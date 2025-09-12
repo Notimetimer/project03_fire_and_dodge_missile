@@ -35,10 +35,9 @@ theta_limit = 85 * pi / 180
 
 d1 = 200e3
 d2 = d1  # 100e3
-d3 = 15e3
 
 min_height = 0
-max_height = d3
+max_height = 15e3
 
 R_cage = d1
 R_birth = 40e3
@@ -175,7 +174,7 @@ class Battle(object):
         self.UAVs = None
         self.dt = None
         self.t = None
-        self.game_time_limit = None
+        self.game_time_limit = self.args.max_episode_len  # None
         self.running = None
         self.action_space = []
         # self.reset()  # 重置位置和状态
@@ -199,7 +198,7 @@ class Battle(object):
         self.missiles = []
         self.dt = dt_report  # simulation interval，1 second
         self.t = 0
-        self.game_time_limit = self.args.max_episode_len
+        # self.game_time_limit = self.args.max_episode_len
         # 初始化无人机
         self.RUAVs = []
         self.BUAVs = []

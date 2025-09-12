@@ -85,7 +85,7 @@ def F16control(obs_jsbsim, rnn_states, hist_act):
     return norm_act, rnn_states, hist_act
 
 if __name__=='__main__':
-    dt = 0.1 # 0.05  # 0.02
+    dt = 0.02 # 0.05  # 0.02
     # 连续输出并tacview中可视化
     start_time = time.time()
     target_height = 3000 * 3.2808  # 6000 m to ft

@@ -192,7 +192,7 @@ class UAVModel(object):
         # 速度矢量关于地面的角度
         vn = self.sim["velocities/v-north-fps"]  # 向北分量
         ve = self.sim["velocities/v-east-fps"]  # 向东分量
-        vu = -self.sim["velocities/v-down-fps"]  # 向下分量（正表示下降）
+        vu = -self.sim["velocities/v-down-fps"]  # 向上分量（正表示上升）
 
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
@@ -245,6 +245,7 @@ class UAVModel(object):
         # self.y = alt * 0.3048 # 高度转米
         # self.z = (lon - start_lon) * 111320 # 纬度差转米（近似）
         v = self.sim["velocities/vt-fps"] * 0.3048  # ego_vc (unit: m/s)
+        self.speed = v
 
         # 取姿态角度
         self.phi = self.sim["attitude/phi-deg"] * pi / 180  # 滚转角 (roll)
@@ -252,12 +253,15 @@ class UAVModel(object):
         self.psi = self.sim["attitude/psi-deg"] * pi / 180  # 航向角 (yaw)
         # self.alpha_air = self.sim["aero/alpha-deg"]  # 迎角
         # self.beta_air = self.sim["aero/beta-deg"]  # 侧滑角
+        # v_ = np.array([v * cos(self.theta) * cos(self.psi),
+        #                v * sin(self.theta),
+        #                v * cos(self.theta) * sin(self.psi)])
 
-        v_ = np.array([v * cos(self.theta) * cos(self.psi),
-                       v * sin(self.theta),
-                       v * cos(self.theta) * sin(self.psi)])
+        # self.vel_ = v_ * v / np.linalg.norm(v_)
 
-        self.vel_ = v_ * v / np.linalg.norm(v_)
+        self.climb_rate = vu
+        self.vel_ = np.array([vn, vu, ve])
+
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])
 

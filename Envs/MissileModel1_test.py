@@ -8,7 +8,6 @@ from math import cos, sin, tan, pi, atan, atan2, acos, asin
 from numpy.linalg import norm
 
 g = 9.81
-
 dt = 0.02 * 5
 t = 0
 g_ = np.array([0, -g, 0])
