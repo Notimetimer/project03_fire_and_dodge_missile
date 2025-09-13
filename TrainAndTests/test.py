@@ -24,6 +24,7 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
+from Visualize.tacview_visualize import *
 
 class height_track_env():
     def __init__(self, dt_move=0.02, o00=None):
@@ -54,7 +55,7 @@ class height_track_env():
         self.height_req = None
         
     
-    def reset(self, o00=None, birth_state=None, height_req=8e3, dt_report = 0.2, t0=0):
+    def reset(self, o00=None, birth_state=None, height_req=8e3, dt_report = 0.2, t0=0, tacview_show=0):
         self.t = t0
         self.success = 0
         self.done = 0
@@ -72,10 +73,10 @@ class height_track_env():
         UAV.label = "red"
         UAV.color = np.array([1, 0, 0])
         # 红方出生点
-        UAV.pos_ = DEFAULT_RED_BIRTH_STATE['position']
+        UAV.pos_ = self.DEFAULT_RED_BIRTH_STATE['position']
         UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
         speed = UAV.speed
-        UAV.psi = DEFAULT_RED_BIRTH_STATE['psi']
+        UAV.psi = self.DEFAULT_RED_BIRTH_STATE['psi']
         UAV.theta = 0 * pi / 180
         UAV.gamma = 0 * pi / 180
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
@@ -88,6 +89,9 @@ class height_track_env():
         
         # △h动作输出有效性测试
         self.height_req = height_req
+
+        if tacview_show:
+            self.tacview = Tacview()
 
 
     def get_obs(self):
@@ -102,15 +106,15 @@ class height_track_env():
         6 v /340 m/s
         '''
         obs = np.zeros(4)
-        obs[0] = UAV.alt / 5e3
-        obs[1] = UAV.climb_rate /340
-        v_hor = abs(UAV.vel_[0]**2+UAV.vel_[2]**2)
-        theta_v = np.arctan2(UAV.vel_[1], v_hor)
+        obs[0] = self.UAV.alt / 5e3
+        obs[1] = self.UAV.climb_rate /340
+        v_hor = abs(self.UAV.vel_[0]**2+self.UAV.vel_[2]**2)
+        theta_v = np.arctan2(self.UAV.vel_[1], v_hor)
         obs[2] = sin(theta_v)
         obs[3] = cos(theta_v)
-        obs[4] = sin(UAV.phi)
-        obs[5] = cos(UAV.phi)
-        obs[6] = UAV.speed /340
+        obs[4] = sin(self.UAV.phi)
+        obs[5] = cos(self.UAV.phi)
+        obs[6] = self.UAV.speed /340
         
         return obs
 
@@ -121,18 +125,27 @@ class height_track_env():
         self.obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs1.shape, dtype=np.float32) for obs1 in obs]
         return self.obs_spaces
 
-    def step(self):
-        pass
-        # 
-        current_t = i*dt_move
-        self.UAV.move(target_height, delta_heading, target_speed)
+    def step(self, action):
+        target_height, delta_heading, target_speed = action
+        self.t += self.dt_report
+        time_rate = int(round(self.dt_report/self.dt_move))
+        for _ in range(time_rate):
+            self.UAV.move(target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False)
+            done = self.get_done()
+            # 单智能体特例
+            if self.fail:
+                break
+        next_obs = self.get_obs()
+        # done = self.get_done()
+        reward = self.get_reward()
         
+        return next_obs, done, reward
 
 
     def get_done(self):
         done = 0
         # 高度追踪失败条件：跑出h_min~h_max的范围立即失败
-        h_current = UAV.alt
+        h_current = self.UAV.alt
         if h_current<self.min_alt or h_current>self.max_alt:
             done = 1
             self.fail = 1
@@ -150,7 +163,7 @@ class height_track_env():
 
     def get_reward(self, ):
         # 高度奖励
-        h_current = UAV.alt
+        h_current = self.UAV.alt
         h_req = self.height_req
         r_h_norm = (h_current<=h_req)*(h_current-self.min_alt)/(h_req-self.min_alt)+\
                     (h_current>h_req)*(1-(h_current-h_req)/(self.max_alt-h_req))
@@ -166,60 +179,72 @@ class height_track_env():
         
 
     def reder(self, tacview_show=0):
-        pass
+        loc_r = [self.UAV.lon, self.UAV.lat, self.UAV.alt]
+        if tacview_show:
+            data_to_send = ''
+            data_to_send += "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
+                    float(self.current_t), self.UAV.id, loc_r[0], loc_r[1], loc_r[2], self.UAV.phi * 180 / pi, self.UAV.theta * 180 / pi,
+                    self.UAV.psi * 180 / pi)
+            self.tacview.send_data_to_client(data_to_send)
 
 
 
-o00 = np.array([118, 30])  # 地理原点的经纬
-DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
-                               'psi': 0
-                               }
-dt_move=0.02
-UAV = UAVModel(dt=dt_move)
-UAV.ammo = 0
-UAV.id = 1
-UAV.red = True
-UAV.blue = False
-UAV.label = "red"
-UAV.color = np.array([1, 0, 0])
-# 红方出生点
-UAV.pos_ = DEFAULT_RED_BIRTH_STATE['position']
-UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
-speed = UAV.speed
-UAV.psi = DEFAULT_RED_BIRTH_STATE['psi']
-UAV.theta = 0 * pi / 180
-UAV.gamma = 0 * pi / 180
-UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
-                                    sin(UAV.theta),
-                                    cos(UAV.theta) * sin(UAV.psi)])
-lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
-UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
-            theta0=UAV.theta, o00=o00)
 
-action = [0,0,0]
 
-target_height = 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
-delta_heading = action[1]  # 相对方位(弧度)
-target_speed = 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
-# print('target_height',target_height)
-# for i in range(int(self.dt // dt_move)):
-t_last = 60
+# o00 = np.array([118, 30])  # 地理原点的经纬
+# DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
+#                                'psi': 0
+#                                }
+# dt_move=0.02
+# UAV = UAVModel(dt=dt_move)
+# UAV.ammo = 0
+# UAV.id = 1
+# UAV.red = True
+# UAV.blue = False
+# UAV.label = "red"
+# UAV.color = np.array([1, 0, 0])
+# # 红方出生点
+# UAV.pos_ = DEFAULT_RED_BIRTH_STATE['position']
+# UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
+# speed = UAV.speed
+# UAV.psi = DEFAULT_RED_BIRTH_STATE['psi']
+# UAV.theta = 0 * pi / 180
+# UAV.gamma = 0 * pi / 180
+# UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
+#                                     sin(UAV.theta),
+#                                     cos(UAV.theta) * sin(UAV.psi)])
+# lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
+# UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
+#             theta0=UAV.theta, o00=o00)
+env = height_track_env()
+# from tqdm import tqdm
 
-tacview_show = 1
 
-if tacview_show:
-    from Visualize.tacview_visualize import *
-    tacview = Tacview()
+# action = [0,0,0]
 
-for i in range(int(t_last//dt_move)):
-    current_t = i*dt_move
-    UAV.move(target_height, delta_heading, target_speed)
-    loc_r = [UAV.lon, UAV.lat, UAV.alt]
-    if tacview_show:
-        data_to_send = ''
-        data_to_send += "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
-                float(current_t), UAV.id, loc_r[0], loc_r[1], loc_r[2], UAV.phi * 180 / pi, UAV.theta * 180 / pi,
-                UAV.psi * 180 / pi)
-    if tacview_show:
-            tacview.send_data_to_client(data_to_send)
+# target_height = 0 # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
+# delta_heading = action[1]  # 相对方位(弧度)
+# target_speed = 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
+# # print('target_height',target_height)
+# # for i in range(int(self.dt // dt_move)):
+# t_last = 60
+
+# tacview_show = 1
+
+# if tacview_show:
+#     from Visualize.tacview_visualize import *
+#     tacview = Tacview()
+
+# for i in range(int(t_last//dt_move)):
+#     current_t = i*dt_move
+
+#     UAV.move(target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False)
+
+#     loc_r = [UAV.lon, UAV.lat, UAV.alt]
+#     if tacview_show:
+#         data_to_send = ''
+#         data_to_send += "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
+#                 float(current_t), UAV.id, loc_r[0], loc_r[1], loc_r[2], UAV.phi * 180 / pi, UAV.theta * 180 / pi,
+#                 UAV.psi * 180 / pi)
+#         tacview.send_data_to_client(data_to_send)
 

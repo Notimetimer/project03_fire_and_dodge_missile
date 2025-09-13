@@ -77,6 +77,7 @@ class UAVModel(object):
         self.lat = None
         self.alt = None
         self.set_height = None
+        self.set_speed = None
 
         # 导弹相关属性
         self.ammo = 6  # 最大可携带导弹数量
@@ -131,6 +132,7 @@ class UAVModel(object):
         self.start_lat = lat0
         self.o00 = o00
         self.set_height = h0
+        self.set_speed = v0
 
         # 初始化状态
         sim.run_ic()
@@ -157,32 +159,20 @@ class UAVModel(object):
         return cd / 10
 
     # todo 补充无人机的运动方程和动作逻辑
-    def move(self, target_height, delta_heading, target_speed, record=False):
-        # 单位：m, rad, mm/s, \
-
-        target_height_english = target_height * 3.2808
-        # target_delta_heading = target_delta_heading
-
-        delta_height = (target_height_english - self.sim["position/h-sl-ft"]) / 3.2808
+    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False):
+        # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
+        if relevant_height==False: # 使用绝对高度指令
+            self.set_height = target_height
+        else: # 使用相对高度指令
+            delta_target_height_english = target_height * 3.2808
+            self.set_height = (delta_target_height_english + self.sim["position/h-sl-ft"]) / 3.2808
         delta_heading = delta_heading  # sub_of_radian(target_delta_heading, sim["attitude/psi-deg"] * pi / 180)
-        # delta_heading = 19 * pi / 180 # test
-        delta_speed = (target_speed - self.sim["velocities/vt-fps"] * 0.3048) / 1.9438
-
-        # print(self.label, 'delta_height', delta_height)
-
-        # 构建观测向量
-        # obs_jsbsim = [
-        #     delta_height,  # ego delta altitude (unit: m)
-        #     delta_heading,  # ego delta heading (unit rad)
-        #     delta_speed,  # ego delta velocities_u (unit: m/s)
-        #     self.sim["position/h-sl-ft"] / 3.2808,  # ego_altitude (unit: m)
-        #     self.sim["attitude/phi-deg"] * pi / 180,  # ego_roll (unit: rad)
-        #     self.sim["attitude/theta-deg"] * pi / 180,  # ego_pitch (unit: rad)
-        #     self.sim["velocities/u-fps"] * 0.3048,  # ego_body_v_x (unit: f/s -> m/s)
-        #     self.sim["velocities/v-fps"] * 0.3048,  # ego_body_v_y (unit: f/s -> m/s)
-        #     self.sim["velocities/w-fps"] * 0.3048,  # ego_body_v_z (unit: f/s -> m/s)
-        #     self.sim["velocities/vt-fps"] * 0.3048  # ego_vc (unit: m/s)
-        # ]
+        
+        if relevant_speed==False: # 使用绝对速度指令
+            self.set_speed = target_speed
+        else: # 使用相对速度指令
+            delta_speed_english = target_speed * 3.2808
+            self.set_speed = (delta_speed_english + self.sim["velocities/vt-fps"]) / 3.2808
 
         # 角速度
         p = self.sim["velocities/p-rad_sec"]  # 横滚角速度（弧度/秒）
@@ -202,9 +192,9 @@ class UAVModel(object):
 
         obs_jsbsim = np.zeros(14)
         # obs_jsbsim[0] = target_theta * pi / 180  # 期望俯仰角 # 测试姿态控制器
-        obs_jsbsim[0] = target_height / 5000  # 期望高度 # 测试飞行控制器
+        obs_jsbsim[0] = self.set_height / 5000  # 期望高度 # 测试飞行控制器
         obs_jsbsim[1] = delta_heading  # 期望相对航向角
-        obs_jsbsim[2] = target_speed / 340  # 期望速度
+        obs_jsbsim[2] = self.set_speed / 340  # 期望速度
         obs_jsbsim[3] = self.sim["attitude/theta-deg"] * pi / 180  # 当前俯仰角
         obs_jsbsim[4] = self.sim["velocities/vt-fps"] * 0.3048 / 340  # 当前速度
         obs_jsbsim[5] = self.sim["attitude/phi-deg"] * pi / 180  # 当前滚转角
@@ -264,10 +254,6 @@ class UAVModel(object):
 
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])
-
-        if record:
-            self.trajectory = np.vstack((self.trajectory, self.pos_))
-            self.vellist = np.vstack((self.vellist, self.vel_))
 
     def short_range_kill(self, target):
         # 近距杀，不需要导弹的模型
