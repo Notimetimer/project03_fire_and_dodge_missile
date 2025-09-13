@@ -142,6 +142,16 @@ class UAVModel(object):
         self.psi = psi0
         self.phi = phi0
         self.theta = theta0
+
+        # 取当前位置
+        lon = self.sim["position/long-gc-deg"]  # 经度
+        lat = self.sim["position/lat-gc-deg"]  # 纬度
+        alt = self.sim["position/h-sl-ft"] / 3.2808  # 高度（英尺）
+        self.lon, self.lat, self.alt = lon, lat, alt
+        # 简单的相对位置计算
+        self.x, self.y, self.z = LLH2NUE(lon, lat, alt, lon_o=self.o00[0], lat_o=self.o00[1])
+        vu = -self.sim["velocities/v-down-fps"]  # 向上分量（正表示上升）
+        self.climb_rate = vu
         # self.rnn_states = np.zeros((1, 1, 128))
         # self.hist_act = np.array([0, 0, 0, 1])
         self.PIDController = F16PIDController()
@@ -183,6 +193,7 @@ class UAVModel(object):
         vn = self.sim["velocities/v-north-fps"]  # 向北分量
         ve = self.sim["velocities/v-east-fps"]  # 向东分量
         vu = -self.sim["velocities/v-down-fps"]  # 向上分量（正表示上升）
+        self.climb_rate = vu
 
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
@@ -249,7 +260,7 @@ class UAVModel(object):
 
         # self.vel_ = v_ * v / np.linalg.norm(v_)
 
-        self.climb_rate = vu
+        # self.climb_rate = vu
         self.vel_ = np.array([vn, vu, ve])
 
         # 速度更新位置

@@ -18,7 +18,7 @@ import time
 import jsbsim
 # import matplotlib.pyplot as plt
 import numpy as np
-from simple_pid import PID
+# from simple_pid import PID
 from numpy.linalg import norm
 
 
@@ -43,6 +43,11 @@ class PositionPID(object):
         p_out = self.k_p * error
         # 积分项
         self._integral += (error * dt)
+
+        # 仿照simple_pid，将积分项整项预先限幅
+        self._integral = np.clip(self._integral, self._min/self.k_i, self._max/self.k_i) \
+            if self.k_i!=0 else self._integral
+        
         i_out = self.k_i * self._integral
         # 微分项
         derivative = (error - self._pre_error) / dt
@@ -109,8 +114,9 @@ class F16PIDController:
         self.yaw_pid = None
         self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
         self.r_pid = None
-        self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
-        self.t_pid.output_limits = (-1, 1)
+        self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
+        # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
+        # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
 
         self.type = None
@@ -172,8 +178,11 @@ class F16PIDController:
         delta_course_rad = state_input[12]
 
         # 油门控制
-        t_pid.setpoint = v_req
-        throttle = 0.5 + 0.5 * t_pid(v, dt)
+        # t_pid.setpoint = v_req
+        # throttle = 0.5 + 0.5 * t_pid(v, dt)
+
+        v_error = v_req-v
+        throttle = 0.5 + 0.5 * t_pid.calculate(v_error, dt)
 
         # # 方向舵控制
         # rudder=0 # abaaba
@@ -346,7 +355,7 @@ if __name__ == '__main__':
         sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
         sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
 
-        target_heading = np.random.rand()*10
+        # target_heading = np.random.rand()*10
 
         # # ### 逗猫
         # if current_t < 15:

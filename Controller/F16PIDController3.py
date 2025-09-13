@@ -44,6 +44,8 @@ class PositionPID(object):
         p_out = self.k_p * error
         # 积分项
         self._integral += (error * dt)
+        self._integral = np.clip(self._integral, self._min/self.k_i, self._max/self.k_i) \
+            if self.k_i!=0 else self._integral
         i_out = self.k_i * self._integral
         # 微分项
         derivative = (error - self._pre_error) / dt

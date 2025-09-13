@@ -25,15 +25,16 @@ sys.path.append(os.path.dirname(current_dir))
 from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
+from Visualize.tensorboard_visualize import *
 
 class height_track_env():
-    def __init__(self, dt_move=0.02, o00=None):
+    def __init__(self, dt_move=0.02):
         super(height_track_env, self).__init__()
         self.UAV_ids = None
         self.dt_report = None
         self.dt_move = dt_move
         self.t = None
-        self.done = None
+        # self.done = None
         self.success = None # 胜
         self.fail = None # 负
         self.draw = None # 平
@@ -41,9 +42,7 @@ class height_track_env():
         self.DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
                                'psi': 0
                                }
-        if o00 == None:
-            o00 = np.array([118, 30])  # 地理原点的经纬
-        self.o00=o00
+        
         # 高于升限会导致动作无法实施，影响
         self.time_limit = 180
         self.min_alt = 1e3
@@ -54,14 +53,17 @@ class height_track_env():
         # △h动作输出有效性测试
         self.height_req = None
         
+        self.tacview_show = None
     
     def reset(self, o00=None, birth_state=None, height_req=8e3, dt_report = 0.2, t0=0, tacview_show=0):
+        self.tacview_show = tacview_show
         self.t = t0
         self.success = 0
-        self.done = 0
+        # self.done = 0
         self.fail = 0
         self.draw = 0
-
+        if o00 == None:
+            o00 = np.array([118, 30])  # 地理原点的经纬
         if birth_state == None:
             birth_state = self.DEFAULT_RED_BIRTH_STATE
         self.dt_report = dt_report
@@ -95,7 +97,6 @@ class height_track_env():
 
 
     def get_obs(self):
-        pass
         '''
         0 h abs /5e3 m
         1 h_dot /340 m/s
@@ -105,7 +106,7 @@ class height_track_env():
         5 cos φ
         6 v /340 m/s
         '''
-        obs = np.zeros(4)
+        obs = np.zeros(7)
         obs[0] = self.UAV.alt / 5e3
         obs[1] = self.UAV.climb_rate /340
         v_hor = abs(self.UAV.vel_[0]**2+self.UAV.vel_[2]**2)
@@ -139,7 +140,7 @@ class height_track_env():
         # done = self.get_done()
         reward = self.get_reward()
         
-        return next_obs, done, reward
+        return next_obs, reward, done
 
 
     def get_done(self):
@@ -178,12 +179,12 @@ class height_track_env():
         return r_h_norm
         
 
-    def reder(self, tacview_show=0):
+    def reder(self,):
         loc_r = [self.UAV.lon, self.UAV.lat, self.UAV.alt]
-        if tacview_show:
+        if self.tacview_show:
             data_to_send = ''
             data_to_send += "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
-                    float(self.current_t), self.UAV.id, loc_r[0], loc_r[1], loc_r[2], self.UAV.phi * 180 / pi, self.UAV.theta * 180 / pi,
+                    float(self.t), self.UAV.id, loc_r[0], loc_r[1], loc_r[2], self.UAV.phi * 180 / pi, self.UAV.theta * 180 / pi,
                     self.UAV.psi * 180 / pi)
             self.tacview.send_data_to_client(data_to_send)
 
@@ -218,6 +219,19 @@ class height_track_env():
 #             theta0=UAV.theta, o00=o00)
 env = height_track_env()
 # from tqdm import tqdm
+obs_space = env.get_obs_spaces()
+action_space = env.action_space
+
+for episode in range(1):
+    env.reset(height_req=8e3, tacview_show=1)
+    obs = env.get_obs()
+    step = 0
+    while not env.get_done():
+        action = np.array([8e3, 0, 300])
+        next_obs, reward, done = env.step(action)
+        # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
+        step += 1
+        env.reder()
 
 
 # action = [0,0,0]
