@@ -195,11 +195,11 @@ from tqdm import tqdm
 obs_space = env.get_obs_spaces()
 action_space = env.action_space
 
-dof = 3
+# dof = 3
 # 超参数
 actor_lr = 1e-3 /10 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 10  # 1e-3  9e-3  5e-3 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-num_episodes = 200  # 2000
+num_episodes = 100  # 2000
 hidden_dim = [128]  # 128
 gamma = 0.9
 lmbda = 0.9
@@ -268,16 +268,24 @@ plt.xlabel('Episodes')
 plt.ylabel('Returns')
 plt.title('PPO on {}'.format(env_name))
 
-# # 测试回合
+plt.show()
 
-# env.reset(height_req=5e3, tacview_show=1)
-# obs = env.get_obs()
-# step = 0
-# while not env.get_done():
-#     action = np.array([5e3, 0, 300])
-#     next_obs, reward, done = env.step(action)
-#     # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
-#     step += 1
-#     env.reder()
-#     time.sleep(0.01)
+
+# 测试回合
+
+env.reset(height_req=5e3, tacview_show=1)
+step = 0
+state = env.get_obs()
+done = False
+while not env.get_done():
+    action = agent.take_action(state, action_bounds=action_bound, explore=True)
+
+    total_action = np.array([action[0], 0, 300])
+
+    next_state, reward, done = env.step(total_action)
+    state = next_state
+    # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
+    step += 1
+    env.reder()
+    time.sleep(0.01)
 
