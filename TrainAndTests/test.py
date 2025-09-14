@@ -26,6 +26,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
+from Algorithms.SquashedPPOcontinues import *
 
 class height_track_env():
     def __init__(self, dt_move=0.02):
@@ -131,7 +132,7 @@ class height_track_env():
         self.t += self.dt_report
         time_rate = int(round(self.dt_report/self.dt_move))
         for _ in range(time_rate):
-            self.UAV.move(target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False)
+            self.UAV.move(target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False)
             done = self.get_done()
             # 单智能体特例
             if self.fail:
@@ -189,76 +190,94 @@ class height_track_env():
             self.tacview.send_data_to_client(data_to_send)
 
 
-
-
-
-# o00 = np.array([118, 30])  # 地理原点的经纬
-# DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
-#                                'psi': 0
-#                                }
-# dt_move=0.02
-# UAV = UAVModel(dt=dt_move)
-# UAV.ammo = 0
-# UAV.id = 1
-# UAV.red = True
-# UAV.blue = False
-# UAV.label = "red"
-# UAV.color = np.array([1, 0, 0])
-# # 红方出生点
-# UAV.pos_ = DEFAULT_RED_BIRTH_STATE['position']
-# UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
-# speed = UAV.speed
-# UAV.psi = DEFAULT_RED_BIRTH_STATE['psi']
-# UAV.theta = 0 * pi / 180
-# UAV.gamma = 0 * pi / 180
-# UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
-#                                     sin(UAV.theta),
-#                                     cos(UAV.theta) * sin(UAV.psi)])
-# lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
-# UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
-#             theta0=UAV.theta, o00=o00)
 env = height_track_env()
-# from tqdm import tqdm
+from tqdm import tqdm
 obs_space = env.get_obs_spaces()
 action_space = env.action_space
 
-for episode in range(1):
-    env.reset(height_req=8e3, tacview_show=1)
-    obs = env.get_obs()
-    step = 0
-    while not env.get_done():
-        action = np.array([8e3, 0, 300])
-        next_obs, reward, done = env.step(action)
-        # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
-        step += 1
-        env.reder()
+dof = 3
+# 超参数
+actor_lr = 1e-3 /10 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
+critic_lr = actor_lr * 10  # 1e-3  9e-3  5e-3 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
+num_episodes = 200  # 2000
+hidden_dim = [128]  # 128
+gamma = 0.9
+lmbda = 0.9
+epochs = 10  # 10
+eps = 0.2
 
+state_dim = 7  # env.observation_space.shape[0] # test
+action_dim = 1 # test
+action_bound = np.array([-1,1])  # 动作幅度限制
+env_name = '高低测试'
 
-# action = [0,0,0]
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-# target_height = 0 # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
-# delta_heading = action[1]  # 相对方位(弧度)
-# target_speed = 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
-# # print('target_height',target_height)
-# # for i in range(int(self.dt // dt_move)):
-# t_last = 60
+agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                      lmbda, epochs, eps, gamma, device)
 
-# tacview_show = 1
+out_range_count = 0
+return_list = []
 
-# if tacview_show:
-#     from Visualize.tacview_visualize import *
-#     tacview = Tacview()
+# 训练
+with tqdm(total=int(num_episodes), desc='Iteration') as pbar:  # 进度条
+    for i_episode in range(int(num_episodes)):  # 每个1/10的训练轮次
+        episode_return = 0
+        transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+        env.reset(height_req=5e3, tacview_show=0)
+        state = env.get_obs()
+        done = False
+        while not done:  # 每个训练回合
+            # 1.执行动作得到环境反馈
+            action = agent.take_action(state, action_bounds=action_bound, explore=True)
 
-# for i in range(int(t_last//dt_move)):
-#     current_t = i*dt_move
+            total_action = np.array([action[0], 0, 300])
 
-#     UAV.move(target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False)
+            next_state, reward, done = env.step(total_action)
 
-#     loc_r = [UAV.lon, UAV.lat, UAV.alt]
-#     if tacview_show:
-#         data_to_send = ''
-#         data_to_send += "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
-#                 float(current_t), UAV.id, loc_r[0], loc_r[1], loc_r[2], UAV.phi * 180 / pi, UAV.theta * 180 / pi,
-#                 UAV.psi * 180 / pi)
-#         tacview.send_data_to_client(data_to_send)
+            transition_dict['states'].append(state)
+            transition_dict['actions'].append(action)
+            transition_dict['next_states'].append(next_state)
+            transition_dict['rewards'].append(reward)
+            transition_dict['dones'].append(done)
+            transition_dict['action_bounds'].append(action_bound)
+            state = next_state
+            episode_return += reward
+
+        if env.fail==1:
+            out_range_count+=1
+        return_list.append(episode_return)
+        agent.update(transition_dict)
+        if (i_episode + 1) >= 10:
+            pbar.set_postfix({'episode': '%d' % (i_episode + 1),
+                              'return': '%.3f' % np.mean(return_list[-10:])})
+        pbar.update(1)
+
+import matplotlib.pyplot as plt
+episodes_list = list(range(len(return_list)))
+plt.figure()
+plt.plot(episodes_list, return_list)
+plt.xlabel('Episodes')
+plt.ylabel('Returns')
+plt.title('PPO on {}'.format(env_name))
+
+mv_return = moving_average(return_list, 9)
+plt.figure()
+plt.plot(episodes_list, mv_return)
+plt.xlabel('Episodes')
+plt.ylabel('Returns')
+plt.title('PPO on {}'.format(env_name))
+
+# # 测试回合
+
+# env.reset(height_req=5e3, tacview_show=1)
+# obs = env.get_obs()
+# step = 0
+# while not env.get_done():
+#     action = np.array([5e3, 0, 300])
+#     next_obs, reward, done = env.step(action)
+#     # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
+#     step += 1
+#     env.reder()
+#     time.sleep(0.01)
 
