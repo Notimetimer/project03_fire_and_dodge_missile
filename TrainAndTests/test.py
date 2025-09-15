@@ -5,6 +5,11 @@ import torch as th
 from math import *
 from gym import spaces
 import copy
+import matplotlib.pyplot as plt
+
+# 设置字体以支持中文
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 # 获取project目录
 def get_current_file_dir():
@@ -56,7 +61,7 @@ class height_track_env():
         
         self.tacview_show = None
     
-    def reset(self, o00=None, birth_state=None, height_req=8e3, dt_report = 0.2, t0=0, tacview_show=0):
+    def reset(self, o00=None, birth_state=None, height_req=8e3, dt_report=0.2, t0=0, tacview_show=0):
         self.tacview_show = tacview_show
         self.t = t0
         self.success = 0
@@ -99,25 +104,28 @@ class height_track_env():
 
     def get_obs(self):
         '''
-        0 h abs /5e3 m
-        1 h_dot /340 m/s
-        2 sin θ_v
-        3 cos θ_v
-        4 sin φ
-        5 cos φ
-        6 v /340 m/s
+        △h_abs / 5e3 m
+        h abs /5e3 m
+        h_dot /340 m/s
+        sin θ_v
+        cos θ_v
+        sin φ
+        cos φ
+        v /340 m/s
         '''
-        obs = np.zeros(7)
-        obs[0] = self.UAV.alt / 5e3
-        obs[1] = self.UAV.climb_rate /340
         v_hor = abs(self.UAV.vel_[0]**2+self.UAV.vel_[2]**2)
-        theta_v = np.arctan2(self.UAV.vel_[1], v_hor)
-        obs[2] = sin(theta_v)
-        obs[3] = cos(theta_v)
-        obs[4] = sin(self.UAV.phi)
-        obs[5] = cos(self.UAV.phi)
-        obs[6] = self.UAV.speed /340
-        
+        theta_v = atan2(self.UAV.vel_[1], v_hor)
+        obs = [
+            (self.height_req - self.UAV.alt) / 5e3,
+            self.UAV.alt / 5e3,
+            # self.UAV.climb_rate /340,
+            # sin(theta_v),
+            # cos(theta_v),
+            # sin(self.UAV.phi),
+            # cos(self.UAV.phi),
+            # self.UAV.speed /340,
+        ]
+        obs= np.array(obs)
         return obs
 
 
@@ -197,18 +205,18 @@ action_space = env.action_space
 
 # dof = 3
 # 超参数
-actor_lr = 1e-3 /10 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
+actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 10  # 1e-3  9e-3  5e-3 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-num_episodes = 100  # 2000
+num_episodes = 300  # 2000
 hidden_dim = [128]  # 128
 gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
 
-state_dim = 7  # env.observation_space.shape[0] # test
+state_dim = len(obs_space) # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 1 # test
-action_bound = np.array([-1,1])  # 动作幅度限制
+action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 env_name = '高低测试'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -216,76 +224,135 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                       lmbda, epochs, eps, gamma, device)
 
+from Math_calculates.ScaleLearningRate import scale_learning_rate
+# 根据动作维度缩放学习率
+actor_lr = scale_learning_rate(actor_lr, agent.actor)
+critic_lr = scale_learning_rate(critic_lr, agent.critic)
+
+from Visualize.tensorboard_visualize import TensorBoardLogger
+
 out_range_count = 0
 return_list = []
 
-# 训练
-with tqdm(total=int(num_episodes), desc='Iteration') as pbar:  # 进度条
-    for i_episode in range(int(num_episodes)):  # 每个1/10的训练轮次
-        episode_return = 0
-        transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
-        env.reset(height_req=5e3, tacview_show=0)
-        state = env.get_obs()
-        done = False
-        while not done:  # 每个训练回合
-            # 1.执行动作得到环境反馈
-            action = agent.take_action(state, action_bounds=action_bound, explore=True)
+logger = TensorBoardLogger(log_root="./logs", host="127.0.0.1", port=6006)
+try:
+    # 训练
+    with tqdm(total=int(num_episodes), desc='Iteration') as pbar:  # 进度条
+        for i_episode in range(int(num_episodes)):  # 每个1/10的训练轮次
+            episode_return = 0
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+            
+            init_height = np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
 
-            total_action = np.array([action[0], 0, 300])
+            birth_state={'position': np.array([-38000.0, init_height, 0.0]),
+                                'psi': 0
+                                }
+            height_req = np.random.uniform(4000, 10000)
+            env.reset(birth_state=birth_state, height_req=height_req, tacview_show=0, dt_report=2) # 打乱顺序也行啊
+            state = env.get_obs()
+            done = False
+            while not done:  # 每个训练回合
+                # 1.执行动作得到环境反馈
+                action = agent.take_action(state, action_bounds=action_bound, explore=True)
 
-            next_state, reward, done = env.step(total_action)
+                total_action = np.array([5000 * action[0], 0, 300])
 
-            transition_dict['states'].append(state)
-            transition_dict['actions'].append(action)
-            transition_dict['next_states'].append(next_state)
-            transition_dict['rewards'].append(reward)
-            transition_dict['dones'].append(done)
-            transition_dict['action_bounds'].append(action_bound)
-            state = next_state
-            episode_return += reward
+                next_state, reward, done = env.step(total_action)
 
-        if env.fail==1:
-            out_range_count+=1
-        return_list.append(episode_return)
-        agent.update(transition_dict)
-        if (i_episode + 1) >= 10:
-            pbar.set_postfix({'episode': '%d' % (i_episode + 1),
-                              'return': '%.3f' % np.mean(return_list[-10:])})
-        pbar.update(1)
+                transition_dict['states'].append(state)
+                transition_dict['actions'].append(action)
+                transition_dict['next_states'].append(next_state)
+                transition_dict['rewards'].append(reward)
+                transition_dict['dones'].append(done)
+                transition_dict['action_bounds'].append(action_bound)
+                state = next_state
+                episode_return += reward * env.dt_report # 奖励按秒分析
 
-import matplotlib.pyplot as plt
-episodes_list = list(range(len(return_list)))
-plt.figure()
-plt.plot(episodes_list, return_list)
-plt.xlabel('Episodes')
-plt.ylabel('Returns')
-plt.title('PPO on {}'.format(env_name))
+            if env.fail==1:
+                out_range_count+=1
+            return_list.append(episode_return)
+            agent.update(transition_dict)
+            
+            # tqdm 训练进度显示
+            if (i_episode + 1) >= 10:
+                pbar.set_postfix({'episode': '%d' % (i_episode + 1),
+                                'return': '%.3f' % np.mean(return_list[-10:])})
+            pbar.update(1)
 
-mv_return = moving_average(return_list, 9)
-plt.figure()
-plt.plot(episodes_list, mv_return)
-plt.xlabel('Episodes')
-plt.ylabel('Returns')
-plt.title('PPO on {}'.format(env_name))
+            # tensorboard 训练进度显示
+            try:
+                logger.add_scalar("train/episode_return", episode_return, i_episode + 1)
+            except Exception:
+                try:
+                    # 兼容不同 logger 实现
+                    logger.add("train/episode_return", episode_return, i_episode + 1)
+                except Exception:
+                    pass
 
-plt.show()
+            # 计算并记录 actor / critic 的梯度范数（L2）
+            def model_grad_norm(model):
+                total_sq = 0.0
+                found = False
+                for p in model.parameters():
+                    if p.grad is not None:
+                        g = p.grad.detach().cpu()
+                        total_sq += float(g.norm(2).item()) ** 2
+                        found = True
+                return float(total_sq ** 0.5) if found else float('nan')
 
+            actor_grad_norm = model_grad_norm(agent.actor)
+            critic_grad_norm = model_grad_norm(agent.critic)
 
-# 测试回合
+            try:
+                logger.add_scalar("grad/actor_grad_norm", actor_grad_norm, i_episode + 1)
+                logger.add_scalar("grad/critic_grad_norm", critic_grad_norm, i_episode + 1)
+            except Exception:
+                try:
+                    logger.add("grad/actor_grad_norm", actor_grad_norm, i_episode + 1)
+                    logger.add("grad/critic_grad_norm", critic_grad_norm, i_episode + 1)
+                except Exception:
+                    pass
 
-env.reset(height_req=5e3, tacview_show=1)
-step = 0
-state = env.get_obs()
-done = False
-while not env.get_done():
-    action = agent.take_action(state, action_bounds=action_bound, explore=True)
+            # 经验池 查错
+            # for key, value in transition_dict.items():
+            #     print(f"{key}: {np.array(value).shape}")
+            # print(1)
 
-    total_action = np.array([action[0], 0, 300])
+    # episodes_list = list(range(len(return_list)))
+    # plt.figure()
+    # plt.plot(episodes_list, return_list)
+    # plt.xlabel('Episodes')
+    # plt.ylabel('Returns')
+    # plt.title('PPO on {}'.format(env_name))
 
-    next_state, reward, done = env.step(total_action)
-    state = next_state
-    # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
-    step += 1
-    env.reder()
-    time.sleep(0.01)
+    # mv_return = moving_average(return_list, 9)
+    # plt.figure()
+    # plt.plot(episodes_list, mv_return)
+    # plt.xlabel('Episodes')
+    # plt.ylabel('Returns')
+    # plt.title('PPO on {}'.format(env_name))
+
+    # plt.show()
+    # 测试回合
+    env.reset(height_req=5e3, dt_report = 2, tacview_show=1)
+    step = 0
+    state = env.get_obs()
+    done = False
+    while not env.get_done():
+        action = agent.take_action(state, action_bounds=action_bound, explore=True)
+
+        total_action = np.array([5000 * action[0], 0, 300])
+
+        next_state, reward, done = env.step(total_action)
+        state = next_state
+        # print(f"step={step} next_obs={next_obs} reward={reward} done={done}")
+        step += 1
+        env.reder()
+        time.sleep(0.01)
+
+except KeyboardInterrupt:
+    print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
+finally:
+    logger.close()
+    print(f"日志已保存到：{logger.run_dir}")
 

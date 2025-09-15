@@ -219,12 +219,12 @@ class F16PIDController:
         y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / norm(L_yz_b_)
         delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
 
-        # # 特例：压机头能够得着的，就不翻转机身
-        # if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta_req) < 60 * pi / 180:
-        #     delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
-        #     # print('push')
-        # # else:
-        # # print('pull')
+        # 特例：压机头能够得着的，就不翻转机身
+        if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
+            delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
+            # print('push')
+        # else:
+        # print('pull')
 
         # 通用
         phi_error = delta_x_angle
@@ -357,22 +357,22 @@ if __name__ == '__main__':
 
         # target_heading = np.random.rand()*10
 
-        # # ### 逗猫
-        # if current_t < 15:
-        #     target_height = 5000  # m
-        #     target_heading = 90  # 度 to rad
-        #     target_speed = 300
-        # elif current_t < 1 * 60:
-        #     target_height = 10000  # m
-        #     target_heading = -120  # 度 to rad
-        # elif current_t < 1 * 60 + 27:
-        #     target_height = 7000  # m
-        #     target_heading = 0  # 度 to rad
-        # elif current_t < 2 * 60 + 10:
-        #     target_height = 8000  # m
-        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
-        # else:
-        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
+        # ### 逗猫
+        if current_t < 15:
+            target_height = 5000  # m
+            target_heading = 90  # 度 to rad
+            target_speed = 300
+        elif current_t < 1 * 60:
+            target_height = 10000  # m
+            target_heading = -120  # 度 to rad
+        elif current_t < 1 * 60 + 27:
+            target_height = 7000  # m
+            target_heading = 0  # 度 to rad
+        elif current_t < 2 * 60 + 10:
+            target_height = 8000  # m
+            target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
+        else:
+            target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
 
         sim.run()
         current_time = step * dt

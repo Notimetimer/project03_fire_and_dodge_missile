@@ -22,7 +22,7 @@ def compute_advantage(gamma, lmbda, td_delta):
         advantage = gamma * lmbda * advantage + delta
         advantage_list.append(advantage)
     advantage_list.reverse()
-    return torch.tensor(advantage_list, dtype=torch.float)
+    return torch.tensor(np.array(advantage_list), dtype=torch.float)
 
 
 class ValueNet(torch.nn.Module):
@@ -139,35 +139,42 @@ class PPOContinuous:
     def _scale_action_to_exec(self, a, action_bounds):
         """把 normalized action a (in [-1,1]) 缩放到环境区间。
 
-        action_bounds 可以是：
-        - 单个数值：action_bound，表示对称区间 [-action_bound, action_bound]
-        - 长度为 2 的元组/列表 (amin, amax)
-        - 每步的数组，形状 (N, 2)
+        action_bounds: 形状为 (action_dim, 2) 的二维 NumPy 数组，
+                       每行对应 amin 和 amax。
         """
-        if isinstance(action_bounds, (int, float)):
-            # 对称区间
-            amin = -float(action_bounds)
-            amax = float(action_bounds)
+        action_bounds = torch.as_tensor(action_bounds, dtype=a.dtype, device=a.device)
+        if action_bounds.dim() == 2:
+            # 处理二维张量 (action_dim, 2)
+            amin = action_bounds[:, 0]
+            amax = action_bounds[:, 1]
+        elif action_bounds.dim() == 3:
+            # 处理三维张量 (batch, action_dim, 2)
+            amin = action_bounds[:, :, 0]
+            amax = action_bounds[:, :, 1]
         else:
-            amin, amax = action_bounds
-        amin = torch.as_tensor(amin, dtype=a.dtype, device=a.device)
-        amax = torch.as_tensor(amax, dtype=a.dtype, device=a.device)
+            raise ValueError("action_bounds 的维度必须是 2 或 3")
+        
         # a in (-1,1) -> scale to [amin, amax]
         return amin + (a + 1.0) * 0.5 * (amax - amin)
 
     def _unscale_exec_to_normalized(self, a_exec, action_bounds):
         """把执行动作 a_exec 反向归一化到 [-1,1]。
 
-        如果 action_bounds 是标量，视作对称区间 [-b, b]。
-        返回 normalized action (in (-1,1)).
+        action_bounds: 形状为 (action_dim, 2) 的二维 NumPy 数组，
+                       每行对应 amin 和 amax。
         """
-        if isinstance(action_bounds, (int, float)):
-            amin = -float(action_bounds)
-            amax = float(action_bounds)
+        action_bounds = torch.as_tensor(action_bounds, dtype=a_exec.dtype, device=a_exec.device)
+        if action_bounds.dim() == 2:
+            # 处理二维张量 (action_dim, 2)
+            amin = action_bounds[:, 0]
+            amax = action_bounds[:, 1]
+        elif action_bounds.dim() == 3:
+            # 处理三维张量 (batch, action_dim, 2)
+            amin = action_bounds[:, :, 0]
+            amax = action_bounds[:, :, 1]
         else:
-            amin, amax = action_bounds
-        amin = torch.as_tensor(amin, dtype=a_exec.dtype, device=a_exec.device)
-        amax = torch.as_tensor(amax, dtype=a_exec.dtype, device=a_exec.device)
+            raise ValueError("action_bounds 的维度必须是 2 或 3")
+        
         # 防止除以零
         span = (amax - amin)
         span = torch.where(span == 0, torch.tensor(1e-6, device=span.device, dtype=span.dtype), span)
@@ -175,8 +182,8 @@ class PPOContinuous:
         # numerical stability
         return a.clamp(-0.999999, 0.999999)
 
-    def take_action(self, state, action_bounds=1.0, explore=True):
-        state = torch.tensor([state], dtype=torch.float).to(self.device)
+    def take_action(self, state, action_bounds, explore=True):
+        state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
         mu, std = self.actor(state)
         dist = SquashedNormal(mu, std)
         if explore:
@@ -192,43 +199,44 @@ class PPOContinuous:
 
     def update(self, transition_dict, action_bounds=None):
         """更新函数兼容以下几种调用方式：
-        - 如果 action_bounds 是 None：期望 transition_dict 中包含 'action_bounds'，其形状为 (N,2) 或每步 (amin,amax)
+        - 如果 action_bounds 是 None: 期望 transition_dict 中包含 'action_bounds'，其形状为 (N,2) 或每步 (amin,amax)
         - 如果 action_bounds 是标量/二元元组/数组：作为全局固定区间使用
 
         transition_dict 必须包含 keys: 'states','actions','rewards','next_states','dones'
         当动作区间随步变化时，必须包含 'action_bounds' 与之对应。
-        存储的 'actions' 应当是环境执行动作 a_exec（未归一化）。
+        存储的 'actions' 应当是环境执行动作 (a_exec 未归一化）。
         """
-        states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
-        actions_exec = torch.tensor(transition_dict['actions'], dtype=torch.float).to(self.device)
-        rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
-        dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
+        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
+        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
+        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
+        action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
 
-        if action_bounds is None:
-            if 'action_bounds' in transition_dict:
-                action_bounds = transition_dict['action_bounds']
-            else:
-                action_bounds = 1.0  # 默认值
+        # if action_bounds is None:
+        #     if 'action_bounds' in transition_dict:
+        #         action_bounds = transition_dict['action_bounds']
+        #     else:
+        #         action_bounds = 1.0  # 默认值
 
-        # 将 action_bounds 处理为每步的数组
-        if isinstance(action_bounds, (int, float)):
-            # 对称区间，扩展为每步相同的区间
-            # action_bounds_arr = [action_bounds] * len(transition_dict['actions'])
-            amin_list = [-float(action_bounds)] * len(transition_dict['actions'])
-            amax_list = [float(action_bounds)] * len(transition_dict['actions'])
-        elif isinstance(action_bounds, (tuple, list, np.ndarray)) and len(action_bounds) == 2:
-            # 二元元组或列表，扩展为每步相同的 min 和 max
-            amin_list = [float(action_bounds[0])] * len(transition_dict['actions'])
-            amax_list = [float(action_bounds[1])] * len(transition_dict['actions'])
-        else:
-            # 每步不同的区间，直接解包
-            amin_list = [float(ab[0]) if isinstance(ab, (tuple, list, np.ndarray)) else -float(ab) for ab in action_bounds]
-            amax_list = [float(ab[1]) if isinstance(ab, (tuple, list, np.ndarray)) else float(ab) for ab in action_bounds]
+        # # 将 action_bounds 处理为每步的数组
+        # if isinstance(action_bounds, (int, float)):
+        #     # 对称区间，扩展为每步相同的区间
+        #     # action_bounds_arr = [action_bounds] * len(transition_dict['actions'])
+        #     amin_list = [-float(action_bounds)] * len(transition_dict['actions'])
+        #     amax_list = [float(action_bounds)] * len(transition_dict['actions'])
+        # elif isinstance(action_bounds, (tuple, list, np.ndarray)) and len(action_bounds) == 2:
+        #     # 二元元组或列表，扩展为每步相同的 min 和 max
+        #     amin_list = [float(action_bounds[0])] * len(transition_dict['actions'])
+        #     amax_list = [float(action_bounds[1])] * len(transition_dict['actions'])
+        # else:
+        #     # 每步不同的区间，直接解包
+        #     amin_list = [float(ab[0]) if isinstance(ab, (tuple, list, np.ndarray)) else -float(ab) for ab in action_bounds]
+        #     amax_list = [float(ab[1]) if isinstance(ab, (tuple, list, np.ndarray)) else float(ab) for ab in action_bounds]
 
-        # 转换为张量
-        amin_tensor = torch.tensor(amin_list, dtype=actions_exec.dtype, device=self.device).unsqueeze(-1)
-        amax_tensor = torch.tensor(amax_list, dtype=actions_exec.dtype, device=self.device).unsqueeze(-1)
+        # # 转换为张量
+        # amin_tensor = torch.tensor(amin_list, dtype=actions_exec.dtype, device=self.device).unsqueeze(-1)
+        # amax_tensor = torch.tensor(amax_list, dtype=actions_exec.dtype, device=self.device).unsqueeze(-1)
 
         # 计算 td_target, advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
@@ -241,7 +249,7 @@ class PPOContinuous:
         dist = SquashedNormal(mu.detach(), std.detach())
 
         # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
-        actions_normalized = self._unscale_exec_to_normalized(actions_exec, (amin_tensor, amax_tensor))
+        actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
         
         # 反算 u = atanh(a)
         u_old = torch.atanh(actions_normalized)
@@ -296,6 +304,3 @@ class PPOContinuous:
 #   'dones': [...],
 #   'action_bounds': [(amin0,amax0), (amin1,amax1), ...]  # 可选
 # }
-
-# 以上实现把 action_bounds 纳入了 update 的计算链路，从而保证了 log_prob 的计算与当时执行动作的一致性，
-# 避免了因动作裁剪/投影导致的策略-执行分布不匹配，从根本上缓解了你提到的 update 中梯度爆炸问题。
