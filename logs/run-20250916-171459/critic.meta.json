@@ -1,0 +1,1 @@
+{"net.0.weight": [128, 2], "net.0.bias": [128], "fc_out.weight": [1, 128], "fc_out.bias": [1]}

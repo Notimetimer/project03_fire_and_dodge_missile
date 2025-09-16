@@ -101,7 +101,7 @@ class PolicyNetContinuous(torch.nn.Module):
         self.fc_mu = torch.nn.Linear(prev_size, action_dim)
         self.fc_std = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x, min_std=1e-3):
+    def forward(self, x, min_std=1e-7): # 最小方差 1e-3
         x = self.net(x)
         mu = self.fc_mu(x)
         std = F.softplus(self.fc_std(x))
@@ -289,6 +289,48 @@ class PPOContinuous:
 
             self.actor_optimizer.step()
             self.critic_optimizer.step()
+
+    def update_supervised(self, transition_dict, action_bounds=None):
+        """
+        Supervised update:
+        - Critic: 与 update() 中相同，使用 TD target 做回归。
+        - Actor: 通过监督学习克隆经验池中的行为策略。具体地，用执行动作反归一化得到的 u_old = atanh(a_normalized)
+                 作为目标，最小化 actor 输出 mu 与 u_old 之间的 MSE（即拟合 pre-squash 均值）。
+        """
+        # 转换为 tensor（先用 np.array 以避免警告/性能问题）
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
+        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
+        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
+        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
+        action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
+
+        # 计算 td_target（与 update() 相同）
+        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+
+        # 将执行动作反向归一化到 [-1,1] 并计算 u_old = atanh(a)
+        actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
+        # u_old 作为监督目标（detach）
+        u_old = torch.atanh(actions_normalized).detach()
+
+        # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
+        for _ in range(self.epochs):
+            # Critic 更新（同 update）
+            critic_loss = F.mse_loss(self.critic(states), td_target.detach())
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=2)
+            self.critic_optimizer.step()
+
+            # Actor 监督学习：拟合 mu -> u_old
+            mu, std = self.actor(states)
+            actor_loss = F.mse_loss(mu, u_old)  # mu 与 u_old 都是 pre-squash 空间
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=2)
+            self.actor_optimizer.step()
+
+
 
 
 # 注意：为了兼容原来的训练循环，请在构造 transition_dict 时保证：

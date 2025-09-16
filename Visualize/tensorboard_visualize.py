@@ -8,10 +8,13 @@ from datetime import datetime
 import numpy as np
 
 class TensorBoardLogger:
-    def __init__(self, log_root="./logs", host="127.0.0.1", port=6006):
+    def __init__(self, log_root="./logs", host="127.0.0.1", port=6006, use_log_root=False):
         self.log_root = os.path.abspath(log_root)
         os.makedirs(self.log_root, exist_ok=True)
-        self.run_dir = os.path.join(self.log_root, "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        if use_log_root:
+            self.run_dir = log_root
+        else:
+            self.run_dir = os.path.join(self.log_root, "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
         os.makedirs(self.run_dir, exist_ok=True)
         self.writer = SummaryWriter(self.run_dir)
         self.tb_proc = None

@@ -169,7 +169,7 @@ class UAVModel(object):
         return cd / 10
 
     # todo 补充无人机的运动方程和动作逻辑
-    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False):
+    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False):
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
             self.set_height = target_height
@@ -221,7 +221,11 @@ class UAVModel(object):
         # norm_act由F16control函数输出
         # norm_act, self.rnn_states, self.hist_act = F16control(obs_jsbsim, self.rnn_states, self.hist_act)
         # print(self.label, norm_act)
-        norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)  # # 测试飞行控制器
+        if with_theta_req == False:
+            norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)  # # 测试飞行控制器
+        else:
+            obs_jsbsim[0] = np.clip(target_height, -1, 1) * pi/2 # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
+            norm_act = self.PIDController.att_output(obs_jsbsim, dt=self.dt)
         # print(obs_jsbsim)
 
         # norm_act=np.array([0.05, -1, 0.1, 1]) # test
