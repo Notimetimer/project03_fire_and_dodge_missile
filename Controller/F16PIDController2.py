@@ -62,6 +62,9 @@ class PositionPID(object):
         self._pre_error = error
         return output
 
+    def clear_integral(self):
+        self._integral = 0
+
 
 def active_rotation(vector, heading, theta, gamma):
     # vector是行向量，根据psi，theta，gamma的顺序旋转坐标系，最后输出行向量
@@ -95,7 +98,7 @@ def sub_of_radian(input1, input2):
 def sub_of_degree(input1, input2):
     # 计算两个角度的差值，范围为[-180, 180]
     diff = input1 - input2
-    diff = (diff + 180) % (360) - 180
+    diff = (diff + 180) % 360 - 180
     return diff
 
 

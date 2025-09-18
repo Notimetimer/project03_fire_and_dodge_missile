@@ -4,6 +4,17 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+# 计算并记录 actor / critic 的梯度范数（L2）
+def model_grad_norm(model):
+    total_sq = 0.0
+    found = False
+    for p in model.parameters():
+        if p.grad is not None:
+            g = p.grad.detach().cpu()
+            total_sq += float(g.norm(2).item()) ** 2
+            found = True
+    return float(total_sq ** 0.5) if found else float('nan')
+
 
 def moving_average(a, window_size):
     cumulative_sum = np.cumsum(np.insert(a, 0, 0))
@@ -197,7 +208,7 @@ class PPOContinuous:
         return a_exec[0].cpu().detach().numpy().flatten()
     
 
-    def update(self, transition_dict, action_bounds=None):
+    def update(self, transition_dict):
         """更新函数兼容以下几种调用方式：
         - 如果 action_bounds 是 None: 期望 transition_dict 中包含 'action_bounds'，其形状为 (N,2) 或每步 (amin,amax)
         - 如果 action_bounds 是标量/二元元组/数组：作为全局固定区间使用
@@ -212,31 +223,6 @@ class PPOContinuous:
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
-
-        # if action_bounds is None:
-        #     if 'action_bounds' in transition_dict:
-        #         action_bounds = transition_dict['action_bounds']
-        #     else:
-        #         action_bounds = 1.0  # 默认值
-
-        # # 将 action_bounds 处理为每步的数组
-        # if isinstance(action_bounds, (int, float)):
-        #     # 对称区间，扩展为每步相同的区间
-        #     # action_bounds_arr = [action_bounds] * len(transition_dict['actions'])
-        #     amin_list = [-float(action_bounds)] * len(transition_dict['actions'])
-        #     amax_list = [float(action_bounds)] * len(transition_dict['actions'])
-        # elif isinstance(action_bounds, (tuple, list, np.ndarray)) and len(action_bounds) == 2:
-        #     # 二元元组或列表，扩展为每步相同的 min 和 max
-        #     amin_list = [float(action_bounds[0])] * len(transition_dict['actions'])
-        #     amax_list = [float(action_bounds[1])] * len(transition_dict['actions'])
-        # else:
-        #     # 每步不同的区间，直接解包
-        #     amin_list = [float(ab[0]) if isinstance(ab, (tuple, list, np.ndarray)) else -float(ab) for ab in action_bounds]
-        #     amax_list = [float(ab[1]) if isinstance(ab, (tuple, list, np.ndarray)) else float(ab) for ab in action_bounds]
-
-        # # 转换为张量
-        # amin_tensor = torch.tensor(amin_list, dtype=actions_exec.dtype, device=self.device).unsqueeze(-1)
-        # amax_tensor = torch.tensor(amax_list, dtype=actions_exec.dtype, device=self.device).unsqueeze(-1)
 
         # 计算 td_target, advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
@@ -257,6 +243,13 @@ class PPOContinuous:
 
         if torch.isnan(old_log_probs).any():
             raise ValueError("old_log_probs 包含 NaN，检查 action_bounds 或 actions 的合法性")
+
+        actor_grad_list = []
+        actor_loss_list = []
+        critc_grad_list = []
+        critic_loss_list = []
+        entropy_list = []
+        ratio_list = []
 
         for _ in range(self.epochs):
             mu, std = self.actor(states)
@@ -290,28 +283,81 @@ class PPOContinuous:
             self.actor_optimizer.step()
             self.critic_optimizer.step()
 
-    def update_supervised(self, transition_dict, action_bounds=None):
+            # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
+            # # 单值 Tensor：使用 .detach().cpu().item()
+            # self.actor_loss = actor_loss.detach().cpu().item()
+            # self.critic_loss = critic_loss.detach().cpu().item()
+            # # 熵是单值（已经 .mean()），同样处理
+            # self.entropy_mean = dist.entropy().mean().detach().cpu().item()
+            # # ratio 是向量，若想记录均值：
+            # self.ratio_mean = ratio.mean().detach().cpu().item()
+
+            actor_grad_list.append(model_grad_norm(self.actor))
+            actor_loss_list.append(actor_loss.detach().cpu().item())
+            critc_grad_list.append(model_grad_norm(self.critic))            
+            critic_loss_list.append(critic_loss.detach().cpu().item())
+            entropy_list.append(dist.entropy().mean().detach().cpu().item())
+            ratio_list.append(ratio.mean().detach().cpu().item())
+        
+        self.actor_loss = np.mean(actor_loss_list)
+        self.actor_grad = np.mean(actor_grad_list)
+        self.critic_loss = np.mean(critic_loss_list)
+        self.crit_grad = np.mean(critc_grad_list)
+        self.entropy_mean = np.mean(entropy_list)
+        self.ratio_mean = np.mean(ratio_list)
+
+    def update_actor_supervised(self, transition_dict):
         """
         Supervised update:
-        - Critic: 与 update() 中相同，使用 TD target 做回归。
         - Actor: 通过监督学习克隆经验池中的行为策略。具体地，用执行动作反归一化得到的 u_old = atanh(a_normalized)
                  作为目标，最小化 actor 输出 mu 与 u_old 之间的 MSE（即拟合 pre-squash 均值）。
         """
         # 转换为 tensor（先用 np.array 以避免警告/性能问题）
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
-
-        # 计算 td_target（与 update() 相同）
-        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
 
         # 将执行动作反向归一化到 [-1,1] 并计算 u_old = atanh(a)
         actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
         # u_old 作为监督目标（detach）
         u_old = torch.atanh(actions_normalized).detach()
+
+        actor_grad_list = []
+        actor_loss_list = []
+
+        # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
+        for _ in range(self.epochs):
+            # Actor 监督学习：拟合 mu -> u_old
+            mu, std = self.actor(states)
+            actor_loss = F.mse_loss(mu, u_old)  # mu 与 u_old 都是 pre-squash 空间
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=2)
+            self.actor_optimizer.step()
+
+            actor_grad_list.append(model_grad_norm(self.actor))
+            actor_loss_list.append(actor_loss.detach().cpu().item())
+
+        self.actor_loss = np.mean(actor_loss_list)
+        self.actor_grad = np.mean(actor_grad_list)
+    
+    def update_critic_only(self, transition_dict):
+        """
+        - Critic: 与 update() 中相同，使用 TD target 做回归。
+        """
+        # 转换为 tensor（先用 np.array 以避免警告/性能问题）
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        # actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
+        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
+        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
+        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
+        # action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
+
+        # 计算 td_target（与 update() 相同）
+        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+
+        critc_grad_list = []
+        critic_loss_list = []
 
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
         for _ in range(self.epochs):
@@ -322,13 +368,11 @@ class PPOContinuous:
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=2)
             self.critic_optimizer.step()
 
-            # Actor 监督学习：拟合 mu -> u_old
-            mu, std = self.actor(states)
-            actor_loss = F.mse_loss(mu, u_old)  # mu 与 u_old 都是 pre-squash 空间
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=2)
-            self.actor_optimizer.step()
+            critc_grad_list.append(model_grad_norm(self.critic))            
+            critic_loss_list.append(critic_loss.detach().cpu().item())
+
+        self.critic_loss = np.mean(critic_loss_list)
+        self.crit_grad = np.mean(critc_grad_list)
 
 
 

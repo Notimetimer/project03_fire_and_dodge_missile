@@ -150,12 +150,12 @@ class height_track_env():
         obs = [
             (self.height_req - self.UAV.alt) / 5e3,
             self.UAV.alt / 5e3,
-            # self.UAV.climb_rate /340,
-            # sin(theta_v),
-            # cos(theta_v),
-            # sin(self.UAV.phi),
-            # cos(self.UAV.phi),
-            # self.UAV.speed /340,
+            self.UAV.climb_rate /340,
+            sin(theta_v),
+            cos(theta_v),
+            sin(self.UAV.phi),
+            cos(self.UAV.phi),
+            self.UAV.speed /340,
         ]
         obs= np.array(obs)
         return obs
@@ -168,6 +168,7 @@ class height_track_env():
         return self.obs_spaces
 
     def step(self, action):
+        self.action = action
         target_height, delta_heading, target_speed = action
         self.t += self.dt_report
         time_rate = int(round(self.dt_report/self.dt_move))
@@ -210,6 +211,13 @@ class height_track_env():
         r_h_norm = (h_current<=h_req)*(h_current-self.min_alt)/(h_req-self.min_alt)+\
                     (h_current>h_req)*(1-(h_current-h_req)/(self.max_alt-h_req))
         r_h_norm = 1 * r_h_norm
+
+        # 操作直接奖励
+        delta_height, delta_heading, target_speed = self.action
+        r_delta_height_instruction = 1-abs(h_req-(h_current+delta_height))/5000
+        r_h_norm += 0.8 * r_delta_height_instruction
+        
+
         # 高度出界惩罚
         if self.fail:
             r_h_norm -= 10
@@ -240,12 +248,13 @@ action_space = env.action_space
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 num_episodes = 400  # 2000
-hidden_dim = [128]  # 128
+hidden_dim = [128, 128]  # 128
 gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
-dt_decision = 1 # 2
+dt_decide = 2 # 2
+pre_train_rate = 0.25 # 0.25
 
 state_dim = len(obs_space) # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 1 # test
@@ -285,12 +294,13 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 
 out_range_count = 0
 return_list = []
+steps_count = 0
 
 logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True)
 try:
     # 有监督预训练
-    with tqdm(total=int(num_episodes*1/4), desc='Iteration') as pbar:  # 进度条
-        for i_episode in range(int(num_episodes*1/4)):  
+    with tqdm(total=int(num_episodes*pre_train_rate), desc='Iteration') as pbar:  # 进度条
+        for i_episode in range(int(num_episodes*pre_train_rate)):  
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             
@@ -300,7 +310,7 @@ try:
                                 'psi': 0
                                 }
             height_req = np.random.uniform(4000, 10000)
-            env.reset(birth_state=birth_state, height_req=height_req, tacview_show=0, dt_report=dt_decision) # 打乱顺序也行啊
+            env.reset(birth_state=birth_state, height_req=height_req, tacview_show=0, dt_report=dt_decide) # 打乱顺序也行啊
             state = env.get_obs()
             done = False
             while not done:  # 每个训练回合
@@ -320,13 +330,27 @@ try:
                 transition_dict['action_bounds'].append(action_bound)
                 state = next_state
                 episode_return += reward * env.dt_report # 奖励按秒分析
+                steps_count += 1 # todo 增加一个以step为横轴的训练曲线
 
             if env.fail==1:
                 out_range_count+=1
+
+            agent.update_actor_supervised(transition_dict)
+
             return_list.append(episode_return)
             logger.add("pre_train/episode_return", episode_return, i_episode + 1)
-            agent.update_supervised(transition_dict)
+            
+            from Utilities.ModelGradNorm import model_grad_norm
+            actor_grad_norm = model_grad_norm(agent.actor)
+            critic_grad_norm = model_grad_norm(agent.critic)
+            # 梯度监控
+            logger.add("pre_train/actor_grad_norm", actor_grad_norm, i_episode + 1)
+            # logger.add("pre_train/critic_grad_norm", critic_grad_norm, i_episode + 1)
+            # 损失函数监控
+            logger.add("pre_train/actor_loss", agent.actor_loss, i_episode + 1)
+            # logger.add("pre_train/critic_loss", agent.critic_loss, i_episode + 1)
 
+            
             # --- 保存模型（有监督阶段：actor_sup + i_episode，critic 每次覆盖）
             os.makedirs(log_dir, exist_ok=True)
             # critic overwrite
@@ -344,8 +368,9 @@ try:
             pbar.update(1)
 
     # 强化学习训练
-    with tqdm(total=int(num_episodes*3/4), desc='Iteration') as pbar:  # 进度条
-        for i_episode in range(int(num_episodes*3/4)):  # 每个1/10的训练轮次
+    rl_steps = 0
+    with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
+        for i_episode in range(int(num_episodes*(1-pre_train_rate))):  # 每个1/10的训练轮次
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             
@@ -355,14 +380,22 @@ try:
                                 'psi': 0
                                 }
             height_req = np.random.uniform(4000, 10000)
-            env.reset(birth_state=birth_state, height_req=height_req, tacview_show=0, dt_report=dt_decision) # 打乱顺序也行啊
+            env.reset(birth_state=birth_state, height_req=height_req, tacview_show=0, dt_report=dt_decide) # 打乱顺序也行啊
             state = env.get_obs()
             done = False
+
+            actor_grad_list = []
+            critc_grad_list = []
+            actor_loss_list = []
+            critic_loss_list = []
+            entropy_list = []
+            ratio_list = []
+
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
                 action = agent.take_action(state, action_bounds=action_bound, explore=True)
-
-                total_action = np.array([action[0], 0, 300]) # 1000 * 
+                rl_steps += 1
+                total_action = np.array([5000 * action[0], 0, 300]) # 1000 * 
 
                 next_state, reward, done = env.step(total_action)
 
@@ -400,23 +433,17 @@ try:
             # tensorboard 训练进度显示
             logger.add("train/episode_return", episode_return, i_episode + 1)
 
-            # 计算并记录 actor / critic 的梯度范数（L2）
-            def model_grad_norm(model):
-                total_sq = 0.0
-                found = False
-                for p in model.parameters():
-                    if p.grad is not None:
-                        g = p.grad.detach().cpu()
-                        total_sq += float(g.norm(2).item()) ** 2
-                        found = True
-                return float(total_sq ** 0.5) if found else float('nan')
-
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)
-
-            logger.add("grad/actor_grad_norm", actor_grad_norm, i_episode + 1)
-            logger.add("grad/critic_grad_norm", critic_grad_norm, i_episode + 1)
-
+            # 梯度监控
+            logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
+            logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
+            # 损失函数监控
+            logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
+            logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
+            # 强化学习actor特殊项监控
+            logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
+            logger.add("train/ratio", agent.ratio_mean, i_episode + 1)
 
     # 在训练结束后，——但仍在 try 范围内——使用最新保存的 actor 权重进行测试
     # 优先加载最新 RL 快照，其次 supervised 快照
@@ -433,7 +460,7 @@ try:
             print(f"Loaded actor for test from: {latest_actor_path}")
 
     # 测试回合（在 try 内，位于 except KeyboardInterrupt 之前）
-    env.reset(height_req=5e3, dt_report = dt_decision, tacview_show=1)
+    env.reset(height_req=5e3, dt_report = dt_decide, tacview_show=1)
     step = 0
     state = env.get_obs()
     done = False

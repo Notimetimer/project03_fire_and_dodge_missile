@@ -18,7 +18,7 @@ import time
 import jsbsim
 # import matplotlib.pyplot as plt
 import numpy as np
-from simple_pid import PID
+# from simple_pid import PID
 from numpy.linalg import norm
 
 # fixme 带转弯时高度控制超调量比没有积分项时大了太多
@@ -44,8 +44,11 @@ class PositionPID(object):
         p_out = self.k_p * error
         # 积分项
         self._integral += (error * dt)
+
+        # 仿照simple_pid，将积分项整项预先限幅
         self._integral = np.clip(self._integral, self._min/self.k_i, self._max/self.k_i) \
             if self.k_i!=0 else self._integral
+        
         i_out = self.k_i * self._integral
         # 微分项
         derivative = (error - self._pre_error) / dt
@@ -103,6 +106,8 @@ def sub_of_degree(input1, input2):
 class F16PIDController:
     def __init__(self):
         # 建议dt=0.02
+        self.check_switch2 = None
+        self.check_switch1 = None
         self.a_last = 0
         self.e_last = 0
         self.r_last = 0
@@ -111,20 +116,21 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=1, i=0, d=0)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
         self.r_pid = None
-        self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
-        self.t_pid.output_limits = (-1, 1)
+        self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
+        # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
+        # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
 
-        self.height_pid = PositionPID(max=1, min=-1, p=1, i=0.008, d=2)
+        self.height_pid = PositionPID(max=1, min=-1, p=1, i= 0 * 0.008, d=2)
 
-    def flight_output(self, input, dt=0.02):
-        target_height_devided = input[0]
-        climb_rad = input[11]
-        current_height_devided = input[13]
-        v = input[4]
-        gamma_rad = input[11]
+    def flight_output(self, state_input, dt=0.02):
+        target_height_devided = state_input[0]
+        climb_rad = state_input[11]
+        current_height_devided = state_input[13]
+        v = state_input[4]
+        gamma_rad = state_input[11]
 
         error_h = np.clip(target_height_devided - current_height_devided, -1, 1)
 
@@ -133,23 +139,23 @@ class F16PIDController:
         if error_h < 0:
             kh = pi / 2
 
-        # target_theta = error_h * kh
-        if abs(climb_rad * 180 / pi) > 2:  #
-            self.height_pid.clear_integral()
-        if abs(error_h)*5000 > 400:  # 高度差太大不累计积分项
-            self.height_pid.clear_integral()
+        # # target_theta = error_h * kh
+        # if abs(climb_rad * 180 / pi) > 2:  #
+        #     self.height_pid.clear_integral()
+        # if abs(error_h)*5000 > 400:  # 高度差太大不累计积分项
+        #     self.height_pid.clear_integral()
         target_theta = self.height_pid.calculate(error_h, dt=dt) * kh
 
-        temp = input
+        temp = state_input
         temp[0] = target_theta
         norm_act = self.att_output(temp, dt=dt)
         return norm_act
 
-    def att_output(self, input, dt=0.02):
-        norm_act = self.att_calculate(input, dt=dt)
-        theta = input[3]
-        alpha = input[6] * 180 / pi
-        q = input[9]
+    def att_output(self, state_input, dt=0.02):
+        norm_act = self.att_calculate(state_input, dt=dt)
+        theta = state_input[3]
+        alpha = state_input[6] * 180 / pi
+        q = state_input[9]
         # # 迎角限制器
         if -8 < alpha < 13:
             k_alpha_air = 0.01
@@ -164,26 +170,29 @@ class F16PIDController:
 
         return norm_act
 
-    def att_calculate(self, input, dt):
+    def att_calculate(self, state_input, dt):
         yaw_pid, e_pid, r_pid, t_pid = self.pids
         a_last, e_last, r_last, t_last = self.last_outputs
-        theta_req = input[0]
-        delta_heading_req = input[1]
-        v_req = input[2]
-        theta = input[3]
-        v = input[4]
-        phi = input[5]
-        alpha_air = input[6]
-        beta_air = input[7]
-        p = input[8]
-        q = input[9]
-        r = input[10]
-        climb_rad = input[11]
-        delta_course_rad = input[12]
+        theta_req = state_input[0]
+        delta_heading_req = state_input[1]
+        v_req = state_input[2]
+        theta = state_input[3]
+        v = state_input[4]
+        phi = state_input[5]
+        alpha_air = state_input[6]
+        beta_air = state_input[7]
+        p = state_input[8]
+        q = state_input[9]
+        r = state_input[10]
+        climb_rad = state_input[11]
+        delta_course_rad = state_input[12]
 
         # 油门控制
-        t_pid.setpoint = v_req
-        throttle = 0.5 + 0.5 * t_pid(v, dt)
+        # t_pid.setpoint = v_req
+        # throttle = 0.5 + 0.5 * t_pid(v, dt)
+
+        v_error = v_req-v
+        throttle = 0.5 + 0.5 * t_pid.calculate(v_error, dt)
 
         # # 方向舵控制
         # rudder=0 # abaaba
@@ -221,7 +230,7 @@ class F16PIDController:
         delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
 
         # 特例：压机头能够得着的，就不翻转机身
-        if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta_req) < 60 * pi / 180:
+        if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
             delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
             # print('push')
         # else:
@@ -241,20 +250,27 @@ class F16PIDController:
 
         # steady filght
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
-        steady_switch_angle = 15  # 20
+        steady_switch_angle = 15  # 20 15 30
 
-        if acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi < steady_switch_angle and abs(
-                theta_req) < 60 * pi / 180:
-            k_steady_yaw = 3 / steady_switch_angle  # /20
+        self.check_switch1 = acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi
+        self.check_switch2 = abs(theta_req)*180/pi
+
+        if acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi < steady_switch_angle and \
+                abs(theta_req) < 60 * pi / 180:
+            k_steady_yaw = 3 / steady_switch_angle
             phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3)
             phi_error = phi_req - phi
             # aileron = (phi_error/pi*6 -p/pi*4)/3
             aileron = (phi_error / pi * 6 - p / pi * 3) / 2
 
-        #     print('steady maneuver')
-        # else:
-        #     print('fast maneuver')
+            self.type = 0  # steady
+        else:
+            self.type = 1  # fast
 
+        # print(self.check_switch1)
+        # print(self.check_switch2)
+        # input("Press any key to continue...")
+        
         # if alpha_air*180/pi<-5:
         #     print('?')
         #     pass
@@ -463,7 +479,7 @@ if __name__ == '__main__':
         fuels.append(sim["propulsion/total-fuel-lbs"])
 
         # 通过tacview可视化
-        if tacview_show and step % np.round(0.4 / dt) == 0:
+        if tacview_show:  # and step % np.round(0.4 / dt) == 0:
             send_t = f"{current_time:.2f}"
             name_R = '001'
             loc_r = [float(lon), float(lat), float(alt)]
