@@ -336,6 +336,7 @@ try:
                 out_range_count+=1
 
             agent.update_actor_supervised(transition_dict)
+            # agent.update_critic_only(transition_dict)
 
             return_list.append(episode_return)
             logger.add("pre_train/episode_return", episode_return, i_episode + 1)
