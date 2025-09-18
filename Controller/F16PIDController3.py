@@ -123,7 +123,7 @@ class F16PIDController:
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
 
-        self.height_pid = PositionPID(max=1, min=-1, p=1, i= 0 * 0.008, d=2)
+        self.height_pid = PositionPID(max=1, min=-1, p=1, i=0.01, d=2)
 
     def flight_output(self, state_input, dt=0.02):
         target_height_devided = state_input[0]
@@ -139,11 +139,11 @@ class F16PIDController:
         if error_h < 0:
             kh = pi / 2
 
-        # # target_theta = error_h * kh
-        # if abs(climb_rad * 180 / pi) > 2:  #
-        #     self.height_pid.clear_integral()
-        # if abs(error_h)*5000 > 400:  # 高度差太大不累计积分项
-        #     self.height_pid.clear_integral()
+        # target_theta = error_h * kh
+        if abs(climb_rad * 180 / pi) > 2:  #
+            self.height_pid.clear_integral()
+        if abs(error_h)*5000 > 400:  # 高度差太大不累计积分项
+            self.height_pid.clear_integral()
         target_theta = self.height_pid.calculate(error_h, dt=dt) * kh
 
         temp = state_input
@@ -326,7 +326,7 @@ if __name__ == '__main__':
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
     target_height = 7500  # m # 测试飞行控制器
-    target_heading = 90  # 度 to rad
+    target_heading = 120  # 度 to rad
     target_speed = 300  # m/s
     t_last = 60 * 5
 
