@@ -1,3 +1,8 @@
+'''
+注意：take_action 有两个输出，即actor原始输出u和tanh和scale后的action_exec
+有监督预训练时经验池存 action_exec, 强化学习训练时经验池存 u
+'''
+
 from torch.distributions import Normal
 import numpy as np
 import torch
@@ -207,7 +212,7 @@ class PPOContinuous:
             a_norm = torch.tanh(u)
 
         a_exec = self._scale_action_to_exec(a_norm, action_bounds)
-        return a_exec[0].cpu().detach().numpy().flatten()
+        return a_exec[0].cpu().detach().numpy().flatten(), u[0].cpu().detach().numpy().flatten()
     
 
     def update(self, transition_dict):
@@ -220,7 +225,7 @@ class PPOContinuous:
         存储的 'actions' 应当是环境执行动作 (a_exec 未归一化）。
         """
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
+        u_s = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
@@ -236,12 +241,12 @@ class PPOContinuous:
         # 构造 SquashedNormal 并计算 old_log_probs
         dist = SquashedNormal(mu.detach(), std.detach())
 
-        # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
-        actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
+        # # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
+        # actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
         
-        # 反算 u = atanh(a)
-        u_old = torch.atanh(actions_normalized)
-        old_log_probs = dist.log_prob(actions_normalized, u_old)
+        # # 反算 u = atanh(a)
+        u_old = u_s
+        old_log_probs = dist.log_prob(0, u_old)
 
         if torch.isnan(old_log_probs).any():
             raise ValueError("old_log_probs 包含 NaN，检查 action_bounds 或 actions 的合法性")
@@ -263,7 +268,7 @@ class PPOContinuous:
 
             dist = SquashedNormal(mu, std)
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
-            log_probs = dist.log_prob(actions_normalized, u_old)
+            log_probs = dist.log_prob(0, u_old)
 
             ratio = torch.exp(log_probs - old_log_probs)
             surr1 = ratio * advantage

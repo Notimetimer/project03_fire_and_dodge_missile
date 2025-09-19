@@ -33,7 +33,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.SquashedPPOcontinues import *
+from Algorithms.SquashedPPOcontinues_dual_a_out import *
 
 # # 只能处理不分块的多层全连接神经网络，没必要单独拿出来
 # def parse_model_sizes_from_meta(meta_path):
@@ -254,7 +254,7 @@ lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
 dt_decide = 2 # 2
-pre_train_rate = 0 # 0.25 # 0.25
+pre_train_rate = 0.1 # 0.25 # 0.25
 
 state_dim = len(obs_space) # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 1 # test
@@ -394,14 +394,14 @@ try:
 
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
-                action = agent.take_action(state, action_bounds=action_bound, explore=True)
+                action, u = agent.take_action(state, action_bounds=action_bound, explore=True)
                 rl_steps += 1
                 total_action = np.array([5000 * action[0], 0, 300]) # 1000 * 
 
                 next_state, reward, done = env.step(total_action)
 
                 transition_dict['states'].append(state)
-                transition_dict['actions'].append(action)
+                transition_dict['actions'].append(u)
                 transition_dict['next_states'].append(next_state)
                 transition_dict['rewards'].append(reward)
                 transition_dict['dones'].append(done)
@@ -466,7 +466,7 @@ try:
     state = env.get_obs()
     done = False
     while not env.get_done():
-        action = agent.take_action(state, action_bounds=action_bound, explore=False)
+        action, _ = agent.take_action(state, action_bounds=action_bound, explore=False)
 
         total_action = np.array([5000 * action[0], 0, 300]) # 1000 * 
 
