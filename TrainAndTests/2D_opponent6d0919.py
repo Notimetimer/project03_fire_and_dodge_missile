@@ -147,12 +147,12 @@ for i in range(1):
     Btrajectory = []
 
     # 环境运行一轮的情况
-    for count in range(round(args.max_episode_len / dt_maneu_dec)):
+    for count in range(round(args.max_episode_len / dt_maneuver)):
         # print(f"time: {env.t}")  # 打印当前的 count 值
         # 回合结束判断
         # print(env.running)
-        current_t = count * dt_maneu_dec
-        if env.running == False or count == round(args.max_episode_len / dt_maneu_dec) - 1:
+        current_t = count * dt_maneuver
+        if env.running == False or count == round(args.max_episode_len / dt_maneuver) - 1:
             # print('回合结束，时间为：', env.t, 's')
             break
         # 获取观测信息
@@ -275,11 +275,11 @@ for i in range(1):
 # 补充显示
 loc_o = NUE2LLH(0, 0, 0, lon_o=o00[0], lat_o=o00[1], h_o=0) # ENU2LLH(mark, np.zeros(3))
 data_to_send = ''
-data_to_send = f"#{send_t + dt_maneu_dec:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
+data_to_send = f"#{send_t + dt_maneuver:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
 # print("data_to_send", data_to_send)
 tacview.send_data_to_client(data_to_send)
 
-data_to_send = f"#{send_t + dt_maneu_dec * 10:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
+data_to_send = f"#{send_t + dt_maneuver * 10:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
 # print("data_to_send", data_to_send)
 tacview.send_data_to_client(data_to_send)
 

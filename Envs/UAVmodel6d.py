@@ -19,7 +19,7 @@ from Math_calculates.sub_of_angles import *
 
 # 无人机模型
 class UAVModel(object):
-    def __init__(self, dt=0.02):
+    def __init__(self, dt=0.02, dt_fire=0.2):
         super(UAVModel, self).__init__()
         # 无人机的标识
         self.last_calc_missile_time = -10
@@ -82,6 +82,7 @@ class UAVModel(object):
         self.attacking = False
         self.dead = False
         self.dt = dt
+        self.dt_fire = dt_fire
 
         self.o00 = None
         self.start_lon = None
@@ -302,8 +303,8 @@ class UAVModel(object):
             #     can_shoot = True
 
             from LaunchZone.calc_hit_points import hit_prob
-            # 每次计算出的概率保持0.5s
-            if current_time-self.last_calc_missile_time >= 0.5:
+            # 每次计算出的概率保持1s
+            if current_time-self.last_calc_missile_time >= 1: # 0.5
                 shoot_prob = hit_prob(self.pos_, self.vel_,
                                       target.pos_, target.vel_)
                 self.last_calc_missile_time = current_time
@@ -312,16 +313,17 @@ class UAVModel(object):
                 shoot_prob = self.shoot_prob
 
             # 随机采样
-            # if np.random.uniform(0, 1) <= shoot_prob:
-            #     can_shoot = True
-            # else:
-            #     can_shoot = False
-
-            # 只在不可逃逸区发射
-            if shoot_prob>=1:
+            shoot_prob_in_1s = 1-(1-shoot_prob)**(self.dt_fire/5)
+            if np.random.uniform(0, 1) <= shoot_prob_in_1s:
                 can_shoot = True
             else:
                 can_shoot = False
+
+            # # 只在不可逃逸区发射
+            # if shoot_prob>=1:
+            #     can_shoot = True
+            # else:
+            #     can_shoot = False
 
         # 导弹发射概率输出
         return can_shoot

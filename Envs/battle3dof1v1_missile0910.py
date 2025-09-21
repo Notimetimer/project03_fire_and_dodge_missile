@@ -43,8 +43,7 @@ from Math_calculates.SimpleAeroDynamics import *
 from Envs.UAVmodel6d import UAVModel
 
 g = 9.81
-dt = 0.02  # 0.02 0.8 0.2
-dt_report = dt
+dt_report = 0.2  # 0.02 0.8 0.2
 dt_move = 0.02
 report_move_time_rate = int(round(dt_report / dt_move))
 
@@ -117,7 +116,7 @@ class Battle(object):
         self.RUAVs = None
         self.BUAVs = None
         self.UAVs = None
-        self.dt = None
+        self.dt_report = None
         self.t = None
         self.game_time_limit = self.args.max_episode_len  # None
         self.running = None
@@ -141,7 +140,7 @@ class Battle(object):
         self.Rmissiles = []
         self.Bmissiles = []
         self.missiles = []
-        self.dt = dt_report  # simulation interval，1 second
+        self.dt_report = dt_report  # simulation interval，1 second
         self.t = 0
         # self.game_time_limit = self.args.max_episode_len
         # 初始化无人机
@@ -151,7 +150,7 @@ class Battle(object):
         self.Bnum = 1
         # 红方初始化
         for i in range(self.Rnum):
-            UAV = UAVModel(dt=dt_move)
+            UAV = UAVModel(dt=dt_move, dt_fire=dt_report)
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
             UAV.red = True
@@ -179,7 +178,7 @@ class Battle(object):
             self.RUAVs.append(UAV)
         # 蓝方初始化
         for i in range(self.Bnum):
-            UAV = UAVModel(dt=dt_move)
+            UAV = UAVModel(dt=dt_move, dt_fire=dt_report)
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
             UAV.red = False
@@ -247,7 +246,7 @@ class Battle(object):
                 delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
                 # print('target_height',target_height)
-                # for i in range(int(self.dt // dt_move)):
+                # for i in range(int(self.dt_report // dt_move)):
                 UAV.move(target_height, delta_heading, target_speed)
             # 导弹移动
             self.missiles = self.Rmissiles + self.Bmissiles

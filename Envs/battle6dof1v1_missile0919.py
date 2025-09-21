@@ -36,9 +36,9 @@ from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize import *
 
 g = 9.81
-dt_maneu_dec = 0.5  # 0.02 0.8 0.2
+dt_maneuver = 0.2  # 0.02 0.8 0.2
 dt_move = 0.02
-report_move_time_rate = int(round(dt_maneu_dec / dt_move))
+report_move_time_rate = int(round(dt_maneuver / dt_move))
 
 o00 = np.array([118, 30])  # 地理原点的经纬
 # t = 0
@@ -98,7 +98,7 @@ class Battle(object):
         super(Battle, self).__init__()
         self.BUAV = None
         self.RUAV = None
-        self.dt_maneu_dec = dt_maneu_dec
+        self.dt_maneuver = dt_maneuver
         self.dt_move = dt_move
         self.UAV_ids = None
         self.UAV_hit = None
@@ -151,7 +151,7 @@ class Battle(object):
         self.Rmissiles = []
         self.Bmissiles = []
         self.missiles = []
-        self.dt_maneu_dec = dt_maneu_dec  # simulation interval，1 second
+        self.dt_maneuver = dt_maneuver  # simulation interval，1 second
         self.t = 0
         # self.game_time_limit = self.args.max_episode_len
         # 初始化无人机
@@ -248,13 +248,13 @@ class Battle(object):
 
     def step(self, r_actions, b_actions):
         # 输入动作（范围为[-1,1]
-        self.t += dt_maneu_dec
+        self.t += dt_maneuver
         self.t = round(self.t, 2)  # 保留两位小数
 
         actions = r_actions + b_actions
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
-        # 运动按照dt_move更新，结果合并到dt_maneu_dec中
+        # 运动按照dt_move更新，结果合并到dt_maneuver中
 
         for j1 in range(int(report_move_time_rate)):
             # 飞机移动
@@ -268,7 +268,7 @@ class Battle(object):
                 delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
                 # print('target_height',target_height)
-                # for i in range(int(self.dt_maneu_dec // dt_move)):
+                # for i in range(int(self.dt_maneuver // dt_move)):
                 UAV.move(target_height, delta_heading, target_speed)
             # 导弹移动
             self.missiles = self.Rmissiles + self.Bmissiles
