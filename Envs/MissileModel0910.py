@@ -249,8 +249,8 @@ class missile_class:
                 line_t_[0] * vrx + line_t_[2] * vrz)) / (
                               distance ** 2 * distance_hor)  # 视线俯仰角速度
         q_epsilon_dot = omega_LOS_z
-        nyt1 = 4 * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
-        nzt1 = 4 * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)
+        nyt1 = 2 * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
+        nzt1 = 2 * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)
 
         return 2, [nzt1, nyt1]
 
@@ -414,52 +414,173 @@ class missile_class:
         return vmt_, pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt
 
 
-# class tacview(object):
-#     def __init__(self):
-#         host = "localhost"
-#         port = 42674
-#         # host = input("请输入服务器IP地址：")
-#         # port = int(input("请输入服务器端口："))
-#         # 提示用户打开tacview软件高级版，点击“记录”-“实时遥测”
-#         print("请打开tacview软件高级版，点击“记录”-“实时遥测”，并使用以下设置：")
-#         print(f"IP地址：{host}")
-#         print(f"端口：{port}")
-#
-#         # 创建套接字
-#         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#
-#         server_socket.bind((host, port))
-#
-#         # 启动监听
-#         server_socket.listen(5)
-#         print(f"Server listening on {host}:{port}")
-#
-#         # 等待客户端连接
-#         client_socket, address = server_socket.accept()
-#         print(f"Accepted connection from {address}")
-#
-#         self.client_socket = client_socket
-#         self.address = address
-#
-#         # 构建握手数据
-#         handshake_data = "XtraLib.Stream.0\nTacview.RealTimeTelemetry.0\nHostUsername\n\x00"
-#         # 发送握手数据
-#         client_socket.send(handshake_data.encode())
-#
-#
-#         # 接收客户端发送的数据
-#         data = client_socket.recv(1024)
-#         print(f"Received data from {address}: {data.decode()}")
-#         print("已建立连接")
-#
-#         # 向客户端发送头部格式数据
-#
-#         data_to_send = ("FileType=text/acmi/tacview\nFileVersion=2.1\n"
-#                         "0,ReferenceTime=2020-04-01T00:00:00Z\n#0.00\n"
-#                         )
-#         client_socket.send(data_to_send.encode())
-#
-#     def send_data_to_client(self, data):
-#
-#         self.client_socket.send(data.encode())
-#
+
+if __name__ == '__main__':
+    list_missiles = []
+    import os
+    import sys
+    def get_current_file_dir():
+    # 判断是否在 Jupyter Notebook 环境
+        try:
+            shell = get_ipython().__class__.__name__  # ← 误报，不用管
+            if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
+                # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
+                return os.getcwd()
+            else:  # 其他 shell
+                return os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            # 普通 Python 脚本
+            return os.path.dirname(os.path.abspath(__file__))
+    current_dir = get_current_file_dir()
+    sys.path.append(os.path.dirname(current_dir))
+    dt=0.02
+    from Visualize.tacview_visualize import *
+
+    # 联动tacview
+    import socket
+    import threading
+    import time
+
+    # 地理原点
+    Longitude0 = 144 + 43 / 60
+    Latitude0 = 13 + 26 / 60
+    Height0 = 0
+    mark = np.array([Longitude0, Latitude0, Height0])  # 地理原点
+
+
+    def ENU2LLH(mark, NUE):
+        # 东北天单位为m，经纬度单位是角度
+        N, U, E = NUE
+        # E, N, U = ENU
+        longit0, latit0, height0 = mark
+        R_earth = 6371004  # ???
+        dlatit = N / R_earth * 180 / pi
+        dlongit = E / (R_earth * cos(latit0 * pi / 180)) * 180 / pi
+        dheight = U
+        out = np.array([longit0 + dlongit, latit0 + dlatit, height0 + dheight])
+        return out
+
+
+    # 目标运动类,不考虑机动
+    class target:
+        def __init__(self, pos0_, vel0_):
+            super(target, self).__init__()
+            self.pos_ = pos0_
+            self.vel_ = vel0_
+
+        def step(self, dt1=dt):
+            self.pos_ += self.vel_ * dt1
+            self.vel_ = self.vel_
+            return self.pos_, self.vel_
+
+
+    # 调用导弹模型仿真
+    t_max = 60 * 2  # 最大仿真时间
+    i_list = np.arange(0, int(t_max / dt), 1)
+    t_range = np.round(i_list * dt, 2)
+
+    p_carrier_ = np.array([0, 7.5e3, 0])
+    v_carrier_ = np.array([300, 0, 0])
+
+    missile_used = 0
+    hit = False
+
+    list_pm_ = p_carrier_
+    list_vm_ = v_carrier_
+    list_vm = np.linalg.norm(list_vm_)
+    list_pt_ = np.array([20e3, 6e3, 0])  # 目标
+    list_vt_ = np.array([0, 0, -300])
+    # missile1 = missile_class(list_pm_, list_vm_, t)
+    Target = target(list_pt_, list_vt_)
+
+    list_line_ = list_pt_ - list_pm_
+    list_distance = norm(list_pm_ - list_pt_)
+    vmt_ = list_vm_
+    vmt = list_vm
+    pmt_ = list_pm_
+    ptt_ = list_pt_
+    vtt_ = list_vt_
+
+    # 多枚导弹连续发
+    # 遍历导弹列表，如果导弹炸了，则跳过
+    # 如果导弹没炸，则获取目标位置、动力学计算以及毁伤判定、记录轨迹
+    end_flag = 0
+    t_count_start = -5
+    tacview = Tacview()
+    for i in i_list:
+        t = np.round(i * dt, 2)
+        # 更新载机位置和速度
+        p_carrier_ += v_carrier_ * dt
+        # 更新目标位置和速度
+        ptt_, vtt_ = Target.step()
+        L_t_ = ptt_ - p_carrier_
+        distance_of_planes = norm(L_t_)
+
+        off_axis_angle_radian = np.arccos(np.dot(v_carrier_, L_t_) / norm(v_carrier_) / distance_of_planes)
+
+        in_range = 1e3 < distance_of_planes < 20e3 and off_axis_angle_radian < 30 * pi / 180
+
+        # 最快每隔5s发射一枚导弹，一共4枚导弹
+        if t - t_count_start >= 10 and in_range and missile_used < 4:
+            missile1 = missile_class(p_carrier_, v_carrier_, ptt_, vtt_, t)
+            list_missiles.append(missile1)
+            t_count_start = t  # 重置计时器
+            missile_used += 1
+            print('missile launched')
+        # 对每一枚导弹做判断
+        for missile1 in list_missiles:
+            if not missile1.dead:
+                # 目标位置传给导弹
+
+                target_information = missile1.observe(vmt_, vtt_, pmt_, ptt_)
+                # 导弹移动
+                vmt_, pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = missile1.step(
+                    target_information)
+                vmt = norm(vmt_)
+
+                # 毁伤判定
+                # 判断命中情况并终止运行
+                if vmt < missile1.speed_min and t > 0.5 + missile1.stage1_time + missile1.stage2_time:
+                    missile1.dead = True
+                if pmt_[1] < missile1.minH_m:  # 高度小于限高自爆
+                    missile1.dead = True
+                if missile1.t > missile1.t_max:  # 超时自爆
+                    missile1.dead = True
+                if t >= 0 + dt:
+                    # if distance < missile1.kill_range*50:  # 启动变步长计算命中情况的条件
+                    #     pass
+                    #     # 假定目标在dt的时间内线性运动，导弹可以以更细分的时间取得观测信息和机动决策
+
+                    hit, _, _ = hit_target(pmt_, vmt_, ptt_, vtt_)
+                    if hit:
+                        print('Target hit')
+                        missile1.dead = True
+                        missile1.hit = True
+
+                        end_flag = 1
+
+        # 在tacview上显示运动
+        send_t = t
+        name_R = '001'
+        name_B = '002'
+        loc_r = ENU2LLH(mark, p_carrier_)
+        loc_b = ENU2LLH(mark, ptt_)
+        data_to_send = f"#{send_t:.2f}\n{name_R},T={loc_r[0]:.6f}|{loc_r[1]:.6f}|{loc_r[2]:.6f},Name=F16,Color=Red\n" + \
+                       f"#{send_t:.2f}\n{name_B},T={loc_b[0]:.6f}|{loc_b[1]:.6f}|{loc_b[2]:.6f},Name=F16,Color=Blue\n"
+        # tacview.send_data_to_client(
+        #     "#0.00\nA0100,T=119.99999999999999|59.999999999999986|8902.421354242131|5.124908336161374e-15|2.6380086088911072e-15|92.1278924460462,Name=F16,Color=Red\n")
+        # tacview.send_data_to_client(data_to_send)
+
+        # alive_missiles = [missile1 for missile1 in list_missiles if not missile1.dead]
+        if not len(list_missiles) == 0:
+            for j, missile1 in enumerate(list_missiles):
+                if not missile1.dead:
+                    loc_m = ENU2LLH(mark, missile1.pos_)
+                    data_to_send += f"#{send_t:.2f}\n{10+j},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}," \
+                                    f"Name=AIM-120C,Color=Orange\n"
+
+        tacview.send_data_to_client(data_to_send)
+        time.sleep(0.001)
+
+        if end_flag:
+            break

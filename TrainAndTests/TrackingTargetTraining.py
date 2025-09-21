@@ -12,7 +12,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.battle3dof1v1_missile0910 import *
+from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
@@ -66,7 +66,8 @@ blue_vel_list = np.empty((0, 3))
 args = get_args()
 env = Battle(args)
 
-r_obs_spaces, b_obs_spaces = env.get_obs_spaces()
+r_obs_spaces = env.get_obs_spaces('r')
+b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 '''滚动时域优化开始'''
 
@@ -146,16 +147,17 @@ for i in range(1):
     Btrajectory = []
 
     # 环境运行一轮的情况
-    for count in range(round(args.max_episode_len / dt_report)):
+    for count in range(round(args.max_episode_len / dt_maneu_dec)):
         # print(f"time: {env.t}")  # 打印当前的 count 值
         # 回合结束判断
         # print(env.running)
-        current_t = count * dt_report
-        if env.running == False or count == round(args.max_episode_len / dt_report) - 1:
+        current_t = count * dt_maneu_dec
+        if env.running == False or count == round(args.max_episode_len / dt_maneu_dec) - 1:
             # print('回合结束，时间为：', env.t, 's')
             break
         # 获取观测信息
-        r_obs_n, b_obs_n = env.get_obs()
+        r_obs_n = env.get_obs('r')
+        b_obs_n = env.get_obs('b')
         state = np.squeeze(r_obs_n)
 
         # todo 可发射判据添加解算，且更换if_possible和距离判据的顺序（发射时间间隔过了之后再解算攻击区会更有效率）
@@ -273,11 +275,11 @@ for i in range(1):
 # 补充显示
 loc_o = NUE2LLH(0, 0, 0, lon_o=o00[0], lat_o=o00[1], h_o=0) # ENU2LLH(mark, np.zeros(3))
 data_to_send = ''
-data_to_send = f"#{send_t + dt_report:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
+data_to_send = f"#{send_t + dt_maneu_dec:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
 # print("data_to_send", data_to_send)
 tacview.send_data_to_client(data_to_send)
 
-data_to_send = f"#{send_t + dt_report * 10:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
+data_to_send = f"#{send_t + dt_maneu_dec * 10:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
 # print("data_to_send", data_to_send)
 tacview.send_data_to_client(data_to_send)
 
@@ -292,56 +294,56 @@ R_controll_check_switch2 = np.array(R_controll_check_switch2)
 B_controll_check_switch1 = np.array(B_controll_check_switch1)
 B_controll_check_switch2 = np.array(B_controll_check_switch2)
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
-# Create a figure and 10 subplots in 2 columns
-fig, axs = plt.subplots(5, 2, figsize=(14, 24), sharex=True)
+# # Create a figure and 10 subplots in 2 columns
+# fig, axs = plt.subplots(5, 2, figsize=(14, 24), sharex=True)
 
-axs[0, 0].plot(t_list, R_controll_type, label='R_controll_type', color='red')
-axs[0, 0].legend()
-axs[0, 0].grid()
+# axs[0, 0].plot(t_list, R_controll_type, label='R_controll_type', color='red')
+# axs[0, 0].legend()
+# axs[0, 0].grid()
 
-axs[0, 1].plot(t_list, B_controll_type, label='B_controll_type', color='blue')
-axs[0, 1].legend()
-axs[0, 1].grid()
+# axs[0, 1].plot(t_list, B_controll_type, label='B_controll_type', color='blue')
+# axs[0, 1].legend()
+# axs[0, 1].grid()
 
-axs[1, 0].plot(t_list, r_action_list[:, 1] * 180 / pi, label='r_action_list[1]', color='green')
-axs[1, 0].legend()
-axs[1, 0].grid()
+# axs[1, 0].plot(t_list, r_action_list[:, 1] * 180 / pi, label='r_action_list[1]', color='green')
+# axs[1, 0].legend()
+# axs[1, 0].grid()
 
-axs[1, 1].plot(t_list, b_action_list[:, 1] * 180 / pi, label='b_action_list[1]', color='orange')
-axs[1, 1].set_xlabel('Time (s)')
-axs[1, 1].legend()
-axs[1, 1].grid()
+# axs[1, 1].plot(t_list, b_action_list[:, 1] * 180 / pi, label='b_action_list[1]', color='orange')
+# axs[1, 1].set_xlabel('Time (s)')
+# axs[1, 1].legend()
+# axs[1, 1].grid()
 
-axs[2, 0].plot(t_list, R_controll_check_switch1, label='R_controll_check_switch1', color='purple')
-axs[2, 0].legend()
-axs[2, 0].grid()
+# axs[2, 0].plot(t_list, R_controll_check_switch1, label='R_controll_check_switch1', color='purple')
+# axs[2, 0].legend()
+# axs[2, 0].grid()
 
-axs[2, 1].plot(t_list, R_controll_check_switch2, label='R_controll_check_switch2', color='brown')
-axs[2, 1].legend()
-axs[2, 1].grid()
+# axs[2, 1].plot(t_list, R_controll_check_switch2, label='R_controll_check_switch2', color='brown')
+# axs[2, 1].legend()
+# axs[2, 1].grid()
 
-axs[3, 0].plot(t_list, B_controll_check_switch1, label='B_controll_check_switch1', color='pink')
-axs[3, 0].legend()
-axs[3, 0].grid()
+# axs[3, 0].plot(t_list, B_controll_check_switch1, label='B_controll_check_switch1', color='pink')
+# axs[3, 0].legend()
+# axs[3, 0].grid()
 
-axs[3, 1].plot(t_list, B_controll_check_switch2, label='B_controll_check_switch2', color='cyan')
-axs[3, 1].set_xlabel('Time (s)')
-axs[3, 1].legend()
-axs[3, 1].grid()
+# axs[3, 1].plot(t_list, B_controll_check_switch2, label='B_controll_check_switch2', color='cyan')
+# axs[3, 1].set_xlabel('Time (s)')
+# axs[3, 1].legend()
+# axs[3, 1].grid()
 
-# 新增弹药数曲线
-axs[4, 0].plot(t_list, r_ammo, label='r_ammo', color='darkred')
-axs[4, 0].legend()
-axs[4, 0].grid()
-axs[4, 0].set_ylabel('Red Ammo')
+# # 新增弹药数曲线
+# axs[4, 0].plot(t_list, r_ammo, label='r_ammo', color='darkred')
+# axs[4, 0].legend()
+# axs[4, 0].grid()
+# axs[4, 0].set_ylabel('Red Ammo')
 
-axs[4, 1].plot(t_list, b_ammo, label='b_ammo', color='navy')
-axs[4, 1].legend()
-axs[4, 1].grid()
-axs[4, 1].set_ylabel('Blue Ammo')
-axs[4, 1].set_xlabel('Time (s)')
+# axs[4, 1].plot(t_list, b_ammo, label='b_ammo', color='navy')
+# axs[4, 1].legend()
+# axs[4, 1].grid()
+# axs[4, 1].set_ylabel('Blue Ammo')
+# axs[4, 1].set_xlabel('Time (s)')
 
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.show()

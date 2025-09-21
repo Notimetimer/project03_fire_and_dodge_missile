@@ -51,7 +51,7 @@ def calc_mach(v, height):
     return v / sound_speed, sound_speed
 
 # 计算命中情况
-def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt1=dt_refer, kill_range=20):
+def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=dt_refer, kill_range=20):
     # # 计算点与点距离
     # distance1 = np.linalg.norm(pmt_ - ptt_)
     # return distance1 <= kill_range, pmt_
@@ -61,11 +61,11 @@ def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt1=dt_refer, kill_range=20):
     # 基于当前点和线性外推得的dt后下一点的判据
     M1 = pmt_1
     T1 = ptt_1
-    M2 = pmt_1 + dt1 * vmt_1
-    T2 = ptt_1 + dt1 * vtt_1
+    M2 = pmt_1 + dt * vmt_1
+    T2 = ptt_1 + dt * vtt_1
 
     t1 = 0
-    delta_t = dt1
+    delta_t = dt
     T1T2_ = T2 - T1
     M1M2_ = M2 - M1
     M1T1_ = T1 - M1
@@ -325,7 +325,7 @@ class missile_class:
             return self.terminal_guidance(v_missile_, v_target_, p_missile_, p_target_)
         # return self.terminal_guidance(v_missile_, v_target_, p_missile_, p_target_)
 
-    def step(self, target_information, dt1=dt_refer, datalink=True, record=False):
+    def step(self, target_information, dt=dt_refer, datalink=True, record=False):
         '''
         输入结构：是否看到目标(1)，目标的位置(3)、目标的速度(3)
         '''
@@ -386,14 +386,14 @@ class missile_class:
         Fx = 1 / 2 * Rho * vmt ** 2 * self.area * cd
         # 速率更新
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
-        vmt += v_dot * dt1
+        vmt += v_dot * dt
         # 限马赫数
         vmt = min(vmt, self.max_mach * sound_speed)
         # 过载限制2
         nt = np.clip(np.linalg.norm([nyt, nzt]), 0, 40)
         [nzt, nyt] = np.array([nzt, nyt]) * nt / np.sqrt(nyt ** 2 + nzt ** 2) if np.abs(nt) > 0 else [0.0, 0.0]
-        theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt1
-        psi_mt += nzt * g / vmt / cos(theta_mt) * dt1
+        theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt
+        psi_mt += nzt * g / vmt / cos(theta_mt) * dt
         # 欧拉角反奇异
         theta_mt = np.clip(theta_mt, -theta_limit, theta_limit)
         if psi_mt > pi:
@@ -406,9 +406,9 @@ class missile_class:
         # print(vmt_)
         # print(self.pos_)
 
-        self.pos_ += vmt_ * dt1  # 欧拉积分
+        self.pos_ += vmt_ * dt  # 欧拉积分
         # 更新时间
-        self.t += dt1
+        self.t += dt
         self.t = round(self.t, 2)  # 保留两位小数
         # print(self.t)
         # 记录运行轨迹

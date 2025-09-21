@@ -7,6 +7,8 @@ Longitude0 = 144 + 43 / 60
 Latitude0 = 13 + 26 / 60
 Height0 = 0
 mark = np.array([Longitude0, Latitude0, Height0])  # 地理原点
+
+# 已弃用
 def ENU2LLH(mark, NUE):
     # 东北天单位为m，经纬度单位是角度
     N, U, E = NUE

@@ -6,7 +6,7 @@ import time
 import jsbsim
 import numpy as np
 from numpy.linalg import norm
-from Controller.F16PIDController import F16PIDController, active_rotation, sub_of_radian, sub_of_degree
+from Controller.F16PIDController2 import F16PIDController, active_rotation, sub_of_radian, sub_of_degree
 
 tacview_show = 1  # 是否显示Tacview
 

@@ -42,7 +42,7 @@ def calc_mach(v, height):
     return v / sound_speed, sound_speed
 
 # 计算命中情况
-def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt1=0.5, kill_range=20):
+def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=0.5, kill_range=20):
     # # 计算点与点距离
     # distance1 = np.linalg.norm(pmt_ - ptt_)
     # return distance1 <= kill_range, pmt_
@@ -52,11 +52,11 @@ def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt1=0.5, kill_range=20):
     # 基于当前点和线性外推得的dt后下一点的判据
     M1 = pmt_1
     T1 = ptt_1
-    M2 = pmt_1 + dt1 * vmt_1
-    T2 = ptt_1 + dt1 * vtt_1
+    M2 = pmt_1 + dt * vmt_1
+    T2 = ptt_1 + dt * vtt_1
 
     t1 = 0
-    delta_t = dt1
+    delta_t = dt
     T1T2_ = T2 - T1
     M1M2_ = M2 - M1
     M1T1_ = T1 - M1
@@ -261,7 +261,7 @@ class missile_class:
     def guidance(self, v_missile_, v_target_, p_missile_, p_target_):
         return self.terminal_guidance(v_missile_, v_target_, p_missile_, p_target_)
 
-    def step(self, target_information, dt1=0.5, record=True):
+    def step(self, target_information, dt=0.5, record=True):
         '''
         输入结构：是否看到目标(1)，目标的位置(3)、目标的速度(3)
         '''
@@ -316,14 +316,14 @@ class missile_class:
         Fx = 1 / 2 * Rho * vmt ** 2 * self.area * cd
         # 速率更新
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
-        vmt += v_dot * dt1
+        vmt += v_dot * dt
         # 限马赫数
         vmt = min(vmt, self.max_mach * sound_speed)
         # 过载限制2
         nt = np.clip(np.linalg.norm([nyt, nzt]), 0, 40)
         [nzt, nyt] = np.array([nzt, nyt]) * nt / np.sqrt(nyt ** 2 + nzt ** 2) if np.abs(nt) > 0 else [0.0, 0.0]
-        theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt1
-        psi_mt += nzt * g / vmt / cos(theta_mt) * dt1
+        theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt
+        psi_mt += nzt * g / vmt / cos(theta_mt) * dt
         # 欧拉角反奇异
         theta_mt = np.clip(theta_mt, -theta_limit, theta_limit)
         if psi_mt > pi:
@@ -332,9 +332,9 @@ class missile_class:
             psi_mt += 2 * pi
         vmt_ = vmt * np.array([cos(theta_mt) * cos(psi_mt), sin(theta_mt), cos(theta_mt) * sin(psi_mt)])
         self.vel_ = vmt_
-        self.pos_ += vmt_ * dt1  # 欧拉积分
+        self.pos_ += vmt_ * dt  # 欧拉积分
         # 更新时间
-        self.t += dt1
+        self.t += dt
         self.t = round(self.t, 2)  # 保留两位小数
         # print(self.t)
         # 记录运行轨迹
@@ -433,8 +433,8 @@ if __name__ == '__main__':
             self.pos_ = pos0_
             self.vel_ = vel0_
 
-        def step(self, dt1=dt):
-            self.pos_ += self.vel_ * dt1
+        def step(self, dt=dt):
+            self.pos_ += self.vel_ * dt
             self.vel_ = self.vel_
             return self.pos_, self.vel_
 
@@ -480,7 +480,7 @@ if __name__ == '__main__':
         # 更新目标位置和速度
         last_ptt_ = ptt_
         last_vtt_ = vtt_
-        ptt_, vtt_ = Target.step(dt1=dt)
+        ptt_, vtt_ = Target.step(dt=dt)
         L_t_ = ptt_ - p_carrier_
         distance_of_planes = norm(L_t_)
 
@@ -507,7 +507,7 @@ if __name__ == '__main__':
                     target_information = missile1.observe(vmt_, last_vtt_, pmt_, ptt1_)
                     # 导弹移动
                     vmt_, pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = missile1.step(
-                        target_information, dt1=dt / plane_missile_time_rate)
+                        target_information, dt=dt / plane_missile_time_rate)
 
                     # 毁伤判定
                     # 判断命中情况并终止运行
@@ -519,7 +519,7 @@ if __name__ == '__main__':
                     if missile1.t > missile1.t_max:  # 超时自爆
                         missile1.dead = True
                     if t >= 0 + dt:
-                        hit, point_m, point_t = hit_target(pmt_, vmt_, ptt1_, last_vtt_, dt1=dt / plane_missile_time_rate)
+                        hit, point_m, point_t = hit_target(pmt_, vmt_, ptt1_, last_vtt_, dt=dt / plane_missile_time_rate)
                         if hit:
                             print('Target hit')
                             missile1.dead = True
@@ -552,7 +552,7 @@ if __name__ == '__main__':
                                     f"Name=AIM-120C,Color=Orange\n"
 
         tacview.send_data_to_client(data_to_send)
-        time.sleep(0.01)
+        time.sleep(0.001)
 
         if end_flag:
             break

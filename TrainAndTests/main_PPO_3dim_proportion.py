@@ -14,7 +14,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import collections
-import rl_utils
+import Algorithms.rl_utils as rl_utils
 from tqdm import tqdm
 from torch.distributions import Normal
 import random

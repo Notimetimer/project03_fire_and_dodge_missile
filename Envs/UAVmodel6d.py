@@ -12,29 +12,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from controller.Controller_function import *
 # from Envs.MissileModel1 import *  # test
 
-
 from Controller.F16PIDController2 import *
-
-
-def sub_of_radian(input1, input2):
-    # 计算两个弧度的差值，范围为[-pi, pi]
-    diff = input1 - input2
-    diff = (diff + pi) % (2 * pi) - pi
-    return diff
-
-
-def LLH2NUE(lon, lat, h, lon_o=118, lat_o=30, h_o=0):
-    x = (lat - lat_o) * 111000  # 纬度差转米（近似）
-    y = h - h_o
-    z = (lon - lon_o) * (111413 * cos(lat_o * pi / 180) - 94 * cos(3 * lat_o * pi / 180))  # 经度差转米（近似）
-    return x, y, z
-
-
-def NUE2LLH(N, U, E, lon_o=118, lat_o=30, h_o=0):
-    lon = lon_o + E / (111413 * cos(lat_o * pi / 180) - 94 * cos(3 * lat_o * pi / 180))
-    lat = lat_o + N / 111000
-    h = U + h_o
-    return lon, lat, h
+from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
+from Math_calculates.sub_of_angles import *
 
 
 # 无人机模型

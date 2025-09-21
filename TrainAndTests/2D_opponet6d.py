@@ -24,6 +24,7 @@ from Algorithms.Rules import decision_rule
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import pandas as pd
+from Envs.MissileModel0910 import missile_class
 
 visualize_needed = 1  # 是否可视化
 
@@ -86,7 +87,7 @@ def launch_missile_if_possible(env, side='r'):
     # 判断是否可以发射导弹
     if uav.can_launch_missile(target, env.t):
         # 发射导弹
-        new_missile = uav.launch_missile(target, env.t)
+        new_missile = uav.launch_missile(target, env.t, missile_class)
         uav.ammo -= 1
         new_missile.side = 'red' if side == 'r' else 'blue'
         if side == 'r':

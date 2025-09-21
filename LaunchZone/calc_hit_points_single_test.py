@@ -4,15 +4,33 @@
 
 import numpy as np
 from math import *
-from Envs.MissileModel1 import *
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 获取project目录
+def get_current_file_dir():
+    # 判断是否在 Jupyter Notebook 环境
+    try:
+        shell = get_ipython().__class__.__name__  # ← 误报，不用管
+        if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
+            # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
+            return os.getcwd()
+        else:  # 其他 shell
+            return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        # 普通 Python 脚本
+        return os.path.dirname(os.path.abspath(__file__))
+
+current_dir = get_current_file_dir()
+sys.path.append(os.path.dirname(current_dir))
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from Envs.MissileModel0910 import * # MissileModel1
 
 g = 9.81
 
-dt = 0.2
+dt = 0.02
 t = 0
 g_ = np.array([0, -g, 0])
 theta_limit = 85 * pi / 180
@@ -58,7 +76,7 @@ class target:
         self.a_refer = 6 * g  # 参考加速度大小
         self.target_moves = np.array(range(5)) + 1
 
-    def step(self, pm_, dt1=dt, target_move=1):
+    def step(self, pm_, dt=dt, target_move=1):
         theta = atan2(self.vel_[1], sqrt(self.vel_[0] ** 2 + self.vel_[2] ** 2))
         heading = atan2(self.vel_[2], self.vel_[0])
         v = norm(self.vel_)
@@ -123,8 +141,8 @@ class target:
             az = 0 if normal < 1e-3 else az / normal * self.a_refer
 
         # 根据加速度解算速度和位置
-        theta += ay / v * dt1
-        heading += az / v / cos(theta) * dt1
+        theta += ay / v * dt
+        heading += az / v / cos(theta) * dt
 
         theta = np.clip(theta, -theta_limit, theta_limit)
         heading = sub_of_radian(heading, 0)
@@ -138,7 +156,7 @@ class target:
             theta = min(theta, theta_max)  # 将theta作用在目标上，不允许目标飞向太空
 
         self.vel_ = v * np.array([cos(theta) * cos(heading), sin(theta), cos(theta) * sin(heading)])  # 考虑加速度矢量
-        self.pos_ += self.vel_ * dt1
+        self.pos_ += self.vel_ * dt
 
         return self.pos_, self.vel_
 
@@ -168,11 +186,11 @@ def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
         target_information = missile1.observe(vmt_, vtt_, pmt_, ptt_)
         # 导弹移动
         vmt_, pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = missile1.step(
-            target_information, dt1=dt, datalink=datalink, record=False)
+            target_information, dt=dt, datalink=datalink, record=False)
         vmt = norm(vmt_)
 
         # 目标移动
-        ptt_, vtt_ = Target.step(pmt_, dt1=dt, target_move=target_move)
+        ptt_, vtt_ = Target.step(pmt_, dt=dt, target_move=target_move)
 
         # 毁伤判定
         # 判断命中情况并终止运行
@@ -214,10 +232,10 @@ def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
 if __name__ == '__main__':
     p_carrier_ = np.array([0, 10000, 0], dtype='float64')
     v_carrier_ = np.array([350, 0, 0], dtype='float64')
-    p_target_ = np.array([12e3, 10000, 0e3], dtype='float64')
+    p_target_ = np.array([20e3, 10000, 0e3], dtype='float64')
     v_target_ = np.array([-300, 0, 0], dtype='float64')
 
-    move_pattern = 4
+    move_pattern = 2
 
     show = 1
 

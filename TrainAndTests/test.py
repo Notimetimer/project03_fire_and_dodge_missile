@@ -228,7 +228,7 @@ class height_track_env():
         return r_h_norm
         
 
-    def reder(self,):
+    def render(self,):
         loc_r = [self.UAV.lon, self.UAV.lat, self.UAV.alt]
         if self.tacview_show:
             data_to_send = ''
@@ -473,7 +473,7 @@ try:
         next_state, reward, done = env.step(total_action)
         state = next_state
         step += 1
-        env.reder()
+        env.render()
         time.sleep(0.01)
 
 except KeyboardInterrupt:

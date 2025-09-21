@@ -194,7 +194,7 @@ class Battle(object):
         self.Bnum = 1
         # 红方初始化
         for i in range(self.Rnum):
-            UAV = UAVModel(dt1=dt_move)
+            UAV = UAVModel(dt=dt_move)
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
             UAV.red = True
@@ -221,7 +221,7 @@ class Battle(object):
             self.RUAVs.append(UAV)
         # 蓝方初始化
         for i in range(self.Bnum):
-            UAV = UAVModel(dt1=dt_move)
+            UAV = UAVModel(dt=dt_move)
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
             UAV.red = False
@@ -585,7 +585,7 @@ class Battle(object):
                                 has_datalink = True
 
                     last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-                        missile.step(target_info, dt1=dt / plane_missile_time_rate, datalink=has_datalink)
+                        missile.step(target_info, dt=dt / plane_missile_time_rate, datalink=has_datalink)
 
                     # print('导弹', missile.id, '有数据链制导?', has_datalink)
 
@@ -600,7 +600,7 @@ class Battle(object):
                         missile.dead = True
                     if missile.t >= 0 + dt and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                         hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, ptt1_, last_vtt_,
-                                                           dt1=dt / plane_missile_time_rate)
+                                                           dt=dt / plane_missile_time_rate)
                         if hit:
                             print(target.label, 'is hit')
                             missile.dead = True

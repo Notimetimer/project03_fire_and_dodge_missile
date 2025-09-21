@@ -8,7 +8,7 @@ from numpy.linalg import norm
 
 g = 9.81
 
-dt = 0.2
+dt = 0.02
 t = 0
 g_ = np.array([0, -g, 0])
 theta_limit = 85 * pi / 180
@@ -208,7 +208,7 @@ class missile_class:
     def guidance(self, v_missile_, v_target_, p_missile_, p_target_):
         return self.terminal_guidance(v_missile_, v_target_, p_missile_, p_target_)
 
-    def step(self, target_information, dt1=dt, record=True):
+    def step(self, target_information, dt=dt, record=True):
         '''
         输入结构：是否看到目标(1)，目标的位置(3)、目标的速度(3)
         '''
@@ -263,14 +263,14 @@ class missile_class:
         Fx = 1 / 2 * Rho * vmt ** 2 * self.area * cd
         # 速率更新
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
-        vmt += v_dot * dt1
+        vmt += v_dot * dt
         # 限马赫数
         vmt = min(vmt, self.max_mach * sound_speed)
         # 过载限制2
         nt = np.clip(np.linalg.norm([nyt, nzt]), 0, 40)
         [nzt, nyt] = np.array([nzt, nyt]) * nt / np.sqrt(nyt ** 2 + nzt ** 2) if np.abs(nt) > 0 else [0.0, 0.0]
-        theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt1
-        psi_mt += nzt * g / vmt / cos(theta_mt) * dt1
+        theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt
+        psi_mt += nzt * g / vmt / cos(theta_mt) * dt
         # 欧拉角反奇异
         theta_mt = np.clip(theta_mt, -theta_limit, theta_limit)
         if psi_mt > pi:
@@ -279,9 +279,9 @@ class missile_class:
             psi_mt += 2 * pi
         vmt_ = vmt * np.array([cos(theta_mt) * cos(psi_mt), sin(theta_mt), cos(theta_mt) * sin(psi_mt)])
         self.vel_ = vmt_
-        self.pos_ += vmt_ * dt1  # 欧拉积分
+        self.pos_ += vmt_ * dt  # 欧拉积分
         # 更新时间
-        self.t += dt1
+        self.t += dt
         self.t = round(self.t, 2)  # 保留两位小数
         # print(self.t)
         # 记录运行轨迹
@@ -388,8 +388,8 @@ if __name__ == '__main__':
             self.pos_ = pos0_
             self.vel_ = vel0_
 
-        def step(self, dt1=dt):
-            self.pos_ += self.vel_ * dt1
+        def step(self, dt=dt):
+            self.pos_ += self.vel_ * dt
             self.vel_ = self.vel_
             return self.pos_, self.vel_
 
@@ -408,8 +408,8 @@ if __name__ == '__main__':
     list_pm_ = p_carrier_
     list_vm_ = v_carrier_
     list_vm = np.linalg.norm(list_vm_)
-    list_pt_ = np.array([30e3, 6e3, 0])  # 目标
-    list_vt_ = np.array([-300, 0, 0])
+    list_pt_ = np.array([20e3, 6e3, 0])  # 目标
+    list_vt_ = np.array([0, 0, -300])
     # missile1 = missile_class(list_pm_, list_vm_, t)
     Target = target(list_pt_, list_vt_)
 
@@ -500,7 +500,7 @@ if __name__ == '__main__':
                                     f"Name=AIM-120C,Color=Orange\n"
 
         tacview.send_data_to_client(data_to_send)
-        time.sleep(0.01)
+        time.sleep(0.001)
 
         if end_flag:
             break

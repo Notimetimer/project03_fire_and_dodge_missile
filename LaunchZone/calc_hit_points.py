@@ -4,7 +4,8 @@
 
 import numpy as np
 from math import *
-from Envs.MissileModel1 import *
+# from Envs.MissileModel1 import *
+from Envs.MissileModel0910 import *
 import sys
 import os
 
@@ -59,7 +60,7 @@ class target:
         self.a_refer = 6 * g  # 参考加速度大小
         self.target_moves = np.array(range(5)) + 1
 
-    def step(self, pm_, dt1=dt, target_move=1):
+    def step(self, pm_, dt=dt, target_move=1):
         theta = atan2(self.vel_[1], sqrt(self.vel_[0] ** 2 + self.vel_[2] ** 2))
         heading = atan2(self.vel_[2], self.vel_[0])
         v = norm(self.vel_)
@@ -124,8 +125,8 @@ class target:
             az = 0 if normal < 1e-3 else az / normal * self.a_refer
 
         # 根据加速度解算速度和位置
-        theta += ay / v * dt1
-        heading += az / v / cos(theta) * dt1
+        theta += ay / v * dt
+        heading += az / v / cos(theta) * dt
 
         theta = np.clip(theta, -theta_limit, theta_limit)
         heading = sub_of_radian(heading, 0)
@@ -139,7 +140,7 @@ class target:
             theta = min(theta, theta_max)  # 将theta作用在目标上，不允许目标飞向太空
 
         self.vel_ = v * np.array([cos(theta) * cos(heading), sin(theta), cos(theta) * sin(heading)])  # 考虑加速度矢量
-        self.pos_ += self.vel_ * dt1
+        self.pos_ += self.vel_ * dt
 
         return self.pos_, self.vel_
 
@@ -171,11 +172,11 @@ def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
         target_information = missile1.observe(vmt_, vtt_, pmt_, ptt_)
         # 导弹移动
         vmt_, pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = missile1.step(
-            target_information, dt1=dt, datalink=datalink, record=False)
+            target_information, dt=dt, datalink=datalink, record=False)
         vmt = norm(vmt_)
 
         # 目标移动
-        ptt_, vtt_ = Target.step(pmt_, dt1=dt, target_move=target_move)
+        ptt_, vtt_ = Target.step(pmt_, dt=dt, target_move=target_move)
 
         # 毁伤判定
         # 判断命中情况并终止运行

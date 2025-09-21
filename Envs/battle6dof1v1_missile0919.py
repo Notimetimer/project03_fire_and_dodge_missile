@@ -41,12 +41,12 @@ from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Envs.UAVmodel6d import UAVModel
+from Visualize.tacview_visualize import *
 
 g = 9.81
-dt = 0.02  # 0.02 0.8 0.2
-dt_report = dt
+dt_maneu_dec = 0.5  # 0.02 0.8 0.2
 dt_move = 0.02
-report_move_time_rate = int(round(dt_report / dt_move))
+report_move_time_rate = int(round(dt_maneu_dec / dt_move))
 
 o00 = np.array([118, 30])  # 地理原点的经纬
 # t = 0
@@ -106,7 +106,7 @@ class Battle(object):
         super(Battle, self).__init__()
         self.BUAV = None
         self.RUAV = None
-        self.dt_report = dt_report
+        self.dt_maneu_dec = dt_maneu_dec
         self.dt_move = dt_move
         self.UAV_ids = None
         self.UAV_hit = None
@@ -117,7 +117,12 @@ class Battle(object):
         self.RUAVs = None
         self.BUAVs = None
         self.UAVs = None
-        self.dt = None
+        self.RUAVsTable = None
+        self.BUAVsTable = None
+        self.UAVsTable = None
+        self.RmissilesTable = None
+        self.BmissilesTable = None
+        self.missilesTable = None
         self.t = None
         self.game_time_limit = self.args.max_episode_len  # None
         self.running = None
@@ -125,14 +130,27 @@ class Battle(object):
         # self.reset()  # 重置位置和状态
         self.r_action_spaces = [spaces.Box(low=-1, high=+1, shape=(3,), dtype=np.float32)]
         self.b_action_spaces = [spaces.Box(low=-1, high=+1, shape=(3,), dtype=np.float32)]
+        self.train_side_win = None
+        self.train_side_loss = None
+        self.train_side_draw = None
+        self.max_alt = 15e3
+        self.max_alt_save = 13e3
+        self.min_alt_save= 3e3
+        self.min_alt = 1e3
+        self.tacview_show = None
         # # 智能体的观察空间
         # r_obs_n, b_obs_n = self.get_obs()
         # self.r_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      r_obs_n]
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      b_obs_n]
+        
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):  # 重置位置和状态
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, tacview_show=0):  # 重置位置和状态
+        self.tacview_show = tacview_show
+        if tacview_show:
+            self.tacview = Tacview()
+
         if red_birth_state is None:
             red_birth_state = self.DEFAULT_RED_BIRTH_STATE
         if blue_birth_state is None:
@@ -141,7 +159,7 @@ class Battle(object):
         self.Rmissiles = []
         self.Bmissiles = []
         self.missiles = []
-        self.dt = dt_report  # simulation interval，1 second
+        self.dt_maneu_dec = dt_maneu_dec  # simulation interval，1 second
         self.t = 0
         # self.game_time_limit = self.args.max_episode_len
         # 初始化无人机
@@ -149,6 +167,12 @@ class Battle(object):
         self.BUAVs = []
         self.Rnum = 1
         self.Bnum = 1
+        self.RUAVsTable = {}
+        self.BUAVsTable = {}
+        self.UAVsTable = {}
+        self.RmissilesTable = {}
+        self.BmissilesTable = {}
+        self.missilesTable = {}
         # 红方初始化
         for i in range(self.Rnum):
             UAV = UAVModel(dt=dt_move)
@@ -156,7 +180,7 @@ class Battle(object):
             UAV.id = i + 1
             UAV.red = True
             UAV.blue = False
-            UAV.label = "red"
+            UAV.label = "Red"
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             # UAV.pos_ = birthpointr.copy() + \
@@ -177,6 +201,7 @@ class Battle(object):
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
             self.RUAVs.append(UAV)
+            self.RUAVsTable[UAV.id]=(UAV, UAV.label, UAV.dead)
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=dt_move)
@@ -184,7 +209,7 @@ class Battle(object):
             UAV.id = i + 201
             UAV.red = False
             UAV.blue = True
-            UAV.label = "blue"
+            UAV.label = "Blue"
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             # UAV.pos_ = birthpointb.copy() + \
@@ -203,8 +228,10 @@ class Battle(object):
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
             self.BUAVs.append(UAV)
+            self.BUAVsTable[UAV.id]=(UAV, UAV.label, UAV.dead)
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
+        self.UAVsTable = {**self.RUAVsTable, **self.BUAVsTable}
         self.UAV_ids = [UAV.id for UAV in self.UAVs]
         self.UAV_hit = [False for _ in range(len(self.UAVs))]
 
@@ -215,25 +242,27 @@ class Battle(object):
         print(red_birth_state)
         print(blue_birth_state)
 
-    def get_obs_spaces(self):
+    def get_obs_spaces(self, side):
         self.reset()
         # 智能体的观察空间
-        r_obs_n, b_obs_n = self.get_obs()
-        self.r_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
-                             r_obs_n]
-        self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
-                             b_obs_n]
-        return self.r_obs_spaces, self.b_obs_spaces
+        # r_obs_n, b_obs_n = self.get_obs()
+        obs_n = self.get_obs(side)
+        # b_obs_n = self.get_obs('b')
+        self.obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
+                             obs_n]
+        # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
+        #                      b_obs_n]
+        return self.obs_spaces
 
     def step(self, r_actions, b_actions):
         # 输入动作（范围为[-1,1]
-        self.t += dt_report
+        self.t += dt_maneu_dec
         self.t = round(self.t, 2)  # 保留两位小数
 
         actions = r_actions + b_actions
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
-        # 运动按照dt_move更新，结果合并到dt_report中
+        # 运动按照dt_move更新，结果合并到dt_maneu_dec中
 
         for j1 in range(int(report_move_time_rate)):
             # 飞机移动
@@ -247,7 +276,7 @@ class Battle(object):
                 delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
                 # print('target_height',target_height)
-                # for i in range(int(self.dt // dt_move)):
+                # for i in range(int(self.dt_maneu_dec // dt_move)):
                 UAV.move(target_height, delta_heading, target_speed)
             # 导弹移动
             self.missiles = self.Rmissiles + self.Bmissiles
@@ -288,7 +317,7 @@ class Battle(object):
                     missile.dead = True
                 if missile.t > missile.t_max:  # 超时自爆
                     missile.dead = True
-                if missile.t >= 0 + dt and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
+                if missile.t >= 0 + self.dt_move and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
                                                        dt=self.dt_move)
                     if hit:
@@ -353,126 +382,184 @@ class Battle(object):
 
     def get_state(self, side):
         '''
+        在这里统一汇总所有用得到的状态量，计算状态量可见性并分配各各个子策略的观测
+        更正，UAVmodel具有一部分判断目标可见性的功能，需要管理
+
         输入给1v1智能体的状态空间包含以下结构：
-        0 目标相对高度差/1e3
-        1 目标相对方位 (rad)
-        2 目标相对俯仰角 (rad)
-        3 目标相对距离
-        4 夹角 (rad)
-        5 本机速度 /340
-        6 本机高度 /1e3
-        7 sinθ
-        8 cosθ
-        9 sinφ
-        10 cosφ
-        11 雷达跟踪标志 
-        12 目标相对方位角速度 (rad/s) / 0.35
-        13 目标相对俯仰角速度 (rad/s) / 0.35
-        14 导弹中制导状态
-        15 导弹预计碰撞时间 / 30s
-        16 目标雷达跟踪标志
-        17 告警标志
-        18 来袭导弹相对方位角(rad)
-        19 来袭导弹相对俯仰角(rad)
-        20 来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km)
+        0  目标可见性标志 bool
+        1  目标相对高度/5e3， 如果看不到，在get_obs置为0
+        2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
+        3  目标相对俯仰角 (rad), 如果看不到，在get_obs置为0
+        4  目标相对距离 / 10e3, 如果看不到，在get_obs置为最大
+        5  夹角 (rad)
+        6  本机速度 /340
+        7  本机高度 /5e3
+        8  sinθ
+        9  cosθ
+        10 sinφ
+        11 cosφ
+        12 目标可跟踪标志 bool
+        13 导弹中制导状态 bool
+        14 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
+        15 目标雷达跟踪标志 bool
+        16 告警标志 bool
+        17 最近来袭导弹相对方位角(rad), 如果没有导弹，在get_obs置为pi
+        18 最近来袭导弹相对俯仰角(rad), 如果没有导弹，在get_obs置为0
+        19 最近来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km), 如果没有导弹，在get_obs置为最大
         
-
-
-
-
-
-        特征缩放方式：
-        距离/10e3
-        高度/1e3
-        速率/300
-        弧度不变
-        距离变化率/100
-
-        每个智能体动作输入为nx, ny, gamma
-        观测结构:
-        自身状态信息：
-            012 自身位置（东北天）
-            345 v, θ, ψ
-        敌方目标共7个位，分别为：
-            0、可观测标志位
-            1、相对本机速度矢量的俯仰角
-            2、相对本机速度矢量的航向角
-            3、同本机的距离
-            4、视径向速度
-            5、视周向角速率
-            6、空置
+        （废弃不用）    目标相对方位角速度 (rad/s) / 0.35
+        （废弃不用）    目标相对俯仰角速度 (rad/s) / 0.35
         '''
+        side = self.UAV_ids
+        
         if side == 'r':
             own = self.RUAV
             adv = self.BUAV
+            own_missiles = self.Rmissiles
+            enm_missiles = self.Bmissiles
         else:  # if side=='b':
             own = self.BUAV
             adv = self.RUAV
-        own_situations = np.zeros((6,), dtype=np.float32)
-        adv_situations = np.zeros((7,), dtype=np.float32)
-        own_situations[0:3] = own.pos_ / np.array([10e3, 1e3, 10e3])
-        v_ = own.vel_
-        vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
-        vv_ = own.vel_[1]  # 掩模 取垂直速度
-        # print(vv_)
-        theta = atan2(vv_, np.linalg.norm(vh_))
-        psi = atan2(vh_[2], vh_[0])
-        own_situations[3] = np.linalg.norm(v_) / 300
-        own_situations[4] = theta
-        own_situations[5] = psi
-        # 目标观测信息
-        # 补充:能否观测标记
+            own_missiles = self.Bmissiles
+            enm_missiles = self.Rmissiles
+        # 目标可见性标志 bool
+        target_observable = 1
+        pass # 目标可见性判断逻辑
+        # 目标相对高度
+        delta_alt_obs = (adv.alt-own.alt)/5e3
+        # 目标相对方位角
         L_ = adv.pos_ - own.pos_
         q_beta = atan2(L_[2], L_[0])
         L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
         L_v = L_[1]
         q_epsilon = atan2(L_v, L_h)
-        # 6↓
-        adv_situations[0] = 1
-        # 7↓
-        adv_situations[1] = q_epsilon  # sub_of_radian(q_epsilon, theta)
-        # 8↓
-        adv_situations[2] = sub_of_radian(q_beta, psi)
-        # 9↓
-        adv_situations[3] = np.linalg.norm(L_) / 10e3
-        # 相对速度
-        vT_ = adv.vel_
-        vr_ = vT_ - v_
-        vr_radial = np.dot(vr_, v_) / np.linalg.norm(v_)  # 径向速度
-        temp = np.cross(v_, vr_) / np.linalg.norm(v_)
-        vr_tangent = np.linalg.norm(temp)  # 周向速度
-        omega = vr_tangent / np.linalg.norm(L_)
-        # 10↓
-        adv_situations[4] = vr_radial / 300
-        # 11↓
-        adv_situations[5] = omega
-        # 12↓
-        adv_situations[6] = 0  # 空置，我也不知道能写啥
+        delta_psi = sub_of_radian(q_beta, own.psi)
+        # 目标相对俯仰角
+        delta_theta = sub_of_radian(q_epsilon, own.theta)
+        # 目标相对距离
+        dist = norm(L_)
+        dist_obs = dist/10e3
+        # 夹角
+        v_ = own.vel_
+        vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
+        vv_ = own.vel_[1]  # 掩模 取垂直速度
+        v = norm(v_)
+        alpha = np.arccos(np.dot(L_,v_)/(v*dist))
+        # 速度观测量
+        v_obs = v/340
+        # 本机高度
+        h_abs_obs = own.alt / 5000
+        # 本机俯仰角
+        sin_theta = sin(own.theta)
+        cos_theta = cos(own.theta)
+        # 本机滚转角
+        sin_phi = sin(own.phi)
+        cos_phi = cos(own.phi)
+        # 雷达可跟踪标志
+        target_tracked = 1
+        if not target_observable:
+            target_tracked = 0
+        pass # todo
+        # 目标相对方位角速度 (rad/s) / 0.35 与 目标相对俯仰角速度 (rad/s) / 0.35
+        # vT_ = adv.vel_
+        # vr_ = vT_ - v_
+        # vr_radial = np.dot(vr_, L_) / dist  # 径向速度
+        # vr_tangent_ = np.cross(L_, vr_) / dist # 目标周向速度矢量
+        # omega_ = vr_tangent_/dist # 目标相对角速度矢量
+        # down_ = np.array([0,-1,0])
+        # L_left_ = np.cross(L_, down_)/dist
+        # L_left_ = L_left_/norm(L_left_)
+        # omega_vert_ = np.dot(omega_, down_)*1
+        # omega_hor_ = omega_-omega_vert_
+        # delta_psi_dot = np.dot(omega_vert_, down_) # 目标相对方位角速度
+        # delta_theta_dot = -np.dot(omega_hor_, L_left_) # 目标相对俯仰角速度
 
-        one_side_obs_one_drone = np.concatenate([
-            own_situations.flatten(),
-            adv_situations.flatten(),
+        # 导弹中制导状态 bool
+        missile_in_mid_term = 0
+        pass # todo 需要由导弹的类实例报告
+
+        # 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
+        missile_time_to_hit_obs = 4
+        pass # todo 需要由导弹的类实例报告
+
+        # 目标雷达跟踪标志 bool
+        locked_by_target = 0
+        pass # 和雷达跟踪目标的逻辑一起做
+
+        # 告警标志 bool
+        warning = 0
+        pass # 取自目标发射导弹的雷达状态
+
+        # 最近来袭导弹判断
+        for missile in enm_missiles:
+            pass
+
+        # 最近来袭导弹相对方位角(rad), 如果没有导弹，在get_obs置为pi
+        threat_delta_psi = pi
+        pass
+
+        # 最近来袭导弹相对俯仰角(rad), 如果没有导弹，在get_obs置为0
+        threat_delta_theta = 0
+        pass
+
+        # 最近来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km), 如果没有导弹，在get_obs置为最大
+        threat_distance = 2
+        pass
+        
+        one_side_obs = np.array([
+            target_observable, 
+            delta_alt_obs, 
+            delta_psi, 
+            delta_theta,
+            dist_obs,
+            alpha,
+            v_obs,
+            h_abs_obs,
+            sin_theta,
+            cos_theta,
+            sin_phi,
+            cos_phi,
+            target_tracked,
+            missile_in_mid_term,
+            missile_time_to_hit_obs,
+            locked_by_target,
+            warning,
+            threat_delta_psi,
+            threat_delta_theta,
+            threat_distance,
         ])
-        one_side_obs = one_side_obs_one_drone
+
         return one_side_obs
 
-    def get_obs(self):
-        r_obs_n = self.get_state('r')
-        # v_ = self.RUAV.vel_
-        # L_ = self.BUAV.pos_ - self.RUAV.pos_
-        # off_axis = acos(np.dot(L_, v_) / (np.linalg.norm(v_) * np.linalg.norm(L_))) * 180 / pi
-        # if off_axis > 100:  # 部分观测 test
-        #     r_obs_n[6:] = 0
-        b_obs_n = self.get_state('b')
-        # v_ = self.BUAV.vel_
-        # L_ = self.RUAV.pos_ - self.BUAV.pos_
-        # off_axis = acos(np.dot(L_, v_) / (np.linalg.norm(v_) * np.linalg.norm(L_))) * 180 / pi
-        # if off_axis > 100:  # 部分观测 test
-        #     b_obs_n[6:] = 0
+    def get_obs(self, side):
+        return self.get_state(side) # np.stack(self.get_state(side)) stack适用于多架无人机观测拼接为np数组
 
-        return np.stack(r_obs_n), np.stack(b_obs_n)
+    # 进攻策略观测量
+    def attack_obs(self, side):
+        # 0  目标可见性标志 bool
+        # 1  目标相对高度/5e3， 如果看不到，在get_obs置为0
+        # 2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
+        # 3  目标相对俯仰角 (rad), 如果看不到，在get_obs置为0
+        # 4  目标相对距离 / 10e3, 如果看不到，在get_obs置为最大
+        # 5  夹角 (rad)
+        # 6  本机速度 /340
+        # 7  本机高度 /5e3
+        # 8  sinθ
+        # 9  cosθ
+        # 10 sinφ
+        # 11 cosφ
+        # 12 目标可跟踪标志 bool
+        mask = np.ones(20)
+        mask[12:] = 0
+        return self.get_state(side)*mask
+        
+    # crank策略观测量
 
-    # 碰边或撞地
+    # 规避策略观测量
+
+    
+
+
 
     def get_reward(self, missiled_combat='Flase'):
         if missiled_combat == True:
@@ -513,7 +600,9 @@ class Battle(object):
             #     rewards[i] -= 10
 
             # test 目标追赶
-            r_obs_n, b_obs_n = self.get_obs()
+            r_obs_n = self.get_obs('r')
+            b_obs_n = self.get_obs('b')
+            # r_obs_n, b_obs_n = self.get_obs()
             # rewards[0] = (1 - np.linalg.norm(r_obs_n[7] / pi * 2)) * 100
             rewards[0] = (1 - np.linalg.norm((r_obs_n[7] - RUAV.theta) / pi * 2 * 2)) * 100  # test
             rewards[1] = (1 - np.linalg.norm((b_obs_n[7] - BUAV.theta) / pi * 2 * 2)) * 100  # test
@@ -532,72 +621,6 @@ class Battle(object):
             if uav.id == target_id:
                 return uav
         return None
-
-    # def update_missiles(self, dt):
-    #     # self.UAV_ids = [UAV.id for UAV in self.UAVs]
-    #     # self.UAV_hit = [False for _ in range(len(self.UAVs))]
-    #     """更新所有已发射导弹的状态"""
-    #     for missile in self.missiles[:]:  # 使用切片创建副本以允许删除
-    #         target = self.get_target_by_id(missile.target_id)
-    #         if target is None:  # 目标不存在, 不更换目标而是击毁导弹
-    #             missile.dead = True
-    #             continue
-    #         elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹, 在飞机1V1的时候可以节省一点计算量，不用费事处理多目标的问题
-    #             missile.dead = True
-    #             continue
-    #         else:
-    #             missile.target = target
-    #         # if not missile.dead:
-    #         # print('目标位置', target.pos_)
-    #         # 计算前导弹和目标位速
-    #         last_pmt_ = missile.pos_
-    #         last_vmt_ = missile.vel_
-    #         last_ptt_ = target.pos_
-    #         last_vtt_ = target.vel_
-    #         # 对每一枚导弹小步走, dt减小之后已经过时了
-    #         if not missile.dead:
-    #             for j1 in range(int(report_move_time_rate)):
-    #                 # 插值计算目标位置
-    #                 ptt1_ = last_ptt_ + last_vtt_ * dt / report_move_time_rate * j1
-    #                 # 获取目标信息
-    #                 target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, ptt1_)
-    #                 # 更新导弹状态
-    #                 has_datalink = False
-    #                 for uav in self.UAVs:
-    #                     # 找到载机，判断载机能否为导弹提供中制导
-    #                     if uav.id == missile.launcher_id:
-    #                         if uav.can_offer_guidance(missile, self.UAVs):
-    #                             has_datalink = True
-    #
-    #                 last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-    #                     missile.step(target_info, dt=dt / report_move_time_rate, datalink=has_datalink)
-    #
-    #                 # print('导弹', missile.id, '有数据链制导?', has_datalink)
-    #
-    #                 # 毁伤判定
-    #                 # 判断命中情况并终止运行
-    #                 vmt1 = norm(last_vmt_)
-    #                 if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
-    #                     missile.dead = True
-    #                 if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
-    #                     missile.dead = True
-    #                 if missile.t > missile.t_max:  # 超时自爆
-    #                     missile.dead = True
-    #                 if missile.t >= 0 + dt and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
-    #                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, ptt1_, last_vtt_,
-    #                                                        dt=dt / report_move_time_rate)
-    #                     if hit:
-    #                         print(target.label, 'is hit')
-    #                         missile.dead = True
-    #                         missile.hit = True
-    #                         missile.pos_ = point_m
-    #                         missile.vel_ = last_vmt_
-    #                         target.pos_ = point_t
-    #                         target.vel_ = last_vtt_
-    #                         target.dead = True
-    #                         target.got_hit = True
-    #                         self.UAV_hit[self.UAV_ids.index(target.id)] = True
-    #     return self.UAV_hit
 
     def get_terminate(self):
         if all(self.UAV_hit):
@@ -621,3 +644,38 @@ class Battle(object):
         # if all(r_dead) or all(b_dead):
         #     return True
         return False
+    
+    def render(self,):
+        if self.tacview_show:
+            data_to_send = ''
+            # 传输飞机信息
+            for UAV in self.UAVs:
+                loc_LLH = UAV.lon, UAV.lat, UAV.alt
+                if not UAV.dead:
+                    # data_to_send += "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color={UAV.label}\n" % (
+                    #     float(self.t), UAV.id, loc_LLH[0], loc_LLH[1], loc_LLH[2], 
+                    #     UAV.phi * 180 / pi, UAV.theta * 180 / pi, UAV.psi * 180 / pi)
+                    data_to_send += (
+                        f"#{self.t:.2f}\n"
+                        f"{UAV.id},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
+                        f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
+                        f"Name=F16,Color={UAV.label}\n"
+                    )
+                else:
+                    data_to_send += f"#{self.t:.2f}\n-{UAV.id}\n"
+
+            # 传输导弹信息
+            for missile in self.missiles:
+                if hasattr(missile, 'dead') and missile.dead:
+                    data_to_send += f"#{self.t:.2f}\n-{missile.id}\n"
+                else:
+                    # 记录导弹的位置
+                    loc_m = NUE2LLH(missile.pos_[0], missile.pos_[1], missile.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
+                    if missile.side == 'red':
+                        color = 'Orange'
+                    else:
+                        color = 'Green'
+                    data_to_send += f"#{self.t:.2f}\n{missile.id},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}," \
+                                    f"Name=AIM-120C,Color={color}\n"
+
+            self.tacview.send_data_to_client(data_to_send)
