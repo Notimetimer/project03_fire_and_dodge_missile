@@ -220,7 +220,7 @@ class UAVModel(object):
         # 取当前位置
         lon = self.sim["position/long-gc-deg"]  # 经度
         lat = self.sim["position/lat-gc-deg"]  # 纬度
-        alt = self.sim["position/h-sl-ft"] / 3.2808  # 高度（英尺）
+        alt = self.sim["position/h-sl-ft"] / 3.2808  # 高度（英尺转米）
 
         self.lon, self.lat, self.alt = lon, lat, alt
 
@@ -245,7 +245,7 @@ class UAVModel(object):
         # self.vel_ = v_ * v / np.linalg.norm(v_)
 
         # self.climb_rate = vu
-        self.vel_ = np.array([vn, vu, ve])
+        self.vel_ = np.array([vn, vu, ve]) / 3.2808 # ft.s转m/s
 
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])
@@ -311,7 +311,14 @@ class UAVModel(object):
             else:
                 shoot_prob = self.shoot_prob
 
-            if np.random.uniform(0, 1) <= shoot_prob:
+            # 随机采样
+            # if np.random.uniform(0, 1) <= shoot_prob:
+            #     can_shoot = True
+            # else:
+            #     can_shoot = False
+
+            # 只在不可逃逸区发射
+            if shoot_prob>=1:
                 can_shoot = True
             else:
                 can_shoot = False

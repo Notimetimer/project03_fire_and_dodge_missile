@@ -12,7 +12,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.battle3dof1v1_missile0910 import *
+from Envs.battle3dof1v1_missile0901 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
@@ -21,11 +21,10 @@ import socket
 import threading
 from send2tacview import *
 from Algorithms.Rules import decision_rule
-from Math_calculates.CartesianOnEarth import *
-
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import pandas as pd
+from Envs.MissileModel0910 import missile_class
 
 visualize_needed = 1  # 是否可视化
 
@@ -80,32 +79,24 @@ def launch_missile_if_possible(env, side='r'):
     """
     if side == 'r':
         uav = env.RUAV
-        ally_missiles = env.Rmissiles
         target = env.BUAV
     else:  # side == 'b'
         uav = env.BUAV
-        ally_missiles = env.Bmissiles
         target = env.RUAV
 
-    waite = False
-    for missile in ally_missiles:
-        if not missile.dead:
-            waite = True
-            break
-        
-    if not waite:
-        # 判断是否可以发射导弹
-        if uav.can_launch_missile(target, env.t):
-            # 发射导弹
-            new_missile = uav.launch_missile(target, env.t, missile_class)
-            uav.ammo -= 1
-            new_missile.side = 'red' if side == 'r' else 'blue'
-            if side == 'r':
-                env.Rmissiles.append(new_missile)
-            else:
-                env.Bmissiles.append(new_missile)
-            env.missiles = env.Rmissiles + env.Bmissiles
-            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+    # 判断是否可以发射导弹
+    if uav.can_launch_missile(target, env.t):
+        # 发射导弹
+        new_missile = uav.launch_missile(target, env.t, missile_class)
+        uav.ammo -= 1
+        new_missile.side = 'red' if side == 'r' else 'blue'
+        if side == 'r':
+            env.Rmissiles.append(new_missile)
+        else:
+            env.Bmissiles.append(new_missile)
+        env.missiles = env.Rmissiles + env.Bmissiles
+        print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+
 
 start_time = time.time()
 launch_time_count = 0
@@ -113,12 +104,6 @@ launch_time_count = 0
 t_list = []
 R_controll_type = []
 B_controll_type = []
-R_controll_check_switch1 = []
-B_controll_check_switch1 = []
-R_controll_check_switch2 = []
-B_controll_check_switch2 = []
-r_ammo = []
-b_ammo = []
 
 for i in range(1):
     episode_return = 0
@@ -126,14 +111,14 @@ for i in range(1):
     # env.reset(red_birth_state=None, blue_birth_state=None, red_init_ammo=0, blue_init_ammo=0)
     # env.reset(red_birth_state=None, blue_birth_state=None,
     #           red_init_ammo=6, blue_init_ammo=6)
-    DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
-                               'psi': 0
+    DEFAULT_RED_BIRTH_STATE = {'position': np.array([0.0, 8000.0, -38000.0]),
+                               'psi': pi/2
                                }
-    DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([38000.0, 8000.0, 0.0]),
-                                'psi': pi
+    DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, 8000.0, 38000.0]),
+                                'psi': -pi/2
                                 }
     env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-              red_init_ammo=0, blue_init_ammo=6)
+              red_init_ammo=6, blue_init_ammo=6)
 
     a1 = env.BUAV.pos_  # 58000,7750,20000
     a2 = env.RUAV.pos_  # 2000,7750,20000
@@ -146,12 +131,12 @@ for i in range(1):
     Btrajectory = []
 
     # 环境运行一轮的情况
-    for count in range(round(args.max_episode_len / dt_report)):
+    for count in range(round(args.max_episode_len / dt_refer)):
         # print(f"time: {env.t}")  # 打印当前的 count 值
         # 回合结束判断
         # print(env.running)
-        current_t = count * dt_report
-        if env.running == False or count == round(args.max_episode_len / dt_report) - 1:
+        current_t = count * dt_refer
+        if env.running == False or count == round(args.max_episode_len / dt_refer) - 1:
             # print('回合结束，时间为：', env.t, 's')
             break
         # 获取观测信息
@@ -172,22 +157,15 @@ for i in range(1):
                                    ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles
                                    )
 
-        # test
-        b_action_n = [[0.3, 0.0, 0.0]]
-        L_ = env.RUAV.pos_ - env.BUAV.pos_
-        beta = atan2(L_[2], L_[0])
-        delta_psi = sub_of_radian(beta, env.BUAV.psi)
-        b_action_n[0][1] = delta_psi
-
-        # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
-        #                            enm_pos_=env.RUAV.pos_, distance=distance,
-        #                            ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles
-        #                            )
-        
+        b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
+                                   enm_pos_=env.RUAV.pos_, distance=distance,
+                                   ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles
+                                   )
         r_action_list.append(r_action_n[0])
         b_action_list.append(b_action_n[0])
 
-        r_reward_n, b_reward_n, r_dones, b_dones, terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+        r_reward_n, b_reward_n, r_dones, b_dones, terminate = env.step(r_action_n, b_action_n,
+                                                                       assume=False)  # 2、环境更新并反馈
 
         '''显示运行轨迹'''
         # print("红方位置：", env.RUAV.pos_)
@@ -211,8 +189,8 @@ for i in range(1):
         send_t = env.t
         name_R = env.RUAV.id
         name_B = env.BUAV.id
-        loc_r = env.RUAV.lon, env.RUAV.lat, env.RUAV.alt # ENU2LLH(mark, env.RUAV.pos_)
-        loc_b = env.BUAV.lon, env.BUAV.lat, env.BUAV.alt # ENU2LLH(mark, env.BUAV.pos_)
+        loc_r = ENU2LLH(mark, env.RUAV.pos_)
+        loc_b = ENU2LLH(mark, env.BUAV.pos_)
         data_to_send = ''
         if not env.RUAV.dead:
             # data_to_send += f"#{send_t:.2f}\n{name_R},T={loc_r[0]:.6f}|{loc_r[1]:.6f}|{loc_r[2]:.6f},Name=F16,Color=Red\n"
@@ -235,7 +213,7 @@ for i in range(1):
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
             else:
                 # 记录导弹的位置
-                loc_m = NUE2LLH(missile.pos_[0], missile.pos_[1], missile.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0) # ENU2LLH(mark, missile.pos_)
+                loc_m = ENU2LLH(mark, missile.pos_)
                 if missile.side == 'red':
                     color = 'Orange'
                 else:
@@ -254,94 +232,65 @@ for i in range(1):
         angle = np.array([env.RUAV.gamma, env.RUAV.theta, env.RUAV.psi]) * 180 / pi
         Rtrajectory.append(np.hstack((position, angle)))
         R_controll_type.append(env.RUAV.PIDController.type)
-        R_controll_check_switch1.append(env.RUAV.PIDController.check_switch1)
-        R_controll_check_switch2.append(env.RUAV.PIDController.check_switch2)
-        r_ammo.append(env.RUAV.ammo)
 
         # 蓝
         position = env.BUAV.pos_
         angle = np.array([env.BUAV.gamma, env.BUAV.theta, env.BUAV.psi]) * 180 / pi
         Btrajectory.append(np.hstack((position, angle)))
         B_controll_type.append(env.BUAV.PIDController.type)
-        B_controll_check_switch1.append(env.BUAV.PIDController.check_switch1)
-        B_controll_check_switch2.append(env.BUAV.PIDController.check_switch2)
-        b_ammo.append(env.BUAV.ammo)
 
         if terminate == True:
             break
 
 # 补充显示
-loc_o = NUE2LLH(0, 0, 0, lon_o=o00[0], lat_o=o00[1], h_o=0) # ENU2LLH(mark, np.zeros(3))
+loc_o = ENU2LLH(mark, np.zeros(3))
 data_to_send = ''
-data_to_send = f"#{send_t + dt_report:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
+data_to_send = f"#{send_t + dt_refer:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
 # print("data_to_send", data_to_send)
 tacview.send_data_to_client(data_to_send)
 
-data_to_send = f"#{send_t + dt_report * 10:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
+data_to_send = f"#{send_t + dt_refer * 10:.2f}\n{900},T={loc_o[0]:.6f}|{loc_o[1]:.6f}|{loc_o[2]:.6f},Name=Game Over, Color=Black\n"
 # print("data_to_send", data_to_send)
 tacview.send_data_to_client(data_to_send)
 
 end_time = time.time()  # 记录结束时间
 print(f"程序运行时间: {end_time - start_time} 秒")
 
-r_action_list = np.array(r_action_list)
-b_action_list = np.array(b_action_list)
+r_action_list=np.array(r_action_list)
+b_action_list=np.array(b_action_list)
 
-R_controll_check_switch1 = np.array(R_controll_check_switch1)
-R_controll_check_switch2 = np.array(R_controll_check_switch2)
-B_controll_check_switch1 = np.array(B_controll_check_switch1)
-B_controll_check_switch2 = np.array(B_controll_check_switch2)
+
 
 import matplotlib.pyplot as plt
 
-# Create a figure and 10 subplots in 2 columns
-fig, axs = plt.subplots(5, 2, figsize=(14, 24), sharex=True)
+# Create a figure and 4 subplots
+fig, axs = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
 
-axs[0, 0].plot(t_list, R_controll_type, label='R_controll_type', color='red')
-axs[0, 0].legend()
-axs[0, 0].grid()
+# Plot R_controll_type
+axs[0].plot(t_list, R_controll_type, label='R_controll_type', color='red')
+axs[0].set_ylabel('R_controll_type')
+axs[0].legend()
+axs[0].grid()
 
-axs[0, 1].plot(t_list, B_controll_type, label='B_controll_type', color='blue')
-axs[0, 1].legend()
-axs[0, 1].grid()
+# Plot B_controll_type
+axs[1].plot(t_list, B_controll_type, label='B_controll_type', color='blue')
+axs[1].set_ylabel('B_controll_type')
+axs[1].legend()
+axs[1].grid()
 
-axs[1, 0].plot(t_list, r_action_list[:, 1] * 180 / pi, label='r_action_list[1]', color='green')
-axs[1, 0].legend()
-axs[1, 0].grid()
+# Plot r_action_list[1] * 180 / pi
+axs[2].plot(t_list, r_action_list[:, 1] * 180 / pi, label='r_action_list[1]', color='green')
+axs[2].set_ylabel('r_action_list[1] (deg)')
+axs[2].legend()
+axs[2].grid()
 
-axs[1, 1].plot(t_list, b_action_list[:, 1] * 180 / pi, label='b_action_list[1]', color='orange')
-axs[1, 1].set_xlabel('Time (s)')
-axs[1, 1].legend()
-axs[1, 1].grid()
+# Plot b_action_list[1] * 180 / pi
+axs[3].plot(t_list, b_action_list[:, 1] * 180 / pi, label='b_action_list[1]', color='orange')
+axs[3].set_ylabel('b_action_list[1] (deg)')
+axs[3].set_xlabel('Time (s)')
+axs[3].legend()
+axs[3].grid()
 
-axs[2, 0].plot(t_list, R_controll_check_switch1, label='R_controll_check_switch1', color='purple')
-axs[2, 0].legend()
-axs[2, 0].grid()
-
-axs[2, 1].plot(t_list, R_controll_check_switch2, label='R_controll_check_switch2', color='brown')
-axs[2, 1].legend()
-axs[2, 1].grid()
-
-axs[3, 0].plot(t_list, B_controll_check_switch1, label='B_controll_check_switch1', color='pink')
-axs[3, 0].legend()
-axs[3, 0].grid()
-
-axs[3, 1].plot(t_list, B_controll_check_switch2, label='B_controll_check_switch2', color='cyan')
-axs[3, 1].set_xlabel('Time (s)')
-axs[3, 1].legend()
-axs[3, 1].grid()
-
-# 新增弹药数曲线
-axs[4, 0].plot(t_list, r_ammo, label='r_ammo', color='darkred')
-axs[4, 0].legend()
-axs[4, 0].grid()
-axs[4, 0].set_ylabel('Red Ammo')
-
-axs[4, 1].plot(t_list, b_ammo, label='b_ammo', color='navy')
-axs[4, 1].legend()
-axs[4, 1].grid()
-axs[4, 1].set_ylabel('Blue Ammo')
-axs[4, 1].set_xlabel('Time (s)')
-
+# Adjust layout and show the plot
 plt.tight_layout()
 plt.show()
