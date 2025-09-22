@@ -51,7 +51,7 @@ from Visualize.tensorboard_visualize import *
 from Algorithms.SquashedPPOcontinues_dual_a_out import *
 from tqdm import tqdm
 
-use_tacview = 1  # 是否可视化
+use_tacview = 0  # 是否可视化
 
 # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
 if matplotlib.get_backend() != 'TkAgg':
@@ -90,8 +90,15 @@ b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
-r_action = []
-b_action = []
+state_dim = len(b_obs_spaces)
+action_dim = b_action_spaces[0].shape[0]
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                      lmbda, epochs, eps, gamma, device)
+
+
 
 
 def launch_missile_if_possible(env, side='r'):
