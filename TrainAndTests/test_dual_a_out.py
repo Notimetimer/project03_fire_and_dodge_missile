@@ -35,36 +35,6 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 from Algorithms.SquashedPPOcontinues_dual_a_out import *
 
-# # 只能处理不分块的多层全连接神经网络，没必要单独拿出来
-# def parse_model_sizes_from_meta(meta_path):
-#     """
-#     从 meta json 中根据 'weight' 项推断网络层大小序列：
-#     返回 (state_dim, hidden_dim_list, action_dim)
-#     """
-#     with open(meta_path, "r") as f:
-#         meta = json.load(f)
-#     weight_items = [(k, tuple(v)) for k, v in meta.items() if "weight" in k and len(v) == 2]
-#     weight_items.sort(key=lambda x: x[0])
-#     if not weight_items:
-#         raise RuntimeError("No weight items found in meta")
-#     sizes = []
-#     sizes.append(weight_items[0][1][1])  # 第一个 weight 的 in_features -> input
-#     for _, shape in weight_items:
-#         sizes.append(shape[0])  # out_features
-#     state_dim_meta = sizes[0]
-#     if len(sizes) >= 3:
-#         hidden_meta = sizes[1:-1]
-#     else:
-#         hidden_meta = [sizes[1]] if len(sizes) == 2 else []
-#     action_dim_meta = sizes[-1]
-#     return state_dim_meta, hidden_meta, action_dim_meta
-
-# def build_agent_from_actor_meta(meta_path, device):
-#     state_dim_m, hidden_m, action_dim_m = parse_model_sizes_from_meta(meta_path)
-#     new_agent = PPOContinuous(state_dim_m, hidden_m, action_dim_m,
-#                               actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
-#     return new_agent
-
 class height_track_env():
     def __init__(self, dt_move=0.02):
         super(height_track_env, self).__init__()
@@ -254,7 +224,7 @@ lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
 dt_decide = 2 # 2
-pre_train_rate = 0.1 # 0.25 # 0.25
+pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = len(obs_space) # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 1 # test
@@ -286,7 +256,7 @@ save_meta_once(actor_meta_path, agent.actor.state_dict())
 save_meta_once(critic_meta_path, agent.critic.state_dict())
 
 from Math_calculates.ScaleLearningRate import scale_learning_rate
-# 根据动作维度缩放学习率
+# 根据参数数量缩放学习率
 actor_lr = scale_learning_rate(actor_lr, agent.actor)
 critic_lr = scale_learning_rate(critic_lr, agent.critic)
 

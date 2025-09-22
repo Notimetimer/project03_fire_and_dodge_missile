@@ -1,9 +1,8 @@
 '''
-写超视距对手策略和靶机对战，靶机只追踪，对手策略分为4个阶段：
-1、速度保持1.5ma，40km外只追踪，40km处立即发射导弹并以45°crank转2（雷达范围±60°）
-2、保持45°偏角进行中制导，到达20km处若收到导弹告警，规避转3否则转4
-3、若不再受导弹威胁，调头攻击转4，否则进行水平置尾机动，速度保持1.6Ma
-4、速度保持1.2Ma，其余同1
+训练进攻策略:
+
+红方闲庭信步
+蓝方追赶红方
 '''
 
 '''
@@ -22,23 +21,35 @@ import argparse
 import time
 import sys
 import os
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
 import matplotlib
+import json
+import glob
+import copy
 import socket
 import threading
 from send2tacview import *
 from Algorithms.Rules import decision_rule
 from Math_calculates.CartesianOnEarth import *
 from Math_calculates.sub_of_angles import *
-
+from torch.distributions import Normal
+import numpy as np
+import torch
+from torch import nn
+import torch.nn.functional as F
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import pandas as pd
+from Envs.UAVmodel6d import UAVModel
+from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
+from Visualize.tacview_visualize import *
+from Visualize.tensorboard_visualize import *
+from Algorithms.SquashedPPOcontinues_dual_a_out import *
+from tqdm import tqdm
 
 use_tacview = 1  # 是否可视化
 
@@ -59,15 +70,17 @@ parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
 # parser.add_argument("--num-BUAVs", type=int, default=1, help="number of blue UAVs")
 args = parser.parse_args()
 
-# if visualize_needed:
-#     tacview = Tacview()
-
-# def main():
-# 将红蓝双方运行的速度和位置保存
-red_pos_list = np.empty((0, 3))
-blue_pos_list = np.empty((0, 3))
-red_vel_list = np.empty((0, 3))
-blue_vel_list = np.empty((0, 3))
+# 超参数
+actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
+critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
+num_episodes = 1000  # 2000 400
+hidden_dim = [128, 128, 128]  # 128
+gamma = 0.9
+lmbda = 0.9
+epochs = 10  # 10
+eps = 0.2
+dt_decide = 2 # 2
+pre_train_rate = 0 # 0.25 # 0.25
 
 
 env = Battle(args, tacview_show=use_tacview)
@@ -75,7 +88,7 @@ r_obs_spaces = env.get_obs_spaces('r')
 b_obs_spaces = env.get_obs_spaces('b')
 # r_obs_spaces, b_obs_spaces = env.get_obs_spaces()
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
-'''滚动时域优化开始'''
+action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
 r_action = []
 b_action = []

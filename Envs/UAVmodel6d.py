@@ -87,6 +87,7 @@ class UAVModel(object):
         self.o00 = None
         self.start_lon = None
         self.start_lat = None
+        self.obs_memory = None
 
     def reset(self, lon0=118, lat0=30, h0=8000, v0=200, psi0=0, phi0=0, theta0=0, o00=np.array([118, 30])):
         sim = jsbsim.FGFDMExec(None, None)
@@ -136,6 +137,8 @@ class UAVModel(object):
         # self.rnn_states = np.zeros((1, 1, 128))
         # self.hist_act = np.array([0, 0, 0, 1])
         self.PIDController = F16PIDController()
+
+        self.obs_memory = None
 
     # todo 阻力系数：应该是和马赫数和迎角有关的，但是先借用下导弹的阻力系数函数了
     def Cd(self, mach):
@@ -205,7 +208,7 @@ class UAVModel(object):
         if with_theta_req == False:
             norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)  # # 测试飞行控制器
         else:
-            obs_jsbsim[0] = np.clip(target_height, -1, 1) * pi/2 # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
+            obs_jsbsim[0] = np.clip(target_height, -pi/2, pi/2)  # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
             norm_act = self.PIDController.att_output(obs_jsbsim, dt=self.dt)
         # print(obs_jsbsim)
 

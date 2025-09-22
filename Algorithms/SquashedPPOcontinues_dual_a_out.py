@@ -72,6 +72,7 @@ class SquashedNormal:
         self.std = std
         self.normal = Normal(mu, std)
         self.eps = eps
+        self.mean = mu
 
     def sample(self):
         # rsample 以支持 reparameterization 重参数化采样, 结果是可导的
@@ -86,7 +87,7 @@ class SquashedNormal:
         # 为数值稳定性添加小量
         log_prob_u = self.normal.log_prob(u)
         # jacobian term
-        jacobian = 0
+        jacobian = 0 # 保存u的话就不需要该修正项
         # jacobian = 2*(np.log(2.0)-u-F.softplus(-2*u))
         # jacobian = torch.log(1 - a.pow(2) + self.eps)
         # sum over action dim, keep dims consistent: return (N, 1)
@@ -119,11 +120,11 @@ class PolicyNetContinuous(torch.nn.Module):
         self.fc_mu = torch.nn.Linear(prev_size, action_dim)
         self.fc_std = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x, min_std=1e-7): # 最小方差 1e-3
+    def forward(self, x, min_std=1e-7, max_std=5): # 最小与最大方差 1e-3
         x = self.net(x)
         mu = self.fc_mu(x)
         std = F.softplus(self.fc_std(x))
-        std = torch.clamp(std, min=min_std)
+        std = torch.clamp(std, min=min_std, max=max_std)
         return mu, std
 
 
@@ -276,8 +277,8 @@ class PPOContinuous:
             # 取消提前求和 # actor_loss = -torch.min(surr1, surr2).mean() - 0.1 * dist.entropy().mean()
 
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
-
-            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - 0.1 * dist.entropy().mean()
+            entropy_factor = torch.clamp(dist.entropy().mean(), -20, 7) # 最大e^2
+            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - 0.1 * entropy_factor
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
             critic_loss = F.mse_loss(self.critic(states), td_target.detach())
