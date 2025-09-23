@@ -73,7 +73,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-num_episodes = 10 # 1000  # 2000 400
+num_episodes = 10000 # 1000  # 2000 400
 hidden_dim = [128, 128, 128]  # 128
 gamma = 0.9
 lmbda = 0.9
@@ -175,7 +175,7 @@ try:
     rl_steps = 0
     with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
         for i_episode in range(int(num_episodes*(1-pre_train_rate))):
-            print("轮次", i_episode+1)
+            # print("轮次", i_episode+1)
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
@@ -285,7 +285,7 @@ try:
             return_list.append(episode_return)
             agent.update(transition_dict)
             
-            print(t_bias)
+            # print(t_bias)
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             r_action_list = np.array(r_action_list)
@@ -311,8 +311,8 @@ try:
             # tensorboard 训练进度显示
             logger.add("train/episode_return", episode_return, i_episode + 1)
 
-            actor_grad_norm = model_grad_norm(agent.actor)
-            critic_grad_norm = model_grad_norm(agent.critic)
+            actor_grad_norm = agent.actor_grad # model_grad_norm(agent.actor)
+            critic_grad_norm = agent.critic_grad # model_grad_norm(agent.critic)
             # 梯度监控
             logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
             logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)

@@ -255,7 +255,7 @@ class PPOContinuous:
 
         actor_grad_list = []
         actor_loss_list = []
-        critc_grad_list = []
+        critic_grad_list = []
         critic_loss_list = []
         entropy_list = []
         ratio_list = []
@@ -306,7 +306,7 @@ class PPOContinuous:
 
             actor_grad_list.append(model_grad_norm(self.actor))
             actor_loss_list.append(actor_loss.detach().cpu().item())
-            critc_grad_list.append(model_grad_norm(self.critic))            
+            critic_grad_list.append(model_grad_norm(self.critic))            
             critic_loss_list.append(critic_loss.detach().cpu().item())
             entropy_list.append(dist.entropy().mean().detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
@@ -314,7 +314,7 @@ class PPOContinuous:
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
         self.critic_loss = np.mean(critic_loss_list)
-        self.crit_grad = np.mean(critc_grad_list)
+        self.critic_grad = np.mean(critic_grad_list)
         self.entropy_mean = np.mean(entropy_list)
         self.ratio_mean = np.mean(ratio_list)
 
@@ -368,7 +368,7 @@ class PPOContinuous:
         # 计算 td_target（与 update() 相同）
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
 
-        critc_grad_list = []
+        critic_grad_list = []
         critic_loss_list = []
 
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
@@ -380,11 +380,11 @@ class PPOContinuous:
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=2)
             self.critic_optimizer.step()
 
-            critc_grad_list.append(model_grad_norm(self.critic))            
+            critic_grad_list.append(model_grad_norm(self.critic))            
             critic_loss_list.append(critic_loss.detach().cpu().item())
 
         self.critic_loss = np.mean(critic_loss_list)
-        self.crit_grad = np.mean(critc_grad_list)
+        self.critic_grad = np.mean(critic_grad_list)
 
 
 
