@@ -674,12 +674,12 @@ class Battle(object):
         if self.train_side_win:
             r_result = 1
 
-        reward = np.array([2,1,1,1,5])*\
-            np.array([r_angle, r_alt, r_speed, r_dist, r_result])
+        reward = np.sum(np.array([2,1,1,1,5])*\
+            np.array([r_angle, r_alt, r_speed, r_dist, r_result]))
 
         if terminate:
             self.running = False
-            
+
         return terminate, reward
 
 

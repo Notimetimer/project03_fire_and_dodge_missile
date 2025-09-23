@@ -79,9 +79,8 @@ gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
-dt_decide = 2 # 2
 pre_train_rate = 0 # 0.25 # 0.25
-
+k_entropy = 0.01 # 熵系数
 
 env = Battle(args, tacview_show=use_tacview)
 r_obs_spaces = env.get_obs_spaces('r')
@@ -271,7 +270,7 @@ try:
                 transition_dict['dones'].append(done)
                 transition_dict['action_bounds'].append(action_bound)
                 # state = next_state
-                episode_return += b_reward * env.dt_report
+                episode_return += b_reward * env.dt_maneuver
 
 
                 '''显示运行轨迹'''
@@ -281,7 +280,7 @@ try:
             episode_end_time = time.time()  # 记录结束时间
             # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
 
-            if env.fail==1:
+            if env.train_side_lose==1:
                 out_range_count+=1
             return_list.append(episode_return)
             agent.update(transition_dict)
@@ -325,7 +324,13 @@ try:
             logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
 
     training_end_time = time.time()  # 记录结束时间
-    print(f"总训练时长: {training_end_time - training_start_time} 秒")
+    elapsed = training_end_time - training_start_time
+    from datetime import timedelta
+    td = timedelta(seconds=elapsed)
+    d = td.days
+    h, rem = divmod(td.seconds, 3600)
+    m, s = divmod(rem, 60)
+    print(f"总训练时长: {d}天 {h}小时 {m}分钟 {s}秒")
 
 
 except KeyboardInterrupt:
@@ -346,9 +351,10 @@ finally:
             sd = th.load(latest_actor_path, map_location=device)
             agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
             print(f"Loaded actor for test from: {latest_actor_path}")
+
     try:
         env = Battle(args, tacview_show=1)
-        for i_episode in range(10):
+        for i_episode in range(3):  # 10
             r_action_list=[]
             b_action_list=[]
             # 飞机出生状态指定

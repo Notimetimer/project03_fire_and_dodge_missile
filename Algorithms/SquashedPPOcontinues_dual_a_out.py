@@ -143,7 +143,7 @@ class PPOContinuous:
     '''
 
     def __init__(self, state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01):
         self.actor = PolicyNetContinuous(state_dim, hidden_dim, action_dim).to(device)
         self.critic = ValueNet(state_dim, hidden_dim).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -154,6 +154,7 @@ class PPOContinuous:
         self.epochs = epochs
         self.eps = eps
         self.device = device
+        self.k_entropy = k_entropy
 
     def _scale_action_to_exec(self, a, action_bounds):
         """把 normalized action a (in [-1,1]) 缩放到环境区间。
@@ -278,7 +279,7 @@ class PPOContinuous:
 
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
             entropy_factor = torch.clamp(dist.entropy().mean(), -20, 7) # 最大e^2
-            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - 0.1 * entropy_factor
+            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
             critic_loss = F.mse_loss(self.critic(states), td_target.detach())
