@@ -206,29 +206,16 @@ for i in range(10):
                                    o00=o00, R_cage=env.R_cage, wander=0
                                    )
         
-        r_action_list.append(r_action_n[0])
-        b_action_list.append(b_action_n[0])
+        r_action_list.append(r_action_n)
+        b_action_list.append(b_action_n)
 
         r_reward_n, b_reward_n, r_dones, b_dones, terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
 
         '''显示运行轨迹'''
-        # print("红方位置：", env.RUAV.pos_)
-        # print("蓝方位置：", env.BUAV.pos_)
-        # # 如果导弹已发射
-        # print(f"当前发射的导弹数量：{len(env.Rmissiles) + len(env.Bmissiles)}")
-        # 遍历导弹列表
-        for missile in env.Rmissiles:
-            if hasattr(missile, 'dead') and missile.dead:
-                continue
-            # 记录导弹的位置
-            missile_pos = missile.pos_  # 假设导弹对象有 pos_ 属性表示位置
-            # print("红方导弹位置：", missile_pos)
-        for missile in env.Bmissiles:
-            if hasattr(missile, 'dead') and missile.dead:
-                continue
-            # 记录导弹的位置
-            missile_pos = missile.pos_  # 假设导弹对象有 pos_ 属性表示位置
-            # print("蓝方导弹位置：", missile_pos)
+        # # print("红方位置：", env.RUAV.pos_)
+        # # print("蓝方位置：", env.BUAV.pos_)
+        # # # 如果导弹已发射
+        # # print(f"当前发射的导弹数量：{len(env.Rmissiles) + len(env.Bmissiles)}")
         
         # 可视化
         env.render(t_bias=t_bias)

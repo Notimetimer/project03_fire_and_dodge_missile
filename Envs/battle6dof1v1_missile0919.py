@@ -200,8 +200,8 @@ class Battle(object):
         self.RUAV = self.RUAVs[0]
         self.BUAV = self.BUAVs[0]
 
-        print(red_birth_state)
-        print(blue_birth_state)
+        # print(red_birth_state)
+        # print(blue_birth_state)
 
     def get_obs_spaces(self, side):
         self.reset()
@@ -221,7 +221,7 @@ class Battle(object):
         self.t += dt_maneuver
         self.t = round(self.t, 2)  # 保留两位小数
 
-        actions = r_actions + b_actions
+        actions = [r_actions] + [b_actions]
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
@@ -620,7 +620,7 @@ class Battle(object):
         pass # todo
         
     def attack_terminate_and_reward(self, side): # 进攻策略训练与奖励
-        end = False
+        terminate = False
         state = self.get_state(side)
         alt = state[7]
         target_alt = state[1]+state[7]
@@ -636,15 +636,17 @@ class Battle(object):
             uav = self.BUAV
 
         # 结束判断：超时/损毁
-        if alpha > pi/2 and self.t > 180: # 3分钟了还没hot就结束
-            end = True
-            self.train_side_lose = 1
+        if self.t > self.game_time_limit:
+            terminate = True
+        # if alpha > pi/2 and self.t > self.game_time_limit: # 超时了还没hot就结束
+        #     terminate = True
+        #     self.train_side_lose = 1
         if not self.min_alt<=alt<=self.max_alt:
-            end = True
+            terminate = True
             self.train_side_lose = 1
 
         if dist<5e3 and alpha< pi/12:
-            end = True
+            terminate = True
             self.train_side_win = 1
 
         # 角度奖励
@@ -675,7 +677,10 @@ class Battle(object):
         reward = np.array([2,1,1,1,5])*\
             np.array([r_angle, r_alt, r_speed, r_dist, r_result])
 
-        return end, reward
+        if terminate:
+            self.running = False
+            
+        return terminate, reward
 
 
     def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励
@@ -740,6 +745,10 @@ class Battle(object):
         return None
 
     def get_terminate(self):
+        # 超时强制结束回合
+        if self.t > self.game_time_limit:
+            return True
+
         if all(self.UAV_hit):
             return True
         missile_dead_list = []
@@ -761,6 +770,7 @@ class Battle(object):
         # if all(r_dead) or all(b_dead):
         #     return True
         return False
+    
     def out_range(self, UAV):
         horizontal_center = np.array([0, 0])
         position = UAV.pos_

@@ -198,7 +198,7 @@ class height_track_env():
         return r_h_norm
         
 
-    def reder(self,):
+    def render(self,):
         loc_r = [self.UAV.lon, self.UAV.lat, self.UAV.alt]
         if self.tacview_show:
             data_to_send = ''
@@ -341,7 +341,7 @@ try:
     # 强化学习训练
     rl_steps = 0
     with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
-        for i_episode in range(int(num_episodes*(1-pre_train_rate))):  # 每个1/10的训练轮次
+        for i_episode in range(int(num_episodes*(1-pre_train_rate))):
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             
@@ -443,7 +443,7 @@ try:
         next_state, reward, done = env.step(total_action)
         state = next_state
         step += 1
-        env.reder()
+        env.render()
         time.sleep(0.01)
 
 except KeyboardInterrupt:

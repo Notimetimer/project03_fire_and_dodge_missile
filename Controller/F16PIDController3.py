@@ -116,6 +116,7 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
+        self.k_roll_filter = 0.1
         self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
         self.r_pid = None
         self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
@@ -124,6 +125,7 @@ class F16PIDController:
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
 
         self.height_pid = PositionPID(max=1, min=-1, p=1, i=0.01, d=2)
+        self.delta_x_angle = 0
 
     def flight_output(self, state_input, dt=0.02):
         target_height_devided = state_input[0]
@@ -137,7 +139,7 @@ class F16PIDController:
         if error_h >= 0:
             kh = pi / 3
         if error_h < 0:
-            kh = pi / 2
+            kh = pi / 2 - 1e-2
 
         # target_theta = error_h * kh
         if abs(climb_rad * 180 / pi) > 2:  #
@@ -229,6 +231,10 @@ class F16PIDController:
         y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / norm(L_yz_b_)
         delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
 
+        # delta_x_angle 滤波
+        delta_x_angle = (1-self.k_roll_filter)*delta_x_angle + self.k_roll_filter*self.delta_x_angle
+        self.delta_x_angle = delta_x_angle
+
         # 特例：压机头能够得着的，就不翻转机身
         if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
             delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
@@ -237,14 +243,14 @@ class F16PIDController:
         # print('pull')
 
         # 通用
-        phi_error = delta_x_angle
-        aileron = phi_error / pi * 3 - p / pi * 1
-        # aileron = phi_error/pi*3 - p/pi * 2
+        roll_error = delta_x_angle
+        aileron = roll_error / pi * 3 - p / pi * 1
+        # aileron = roll_error/pi*3 - p/pi * 2
 
         # 特例：高速俯冲时减弱副翼舵量
         if theta * 180 / pi < -70 and v / 340 > 1:
             print('delta_x_angle', delta_x_angle * 180 / pi)
-            aileron = (phi_error / pi * 6 - p / pi * 8) / 4
+            aileron = (roll_error / pi * 6 - p / pi * 8) / 4
             if 0.9 < abs(delta_x_angle / (pi / 2)) < 1.1:
                 elevetor = 0
 
@@ -259,9 +265,9 @@ class F16PIDController:
                 abs(theta_req) < 60 * pi / 180:
             k_steady_yaw = 3 / steady_switch_angle
             phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3)
-            phi_error = phi_req - phi
-            # aileron = (phi_error/pi*6 -p/pi*4)/3
-            aileron = (phi_error / pi * 6 - p / pi * 3) / 2
+            roll_error = phi_req - phi
+            # aileron = (roll_error/pi*6 -p/pi*4)/3
+            aileron = (roll_error / pi * 6 - p / pi * 3) / 2
 
             self.type = 0  # steady
         else:
@@ -325,8 +331,8 @@ if __name__ == '__main__':
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 7500  # m # 测试飞行控制器
-    target_heading = 120  # 度 to rad
+    target_height = 7000  # m # 测试飞行控制器 7000
+    target_heading = 180  # 度 to rad 120
     target_speed = 300  # m/s
     t_last = 60 * 5
 
