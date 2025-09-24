@@ -155,6 +155,15 @@ class PPOContinuous:
         self.eps = eps
         self.device = device
         self.k_entropy = k_entropy
+    
+    def set_learning_rate(self, actor_lr=None, critic_lr=None):
+        """动态设置 actor 和 critic 的学习率"""
+        if actor_lr is not None:
+            for param_group in self.actor_optimizer.param_groups:
+                param_group['lr'] = actor_lr
+        if critic_lr is not None:
+            for param_group in self.critic_optimizer.param_groups:
+                param_group['lr'] = critic_lr    
 
     def _scale_action_to_exec(self, a, action_bounds):
         """把 normalized action a (in [-1,1]) 缩放到环境区间。

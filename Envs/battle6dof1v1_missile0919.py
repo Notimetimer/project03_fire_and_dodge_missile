@@ -667,20 +667,23 @@ class Battle(object):
         r_dist = (dist<=10e3)*(dist-0)/(10e3-0)+\
                     (dist>10e3)*(1-(dist-10e3)/(50e3-10e3))
 
-        # 结果奖励
-        r_result = 0
-        if self.train_side_lose:
-            r_result = -1
-        if self.train_side_win:
-            r_result = 1
+        # 平稳性惩罚
+        r_roll = -abs(uav.p)/(2*pi) # 假设最大角速度是1s转一圈
 
-        reward = np.sum(np.array([2,1,1,1,5])*\
-            np.array([r_angle, r_alt, r_speed, r_dist, r_result]))
+        # 事件奖励
+        reward_event = 0
+        if self.train_side_lose:
+            reward_event = -1
+        if self.train_side_win:
+            reward_event = 1
+
+        reward = np.sum(np.array([2,1,1,1,5,0.5])*\
+            np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_roll]))
 
         if terminate:
             self.running = False
-
-        return terminate, reward
+        
+        return terminate, reward, reward_event
 
 
     def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励

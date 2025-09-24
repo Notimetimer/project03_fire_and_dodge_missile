@@ -172,12 +172,14 @@ class UAVModel(object):
         p = self.sim["velocities/p-rad_sec"]  # 横滚角速度（弧度/秒）
         q = self.sim["velocities/q-rad_sec"]  # 俯仰角速度（弧度/秒）
         r = self.sim["velocities/r-rad_sec"]  # 偏航角速度（弧度/秒）
+        self.p, self.q, self.r = p,q,r
 
         # 速度矢量关于地面的角度
         vn = self.sim["velocities/v-north-fps"]  # 向北分量
         ve = self.sim["velocities/v-east-fps"]  # 向东分量
         vu = -self.sim["velocities/v-down-fps"]  # 向上分量（正表示上升）
         self.climb_rate = vu
+        self.vn, self.ne, self.vu = vn, ve, vu
 
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
