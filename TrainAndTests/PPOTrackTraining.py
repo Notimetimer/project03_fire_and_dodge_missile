@@ -299,9 +299,10 @@ if __name__=="__main__":
                 critic_path = os.path.join(log_dir, "critic.pt")
                 th.save(agent.critic.state_dict(), critic_path)
                 # actor RL snapshot
-                actor_name = f"actor_rein{i_episode}.pt"
-                actor_path = os.path.join(log_dir, actor_name)
-                th.save(agent.actor.state_dict(), actor_path)
+                if i_episode % 10 == 0:
+                    actor_name = f"actor_rein{i_episode}.pt"
+                    actor_path = os.path.join(log_dir, actor_name)
+                    th.save(agent.actor.state_dict(), actor_path)
 
                 
                 # tqdm 训练进度显示

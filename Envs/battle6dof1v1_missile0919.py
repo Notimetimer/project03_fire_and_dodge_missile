@@ -372,6 +372,7 @@ class Battle(object):
         
         （废弃不用）    目标相对方位角速度 (rad/s) / 0.35
         （废弃不用）    目标相对俯仰角速度 (rad/s) / 0.35
+        todo :p,q,r 暂时没有加上，如果训练还不是很稳定的话，考虑从21开始加
         '''
         side = self.UAV_ids
         
@@ -589,13 +590,13 @@ class Battle(object):
         # 10 sinφ
         # 11 cosφ
         # 12 目标可跟踪标志 bool
-        mask = np.ones(20)
+        mask = np.ones(21)
         mask[13:] = 0
         
         return self.get_obs(side)*mask
         
     # crank策略观测量
-    def crank_obs(self, side):
+    def crank_obs(self, side, left_right):
         # 0  目标可见性标志 bool
         # 1  目标相对高度/5e3， 如果看不到，在get_obs置为0
         # 2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
@@ -611,7 +612,7 @@ class Battle(object):
         # 12 目标可跟踪标志 bool
         # 13 导弹中制导状态 bool
         # 14 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
-        mask = np.ones(20)
+        mask = np.ones(21)
         mask[15:] = 0
         return self.get_obs(side)*mask # todo
 
@@ -668,7 +669,7 @@ class Battle(object):
                     (dist>10e3)*(1-(dist-10e3)/(50e3-10e3))
 
         # 平稳性惩罚
-        r_roll = -abs(uav.p)/(2*pi) # 假设最大角速度是1s转一圈
+        r_roll = 0 # -abs(uav.p)/(2*pi) # 假设最大角速度是1s转一圈， 训偏了
 
         # 事件奖励
         reward_event = 0
