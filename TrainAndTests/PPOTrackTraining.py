@@ -83,9 +83,8 @@ pre_train_rate = 0 # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
 
 env = Battle(args, tacview_show=use_tacview)
-r_obs_spaces = env.get_obs_spaces('r')
+r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
 b_obs_spaces = env.get_obs_spaces('b')
-# r_obs_spaces, b_obs_spaces = env.get_obs_spaces()
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
@@ -227,16 +226,15 @@ if __name__=="__main__":
                         # print('回合结束，时间为：', env.t, 's')
                         break
                     # 获取观测信息
-                    r_obs_n = env.get_obs('r')
+                    r_obs_n = env.get_obs('r') # todo 子策略的训练不要用这个
                     b_obs_n = env.get_obs('b')
 
                     # 在这里将观测信息压入记忆
                     env.RUAV.obs_memory = r_obs_n.copy()
                     env.BUAV.obs_memory = b_obs_n.copy()
 
-                    state = np.squeeze(b_obs_n)
+                    b_obs = np.squeeze(b_obs_n)
 
-                    # todo 可发射判据添加解算，且更换if_possible和距离判据的顺序（发射时间间隔过了之后再解算攻击区会更有效率）
                     distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                     # 发射导弹判决
                     if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
@@ -250,7 +248,7 @@ if __name__=="__main__":
                                             ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                             o00=o00, R_cage=env.R_cage, wander=1
                                             )
-                    b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
 
                     # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
                     #                         enm_pos_=env.RUAV.pos_, distance=distance,
@@ -263,7 +261,7 @@ if __name__=="__main__":
 
                     _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                     done, b_reward, _ = env.attack_terminate_and_reward('b')
-                    next_state = env.get_obs('b')  # 观测
+                    next_state = env.get_obs('b')  # todo 子策略的训练不要用这个
 
                     transition_dict['states'].append(state)
                     transition_dict['actions'].append(u)
@@ -380,7 +378,7 @@ if __name__=="__main__":
                 step = 0
                 done = False
                 while not done:
-                    r_obs_n = env.get_obs('r')
+                    r_obs_n = env.get_obs('r') # todo 子策略的训练不要用这个
                     b_obs_n = env.get_obs('b')
                     # 在这里将观测信息压入记忆
                     env.RUAV.obs_memory = r_obs_n.copy()

@@ -1,5 +1,5 @@
 '''出生点改在外面指定'''
-
+import numpy as np
 from random import random
 import random
 from gym import spaces
@@ -8,6 +8,7 @@ import jsbsim
 import sys
 import os
 import importlib
+import copy
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -34,6 +35,7 @@ from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
+from Utilities.flatten_dict_obs import flatten_obs2 as flatten_obs
 
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
@@ -93,7 +95,7 @@ class Battle(object):
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
 
         # # 智能体的观察空间
-        # r_obs_n, b_obs_n = self.get_obs()
+        # r_obs_n, b_obs_n = self.base_obs()
         # self.r_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      r_obs_n]
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
@@ -207,9 +209,9 @@ class Battle(object):
         self.reset()
         
         # 智能体的观察空间
-        # r_obs_n, b_obs_n = self.get_obs()
-        obs_n = self.get_obs(side)
-        # b_obs_n = self.get_obs('b')
+        # r_obs_n, b_obs_n = self.base_obs()
+        obs_n = self.base_obs(side)
+        # b_obs_n = self.base_obs('b')
         self.obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
                              obs_n]
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
@@ -345,34 +347,8 @@ class Battle(object):
     def get_state(self, side):
         '''
         在这里统一汇总所有用得到的状态量，计算状态量可见性并分配各各个子策略的观测
-        更正，UAVmodel具有一部分判断目标可见性的功能，需要管理
-
-        输入给1v1智能体的状态空间包含以下结构：
-        0  目标可见性标志 bool
-        1  目标相对高度 m
-        2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
-        3  目标相对俯仰角 (rad), 如果看不到，在get_obs置为0
-        4  目标相对距离 m
-        5  夹角 (rad)
-        6  本机速度 m/s
-        7  本机高度 m
-        8  sinθ
-        9  cosθ
-        10 sinφ
-        11 cosφ
-        12 目标可跟踪标志 bool
-        13 导弹中制导状态 bool
-        14 导弹预计碰撞时间 s, 如果没有在飞行导弹，在get_obs中置为4(120s)
-        15 目标雷达跟踪标志 bool
-        16 告警标志 bool
-        17 最近来袭导弹相对方位角(rad), 如果没有导弹，在get_obs置为pi
-        18 最近来袭导弹相对俯仰角(rad), 如果没有导弹，在get_obs置为0
-        19 最近来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km), 如果没有导弹，在get_obs置为最大
-        20 目标雷达可探测标志 bool
-        
-        （废弃不用）    目标相对方位角速度 (rad/s) / 0.35
-        （废弃不用）    目标相对俯仰角速度 (rad/s) / 0.35
-        todo :p,q,r 暂时没有加上，如果训练还不是很稳定的话，考虑从21开始加
+        这里不缩放，统一在get_obs缩放（因为有些会直接输入到规则里面）
+        默认值在这里设定
         '''
         side = self.UAV_ids
         
@@ -386,8 +362,11 @@ class Battle(object):
             adv = self.RUAV
             own_missiles = self.Bmissiles
             enm_missiles = self.Rmissiles
-        # 目标可见性标志 bool
-        target_observable = 1
+
+        # 目标存活标志
+        target_alive = not adv.dead    
+        # 目标可见性标志 0 完全不可见 1 可获取角度信息 2 可获取全部信息
+        target_observable = 2 # 难保不搞成one-hot的形式
         # 目标相对高度
         delta_alt_obs = adv.alt-own.alt
         # 目标相对方位角
@@ -409,38 +388,28 @@ class Battle(object):
         v = norm(v_)
         alpha = np.arccos(np.dot(L_,v_)/(v*dist))
         # 速度观测量
-        v_obs = v
+        v_own = v
         # 本机高度
-        h_abs_obs = own.alt
+        h_own = own.alt
         # 本机俯仰角
         sin_theta = sin(own.theta)
         cos_theta = cos(own.theta)
         # 本机滚转角
         sin_phi = sin(own.phi)
         cos_phi = cos(own.phi)
+
+        # 剩余导弹量
+        ammo = own.ammo
+
         # 雷达可跟踪标志
         target_tracked = 1
-
-        # 目标相对方位角速度 (rad/s) / 0.35 与 目标相对俯仰角速度 (rad/s) / 0.35
-        # vT_ = adv.vel_
-        # vr_ = vT_ - v_
-        # vr_radial = np.dot(vr_, L_) / dist  # 径向速度
-        # vr_tangent_ = np.cross(L_, vr_) / dist # 目标周向速度矢量
-        # omega_ = vr_tangent_/dist # 目标相对角速度矢量
-        # down_ = np.array([0,-1,0])
-        # L_left_ = np.cross(L_, down_)/dist
-        # L_left_ = L_left_/norm(L_left_)
-        # omega_vert_ = np.dot(omega_, down_)*1
-        # omega_hor_ = omega_-omega_vert_
-        # delta_psi_dot = np.dot(omega_vert_, down_) # 目标相对方位角速度
-        # delta_theta_dot = -np.dot(omega_hor_, L_left_) # 目标相对俯仰角速度
 
         # 导弹中制导状态 bool
         missile_in_mid_term = 0
         pass # todo 需要由导弹的类实例报告
 
-        # 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
-        missile_time_to_hit_obs = 4
+        # 导弹预计碰撞时间, 如果没有在飞行导弹，在get_obs中置为(120s)
+        missile_time_to_hit_obs = 120
         pass # todo 需要由导弹的类实例报告
 
         # 目标雷达跟踪标志 bool
@@ -464,63 +433,108 @@ class Battle(object):
         pass
 
         # 最近来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km), 如果没有导弹，在get_obs置为最大
-        threat_distance = 2
+        threat_distance = 100
         pass
 
-        # 目标雷达可探测标志
-        target_radar_detects_me = 0
+        p = own.p
+        q = own.q
+        r = own.r
+
+        theta_v = own.theta_v
+        psi_v = own.psi_v
+
+        alpha_air = own.alpha_air
+        beta_air = own.beta_air
+
+        speed_T = adv.speed
         
-        one_side_obs = np.array([
-            target_observable, 
-            delta_alt_obs, 
-            delta_psi, 
-            delta_theta,
-            dist_obs,
-            alpha,
-            v_obs,
-            h_abs_obs,
-            sin_theta,
-            cos_theta,
-            sin_phi,
-            cos_phi,
-            target_tracked,
-            missile_in_mid_term,
-            missile_time_to_hit_obs,
-            locked_by_target,
-            warning,
-            threat_delta_psi,
-            threat_delta_theta,
-            threat_distance,
-            target_radar_detects_me
-        ])
+        # 目标相对方位角速度 (rad/s) / 0.35 与 目标相对俯仰角速度 (rad/s) / 0.35
+        vT_ = adv.vel_
+        # vr_ = vT_ - v_
+        # vr_radial = np.dot(vr_, L_) / dist  # 径向速度
+        # vr_tangent_ = np.cross(L_, vr_) / dist # 目标周向速度矢量
+        # omega_ = vr_tangent_/dist # 目标相对角速度矢量
+        # down_ = np.array([0,-1,0])
+        # L_left_ = np.cross(L_, down_)/dist
+        # L_left_ = L_left_/norm(L_left_)
+        # omega_vert_ = np.dot(omega_, down_)*1
+        # omega_hor_ = omega_-omega_vert_
+        # delta_psi_dot = np.dot(omega_vert_, down_) # 目标相对方位角速度
+        # delta_theta_dot = -np.dot(omega_hor_, L_left_) # 目标相对俯仰角速度
+        
+        psi_vT = atan2(vT_[2], vT_[0]) 
+        theta_vT = atan2(vT_[1], sqrt(vT_[0]**2+vT_[2]**2))
 
-        return one_side_obs
+        # 目标水平/垂直进入角
+        AA_hor = sub_of_radian(psi_vT, q_beta) # 向右飞为正
+        AA_vert = sub_of_radian(theta_vT, q_epsilon) # 向上飞为正      
 
-    def get_obs(self, side, pomdp=0):
-        # 0  目标可见性标志 bool
-        # 1  目标相对高度/5e3， 如果看不到，在get_obs置为0
-        # 2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
-        # 3  目标相对俯仰角 (rad), 如果看不到，在get_obs置为0
-        # 4  目标相对距离 / 10e3, 如果看不到，在get_obs置为最大
-        # 5  夹角 (rad)
-        # 6  本机速度 /340
-        # 7  本机高度 /5e3
-        # 8  sinθ
-        # 9  cosθ
-        # 10 sinφ
-        # 11 cosφ
-        # 12 目标可跟踪标志 bool
-        # 13 导弹中制导状态 bool
-        # 14 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
-        # 15 目标雷达跟踪标志 bool
-        # 16 告警标志 bool
-        # 17 最近来袭导弹相对方位角(rad), 如果没有导弹，在get_obs置为pi
-        # 18 最近来袭导弹相对俯仰角(rad), 如果没有导弹，在get_obs置为0
-        # 19 最近来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km), 如果没有导弹，在get_obs置为最大
-        # （废弃不用）    目标相对方位角速度 (rad/s) / 0.35
-        # （废弃不用）    目标相对俯仰角速度 (rad/s) / 0.35
-        # 20 目标雷达可探测标志 bool
+        # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
+        self.key_order = [
+            "target_alive", "target_observable", "target_tracked",
+            "missile_in_mid_term", "locked_by_target", "warning",
+            "target_information",  # 8
+            "ego_main",            # 7
+            "ego_control",         # 7
+            "weapon",              # 1
+            "threat"               # 3
+        ]
 
+        one_side_states = {
+            # 单独键（标量或布尔）
+            "target_alive": bool(target_alive),
+            "target_observable": int(target_observable), # 0 完全不可见 1 角度信息可见 2 完全可见
+            "target_tracked": bool(target_tracked), # 已锁定敌机
+            "missile_in_mid_term": bool(missile_in_mid_term),
+            "locked_by_target": bool(locked_by_target), # 敌锁定
+            "warning": bool(warning),
+
+            # 打包的向量 / 子组
+            "target_information": [
+                float(delta_alt_obs),   # 0相对高度 m
+                float(delta_psi),       # 1相对方位 rad
+                float(delta_theta),     # 2相对俯仰角 rad
+                float(dist_obs),        # 3距离 m
+                float(alpha),           # 4夹角 rad
+                float(speed_T),         # 5目标速度 m/s
+                float(AA_hor),          # 6水平进入角 rad
+                float(AA_vert)          # 7垂直进入角 rad
+            ],
+
+            "ego_main": [
+                float(v_own),   # 0本机速度 m/s
+                float(h_own),   # 1本机高度 m
+                float(sin_theta), # 2
+                float(cos_theta), # 3
+                float(sin_phi), # 4
+                float(cos_phi), # 5
+                int(ammo)       # 6剩余导弹数量
+            ],
+
+            "ego_control": [
+                float(p), # 0 rad/s
+                float(q), # 1 rad/s
+                float(r), # 2 rad/s
+                float(theta_v), # 3
+                float(psi_v), # 4
+                float(alpha_air), # 5 rad
+                float(beta_air) # 6 rad
+            ],
+
+            "weapon": float(missile_time_to_hit_obs),
+
+            "threat": [
+                float(threat_delta_psi), # 0
+                float(threat_delta_theta), # 1
+                float(threat_distance) # 2
+            ]
+        }
+
+        return one_side_states
+
+    def base_obs(self, side, pomdp=0):
+        # 处理部分可观测、默认值问题、并尺度缩放
+        # 输出保持字典的形式
         if side == 'r':
             uav = self.RUAV
         if side == 'b':
@@ -528,8 +542,20 @@ class Battle(object):
         
         state = self.get_state(side) # np.stack(self.get_state(side)) stack适用于多架无人机观测拼接为np数组
         
-        if pomdp: # 只有在部分观测情况下需要添加屏蔽
+        # 默认值设定
+        self.state_init = self.get_state(side)
+        self.state_init["target_alive"]=1 # 默认目标存活
+        self.state_init["target_observable"]=2 # 默认完全可见
+        self.state_init["target_tracked"]=0
+        self.state_init["missile_in_mid_term"]=0
+        self.state_init["locked_by_target"]=0
+        self.state_init["warning"]=0
+        self.state_init["target_information"]=[0,0,0,100,0,0,0,0]
+        self.state_init["weapon"]=120
+        self.state_init["threat"]=[0,0,100]
 
+        # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
+        if pomdp: # 只有在部分观测情况下需要添加屏蔽
             if not uav.obs_memory: # 假如不存在记忆，给默认值
                 memory = np.array([0,0,0,0,100e3, 0, 1, 2, 0, 1, 0, 1, 0, 0, 4, 0, 0, 0, 0, 2, 1])
             else:
@@ -563,73 +589,79 @@ class Battle(object):
                     pass # 否则所有信息可见
             else:
                 pass # 10km类信息完全可见
-
-        uav.obs_memory = state
+        # todo 不该看到的改为默认值或者残留值
+        uav.obs_memory = state # 更新残留值
 
         # 尺度缩放
-        state_observed = state
-        state_observed[1]/=5e3
-        state_observed[4]/=10e3
-        state_observed[6]/=340
-        state_observed[7]/=5e3
-        state_observed[14]/=30
-        return state_observed
+        observation = state
+        observation["target_information"][0]/=5e3
+        observation["target_information"][3]/=10e3
+        observation["target_information"][5]/=340
+        observation["ego_main"][0]/=340
+        observation["ego_main"][1]/=5e3
+        observation["ego_control"][0,1,2]/=(2*pi)
+        observation["weapon"]/=30
+        observation["threat"][2]/=10e3
+        return observation
 
     # 进攻策略观测量
     def attack_obs(self, side):
-        # 0  目标可见性标志 bool
-        # 1  目标相对高度/5e3， 如果看不到，在get_obs置为0
-        # 2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
-        # 3  目标相对俯仰角 (rad), 如果看不到，在get_obs置为0
-        # 4  目标相对距离 / 10e3, 如果看不到，在get_obs置为最大
-        # 5  夹角 (rad)
-        # 6  本机速度 /340
-        # 7  本机高度 /5e3
-        # 8  sinθ
-        # 9  cosθ
-        # 10 sinφ
-        # 11 cosφ
-        # 12 目标可跟踪标志 bool
-        mask = np.ones(21)
-        mask[13:] = 0
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
+        full_obs["weapon"] = copy.deepcopy(self.state_init["weapon"])
+        full_obs["threat"] = copy.deepcopy(self.state_init["threat"])
         
-        return self.get_obs(side)*mask
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs
+    
+    def left_crank_obs(self, side):
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
+        full_obs["threat"] = copy.deepcopy(self.state_init["threat"])
         
-    # crank策略观测量
-    def crank_obs(self, side, left_right):
-        # 0  目标可见性标志 bool
-        # 1  目标相对高度/5e3， 如果看不到，在get_obs置为0
-        # 2  目标相对方位 (rad), 如果看不到，在get_obs置为pi
-        # 3  目标相对俯仰角 (rad), 如果看不到，在get_obs置为0
-        # 4  目标相对距离 / 10e3, 如果看不到，在get_obs置为最大
-        # 5  夹角 (rad)
-        # 6  本机速度 /340
-        # 7  本机高度 /5e3
-        # 8  sinθ
-        # 9  cosθ
-        # 10 sinφ
-        # 11 cosφ
-        # 12 目标可跟踪标志 bool
-        # 13 导弹中制导状态 bool
-        # 14 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
-        mask = np.ones(21)
-        mask[15:] = 0
-        return self.get_obs(side)*mask # todo
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs
+    
+    def right_crank_obs(self, side):
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
+        full_obs["threat"] = copy.deepcopy(self.state_init["threat"])
+        
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs
 
-    # 规避策略观测量
+
     def escape_obs(self, side):
-        pass # todo
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
+        full_obs["weapon"] = copy.deepcopy(self.state_init["weapon"])
         
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs
+            
     def attack_terminate_and_reward(self, side): # 进攻策略训练与奖励
         terminate = False
         state = self.get_state(side)
-        alt = state[7]
-        target_alt = state[1]+state[7]
-        delta_psi = state[2]
-        delta_theta = state[3]
-        dist = state[4]
-        alpha = state[5]
-        speed = state[6]
+        speed = state["ego_main"][0]
+        alt = state["ego_main"][1]
+        target_alt = alt+state["target_information"][0]
+        delta_psi = state["target_information"][1]
+        delta_theta = state["target_information"][2]
+        dist = state["target_information"][3]
+        alpha = state["target_information"][4]
+        
 
         if side == 'r':
             uav = self.RUAV
@@ -686,61 +718,64 @@ class Battle(object):
         
         return terminate, reward, reward_event
 
+    def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
+        pass
 
-    def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励
-        if missiled_combat == True:
-            # 添加导弹命中相关的奖励和惩罚
-            pass
-        '结果奖励部分'
-        RUAV = self.RUAV
-        BUAV = self.BUAV
-        UAVs = [RUAV, BUAV]
-        A = [0, 0]  # R, B
-        rewards = [0, 0]  # R, B
+    def right_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
+        pass
 
-        for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
-            # adv = UAVs[1 - i]
-            # # # 出界剩余时间惩罚：
-            # t_last_max = 60
-            # t_last = np.ones(6)
-            # # 出界惩罚
-            # if out_range(UAV):
-            #     rewards[i] -= 100
-            # # 超出限高惩罚
-            # if UAV.pos_[1] >= max_height:
-            #     rewards[i] -= 80
-            # # 对手出界
-            # if out_range(adv):
-            #     rewards[i] += 10
-            # # 被命中(不管是导弹还是"扫描枪")
-            # if UAV.got_hit:
-            #     rewards[i] -= 100
-            # # 命中对手
-            # if adv.got_hit:
-            #     rewards[i] += 200  # 增加命中奖励
-            # # 撞机
-            # if UAV.crash:
-            #     rewards[i] -= 70
-            # # 平局
-            # if self.t >= self.game_time_limit and not any([UAV.dead, adv.dead]):
-            #     rewards[i] -= 10
 
-            # test 目标追赶
-            r_obs_n = self.get_obs('r')
-            b_obs_n = self.get_obs('b')
-            # r_obs_n, b_obs_n = self.get_obs()
-            # rewards[0] = (1 - np.linalg.norm(r_obs_n[7] / pi * 2)) * 100
-            rewards[0] = (1 - np.linalg.norm((r_obs_n[7] - RUAV.theta) / pi * 2 * 2)) * 100  # test
-            rewards[1] = (1 - np.linalg.norm((b_obs_n[7] - BUAV.theta) / pi * 2 * 2)) * 100  # test
-            # rewards[1] = (1-np.linalg.norm(BUAV.theta/pi*2)) * 100
-            rewards[0] += (1 - np.linalg.norm(r_obs_n[8] / pi)) * 100
-            rewards[1] += (1 - np.linalg.norm(b_obs_n[8] / pi)) * 100
 
-            # 稀疏奖励
-
-        # return rewards[0], rewards[1]
-        # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
-        return (rewards[0], rewards[0]), (rewards[1], rewards[1])
+    # def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励
+    #     if missiled_combat == True:
+    #         # 添加导弹命中相关的奖励和惩罚
+    #         pass
+    #     '结果奖励部分'
+    #     RUAV = self.RUAV
+    #     BUAV = self.BUAV
+    #     UAVs = [RUAV, BUAV]
+    #     A = [0, 0]  # R, B
+    #     rewards = [0, 0]  # R, B
+    #     for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
+    #         # adv = UAVs[1 - i]
+    #         # # # 出界剩余时间惩罚：
+    #         # t_last_max = 60
+    #         # t_last = np.ones(6)
+    #         # # 出界惩罚
+    #         # if out_range(UAV):
+    #         #     rewards[i] -= 100
+    #         # # 超出限高惩罚
+    #         # if UAV.pos_[1] >= max_height:
+    #         #     rewards[i] -= 80
+    #         # # 对手出界
+    #         # if out_range(adv):
+    #         #     rewards[i] += 10
+    #         # # 被命中(不管是导弹还是"扫描枪")
+    #         # if UAV.got_hit:
+    #         #     rewards[i] -= 100
+    #         # # 命中对手
+    #         # if adv.got_hit:
+    #         #     rewards[i] += 200  # 增加命中奖励
+    #         # # 撞机
+    #         # if UAV.crash:
+    #         #     rewards[i] -= 70
+    #         # # 平局
+    #         # if self.t >= self.game_time_limit and not any([UAV.dead, adv.dead]):
+    #         #     rewards[i] -= 10
+    #         # test 目标追赶
+    #         r_obs_n = self.base_obs('r')
+    #         b_obs_n = self.base_obs('b')
+    #         # r_obs_n, b_obs_n = self.base_obs()
+    #         # rewards[0] = (1 - np.linalg.norm(r_obs_n[7] / pi * 2)) * 100
+    #         rewards[0] = (1 - np.linalg.norm((r_obs_n[7] - RUAV.theta) / pi * 2 * 2)) * 100  # test
+    #         rewards[1] = (1 - np.linalg.norm((b_obs_n[7] - BUAV.theta) / pi * 2 * 2)) * 100  # test
+    #         # rewards[1] = (1-np.linalg.norm(BUAV.theta/pi*2)) * 100
+    #         rewards[0] += (1 - np.linalg.norm(r_obs_n[8] / pi)) * 100
+    #         rewards[1] += (1 - np.linalg.norm(b_obs_n[8] / pi)) * 100
+    #         # 稀疏奖励
+    #     # return rewards[0], rewards[1]
+    #     # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
+    #     return (rewards[0], rewards[0]), (rewards[1], rewards[1])
 
     def get_target_by_id(self, target_id):
         for uav in self.UAVs:

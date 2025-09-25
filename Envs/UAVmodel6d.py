@@ -184,6 +184,9 @@ class UAVModel(object):
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
 
+        self.theta_v = gamma_angle * pi/180
+        self.psi_v = course_angle * pi/180
+
         current_heading = self.sim["attitude/psi-deg"] * pi / 180
         target_heading = sub_of_radian(current_heading + delta_heading, 0) * 180/pi
 
@@ -201,7 +204,7 @@ class UAVModel(object):
         obs_jsbsim[9] = q
         obs_jsbsim[10] = r
         obs_jsbsim[11] = gamma_angle * pi / 180  # 爬升角
-        obs_jsbsim[12] = sub_of_degree(target_heading, course_angle) * pi / 180  # 航迹角
+        obs_jsbsim[12] = sub_of_degree(target_heading, course_angle) * pi / 180  # 相对航迹角
         obs_jsbsim[13] = self.sim["position/h-sl-ft"] * 0.3048 / 5000  # 高度/5000（英尺转米）
 
         # norm_act由F16control函数输出
@@ -213,6 +216,9 @@ class UAVModel(object):
             obs_jsbsim[0] = np.clip(target_height, -pi/2, pi/2)  # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
             norm_act = self.PIDController.att_output(obs_jsbsim, dt=self.dt)
         # print(obs_jsbsim)
+
+        self.alpha_air = self.sim["aero/alpha-deg"] * pi / 180  # 当前迎角
+        self.beta_air = self.sim["aero/beta-deg"] * pi / 180  # 当前侧滑角
 
         # norm_act=np.array([0.05, -1, 0.1, 1]) # test
 
@@ -242,15 +248,7 @@ class UAVModel(object):
         self.phi = self.sim["attitude/phi-deg"] * pi / 180  # 滚转角 (roll)
         self.theta = self.sim["attitude/theta-deg"] * pi / 180  # 俯仰角 (pitch)
         self.psi = self.sim["attitude/psi-deg"] * pi / 180  # 航向角 (yaw)
-        # self.alpha_air = self.sim["aero/alpha-deg"]  # 迎角
-        # self.beta_air = self.sim["aero/beta-deg"]  # 侧滑角
-        # v_ = np.array([v * cos(self.theta) * cos(self.psi),
-        #                v * sin(self.theta),
-        #                v * cos(self.theta) * sin(self.psi)])
 
-        # self.vel_ = v_ * v / np.linalg.norm(v_)
-
-        # self.climb_rate = vu
         self.vel_ = np.array([vn, vu, ve]) / 3.2808 # ft.s转m/s
 
         # 速度更新位置
