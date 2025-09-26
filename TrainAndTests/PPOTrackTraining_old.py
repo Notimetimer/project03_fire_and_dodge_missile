@@ -22,7 +22,7 @@ import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.battle6dof1v1_missile0919 import *
+from Envs.battle6dof1v1_missile0919_old import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
