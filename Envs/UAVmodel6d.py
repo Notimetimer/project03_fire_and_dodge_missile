@@ -58,6 +58,9 @@ class UAVModel(object):
         self.alt = None
         self.set_height = None
         self.set_speed = None
+        # 雷达性能约束
+        self.max_radar_angle = pi/3
+        self.max_radar_range = None
 
         # 导弹相关属性
         self.ammo = 6  # 最大可携带导弹数量

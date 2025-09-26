@@ -154,6 +154,7 @@ class missile_class:
         self.radar_lock_state = False
         self.side = None
         self.datalink = None
+        self.A_pole_moment = None
 
     def Cd(self, mach):
         if 0 < mach <= 0.9:
@@ -308,8 +309,14 @@ class missile_class:
         line_t_ = ptt_ - pmt_
         distance = np.linalg.norm(line_t_)
         if np.linalg.norm(distance) <= self.detect_range:
+            self.A_pole_moment = 0
+            # 捕获目标瞬间标志
+            if self.guidance_stage == 2:
+                self.A_pole_moment = 1
             # print(str(self.t)+'s,末制导')
             self.guidance_stage = 3
+        # if self.A_pole_moment == 1:
+        #     print('A_pole')
 
         if self.guidance_stage == 2:
             return self.mid_term_guidance(v_missile_, v_target_, p_missile_, p_target_, datalink)
@@ -488,8 +495,8 @@ if __name__ == '__main__':
     list_pm_ = p_carrier_
     list_vm_ = v_carrier_
     list_vm = np.linalg.norm(list_vm_)
-    list_pt_ = np.array([20e3, 6e3, 0])  # 目标
-    list_vt_ = np.array([0, 0, -300])
+    list_pt_ = np.array([40e3, 6e3, 0])  # 目标
+    list_vt_ = np.array([-150, 0, -150])
     # missile1 = missile_class(list_pm_, list_vm_, t)
     Target = target(list_pt_, list_vt_)
 
@@ -518,10 +525,10 @@ if __name__ == '__main__':
 
         off_axis_angle_radian = np.arccos(np.dot(v_carrier_, L_t_) / norm(v_carrier_) / distance_of_planes)
 
-        in_range = 1e3 < distance_of_planes < 20e3 and off_axis_angle_radian < 30 * pi / 180
+        in_range = 1e3 < distance_of_planes < 60e3 and off_axis_angle_radian < 30 * pi / 180
 
         # 最快每隔5s发射一枚导弹，一共4枚导弹
-        if t - t_count_start >= 10 and in_range and missile_used < 4:
+        if t - t_count_start >= 10 and in_range and missile_used < 1: # 4
             missile1 = missile_class(p_carrier_, v_carrier_, ptt_, vtt_, t)
             list_missiles.append(missile1)
             t_count_start = t  # 重置计时器
@@ -580,7 +587,7 @@ if __name__ == '__main__':
                                     f"Name=AIM-120C,Color=Orange\n"
 
         tacview.send_data_to_client(data_to_send)
-        time.sleep(0.001)
+        time.sleep(0.0001)
 
         if end_flag:
             break

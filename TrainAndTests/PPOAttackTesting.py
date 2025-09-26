@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from TrainAndTests.PPOAttackTraining import *
 import re
 
@@ -67,8 +71,8 @@ try:
         step = 0
         done = False
         while not done:
-            r_obs_n = env.get_obs('r')
-            b_obs_n = env.get_obs('b')
+            r_obs_n = env.attack_obs('r')
+            b_obs_n = env.attack_obs('b')
             # 在这里将观测信息压入记忆
             env.RUAV.obs_memory = r_obs_n.copy()
             env.BUAV.obs_memory = b_obs_n.copy()

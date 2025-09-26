@@ -143,7 +143,7 @@ class PPOContinuous:
     '''
 
     def __init__(self, state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2):
         self.actor = PolicyNetContinuous(state_dim, hidden_dim, action_dim).to(device)
         self.critic = ValueNet(state_dim, hidden_dim).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -155,6 +155,8 @@ class PPOContinuous:
         self.eps = eps
         self.device = device
         self.k_entropy = k_entropy
+        self.critic_max_grad=critic_max_grad
+        self.actor_max_grad=actor_max_grad
     
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -265,6 +267,8 @@ class PPOContinuous:
         actor_grad_list = []
         actor_loss_list = []
         critic_grad_list = []
+        post_clip_actor_grad = []
+        post_clip_critic_grad = []
         critic_loss_list = []
         entropy_list = []
         ratio_list = []
@@ -296,23 +300,19 @@ class PPOContinuous:
             self.critic_optimizer.zero_grad()
             actor_loss.backward()
             critic_loss.backward()
+            
+            # 裁剪前梯度
+            post_clip_actor_grad.append(model_grad_norm(self.actor))
+            post_clip_critic_grad.append(model_grad_norm(self.critic))  
 
             # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=2)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=2)
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
             self.actor_optimizer.step()
             self.critic_optimizer.step()
 
             # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
-            # # 单值 Tensor：使用 .detach().cpu().item()
-            # self.actor_loss = actor_loss.detach().cpu().item()
-            # self.critic_loss = critic_loss.detach().cpu().item()
-            # # 熵是单值（已经 .mean()），同样处理
-            # self.entropy_mean = dist.entropy().mean().detach().cpu().item()
-            # # ratio 是向量，若想记录均值：
-            # self.ratio_mean = ratio.mean().detach().cpu().item()
-
             actor_grad_list.append(model_grad_norm(self.actor))
             actor_loss_list.append(actor_loss.detach().cpu().item())
             critic_grad_list.append(model_grad_norm(self.critic))            
@@ -326,6 +326,8 @@ class PPOContinuous:
         self.critic_grad = np.mean(critic_grad_list)
         self.entropy_mean = np.mean(entropy_list)
         self.ratio_mean = np.mean(ratio_list)
+        self.post_clip_critic_grad = np.mean(post_clip_critic_grad)
+        self.post_clip_actor_grad = np.mean(post_clip_actor_grad)
 
     def update_actor_supervised(self, transition_dict):
         """
@@ -345,7 +347,7 @@ class PPOContinuous:
 
         actor_grad_list = []
         actor_loss_list = []
-
+        post_clip_actor_grad = []
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
         for _ in range(self.epochs):
             # Actor 监督学习：拟合 mu -> u_old
@@ -353,7 +355,8 @@ class PPOContinuous:
             actor_loss = F.mse_loss(mu, u_old)  # mu 与 u_old 都是 pre-squash 空间
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=2)
+            post_clip_actor_grad.append(model_grad_norm(self.actor))
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             self.actor_optimizer.step()
 
             actor_grad_list.append(model_grad_norm(self.actor))
@@ -361,6 +364,7 @@ class PPOContinuous:
 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
+        self.post_clip_actor_grad = np.mean(post_clip_actor_grad)
     
     def update_critic_only(self, transition_dict):
         """
@@ -379,6 +383,7 @@ class PPOContinuous:
 
         critic_grad_list = []
         critic_loss_list = []
+        post_clip_critic_grad = []
 
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
         for _ in range(self.epochs):
@@ -386,7 +391,11 @@ class PPOContinuous:
             critic_loss = F.mse_loss(self.critic(states), td_target.detach())
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=2)
+
+            # 裁剪前梯度
+            post_clip_critic_grad.append(model_grad_norm(self.critic)) 
+            # 梯度裁剪
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
             self.critic_optimizer.step()
 
             critic_grad_list.append(model_grad_norm(self.critic))            
@@ -394,6 +403,7 @@ class PPOContinuous:
 
         self.critic_loss = np.mean(critic_loss_list)
         self.critic_grad = np.mean(critic_grad_list)
+        self.post_clip_critic_grad = np.mean(post_clip_critic_grad)
 
 
 

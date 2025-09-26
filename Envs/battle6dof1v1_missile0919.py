@@ -56,6 +56,9 @@ R_birth = 40e3
 
 horizontal_center = np.array([0, 0])
 
+def sigmoid(x):
+    return 1/(1+exp(-x))
+
 class Battle(object):
     def __init__(self, args, tacview_show=0):
         super(Battle, self).__init__()
@@ -85,9 +88,9 @@ class Battle(object):
         # self.reset()  # 重置位置和状态
         self.r_action_spaces = [spaces.Box(low=-1, high=+1, shape=(3,), dtype=np.float32)]
         self.b_action_spaces = [spaces.Box(low=-1, high=+1, shape=(3,), dtype=np.float32)]
-        self.train_side_win = None
-        self.train_side_lose = None
-        self.train_side_draw = None
+        self.win = None
+        self.lose = None
+        self.draw = None
         self.max_alt = 15e3
         self.max_alt_save = 13e3
         self.min_alt_save= 3e3
@@ -137,9 +140,9 @@ class Battle(object):
         self.RmissilesTable = {}
         self.BmissilesTable = {}
         self.missilesTable = {}
-        self.train_side_win = 0
-        self.train_side_lose = 0
-        self.train_side_draw = 0
+        self.win = 0
+        self.lose = 0
+        self.draw = 0
         # 红方初始化
         for i in range(self.Rnum):
             UAV = UAVModel(dt=dt_move)
@@ -631,6 +634,8 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
+        full_obs["target_tracked"] = 1
+        full_obs["missile_in_mid_term"] = 1
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         
@@ -642,6 +647,8 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
+        full_obs["target_tracked"] = 1
+        full_obs["missile_in_mid_term"] = 1
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         
@@ -674,22 +681,24 @@ class Battle(object):
 
         if side == 'r':
             uav = self.RUAV
+            enm = self.BUAV
         if side == 'b':
             uav = self.BUAV
+            enm = self.RUAV
 
         # 结束判断：超时/损毁
         if self.t > self.game_time_limit:
             terminate = True
         # if alpha > pi/2 and self.t > self.game_time_limit: # 超时了还没hot就结束
         #     terminate = True
-        #     self.train_side_lose = 1
+        #     self.lose = 1
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
-            self.train_side_lose = 1
+            self.lose = 1
 
         if dist<5e3 and alpha< pi/12:
             terminate = True
-            self.train_side_win = 1
+            self.win = 1
 
         # 角度奖励
         r_angle = 1-alpha/(pi/3)  # 超出雷达范围就惩罚狠一点
@@ -714,9 +723,9 @@ class Battle(object):
 
         # 事件奖励
         reward_event = 0
-        if self.train_side_lose:
+        if self.lose:
             reward_event = -1
-        if self.train_side_win:
+        if self.win:
             reward_event = 1
 
         reward = np.sum(np.array([2,1,1,1,5,0.5])*\
@@ -741,79 +750,97 @@ class Battle(object):
         alpha = state["target_information"][4]
 
         if side == 'r':
-            uav = self.RUAV
+            ego = self.RUAV
+            ego_missile = self.Rmissiles[0]
+            enm = self.BUAV
         if side == 'b':
-            uav = self.BUAV
+            ego = self.BUAV
+            ego_missile = self.Bmissiles[0]
+            enm = self.RUAV
         
         '''
+        todo：状态空间与导弹相关的部分：制导阶段
+
+        一阶段：对方不还手
         crank训练初始情况：
         1、目标初始化前首先计算导弹可发射区范围，然后将目标置于可发射区内、不可逃逸区外，对我机纯追踪
-        2、目标出现在我机前半球雷达角度范围内40~80km向我机做纯追踪机动、速度和高度为随机数
+        2、目标出现在我机正前方40~80km向我机做纯追踪机动、速度和高度为随机数,与我机同高度
         3、初始只有一枚导弹，开始就发射导弹
 
         crank训练结束的情况
-        1、导弹进入末制导/损毁
-        2、超出雷达范围，立即失败
-        3、飞机出界、立即失败
-        4、导弹命中目标，立即成功
-        5、导弹自爆、立即失败
+        0、超时结束
+        1、超出雷达范围，立即失败
+        2、飞机出界、立即失败
+        3、导弹命中目标，立即成功
+        4、导弹自爆、立即失败
 
         奖励种类：
         1、角度奖励：左crank需要delta_psi接近雷达正向边界、右crank需要-delta_psi接近雷达边界
         2、高度奖励：应该比目标略低但保持在安全区域
-        4、A-pole奖励：计算目标按照当前轨迹飞行下去时，导弹进入锁定范围瞬间的预测敌我距离
-        5、目标消灭奖励：
+        3、A-pole奖励：导弹进入锁定范围瞬间根据敌我距离提供奖励
+        4、F-pole奖励：导弹命中敌机瞬间根据敌我距离提供奖励
+
+        二阶段：互射一枚导弹（状态空间还没做好，做完规避再回来做二阶段）
 
         '''
-        # 结束判断：超时/损毁
+        # 超时结束
         if self.t > self.game_time_limit:
             terminate = True
-        # if alpha > pi/2 and self.t > self.game_time_limit: # 超时了还没hot就结束
-        #     terminate = True
-        #     self.train_side_lose = 1
+        # 雷达丢失目标判为失败
+        if alpha > ego.max_radar_angle:
+            terminate = True
+            self.lose = 1
+        # 出界失败
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
-            self.train_side_lose = 1
-
-        if dist<5e3 and alpha< pi/12:
-            terminate = True
-            self.train_side_win = 1
-
-        # 角度奖励
-        r_angle = 1-alpha/(pi/3)  # 超出雷达范围就惩罚狠一点
+            self.lose = 1
+        # 导弹命中目标成功
+        if enm.got_hit:
+            self.win = 1
+        # 导弹miss，失败
+        if ego_missile.dead and not enm.got_hit:
+            self.lose = 1
+        
+        # 左carnk角度奖励
+        x_alpha = np.sign(delta_psi)*alpha * 180/pi
+        alpha_max = ego.max_radar_angle*180/pi # 60
+        mid_switch = sigmoid(0.4 * (x_alpha + alpha_max)) * sigmoid(0.4 * (alpha_max - x_alpha))
+        r_angle = (x_alpha/alpha_max * mid_switch - (1 - mid_switch))
 
         # 高度奖励
-        pre_alt_opt = target_alt + np.clip((dist-10e3)/(40e3-10e3)*5e3, 0, 5e3)
+        pre_alt_opt = target_alt - 1e3 # 比目标低1000m方便增加阻力
         alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
-
         r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
                     (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
                 
         # 速度奖励
-        speed_opt = 1.5*340
+        speed_opt = 0.95*340
         r_speed = abs(speed-speed_opt)/(2*340)
 
-        # 距离奖励
-        r_dist = (dist<=10e3)*(dist-0)/(10e3-0)+\
-                    (dist>10e3)*(1-(dist-10e3)/(50e3-10e3))
+        # 事件奖励
+        r_event = 0
+        # A-pole奖励
+        if ego_missile.A_pole_moment:
+            r_event += dist / 30e3 * 20
+            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        # F-pole奖励
+        if ego_missile.hit:
+            r_event += dist / 30e3 * 40
+            r_event += alt
+            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        if self.lose:
+            r_event -= 20
 
         # 平稳性惩罚
-        r_roll = 0 # -abs(uav.p)/(2*pi) # 假设最大角速度是1s转一圈， 训偏了
+        r_steady = -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2
 
-        # 事件奖励
-        reward_event = 0
-        if self.train_side_lose:
-            reward_event = -1
-        if self.train_side_win:
-            reward_event = 1
-
-        reward = np.sum(np.array([2,1,1,1,5,0.5])*\
-            np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_roll]))
+        reward = np.sum(np.array([2, 1, 1, 0.5, 1])*\
+            np.array([r_angle, r_alt, r_speed, r_event, r_steady]))
 
         if terminate:
             self.running = False
         
-        return terminate, reward, reward_event
+        return terminate, reward, r_event
 
     def right_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
         pass
