@@ -124,6 +124,10 @@ class UAVModel(object):
         self.psi = psi0
         self.phi = phi0
         self.theta = theta0
+        self.p = self.sim["velocities/p-rad_sec"]  # 横滚角速度（弧度/秒）
+        self.q = self.sim["velocities/q-rad_sec"]  # 俯仰角速度（弧度/秒）
+        self.r = self.sim["velocities/r-rad_sec"]        
+        self.speed = self.sim["velocities/vt-fps"] * 0.3048  # ego_vc (unit: m/s)
 
         # 取当前位置
         lon = self.sim["position/long-gc-deg"]  # 经度
@@ -132,8 +136,22 @@ class UAVModel(object):
         self.lon, self.lat, self.alt = lon, lat, alt
         # 简单的相对位置计算
         self.x, self.y, self.z = LLH2NUE(lon, lat, alt, lon_o=self.o00[0], lat_o=self.o00[1])
-        vu = -self.sim["velocities/v-down-fps"]  # 向上分量（正表示上升）
+
+        vn = self.sim["velocities/v-north-fps"] * 0.3048  # 向北分量
+        ve = self.sim["velocities/v-east-fps"] * 0.3048  # 向东分量
+        vu = -self.sim["velocities/v-down-fps"] * 0.3048  # 向上分量（正表示上升）
         self.climb_rate = vu
+        self.vn, self.ne, self.vu = vn, ve, vu
+
+        gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
+        course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
+
+        self.theta_v = gamma_angle * pi/180
+        self.psi_v = course_angle * pi/180
+
+        self.alpha_air = self.sim["aero/alpha-deg"] * pi / 180  # 当前迎角
+        self.beta_air = self.sim["aero/beta-deg"] * pi / 180  # 当前侧滑角
+
         # self.rnn_states = np.zeros((1, 1, 128))
         # self.hist_act = np.array([0, 0, 0, 1])
         self.PIDController = F16PIDController()
@@ -175,9 +193,9 @@ class UAVModel(object):
         self.p, self.q, self.r = p,q,r
 
         # 速度矢量关于地面的角度
-        vn = self.sim["velocities/v-north-fps"]  # 向北分量
-        ve = self.sim["velocities/v-east-fps"]  # 向东分量
-        vu = -self.sim["velocities/v-down-fps"]  # 向上分量（正表示上升）
+        vn = self.sim["velocities/v-north-fps"] * 0.3048  # 向北分量
+        ve = self.sim["velocities/v-east-fps"] * 0.3048  # 向东分量
+        vu = -self.sim["velocities/v-down-fps"] * 0.3048  # 向上分量（正表示上升）
         self.climb_rate = vu
         self.vn, self.ne, self.vu = vn, ve, vu
 

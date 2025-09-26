@@ -599,7 +599,9 @@ class Battle(object):
         observation["target_information"][5]/=340
         observation["ego_main"][0]/=340
         observation["ego_main"][1]/=5e3
-        observation["ego_control"][0,1,2]/=(2*pi)
+        observation["ego_control"][0]/=(2*pi)
+        observation["ego_control"][1]/=(2*pi)
+        observation["ego_control"][2]/=(2*pi)
         observation["weapon"]/=30
         observation["threat"][2]/=10e3
         return observation
@@ -661,7 +663,6 @@ class Battle(object):
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
         alpha = state["target_information"][4]
-        
 
         if side == 'r':
             uav = self.RUAV
@@ -719,63 +720,130 @@ class Battle(object):
         return terminate, reward, reward_event
 
     def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
-        pass
+        # copy了进攻的，还没改
+        terminate = False
+        state = self.get_state(side)
+        speed = state["ego_main"][0]
+        alt = state["ego_main"][1]
+        target_alt = alt+state["target_information"][0]
+        delta_psi = state["target_information"][1]
+        delta_theta = state["target_information"][2]
+        dist = state["target_information"][3]
+        alpha = state["target_information"][4]
+
+        if side == 'r':
+            uav = self.RUAV
+        if side == 'b':
+            uav = self.BUAV
+
+        # 结束判断：超时/损毁
+        if self.t > self.game_time_limit:
+            terminate = True
+        # if alpha > pi/2 and self.t > self.game_time_limit: # 超时了还没hot就结束
+        #     terminate = True
+        #     self.train_side_lose = 1
+        if not self.min_alt<=alt<=self.max_alt:
+            terminate = True
+            self.train_side_lose = 1
+
+        if dist<5e3 and alpha< pi/12:
+            terminate = True
+            self.train_side_win = 1
+
+        # 角度奖励
+        r_angle = 1-alpha/(pi/3)  # 超出雷达范围就惩罚狠一点
+
+        # 高度奖励
+        pre_alt_opt = target_alt + np.clip((dist-10e3)/(40e3-10e3)*5e3, 0, 5e3)
+        alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+
+        r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
+                    (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+                
+        # 速度奖励
+        speed_opt = 1.5*340
+        r_speed = abs(speed-speed_opt)/(2*340)
+
+        # 距离奖励
+        r_dist = (dist<=10e3)*(dist-0)/(10e3-0)+\
+                    (dist>10e3)*(1-(dist-10e3)/(50e3-10e3))
+
+        # 平稳性惩罚
+        r_roll = 0 # -abs(uav.p)/(2*pi) # 假设最大角速度是1s转一圈， 训偏了
+
+        # 事件奖励
+        reward_event = 0
+        if self.train_side_lose:
+            reward_event = -1
+        if self.train_side_win:
+            reward_event = 1
+
+        reward = np.sum(np.array([2,1,1,1,5,0.5])*\
+            np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_roll]))
+
+        if terminate:
+            self.running = False
+        
+        return terminate, reward, reward_event
 
     def right_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
         pass
 
 
 
-    # def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励
-    #     if missiled_combat == True:
-    #         # 添加导弹命中相关的奖励和惩罚
-    #         pass
-    #     '结果奖励部分'
-    #     RUAV = self.RUAV
-    #     BUAV = self.BUAV
-    #     UAVs = [RUAV, BUAV]
-    #     A = [0, 0]  # R, B
-    #     rewards = [0, 0]  # R, B
-    #     for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
-    #         # adv = UAVs[1 - i]
-    #         # # # 出界剩余时间惩罚：
-    #         # t_last_max = 60
-    #         # t_last = np.ones(6)
-    #         # # 出界惩罚
-    #         # if out_range(UAV):
-    #         #     rewards[i] -= 100
-    #         # # 超出限高惩罚
-    #         # if UAV.pos_[1] >= max_height:
-    #         #     rewards[i] -= 80
-    #         # # 对手出界
-    #         # if out_range(adv):
-    #         #     rewards[i] += 10
-    #         # # 被命中(不管是导弹还是"扫描枪")
-    #         # if UAV.got_hit:
-    #         #     rewards[i] -= 100
-    #         # # 命中对手
-    #         # if adv.got_hit:
-    #         #     rewards[i] += 200  # 增加命中奖励
-    #         # # 撞机
-    #         # if UAV.crash:
-    #         #     rewards[i] -= 70
-    #         # # 平局
-    #         # if self.t >= self.game_time_limit and not any([UAV.dead, adv.dead]):
-    #         #     rewards[i] -= 10
-    #         # test 目标追赶
-    #         r_obs_n = self.base_obs('r')
-    #         b_obs_n = self.base_obs('b')
-    #         # r_obs_n, b_obs_n = self.base_obs()
-    #         # rewards[0] = (1 - np.linalg.norm(r_obs_n[7] / pi * 2)) * 100
-    #         rewards[0] = (1 - np.linalg.norm((r_obs_n[7] - RUAV.theta) / pi * 2 * 2)) * 100  # test
-    #         rewards[1] = (1 - np.linalg.norm((b_obs_n[7] - BUAV.theta) / pi * 2 * 2)) * 100  # test
-    #         # rewards[1] = (1-np.linalg.norm(BUAV.theta/pi*2)) * 100
-    #         rewards[0] += (1 - np.linalg.norm(r_obs_n[8] / pi)) * 100
-    #         rewards[1] += (1 - np.linalg.norm(b_obs_n[8] / pi)) * 100
-    #         # 稀疏奖励
-    #     # return rewards[0], rewards[1]
-    #     # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
-    #     return (rewards[0], rewards[0]), (rewards[1], rewards[1])
+    def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励
+        if missiled_combat == True:
+            # 添加导弹命中相关的奖励和惩罚
+            pass
+        '结果奖励部分'
+        RUAV = self.RUAV
+        BUAV = self.BUAV
+        UAVs = [RUAV, BUAV]
+        A = [0, 0]  # R, B
+        rewards = [0, 0]  # R, B
+        for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
+            # adv = UAVs[1 - i]
+            # # # 出界剩余时间惩罚：
+            # t_last_max = 60
+            # t_last = np.ones(6)
+            # # 出界惩罚
+            # if out_range(UAV):
+            #     rewards[i] -= 100
+            # # 超出限高惩罚
+            # if UAV.pos_[1] >= max_height:
+            #     rewards[i] -= 80
+            # # 对手出界
+            # if out_range(adv):
+            #     rewards[i] += 10
+            # # 被命中(不管是导弹还是"扫描枪")
+            # if UAV.got_hit:
+            #     rewards[i] -= 100
+            # # 命中对手
+            # if adv.got_hit:
+            #     rewards[i] += 200  # 增加命中奖励
+            # # 撞机
+            # if UAV.crash:
+            #     rewards[i] -= 70
+            # # 平局
+            # if self.t >= self.game_time_limit and not any([UAV.dead, adv.dead]):
+            #     rewards[i] -= 10
+            # test 目标追赶
+
+            r_obs_n = self.base_obs('r')
+            b_obs_n = self.base_obs('b')
+
+            rewards[0]=0
+            rewards[1]=0
+
+            # rewards[0] = (1 - np.linalg.norm((r_obs_n[7] - RUAV.theta) / pi * 2 * 2)) * 100  # test
+            # rewards[1] = (1 - np.linalg.norm((b_obs_n[7] - BUAV.theta) / pi * 2 * 2)) * 100  # test
+            
+            # rewards[0] += (1 - np.linalg.norm(r_obs_n[8] / pi)) * 100
+            # rewards[1] += (1 - np.linalg.norm(b_obs_n[8] / pi)) * 100
+            # 稀疏奖励
+        # return rewards[0], rewards[1]
+        # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
+        return (rewards[0], rewards[0]), (rewards[1], rewards[1])
 
     def get_target_by_id(self, target_id):
         for uav in self.UAVs:
