@@ -551,6 +551,8 @@ class Battle(object):
         self.state_init["locked_by_target"]=0
         self.state_init["warning"]=0
         self.state_init["target_information"]=[0,0,0,100,0,0,0,0]
+        self.state_init["ego_main"]=[300, 5000, 0, 1, 0, 1, 0]
+        self.state_init["ego_control"]=[0, 0, 0, 0, 0, 0, 0]
         self.state_init["weapon"]=120
         self.state_init["threat"]=[0,0,100]
 
@@ -590,20 +592,26 @@ class Battle(object):
             else:
                 pass # 10km类信息完全可见
         # todo 不该看到的改为默认值或者残留值
-        uav.obs_memory = state # 更新残留值
+        uav.obs_memory = copy.deepcopy(state) # 更新残留值
 
         # 尺度缩放
-        observation = state
-        observation["target_information"][0]/=5e3
-        observation["target_information"][3]/=10e3
-        observation["target_information"][5]/=340
-        observation["ego_main"][0]/=340
-        observation["ego_main"][1]/=5e3
-        observation["ego_control"][0]/=(2*pi)
-        observation["ego_control"][1]/=(2*pi)
-        observation["ego_control"][2]/=(2*pi)
-        observation["weapon"]/=30
-        observation["threat"][2]/=10e3
+        def scale_state(state_input):
+            # 使用 deepcopy 避免修改传入对象
+            s = copy.deepcopy(state_input)
+            s["target_information"][0] /= 5e3
+            s["target_information"][3] /= 10e3
+            s["target_information"][5] /= 340
+            s["ego_main"][0] /= 340
+            s["ego_main"][1] /= 5e3
+            s["ego_control"][0] /= (2 * pi)
+            s["ego_control"][1] /= (2 * pi)
+            s["ego_control"][2] /= (2 * pi)
+            s["weapon"] /= 120
+            s["threat"][2] /= 10e3
+            return s
+
+        observation = scale_state(state)
+        self.obs_init = scale_state(self.state_init)
         return observation
 
     # 进攻策略观测量
@@ -611,9 +619,9 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
-        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
-        full_obs["weapon"] = copy.deepcopy(self.state_init["weapon"])
-        full_obs["threat"] = copy.deepcopy(self.state_init["threat"])
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
+        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -623,8 +631,8 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
-        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
-        full_obs["threat"] = copy.deepcopy(self.state_init["threat"])
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -634,8 +642,8 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
-        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
-        full_obs["threat"] = copy.deepcopy(self.state_init["threat"])
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -646,8 +654,8 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
-        full_obs["ego_control"] = copy.deepcopy(self.state_init["ego_control"])
-        full_obs["weapon"] = copy.deepcopy(self.state_init["weapon"])
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
         
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -721,6 +729,7 @@ class Battle(object):
 
     def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
         # copy了进攻的，还没改
+
         terminate = False
         state = self.get_state(side)
         speed = state["ego_main"][0]
@@ -735,7 +744,27 @@ class Battle(object):
             uav = self.RUAV
         if side == 'b':
             uav = self.BUAV
+        
+        '''
+        crank训练初始情况：
+        1、目标初始化前首先计算导弹可发射区范围，然后将目标置于可发射区内、不可逃逸区外，对我机纯追踪
+        2、目标出现在我机前半球雷达角度范围内40~80km向我机做纯追踪机动、速度和高度为随机数
+        3、初始只有一枚导弹，开始就发射导弹
 
+        crank训练结束的情况
+        1、导弹进入末制导/损毁
+        2、超出雷达范围，立即失败
+        3、飞机出界、立即失败
+        4、导弹命中目标，立即成功
+        5、导弹自爆、立即失败
+
+        奖励种类：
+        1、角度奖励：左crank需要delta_psi接近雷达正向边界、右crank需要-delta_psi接近雷达边界
+        2、高度奖励：应该比目标略低但保持在安全区域
+        4、A-pole奖励：计算目标按照当前轨迹飞行下去时，导弹进入锁定范围瞬间的预测敌我距离
+        5、目标消灭奖励：
+
+        '''
         # 结束判断：超时/损毁
         if self.t > self.game_time_limit:
             terminate = True

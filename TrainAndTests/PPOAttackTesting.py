@@ -1,10 +1,14 @@
-from PPOTrackTraining import *
+from TrainAndTests.PPOAttackTraining import *
 import re
 
 # 找出日期最大的目录
-def get_latest_log_dir(pre_log_dir):
+def get_latest_log_dir(pre_log_dir, mission_name=None):
     # 匹配 run-YYYYMMDD-HHMMSS 目录
-    pattern = re.compile(r"run-(\d{8})-(\d{6})")
+    # pattern = re.compile(r"run-(\d{8})-(\d{6})")
+    if mission_name:
+        pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
+    else:
+        pattern = re.compile(r"run-(\d{8})-(\d{6})")
     max_dt = None
     latest_dir = None
     for d in os.listdir(pre_log_dir):
@@ -20,8 +24,7 @@ def get_latest_log_dir(pre_log_dir):
         return None
 
 pre_log_dir = os.path.join("./logs")
-log_dir = get_latest_log_dir(pre_log_dir)
-
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
 
 # 测试训练效果

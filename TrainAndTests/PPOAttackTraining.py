@@ -81,6 +81,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
+mission_name = 'Attack'
 
 env = Battle(args, tacview_show=use_tacview)
 # r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
@@ -141,7 +142,8 @@ if __name__=="__main__":
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
     from datetime import datetime
-    log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
@@ -162,7 +164,7 @@ if __name__=="__main__":
     return_list = []
     steps_count = 0
 
-    logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True)
+    logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
 
     training_start_time = time.time()
@@ -340,70 +342,70 @@ if __name__=="__main__":
         logger.close()
         print(f"日志已保存到：{logger.run_dir}")
 
-        # 测试训练效果
-        agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                        lmbda, epochs, eps, gamma, device)
-        if os.path.exists(actor_meta_path):
-            rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-            sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-            latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
-            if latest_actor_path:
-                # 直接加载权重到现有的 agent
-                sd = th.load(latest_actor_path, map_location=device)
-                agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
-                print(f"Loaded actor for test from: {latest_actor_path}")
+        # # 测试训练效果
+        # agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+        #                 lmbda, epochs, eps, gamma, device)
+        # if os.path.exists(actor_meta_path):
+        #     rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
+        #     sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
+        #     latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
+        #     if latest_actor_path:
+        #         # 直接加载权重到现有的 agent
+        #         sd = th.load(latest_actor_path, map_location=device)
+        #         agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
+        #         print(f"Loaded actor for test from: {latest_actor_path}")
 
-        try:
-            env = Battle(args, tacview_show=1)
-            for i_episode in range(3):  # 10
-                r_action_list=[]
-                b_action_list=[]
-                # 飞机出生状态指定
-                red_R_ = random.uniform(20e3, 60e3)
-                red_beta = random.uniform(0, 2*pi)
-                red_psi = random.uniform(0, 2*pi)
-                red_height = random.uniform(3e3, 10e3)
-                red_N = red_R_*cos(red_beta)
-                red_E = red_R_*sin(red_beta)
-                blue_height = random.uniform(3e3, 10e3)
+        # try:
+        #     env = Battle(args, tacview_show=1)
+        #     for i_episode in range(3):  # 10
+        #         r_action_list=[]
+        #         b_action_list=[]
+        #         # 飞机出生状态指定
+        #         red_R_ = random.uniform(20e3, 60e3)
+        #         red_beta = random.uniform(0, 2*pi)
+        #         red_psi = random.uniform(0, 2*pi)
+        #         red_height = random.uniform(3e3, 10e3)
+        #         red_N = red_R_*cos(red_beta)
+        #         red_E = red_R_*sin(red_beta)
+        #         blue_height = random.uniform(3e3, 10e3)
 
-                DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                        'psi': red_psi
-                                        }
-                DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-                                            'psi': pi
-                                            }
-                env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=0, blue_init_ammo=0)
-                step = 0
-                done = False
-                while not done:
-                    r_obs_n = env.attack_obs('r')
-                    b_obs_n = env.attack_obs('b')
-                    # 在这里将观测信息压入记忆
-                    env.RUAV.obs_memory = r_obs_n.copy()
-                    env.BUAV.obs_memory = b_obs_n.copy()
-                    state = np.squeeze(b_obs_n)
-                    distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-                    r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-                                            enm_pos_=env.BUAV.pos_, distance=distance,
-                                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                            o00=o00, R_cage=env.R_cage, wander=1
-                                            )
-                    b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+        #         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+        #                                 'psi': red_psi
+        #                                 }
+        #         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
+        #                                     'psi': pi
+        #                                     }
+        #         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
+        #                 red_init_ammo=0, blue_init_ammo=0)
+        #         step = 0
+        #         done = False
+        #         while not done:
+        #             r_obs_n = env.attack_obs('r')
+        #             b_obs_n = env.attack_obs('b')
+        #             # 在这里将观测信息压入记忆
+        #             env.RUAV.obs_memory = r_obs_n.copy()
+        #             env.BUAV.obs_memory = b_obs_n.copy()
+        #             state = np.squeeze(b_obs_n)
+        #             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+        #             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
+        #                                     enm_pos_=env.BUAV.pos_, distance=distance,
+        #                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
+        #                                     o00=o00, R_cage=env.R_cage, wander=1
+        #                                     )
+        #             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
                     
-                    r_action_list.append(r_action_n)
-                    b_action_list.append(b_action_n)
+        #             r_action_list.append(r_action_n)
+        #             b_action_list.append(b_action_n)
 
-                    _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                    done, b_reward, _ = env.attack_terminate_and_reward('b')
+        #             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+        #             done, b_reward, _ = env.attack_terminate_and_reward('b')
 
-                    step += 1
-                    env.render(t_bias=t_bias)
-                    time.sleep(0.01)
+        #             step += 1
+        #             env.render(t_bias=t_bias)
+        #             time.sleep(0.01)
                 
-                env.clear_render(t_bias=t_bias)
-                t_bias += env.t
+        #         env.clear_render(t_bias=t_bias)
+        #         t_bias += env.t
 
-        except KeyboardInterrupt:
-            print("验证已中断")
+        # except KeyboardInterrupt:
+        #     print("验证已中断")

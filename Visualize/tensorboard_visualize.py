@@ -8,7 +8,7 @@ from datetime import datetime
 import numpy as np
 
 class TensorBoardLogger:
-    def __init__(self, log_root="./logs", host="127.0.0.1", port=6006, use_log_root=False):
+    def __init__(self, log_root="./logs", host="127.0.0.1", port=6006, use_log_root=False, auto_show=False):
         self.log_root = os.path.abspath(log_root)
         os.makedirs(self.log_root, exist_ok=True)
         if use_log_root:
@@ -20,7 +20,9 @@ class TensorBoardLogger:
         self.tb_proc = None
         self.host = host
         self.port = port
-        self._start_tensorboard()
+        self.auto_show = auto_show
+        if self.auto_show:
+            self._start_tensorboard()
 
     def _read_stream(self, stream, prefix):
         for line in iter(stream.readline, ""):
@@ -77,7 +79,7 @@ class TensorBoardLogger:
 
 # 示例用法
 if __name__ == "__main__":
-    logger = TensorBoardLogger(log_root="./logs", host="127.0.0.1", port=6006)
+    logger = TensorBoardLogger(log_root="./logs", host="127.0.0.1", port=6006, auto_show=False)
     try:
         step = 0
         while True:
@@ -93,4 +95,3 @@ if __name__ == "__main__":
         logger.close()
         print(f"日志已保存到：{logger.run_dir}")
 
-        
