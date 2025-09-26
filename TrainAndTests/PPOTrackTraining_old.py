@@ -261,15 +261,14 @@ if __name__=="__main__":
 
                     _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                     done, b_reward, _ = env.attack_terminate_and_reward('b')
-                    next_state = env.get_obs('b')  # todo 子策略的训练不要用这个
+                    next_b_obs = env.get_obs('b')  # todo 子策略的训练不要用这个
 
-                    transition_dict['states'].append(state)
+                    transition_dict['states'].append(b_obs)
                     transition_dict['actions'].append(u)
-                    transition_dict['next_states'].append(next_state)
+                    transition_dict['next_states'].append(next_b_obs)
                     transition_dict['rewards'].append(b_reward)
                     transition_dict['dones'].append(done)
                     transition_dict['action_bounds'].append(action_bound)
-                    # state = next_state
                     episode_return += b_reward * env.dt_maneuver
 
 
