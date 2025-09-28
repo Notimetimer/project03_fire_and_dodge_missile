@@ -24,7 +24,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.battle6dof1v1_missile0919 import *
+from Envs.battle6dof1v1_missile0919_old import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
@@ -148,7 +148,7 @@ for i in range(10):
                                 'psi': pi
                                 }
     env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-              red_init_ammo=0, blue_init_ammo=0)
+              red_init_ammo=6, blue_init_ammo=6)
 
     a1 = env.BUAV.pos_  # 58000,7750,20000
     a2 = env.RUAV.pos_  # 2000,7750,20000

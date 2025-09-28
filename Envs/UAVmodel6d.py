@@ -270,7 +270,7 @@ class UAVModel(object):
         self.theta = self.sim["attitude/theta-deg"] * pi / 180  # 俯仰角 (pitch)
         self.psi = self.sim["attitude/psi-deg"] * pi / 180  # 航向角 (yaw)
 
-        self.vel_ = np.array([vn, vu, ve]) / 3.2808 # ft.s转m/s
+        self.vel_ = np.array([vn, vu, ve]) # ft.s转m/s
 
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])

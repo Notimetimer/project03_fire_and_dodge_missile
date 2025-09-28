@@ -799,8 +799,14 @@ class Battle(object):
                         f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
                         f"Name=F16,Color={UAV.label}\n"
                     )
+                    data_to_send+=(
+                        f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
+                        f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
+                        f"Type=Beam, Color={UAV.label},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=20\n"
+                    )
                 else:
                     data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
+                    data_to_send += f"#-{UAV.id+1000}\n"
 
             # 传输导弹信息
             for missile in self.missiles:
@@ -824,6 +830,7 @@ class Battle(object):
             data_to_send = ''
             for UAV in self.UAVs:
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
+                data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
             for missile in self.missiles:
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
             self.tacview.send_data_to_client(data_to_send)

@@ -33,9 +33,11 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
+from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
 from Utilities.flatten_dict_obs import flatten_obs2 as flatten_obs
+
 
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
@@ -472,6 +474,8 @@ class Battle(object):
         AA_hor = sub_of_radian(psi_vT, q_beta) # 向右飞为正
         AA_vert = sub_of_radian(theta_vT, q_epsilon) # 向上飞为正      
 
+        d, d_hor, left_or_right = calc_intern_dist2cylinder(self.R_cage, own.pos_, own.psi_v, own.theta_v)
+
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [
             "target_alive", "target_observable", "target_tracked",
@@ -480,7 +484,8 @@ class Battle(object):
             "ego_main",            # 7
             "ego_control",         # 7
             "weapon",              # 1
-            "threat"               # 3
+            "threat",              # 3
+            "border",              # 2
         ]
 
         one_side_states = {
@@ -530,7 +535,13 @@ class Battle(object):
                 float(threat_delta_psi), # 0
                 float(threat_delta_theta), # 1
                 float(threat_distance) # 2
+            ],
+
+            "border":[
+                float(d_hor), # 0
+                int(left_or_right), # 1
             ]
+
         }
 
         return one_side_states
@@ -558,6 +569,7 @@ class Battle(object):
         self.state_init["ego_control"]=[0, 0, 0, 0, 0, 0, 0]
         self.state_init["weapon"]=120
         self.state_init["threat"]=[0,0,100]
+        self.state_init["border"]=[self.R_cage, 0]
 
         # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
         if pomdp: # 只有在部分观测情况下需要添加屏蔽
@@ -611,6 +623,7 @@ class Battle(object):
             s["ego_control"][2] /= (2 * pi)
             s["weapon"] /= 120
             s["threat"][2] /= 10e3
+            s["border"][0] = max(0, 1-s["border"][0]/10e3)
             return s
 
         observation = scale_state(state)

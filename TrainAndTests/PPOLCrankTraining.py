@@ -81,327 +81,336 @@ env = Battle(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
-state_dim = 32 # len(b_obs_spaces)
+state_dim = 34 # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-def launch_missile_if_possible(env, side='r'):
-    """
-    根据条件判断是否发射导弹
-    """
-    if side == 'r':
-        uav = env.RUAV
-        ally_missiles = env.Rmissiles
-        target = env.BUAV
-    else:  # side == 'b'
-        uav = env.BUAV
-        ally_missiles = env.Bmissiles
-        target = env.RUAV
+# 整一下高度-攻击区离散表（使用有限的选择）
+# 水平距离20km~80km, 我机高度 env.min_alt_save 到 env.max_alt_save 按 2e3 间隔划分
+# 目标高度 = 我机高度-2e3, 0, 2e3, 双方速度均为1.2Ma，最后构建一个[我机高度, 目标高度, 不可逃逸区边界，最大边界]的查询表
 
-    waite = False
-    for missile in ally_missiles:
-        if not missile.dead:
-            waite = True
-            break
+
+
+
+
+
+# def launch_missile_if_possible(env, side='r'):
+#     """
+#     根据条件判断是否发射导弹
+#     """
+#     if side == 'r':
+#         uav = env.RUAV
+#         ally_missiles = env.Rmissiles
+#         target = env.BUAV
+#     else:  # side == 'b'
+#         uav = env.BUAV
+#         ally_missiles = env.Bmissiles
+#         target = env.RUAV
+
+#     waite = False
+#     for missile in ally_missiles:
+#         if not missile.dead:
+#             waite = True
+#             break
         
-    if not waite:
-        # 判断是否可以发射导弹
-        if uav.can_launch_missile(target, env.t):
-            # 发射导弹
-            new_missile = uav.launch_missile(target, env.t, missile_class)
-            uav.ammo -= 1
-            new_missile.side = 'red' if side == 'r' else 'blue'
-            if side == 'r':
-                env.Rmissiles.append(new_missile)
-            else:
-                env.Bmissiles.append(new_missile)
-            env.missiles = env.Rmissiles + env.Bmissiles
-            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+#     if not waite:
+#         # 判断是否可以发射导弹
+#         if uav.can_launch_missile(target, env.t):
+#             # 发射导弹
+#             new_missile = uav.launch_missile(target, env.t, missile_class)
+#             uav.ammo -= 1
+#             new_missile.side = 'red' if side == 'r' else 'blue'
+#             if side == 'r':
+#                 env.Rmissiles.append(new_missile)
+#             else:
+#                 env.Bmissiles.append(new_missile)
+#             env.missiles = env.Rmissiles + env.Bmissiles
+#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
-def save_meta_once(path, state_dict):
-    if os.path.exists(path):
-        return
-    meta = {k: list(v.shape) for k, v in state_dict.items()}
-    with open(path, "w") as f:
-        json.dump(meta, f)
+# def save_meta_once(path, state_dict):
+#     if os.path.exists(path):
+#         return
+#     meta = {k: list(v.shape) for k, v in state_dict.items()}
+#     with open(path, "w") as f:
+#         json.dump(meta, f)
 
-if __name__=="__main__":
+# if __name__=="__main__":
 
-    agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                        lmbda, epochs, eps, gamma, device, critic_max_grad=100, actor_max_grad=2) # 2,2
+#     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+#                         lmbda, epochs, eps, gamma, device, critic_max_grad=100, actor_max_grad=2) # 2,2
 
-    # --- 仅保存一次网络形状（meta json），如果已存在则跳过
-    # log_dir = "./logs"
-    from datetime import datetime
-    # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+#     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
+#     # log_dir = "./logs"
+#     from datetime import datetime
+#     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+#     log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
-    os.makedirs(log_dir, exist_ok=True)
-    actor_meta_path = os.path.join(log_dir, "actor.meta.json")
-    critic_meta_path = os.path.join(log_dir, "critic.meta.json")
+#     os.makedirs(log_dir, exist_ok=True)
+#     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
+#     critic_meta_path = os.path.join(log_dir, "critic.meta.json")
 
-    save_meta_once(actor_meta_path, agent.actor.state_dict())
-    save_meta_once(critic_meta_path, agent.critic.state_dict())
+#     save_meta_once(actor_meta_path, agent.actor.state_dict())
+#     save_meta_once(critic_meta_path, agent.critic.state_dict())
 
-    from Math_calculates.ScaleLearningRate import scale_learning_rate
-    # 根据参数数量缩放学习率
-    actor_lr = scale_learning_rate(actor_lr, agent.actor)
-    critic_lr = scale_learning_rate(critic_lr, agent.critic)
-    agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+#     from Math_calculates.ScaleLearningRate import scale_learning_rate
+#     # 根据参数数量缩放学习率
+#     actor_lr = scale_learning_rate(actor_lr, agent.actor)
+#     critic_lr = scale_learning_rate(critic_lr, agent.critic)
+#     agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
-    from Visualize.tensorboard_visualize import TensorBoardLogger
+#     from Visualize.tensorboard_visualize import TensorBoardLogger
 
-    out_range_count = 0
-    return_list = []
-    steps_count = 0
+#     out_range_count = 0
+#     return_list = []
+#     steps_count = 0
 
-    logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
-
-
-    training_start_time = time.time()
-    launch_time_count = 0
-
-    t_bias = 0
+#     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
 
-    try:
-        # 强化学习训练
-        rl_steps = 0
-        with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
-            for i_episode in range(int(num_episodes*(1-pre_train_rate))):
-                # print("轮次", i_episode+1)
-                episode_return = 0
-                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+#     training_start_time = time.time()
+#     launch_time_count = 0
 
-                # 飞机出生状态指定
-                red_R_ = random.uniform(20e3, 60e3)
-                red_beta = random.uniform(0, 2*pi)
-                red_psi = random.uniform(0, 2*pi)
-                red_height = random.uniform(3e3, 10e3)
-                red_N = red_R_*cos(red_beta)
-                red_E = red_R_*sin(red_beta)
-                blue_height = random.uniform(3e3, 10e3)
+#     t_bias = 0
 
-                DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                        'psi': red_psi
-                                        }
-                DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-                                            'psi': pi
-                                            }
-                env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=0, blue_init_ammo=0)
 
-                # a1 = env.BUAV.pos_  # 58000,7750,20000
-                # a2 = env.RUAV.pos_  # 2000,7750,20000
-                # b1 = env.UAVs[0].pos_
-                # b2 = env.UAVs[1].pos_
-                done = False
+#     try:
+#         # 强化学习训练
+#         rl_steps = 0
+#         with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
+#             for i_episode in range(int(num_episodes*(1-pre_train_rate))):
+#                 # print("轮次", i_episode+1)
+#                 episode_return = 0
+#                 transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+
+#                 # 飞机出生状态指定
+#                 red_R_ = random.uniform(20e3, 60e3)
+#                 red_beta = random.uniform(0, 2*pi)
+#                 red_psi = random.uniform(0, 2*pi)
+#                 red_height = random.uniform(3e3, 10e3)
+#                 red_N = red_R_*cos(red_beta)
+#                 red_E = red_R_*sin(red_beta)
+#                 blue_height = random.uniform(3e3, 10e3)
+
+#                 DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+#                                         'psi': red_psi
+#                                         }
+#                 DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
+#                                             'psi': pi
+#                                             }
+#                 env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
+#                         red_init_ammo=0, blue_init_ammo=0)
+
+#                 # a1 = env.BUAV.pos_  # 58000,7750,20000
+#                 # a2 = env.RUAV.pos_  # 2000,7750,20000
+#                 # b1 = env.UAVs[0].pos_
+#                 # b2 = env.UAVs[1].pos_
+#                 done = False
                 
-                actor_grad_list = []
-                critc_grad_list = []
-                actor_loss_list = []
-                critic_loss_list = []
-                entropy_list = []
-                ratio_list = []
+#                 actor_grad_list = []
+#                 critc_grad_list = []
+#                 actor_loss_list = []
+#                 critic_loss_list = []
+#                 entropy_list = []
+#                 ratio_list = []
 
-                r_action_list = []
-                b_action_list = []
+#                 r_action_list = []
+#                 b_action_list = []
                 
-                episode_start_time = time.time()
+#                 episode_start_time = time.time()
 
-                # 环境运行一轮的情况
-                for count in range(round(args.max_episode_len / dt_maneuver)):
-                    # print(f"time: {env.t}")  # 打印当前的 count 值
-                    # 回合结束判断
-                    # print(env.running)
-                    current_t = count * dt_maneuver
-                    if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
-                        # print('回合结束，时间为：', env.t, 's')
-                        break
-                    # 获取观测信息
-                    r_obs_n = env.attack_obs('r')
-                    b_obs_n = env.attack_obs('b')
+#                 # 环境运行一轮的情况
+#                 for count in range(round(args.max_episode_len / dt_maneuver)):
+#                     # print(f"time: {env.t}")  # 打印当前的 count 值
+#                     # 回合结束判断
+#                     # print(env.running)
+#                     current_t = count * dt_maneuver
+#                     if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
+#                         # print('回合结束，时间为：', env.t, 's')
+#                         break
+#                     # 获取观测信息
+#                     r_obs_n = env.attack_obs('r')
+#                     b_obs_n = env.attack_obs('b')
 
-                    # 在这里将观测信息压入记忆
-                    env.RUAV.obs_memory = r_obs_n.copy()
-                    env.BUAV.obs_memory = b_obs_n.copy()
+#                     # 在这里将观测信息压入记忆
+#                     env.RUAV.obs_memory = r_obs_n.copy()
+#                     env.BUAV.obs_memory = b_obs_n.copy()
 
-                    b_obs = np.squeeze(b_obs_n)
+#                     b_obs = np.squeeze(b_obs_n)
 
-                    distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-                    # 发射导弹判决
-                    if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
-                        launch_time_count = 0
-                        launch_missile_if_possible(env, side='r')
-                        launch_missile_if_possible(env, side='b')
+#                     distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+#                     # 发射导弹判决
+#                     if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
+#                         launch_time_count = 0
+#                         launch_missile_if_possible(env, side='r')
+#                         launch_missile_if_possible(env, side='b')
 
-                    # 机动决策
-                    r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-                                            enm_pos_=env.BUAV.pos_, distance=distance,
-                                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                            o00=o00, R_cage=env.R_cage, wander=1
-                                            )
-                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
+#                     # 机动决策
+#                     r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
+#                                             enm_pos_=env.BUAV.pos_, distance=distance,
+#                                             ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
+#                                             o00=o00, R_cage=env.R_cage, wander=1
+#                                             )
+#                     b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
 
-                    # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
-                    #                         enm_pos_=env.RUAV.pos_, distance=distance,
-                    #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
-                    #                         o00=o00, R_cage=env.R_cage, wander=0
-                    #                         )
+#                     # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
+#                     #                         enm_pos_=env.RUAV.pos_, distance=distance,
+#                     #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
+#                     #                         o00=o00, R_cage=env.R_cage, wander=0
+#                     #                         )
                     
-                    r_action_list.append(r_action_n)
-                    b_action_list.append(b_action_n)
+#                     r_action_list.append(r_action_n)
+#                     b_action_list.append(b_action_n)
 
-                    _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                    done, b_reward, _ = env.attack_terminate_and_reward('b')
-                    next_b_obs = env.attack_obs('b')  # 子策略的训练不要用get_obs
+#                     _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+#                     done, b_reward, _ = env.attack_terminate_and_reward('b')
+#                     next_b_obs = env.attack_obs('b')  # 子策略的训练不要用get_obs
 
-                    transition_dict['states'].append(b_obs)
-                    transition_dict['actions'].append(u)
-                    transition_dict['next_states'].append(next_b_obs)
-                    transition_dict['rewards'].append(b_reward)
-                    transition_dict['dones'].append(done)
-                    transition_dict['action_bounds'].append(action_bound)
-                    # state = next_state
-                    episode_return += b_reward * env.dt_maneuver
+#                     transition_dict['states'].append(b_obs)
+#                     transition_dict['actions'].append(u)
+#                     transition_dict['next_states'].append(next_b_obs)
+#                     transition_dict['rewards'].append(b_reward)
+#                     transition_dict['dones'].append(done)
+#                     transition_dict['action_bounds'].append(action_bound)
+#                     # state = next_state
+#                     episode_return += b_reward * env.dt_maneuver
 
 
-                    '''显示运行轨迹'''
-                    # 可视化
-                    env.render(t_bias=t_bias)
+#                     '''显示运行轨迹'''
+#                     # 可视化
+#                     env.render(t_bias=t_bias)
                 
-                episode_end_time = time.time()  # 记录结束时间
-                # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
+#                 episode_end_time = time.time()  # 记录结束时间
+#                 # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
 
-                if env.lose==1:
-                    out_range_count+=1
-                return_list.append(episode_return)
-                agent.update(transition_dict)
+#                 if env.lose==1:
+#                     out_range_count+=1
+#                 return_list.append(episode_return)
+#                 agent.update(transition_dict)
                 
-                # print(t_bias)
-                env.clear_render(t_bias=t_bias)
-                t_bias += env.t
-                r_action_list = np.array(r_action_list)
-                b_action_list = np.array(b_action_list)
+#                 # print(t_bias)
+#                 env.clear_render(t_bias=t_bias)
+#                 t_bias += env.t
+#                 r_action_list = np.array(r_action_list)
+#                 b_action_list = np.array(b_action_list)
 
-                # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
-                os.makedirs(log_dir, exist_ok=True)
-                # critic overwrite
-                critic_path = os.path.join(log_dir, "critic.pt")
-                th.save(agent.critic.state_dict(), critic_path)
-                # actor RL snapshot
-                if i_episode % 10 == 0:
-                    actor_name = f"actor_rein{i_episode}.pt"
-                    actor_path = os.path.join(log_dir, actor_name)
-                    th.save(agent.actor.state_dict(), actor_path)
+#                 # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
+#                 os.makedirs(log_dir, exist_ok=True)
+#                 # critic overwrite
+#                 critic_path = os.path.join(log_dir, "critic.pt")
+#                 th.save(agent.critic.state_dict(), critic_path)
+#                 # actor RL snapshot
+#                 if i_episode % 10 == 0:
+#                     actor_name = f"actor_rein{i_episode}.pt"
+#                     actor_path = os.path.join(log_dir, actor_name)
+#                     th.save(agent.actor.state_dict(), actor_path)
 
                 
-                # tqdm 训练进度显示
-                if (i_episode + 1) >= 10:
-                    pbar.set_postfix({'episode': '%d' % (i_episode + 1),
-                                    'return': '%.3f' % np.mean(return_list[-10:])})
-                pbar.update(1)
+#                 # tqdm 训练进度显示
+#                 if (i_episode + 1) >= 10:
+#                     pbar.set_postfix({'episode': '%d' % (i_episode + 1),
+#                                     'return': '%.3f' % np.mean(return_list[-10:])})
+#                 pbar.update(1)
 
-                # tensorboard 训练进度显示
-                logger.add("train/episode_return", episode_return, i_episode + 1)
+#                 # tensorboard 训练进度显示
+#                 logger.add("train/episode_return", episode_return, i_episode + 1)
 
-                actor_grad_norm = agent.actor_grad
-                actor_post_slip_grad = agent.post_clip_actor_grad
-                critic_grad_norm = agent.critic_grad
-                critic_post_clip_grad = agent.post_clip_critic_grad
-                # 梯度监控
-                logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
-                logger.add("train/actor_post_slip_grad", actor_post_slip_grad, i_episode + 1)
-                logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
-                logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
-                # 损失函数监控
-                logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
-                logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
-                # 强化学习actor特殊项监控
-                logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
-                logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
+#                 actor_grad_norm = agent.actor_grad
+#                 actor_post_slip_grad = agent.post_clip_actor_grad
+#                 critic_grad_norm = agent.critic_grad
+#                 critic_post_clip_grad = agent.post_clip_critic_grad
+#                 # 梯度监控
+#                 logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
+#                 logger.add("train/actor_post_slip_grad", actor_post_slip_grad, i_episode + 1)
+#                 logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
+#                 logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
+#                 # 损失函数监控
+#                 logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
+#                 logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
+#                 # 强化学习actor特殊项监控
+#                 logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
+#                 logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
 
-        training_end_time = time.time()  # 记录结束时间
-        elapsed = training_end_time - training_start_time
-        from datetime import timedelta
-        td = timedelta(seconds=elapsed)
-        d = td.days
-        h, rem = divmod(td.seconds, 3600)
-        m, s = divmod(rem, 60)
-        print(f"总训练时长: {d}天 {h}小时 {m}分钟 {s}秒")
+#         training_end_time = time.time()  # 记录结束时间
+#         elapsed = training_end_time - training_start_time
+#         from datetime import timedelta
+#         td = timedelta(seconds=elapsed)
+#         d = td.days
+#         h, rem = divmod(td.seconds, 3600)
+#         m, s = divmod(rem, 60)
+#         print(f"总训练时长: {d}天 {h}小时 {m}分钟 {s}秒")
 
 
-    except KeyboardInterrupt:
-        print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
-    finally:
-        logger.close()
-        print(f"日志已保存到：{logger.run_dir}")
+#     except KeyboardInterrupt:
+#         print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
+#     finally:
+#         logger.close()
+#         print(f"日志已保存到：{logger.run_dir}")
 
-        # # 测试训练效果
-        # agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-        #                 lmbda, epochs, eps, gamma, device)
-        # if os.path.exists(actor_meta_path):
-        #     rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-        #     sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-        #     latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
-        #     if latest_actor_path:
-        #         # 直接加载权重到现有的 agent
-        #         sd = th.load(latest_actor_path, map_location=device)
-        #         agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
-        #         print(f"Loaded actor for test from: {latest_actor_path}")
+#         # # 测试训练效果
+#         # agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+#         #                 lmbda, epochs, eps, gamma, device)
+#         # if os.path.exists(actor_meta_path):
+#         #     rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
+#         #     sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
+#         #     latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
+#         #     if latest_actor_path:
+#         #         # 直接加载权重到现有的 agent
+#         #         sd = th.load(latest_actor_path, map_location=device)
+#         #         agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
+#         #         print(f"Loaded actor for test from: {latest_actor_path}")
 
-        # try:
-        #     env = Battle(args, tacview_show=1)
-        #     for i_episode in range(3):  # 10
-        #         r_action_list=[]
-        #         b_action_list=[]
-        #         # 飞机出生状态指定
-        #         red_R_ = random.uniform(20e3, 60e3)
-        #         red_beta = random.uniform(0, 2*pi)
-        #         red_psi = random.uniform(0, 2*pi)
-        #         red_height = random.uniform(3e3, 10e3)
-        #         red_N = red_R_*cos(red_beta)
-        #         red_E = red_R_*sin(red_beta)
-        #         blue_height = random.uniform(3e3, 10e3)
+#         # try:
+#         #     env = Battle(args, tacview_show=1)
+#         #     for i_episode in range(3):  # 10
+#         #         r_action_list=[]
+#         #         b_action_list=[]
+#         #         # 飞机出生状态指定
+#         #         red_R_ = random.uniform(20e3, 60e3)
+#         #         red_beta = random.uniform(0, 2*pi)
+#         #         red_psi = random.uniform(0, 2*pi)
+#         #         red_height = random.uniform(3e3, 10e3)
+#         #         red_N = red_R_*cos(red_beta)
+#         #         red_E = red_R_*sin(red_beta)
+#         #         blue_height = random.uniform(3e3, 10e3)
 
-        #         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-        #                                 'psi': red_psi
-        #                                 }
-        #         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-        #                                     'psi': pi
-        #                                     }
-        #         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-        #                 red_init_ammo=0, blue_init_ammo=0)
-        #         step = 0
-        #         done = False
-        #         while not done:
-        #             r_obs_n = env.attack_obs('r')
-        #             b_obs_n = env.attack_obs('b')
-        #             # 在这里将观测信息压入记忆
-        #             env.RUAV.obs_memory = r_obs_n.copy()
-        #             env.BUAV.obs_memory = b_obs_n.copy()
-        #             state = np.squeeze(b_obs_n)
-        #             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-        #             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-        #                                     enm_pos_=env.BUAV.pos_, distance=distance,
-        #                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-        #                                     o00=o00, R_cage=env.R_cage, wander=1
-        #                                     )
-        #             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+#         #         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+#         #                                 'psi': red_psi
+#         #                                 }
+#         #         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
+#         #                                     'psi': pi
+#         #                                     }
+#         #         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
+#         #                 red_init_ammo=0, blue_init_ammo=0)
+#         #         step = 0
+#         #         done = False
+#         #         while not done:
+#         #             r_obs_n = env.attack_obs('r')
+#         #             b_obs_n = env.attack_obs('b')
+#         #             # 在这里将观测信息压入记忆
+#         #             env.RUAV.obs_memory = r_obs_n.copy()
+#         #             env.BUAV.obs_memory = b_obs_n.copy()
+#         #             state = np.squeeze(b_obs_n)
+#         #             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+#         #             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
+#         #                                     enm_pos_=env.BUAV.pos_, distance=distance,
+#         #                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
+#         #                                     o00=o00, R_cage=env.R_cage, wander=1
+#         #                                     )
+#         #             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
                     
-        #             r_action_list.append(r_action_n)
-        #             b_action_list.append(b_action_n)
+#         #             r_action_list.append(r_action_n)
+#         #             b_action_list.append(b_action_n)
 
-        #             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-        #             done, b_reward, _ = env.attack_terminate_and_reward('b')
+#         #             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+#         #             done, b_reward, _ = env.attack_terminate_and_reward('b')
 
-        #             step += 1
-        #             env.render(t_bias=t_bias)
-        #             time.sleep(0.01)
+#         #             step += 1
+#         #             env.render(t_bias=t_bias)
+#         #             time.sleep(0.01)
                 
-        #         env.clear_render(t_bias=t_bias)
-        #         t_bias += env.t
+#         #         env.clear_render(t_bias=t_bias)
+#         #         t_bias += env.t
 
-        # except KeyboardInterrupt:
-        #     print("验证已中断")
+#         # except KeyboardInterrupt:
+#         #     print("验证已中断")

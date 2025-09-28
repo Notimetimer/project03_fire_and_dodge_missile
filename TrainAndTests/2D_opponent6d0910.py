@@ -176,7 +176,7 @@ for i in range(1):
                                 'psi': -pi/2
                                 }
     env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-              red_init_ammo=1, blue_init_ammo=1)
+              red_init_ammo=6, blue_init_ammo=6)
 
     a1 = env.BUAV.pos_  # 58000,7750,20000
     a2 = env.RUAV.pos_  # 2000,7750,20000

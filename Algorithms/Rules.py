@@ -7,7 +7,6 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Math_calculates.sub_of_angles import *
 
-
 def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_missiles, o00, R_cage, wander=0):
     # 输出为所需的绝对高度、相对方位和绝对速度
     # 是否有导弹可用
@@ -83,3 +82,4 @@ def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_miss
         action_n[0] = 5000
     
     return action_n
+
