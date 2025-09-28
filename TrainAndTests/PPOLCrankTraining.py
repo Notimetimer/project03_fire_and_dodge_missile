@@ -74,7 +74,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
-mission_name = 'Attack'
+mission_name = 'LCrank'
 
 env = Battle(args, tacview_show=use_tacview)
 # r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
@@ -109,93 +109,60 @@ prepare_time = end_time - start_time
 print(f"仿真初始条件查询表构建时长: {prepare_time} 秒") 
 
 
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
+def save_meta_once(path, state_dict):
+    if os.path.exists(path):
+        return
+    meta = {k: list(v.shape) for k, v in state_dict.items()}
+    with open(path, "w") as f:
+        json.dump(meta, f)
 
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-        
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'red' if side == 'r' else 'blue'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+if __name__=="__main__":
 
-# def save_meta_once(path, state_dict):
-#     if os.path.exists(path):
-#         return
-#     meta = {k: list(v.shape) for k, v in state_dict.items()}
-#     with open(path, "w") as f:
-#         json.dump(meta, f)
+    agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=100, actor_max_grad=2) # 2,2
 
-# if __name__=="__main__":
+    # --- 仅保存一次网络形状（meta json），如果已存在则跳过
+    # log_dir = "./logs"
+    from datetime import datetime
+    # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
-#     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-#                         lmbda, epochs, eps, gamma, device, critic_max_grad=100, actor_max_grad=2) # 2,2
+    os.makedirs(log_dir, exist_ok=True)
+    actor_meta_path = os.path.join(log_dir, "actor.meta.json")
+    critic_meta_path = os.path.join(log_dir, "critic.meta.json")
 
-#     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
-#     # log_dir = "./logs"
-#     from datetime import datetime
-#     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-#     log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    save_meta_once(actor_meta_path, agent.actor.state_dict())
+    save_meta_once(critic_meta_path, agent.critic.state_dict())
 
-#     os.makedirs(log_dir, exist_ok=True)
-#     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
-#     critic_meta_path = os.path.join(log_dir, "critic.meta.json")
+    from Math_calculates.ScaleLearningRate import scale_learning_rate
+    # 根据参数数量缩放学习率
+    actor_lr = scale_learning_rate(actor_lr, agent.actor)
+    critic_lr = scale_learning_rate(critic_lr, agent.critic)
+    agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
-#     save_meta_once(actor_meta_path, agent.actor.state_dict())
-#     save_meta_once(critic_meta_path, agent.critic.state_dict())
+    from Visualize.tensorboard_visualize import TensorBoardLogger
 
-#     from Math_calculates.ScaleLearningRate import scale_learning_rate
-#     # 根据参数数量缩放学习率
-#     actor_lr = scale_learning_rate(actor_lr, agent.actor)
-#     critic_lr = scale_learning_rate(critic_lr, agent.critic)
-#     agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+    out_range_count = 0
+    return_list = []
+    steps_count = 0
 
-#     from Visualize.tensorboard_visualize import TensorBoardLogger
-
-#     out_range_count = 0
-#     return_list = []
-#     steps_count = 0
-
-#     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
+    logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
 
-#     training_start_time = time.time()
-#     launch_time_count = 0
+    training_start_time = time.time()
+    launch_time_count = 0
 
-#     t_bias = 0
+    t_bias = 0
 
 
-#     try:
-#         # 强化学习训练
-#         rl_steps = 0
-#         with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
-#             for i_episode in range(int(num_episodes*(1-pre_train_rate))):
-#                 # print("轮次", i_episode+1)
-#                 episode_return = 0
-#                 transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+    try:
+        # 强化学习训练
+        rl_steps = 0
+        with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
+            for i_episode in range(int(num_episodes*(1-pre_train_rate))):
+                # print("轮次", i_episode+1)
+                episode_return = 0
+                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
 #                 # 飞机出生状态指定
 #                 red_R_ = random.uniform(20e3, 60e3)
