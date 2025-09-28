@@ -123,9 +123,15 @@ if __name__ == '__main__':
         for move_pattern in move_patterns
     ]
     # 执行并行任务
-    far_edges = Parallel(n_jobs=5)(parallel_tasks)
+    far_edges_and_times = Parallel(n_jobs=5)(parallel_tasks)
     t1 = time.time()
+    far_edges = []
+    times = []
+    for far_edge, calc_time in far_edges_and_times:
+        far_edges.append(far_edge)
+        times.append(calc_time)
     print(far_edges)
+    print(times)
     print(f"并行程序运行时长: {t1-t0} 秒")
     
 

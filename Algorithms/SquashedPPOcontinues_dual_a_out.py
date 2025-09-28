@@ -248,6 +248,10 @@ class PPOContinuous:
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        
+        # # 优势归一化（目前只发现了阻碍）
+        # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
+        # advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
         # 策略输出（未压缩的 mu,std）
         mu, std = self.actor(states)
@@ -260,6 +264,9 @@ class PPOContinuous:
         # # 反算 u = atanh(a)
         u_old = u_s
         old_log_probs = dist.log_prob(0, u_old)
+
+        # # 提前在action_dim维度求和
+        # old_log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)    # -> (N,1)
 
         if torch.isnan(old_log_probs).any():
             raise ValueError("old_log_probs 包含 NaN，检查 action_bounds 或 actions 的合法性")
@@ -284,6 +291,9 @@ class PPOContinuous:
             dist = SquashedNormal(mu, std)
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
             log_probs = dist.log_prob(0, u_old)
+
+            # # 提前在action_dim维度求和
+            # log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)   # -> (N,1)
 
             ratio = torch.exp(log_probs - old_log_probs)
             surr1 = ratio * advantage
