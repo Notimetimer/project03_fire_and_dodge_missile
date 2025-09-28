@@ -42,6 +42,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 from Algorithms.SquashedPPOcontinues_dual_a_out import *
 from tqdm import tqdm
+from LaunchZone.calc_DLZ import *
 
 use_tacview = 0  # 是否可视化
 
@@ -90,9 +91,22 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 # 水平距离20km~80km, 我机高度 env.min_alt_save 到 env.max_alt_save 按 2e3 间隔划分
 # 目标高度 = 我机高度-2e3, 0, 2e3, 双方速度均为1.2Ma，最后构建一个[我机高度, 目标高度, 不可逃逸区边界，最大边界]的查询表
 
+init_states = []
+start_time = time.time()
+for ego_height in np.arange(env.min_alt_save, env.max_alt_save+1, 2e3):
+    enm_heights = [ego_height-2e3, ego_height, ego_height+2e3]
+    for enm_height in enm_heights:
+        if enm_height<3e3 or enm_height>13e3:
+            enm_heights.remove(enm_height)
+    for enm_height in enm_heights:
+        far_edges, _ = crank_pre_calculation(5e3, 100e3, 1e3, ego_height, enm_height, v_carrier=1.2*340, v_target=1.2*340)
+        init_states.append([ego_height, enm_height, min(far_edges), max(far_edges)])
 
-
-
+initial_states = np.array(init_states)
+print(initial_states)
+end_time = time.time()
+prepare_time = end_time - start_time
+print(f"仿真初始条件查询表构建时长: {prepare_time} 秒") 
 
 
 # def launch_missile_if_possible(env, side='r'):

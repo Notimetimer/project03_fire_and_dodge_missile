@@ -193,13 +193,6 @@ for i in range(10):
                                    o00=o00, R_cage=env.R_cage, wander=1
                                    )
 
-        # test
-        # b_action_n = [[0.3, 0.0, 1.0]]
-        # L_ = env.RUAV.pos_ - env.BUAV.pos_
-        # beta = atan2(L_[2], L_[0])
-        # delta_psi = sub_of_radian(beta, env.BUAV.psi)
-        # b_action_n[0][1] = delta_psi
-
         b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
                                    enm_pos_=env.RUAV.pos_, distance=distance,
                                    ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,

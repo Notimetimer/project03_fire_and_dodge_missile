@@ -623,7 +623,8 @@ class Battle(object):
             s["ego_control"][2] /= (2 * pi)
             s["weapon"] /= 120
             s["threat"][2] /= 10e3
-            s["border"][0] = max(0, 1-s["border"][0]/10e3)
+            s["border"][0] = max(0, 1-s["border"][0]/20e3)
+            s["border"][1] = 0 if s["border"][0]==0 else s["border"][1]
             return s
 
         observation = scale_state(state)
@@ -638,6 +639,7 @@ class Battle(object):
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
+        full_obs["border"] = copy.deepcopy(self.obs_init["border"])
         
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
