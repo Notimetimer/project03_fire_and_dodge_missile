@@ -224,8 +224,9 @@ class Battle(object):
         return self.obs_spaces
 
     def step(self, r_actions, b_actions):
+        report_move_time_rate = int(round(self.dt_maneuver / dt_move))
         # 输入动作（范围为[-1,1]
-        self.t += dt_maneuver
+        self.t += self.dt_maneuver
         self.t = round(self.t, 2)  # 保留两位小数
 
         actions = [r_actions] + [b_actions]

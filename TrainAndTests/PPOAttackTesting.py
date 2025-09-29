@@ -5,6 +5,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from TrainAndTests.PPOAttackTraining import *
 import re
 
+dt_maneuver= 0.2 
+action_eps = 0.8 # 动作平滑度
+
 # 找出日期最大的目录
 def get_latest_log_dir(pre_log_dir, mission_name=None):
     # 匹配 run-YYYYMMDD-HHMMSS 目录
@@ -68,9 +71,13 @@ try:
                                     }
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=0, blue_init_ammo=0)
+        env.dt_maneuver = dt_maneuver
         step = 0
         done = False
+        hist_b_action = np.zeros(3)
+
         while not done:
+            print(env.t)
             r_obs_n = env.attack_obs('r')
             b_obs_n = env.attack_obs('b')
             # 在这里将观测信息压入记忆
@@ -85,6 +92,10 @@ try:
                                     )
             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
             
+            # 动作平滑（实验性）
+            b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
+            hist_b_action = b_action_n
+
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
 

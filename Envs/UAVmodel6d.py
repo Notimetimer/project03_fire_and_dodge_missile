@@ -173,7 +173,6 @@ class UAVModel(object):
             cd = 0.2
         return cd / 10
 
-    # todo 补充无人机的运动方程和动作逻辑
     def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False):
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
@@ -274,6 +273,10 @@ class UAVModel(object):
 
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])
+    
+    # 
+    def p2p_move(self, throttle, elevetor, aileron):
+        pass
 
     def short_range_kill(self, target):
         # 近距杀，不需要导弹的模型
