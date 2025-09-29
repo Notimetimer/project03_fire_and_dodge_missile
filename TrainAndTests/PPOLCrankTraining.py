@@ -44,7 +44,7 @@ from Algorithms.SquashedPPOcontinues_dual_a_out import *
 from tqdm import tqdm
 from LaunchZone.calc_DLZ import *
 
-use_tacview = 1  # 是否可视化
+use_tacview = 0  # 是否可视化
 
 # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
 if matplotlib.get_backend() != 'TkAgg':
@@ -107,9 +107,11 @@ def save_meta_once(path, state_dict):
         json.dump(meta, f)
 
 if __name__=="__main__":
+    
+    transition_dict_capacity = env.args.max_episode_len//env.dt_maneuver + 1
 
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                        lmbda, epochs, eps, gamma, device, critic_max_grad=100, actor_max_grad=2) # 2,2
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2) # 2,2
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
@@ -143,8 +145,8 @@ if __name__=="__main__":
     launch_time_count = 0
 
     t_bias = 0
-
-
+    steps_since_update = 0
+    # transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
     try:
         # 强化学习训练
         rl_steps = 0
@@ -210,6 +212,34 @@ if __name__=="__main__":
 
                     b_obs = np.squeeze(b_obs_n)
 
+                    # 反向转回字典方便排查
+                    b_check_obs = copy.deepcopy(env.state_init)
+                    key_order = env.key_order
+
+                    # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
+                    arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
+                    idx = 0
+                    for k in key_order:
+                        if k not in b_check_obs:
+                            raise KeyError(f"key '{k}' not in state_init")
+                        v0 = b_check_obs[k]
+                        # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
+                        if isinstance(v0, (list, tuple, np.ndarray)):
+                            length = len(v0)
+                            slice_v = arr[idx: idx + length]
+                            if isinstance(v0, np.ndarray):
+                                b_check_obs[k] = slice_v.copy()
+                            else:
+                                b_check_obs[k] = slice_v.tolist()
+                            idx += length
+                        else:
+                            # 标量
+                            b_check_obs[k] = float(arr[idx])
+                            idx += 1
+                    if idx != arr.size:
+                        # 长度不匹配时给出提示（便于调试）
+                        print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
+
                     distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                     
                     # 开局就发射一枚导弹
@@ -249,7 +279,27 @@ if __name__=="__main__":
                     transition_dict['action_bounds'].append(action_bound)
                     # state = next_state
                     episode_return += b_reward * env.dt_maneuver
+                    # steps_since_update += 1
 
+                    # if steps_since_update >= transition_dict_capacity:
+                    #     steps_since_update = 0
+                    #     agent.update(transition_dict)
+                    #     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+                    #     actor_grad_norm = agent.actor_grad
+                    #     actor_post_clip_grad = agent.post_clip_actor_grad
+                    #     critic_grad_norm = agent.critic_grad
+                    #     critic_post_clip_grad = agent.post_clip_critic_grad
+                    #     # 梯度监控
+                    #     logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
+                    #     # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
+                    #     logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
+                    #     # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
+                    #     # 损失函数监控
+                    #     logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
+                    #     logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
+                    #     # 强化学习actor特殊项监控
+                    #     logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
+                    #     logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
 
                     '''显示运行轨迹'''
                     # 可视化
@@ -262,7 +312,26 @@ if __name__=="__main__":
                     out_range_count+=1
                 return_list.append(episode_return)
                 agent.update(transition_dict)
-                
+
+                # tensorboard 训练进度显示
+                logger.add("train/episode_return", episode_return, i_episode + 1)
+
+                actor_grad_norm = agent.actor_grad
+                actor_post_clip_grad = agent.post_clip_actor_grad
+                critic_grad_norm = agent.critic_grad
+                critic_post_clip_grad = agent.post_clip_critic_grad
+                # 梯度监控
+                logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
+                # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
+                logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
+                # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
+                # 损失函数监控
+                logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
+                logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
+                # 强化学习actor特殊项监控
+                logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
+                logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
+
                 # print(t_bias)
                 env.clear_render(t_bias=t_bias)
                 t_bias += env.t
@@ -279,7 +348,6 @@ if __name__=="__main__":
                     actor_name = f"actor_rein{i_episode}.pt"
                     actor_path = os.path.join(log_dir, actor_name)
                     th.save(agent.actor.state_dict(), actor_path)
-
                 
                 # tqdm 训练进度显示
                 if (i_episode + 1) >= 10:
@@ -287,25 +355,7 @@ if __name__=="__main__":
                                     'return': '%.3f' % np.mean(return_list[-10:])})
                 pbar.update(1)
 
-                # tensorboard 训练进度显示
-                logger.add("train/episode_return", episode_return, i_episode + 1)
-
-                actor_grad_norm = agent.actor_grad
-                actor_post_slip_grad = agent.post_clip_actor_grad
-                critic_grad_norm = agent.critic_grad
-                critic_post_clip_grad = agent.post_clip_critic_grad
-                # 梯度监控
-                logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
-                logger.add("train/actor_post_slip_grad", actor_post_slip_grad, i_episode + 1)
-                logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
-                logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
-                # 损失函数监控
-                logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
-                logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
-                # 强化学习actor特殊项监控
-                logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
-                logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
-
+                
         training_end_time = time.time()  # 记录结束时间
         elapsed = training_end_time - training_start_time
         from datetime import timedelta

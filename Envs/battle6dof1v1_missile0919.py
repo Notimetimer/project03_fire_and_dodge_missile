@@ -408,10 +408,14 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        target_tracked = 1
+        target_locked = 1
 
         # 导弹中制导状态 bool
         missile_in_mid_term = 0
+        # 首先找到所有存活的友方导弹是否由本机发射
+
+        # 然后判断该导弹的 .guidance_stage是否<3
+
         pass # todo 需要由导弹的类实例报告
 
         # 导弹预计碰撞时间, 如果没有在飞行导弹，在get_obs中置为(120s)
@@ -479,7 +483,7 @@ class Battle(object):
 
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [
-            "target_alive", "target_observable", "target_tracked",
+            "target_alive", "target_observable", "target_locked",
             "missile_in_mid_term", "locked_by_target", "warning",
             "target_information",  # 8
             "ego_main",            # 7
@@ -493,7 +497,7 @@ class Battle(object):
             # 单独键（标量或布尔）
             "target_alive": bool(target_alive),
             "target_observable": int(target_observable), # 0 完全不可见 1 角度信息可见 2 完全可见
-            "target_tracked": bool(target_tracked), # 已锁定敌机
+            "target_locked": bool(target_locked), # 已锁定敌机
             "missile_in_mid_term": bool(missile_in_mid_term),
             "locked_by_target": bool(locked_by_target), # 敌锁定
             "warning": bool(warning),
@@ -561,7 +565,7 @@ class Battle(object):
         self.state_init = self.get_state(side)
         self.state_init["target_alive"]=1 # 默认目标存活
         self.state_init["target_observable"]=2 # 默认完全可见
-        self.state_init["target_tracked"]=0
+        self.state_init["target_locked"]=0
         self.state_init["missile_in_mid_term"]=0
         self.state_init["locked_by_target"]=0
         self.state_init["warning"]=0
@@ -650,7 +654,7 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
-        full_obs["target_tracked"] = 1
+        full_obs["target_locked"] = 1
         full_obs["missile_in_mid_term"] = 1
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
@@ -663,7 +667,7 @@ class Battle(object):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
-        full_obs["target_tracked"] = 1
+        full_obs["target_locked"] = 1
         full_obs["missile_in_mid_term"] = 1
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
@@ -802,10 +806,11 @@ class Battle(object):
         # 超时结束
         if self.t > self.game_time_limit:
             terminate = True
-        # 雷达丢失目标判为失败
+        # 雷达丢失目标判为失败 (会导致训练不稳定)
         if alpha > ego.max_radar_angle:
-            terminate = True
-            self.lose = 1
+            # terminate = True
+            # self.lose = 1
+            pass
         # 出界失败
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
@@ -846,6 +851,8 @@ class Battle(object):
             r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
         if self.lose:
             r_event -= 20
+        if alpha > ego.max_radar_angle:
+            r_event -= 30 # 超出雷达范围严重惩罚
 
         # 平稳性惩罚
         r_steady = -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2

@@ -120,7 +120,8 @@ class PolicyNetContinuous(torch.nn.Module):
         self.fc_mu = torch.nn.Linear(prev_size, action_dim)
         self.fc_std = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x, min_std=1e-7, max_std=5): # 最小与最大方差 1e-3
+    def forward(self, x, min_std=1e-7, max_std=0.6): 
+        # 最小方差 1e-3, 最大方差不要超过0.707否则tanh后会出现双峰函数
         x = self.net(x)
         mu = self.fc_mu(x)
         std = F.softplus(self.fc_std(x))
@@ -263,7 +264,7 @@ class PPOContinuous:
         
         # # 反算 u = atanh(a)
         u_old = u_s
-        old_log_probs = dist.log_prob(0, u_old)
+        old_log_probs = dist.log_prob(0, u_old) # (N,1)
 
         # # 提前在action_dim维度求和
         # old_log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)    # -> (N,1)
@@ -290,19 +291,22 @@ class PPOContinuous:
 
             dist = SquashedNormal(mu, std)
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
-            log_probs = dist.log_prob(0, u_old)
+            log_probs = dist.log_prob(0, u_old) # (N,1)
 
             # # 提前在action_dim维度求和
             # log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)   # -> (N,1)
 
-            ratio = torch.exp(log_probs - old_log_probs)
-            surr1 = ratio * advantage
+            ratio = torch.exp(log_probs - old_log_probs) # (N,1)
+            # surr1 = ratio * advantage
+            # calmp surr1
+            surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
             # 取消提前求和 # actor_loss = -torch.min(surr1, surr2).mean() - 0.1 * dist.entropy().mean()
 
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
-            entropy_factor = torch.clamp(dist.entropy().mean(), -20, 7) # 最大e^2
-            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor
+
+            entropy_factor = torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor # 标量
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
             critic_loss = F.mse_loss(self.critic(states), td_target.detach())

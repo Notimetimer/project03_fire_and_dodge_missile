@@ -100,7 +100,7 @@ class UAVModel(object):
         sim.load_model("f16")  # f15, p51d, ball 等模型可选
         # 设置初始状态（单位：英尺、节、角度）
         sim["ic/h-sl-ft"] = h0 * 3.2808  # 高度：m -> ft
-        sim["ic/vt-kts"] = v0 * 1.9438  # 空速： m/s-> 节
+        sim["ic/vt-kts"] = v0 * 1.9438  # 空速： m/s-> 节 vt 真空速 ic/vc 仪表空速
         sim["ic/psi-true-deg"] = psi0 * 180 / pi  # 航向角: °
         sim["ic/phi-deg"] = phi0 * 180 / pi
         sim["ic/theta-deg"] = theta0 * 180 / pi
