@@ -1,5 +1,5 @@
 '''
-注意：take_action 有两个输出，即actor原始输出u和tanh和scale后的action_exec
+注意：take action 有两个输出，即actor原始输出u和tanh和scale后的action_exec
 有监督预训练时经验池存 action_exec, 强化学习训练时经验池存 u
 '''
 
@@ -19,6 +19,21 @@ def model_grad_norm(model):
             total_sq += float(g.norm(2).item()) ** 2
             found = True
     return float(total_sq ** 0.5) if found else float('nan')
+
+def check_weights_bias_nan(model, model_name="model", place=None):
+    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
+    参数:
+      model: torch.nn.Module
+      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
+      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
+    """
+    for name, param in model.named_parameters():
+        if ("weight" in name) or ("bias" in name):
+            if param is None:
+                continue
+            if torch.isnan(param).any():
+                loc = f" at {place}" if place else ""
+                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
 
 
 def moving_average(a, window_size):
@@ -216,7 +231,22 @@ class PPOContinuous:
 
     def take_action(self, state, action_bounds, explore=True):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
+        # 检查state中是否存在nan
+        if torch.isnan(state).any() or torch.isinf(state).any():
+            print('state', state)
+        # 检查actor参数中是否存在nan
+        check_weights_bias_nan(self.actor, "actor", "take action中")
         mu, std = self.actor(state)
+        # 检查mu, std是否含有nan
+        if torch.isnan(mu).any() or torch.isnan(std).any() or torch.isinf(mu).any() or torch.isinf(std).any():
+            print('mu', mu)
+            print('std', std)
+            raise ValueError(
+                f"NaN/Inf detected in actor outputs: mu_nan={torch.isnan(mu).any().item()}, "
+                f"std_nan={torch.isnan(std).any().item()}, mu_inf={torch.isinf(mu).any().item()}, "
+                f"std_inf={torch.isinf(std).any().item()}"
+            ) 
+
         dist = SquashedNormal(mu, std)
         if explore:
             a_norm, u = dist.sample()
@@ -289,6 +319,10 @@ class PPOContinuous:
             if torch.isnan(critic_values).any():
                 raise ValueError("NaN in Critic outputs in loop")
 
+            # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
+            check_weights_bias_nan(self.actor, "actor", "update循环中")
+            check_weights_bias_nan(self.critic, "critic", "update循环中")
+
             dist = SquashedNormal(mu, std)
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
             log_probs = dist.log_prob(0, u_old) # (N,1)
@@ -342,7 +376,18 @@ class PPOContinuous:
         self.ratio_mean = np.mean(ratio_list)
         self.post_clip_critic_grad = np.mean(post_clip_critic_grad)
         self.post_clip_actor_grad = np.mean(post_clip_actor_grad)
+        self.advantage = advantage.abs().mean().detach().cpu().item()
+        # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
+        check_weights_bias_nan(self.actor, "actor", "update后")
+        check_weights_bias_nan(self.critic, "critic", "update后")
 
+
+
+
+
+
+
+    # 特殊用法
     def update_actor_supervised(self, transition_dict):
         """
         Supervised update:

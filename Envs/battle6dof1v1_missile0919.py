@@ -771,11 +771,11 @@ class Battle(object):
 
         if side == 'r':
             ego = self.RUAV
-            ego_missile = self.Rmissiles[0]
+            # ego_missile = self.Rmissiles[0]
             enm = self.BUAV
         if side == 'b':
             ego = self.BUAV
-            ego_missile = self.Bmissiles[0]
+            # ego_missile = self.Bmissiles[0]
             enm = self.RUAV
         
         '''
@@ -815,14 +815,16 @@ class Battle(object):
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
             self.lose = 1
-        # 导弹命中目标成功
-        if enm.got_hit:
-            self.win = 1
-        # 导弹miss，失败
-        if ego_missile.dead and not enm.got_hit:
-            self.lose = 1
+        # # 导弹命中目标成功
+        # if enm.got_hit:
+        #     terminate = True
+        #     self.win = 1
+        # # 导弹miss，失败
+        # if ego_missile.dead and not enm.got_hit:
+        #     terminate = True
+        #     self.lose = 1
         
-        # 左carnk角度奖励
+        # 左crank角度奖励
         x_alpha = np.sign(delta_psi)*alpha * 180/pi
         alpha_max = ego.max_radar_angle*180/pi # 60
         mid_switch = sigmoid(0.4 * (x_alpha + alpha_max)) * sigmoid(0.4 * (alpha_max - x_alpha))
@@ -840,19 +842,19 @@ class Battle(object):
 
         # 事件奖励
         r_event = 0
-        # A-pole奖励
-        if ego_missile.A_pole_moment:
-            r_event += dist / 30e3 * 20
-            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-        # F-pole奖励
-        if ego_missile.hit:
-            r_event += dist / 30e3 * 40
-            r_event += alt
-            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-        if self.lose:
-            r_event -= 20
-        if alpha > ego.max_radar_angle:
-            r_event -= 30 # 超出雷达范围严重惩罚
+        # # A-pole奖励
+        # if ego_missile.A_pole_moment:
+        #     r_event += dist / 30e3 * 20
+        #     r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        # # F-pole奖励
+        # if ego_missile.hit:
+        #     r_event += dist / 30e3 * 40
+        #     r_event += alt
+        #     r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        # if self.lose:
+        #     r_event -= 20
+        # if alpha > ego.max_radar_angle:
+        #     r_event -= 30 # 超出雷达范围严重惩罚
 
         # 平稳性惩罚
         r_steady = -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2

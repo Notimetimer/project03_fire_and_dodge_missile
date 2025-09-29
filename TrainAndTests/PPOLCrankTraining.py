@@ -66,7 +66,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-num_episodes = 100 # 1000
+num_episodes = 1000 # 1000
 hidden_dim = [128, 128, 128]  # 128
 gamma = 0.9
 lmbda = 0.9
@@ -159,7 +159,7 @@ if __name__=="__main__":
                 # 飞机出生状态指定
                 init_case = np.random.randint(initial_states.shape[0])
 
-                red_R = random.uniform(initial_states[init_case][2], min(60e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
+                red_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
                 
                 blue_height = initial_states[init_case][0]
                 red_height = initial_states[init_case][1]
@@ -177,7 +177,7 @@ if __name__=="__main__":
                                             'psi': blue_psi
                                             }
                 env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=0, blue_init_ammo=1)
+                        red_init_ammo=0, blue_init_ammo=0)
 
                 done = False
                 
@@ -271,6 +271,8 @@ if __name__=="__main__":
                     done, b_reward, _ = env.left_crank_terminate_and_reward('b')
                     next_b_obs = env.left_crank_obs('b')  # 子策略的训练不要用get_obs
 
+                    done = done or fake_terminate
+
                     transition_dict['states'].append(b_obs)
                     transition_dict['actions'].append(u)
                     transition_dict['next_states'].append(next_b_obs)
@@ -321,16 +323,17 @@ if __name__=="__main__":
                 critic_grad_norm = agent.critic_grad
                 critic_post_clip_grad = agent.post_clip_critic_grad
                 # 梯度监控
-                logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
+                logger.add("train/1 actor_grad_norm", actor_grad_norm, i_episode + 1)
                 # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
-                logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
+                logger.add("train/2 critic_grad_norm", critic_grad_norm, i_episode + 1)
                 # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
                 # 损失函数监控
-                logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
-                logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
+                logger.add("train/3 actor_loss", agent.actor_loss, i_episode + 1)
+                logger.add("train/4 critic_loss", agent.critic_loss, i_episode + 1)
                 # 强化学习actor特殊项监控
-                logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
-                logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
+                logger.add("train/5 entropy", agent.entropy_mean, i_episode + 1)
+                logger.add("train/6 ratio", agent.ratio_mean, i_episode + 1)     
+                logger.add("train/7 advantange", agent.advantage, i_episode + 1)
 
                 # print(t_bias)
                 env.clear_render(t_bias=t_bias)

@@ -137,7 +137,7 @@ def save_meta_once(path, state_dict):
 if __name__=="__main__":
 
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                        lmbda, epochs, eps, gamma, device, critic_max_grad=100, actor_max_grad=2) # 2,2
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2) # 2,2
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
