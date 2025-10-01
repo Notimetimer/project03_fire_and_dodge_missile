@@ -230,6 +230,8 @@ class Battle(object):
         self.t = round(self.t, 2)  # 保留两位小数
 
         actions = [r_actions] + [b_actions]
+        self.r_actions = r_actions.copy()
+        self.b_actions = b_actions.copy()
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
@@ -247,6 +249,8 @@ class Battle(object):
                 # print('target_height',target_height)
                 # for i in range(int(self.dt_maneuver // dt_move)):
                 UAV.move(target_height, delta_heading, target_speed, relevant_height=True)
+                # 上一步动作
+                # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
             self.missiles = self.Rmissiles + self.Bmissiles
@@ -392,7 +396,7 @@ class Battle(object):
         vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
         vv_ = own.vel_[1]  # 掩模 取垂直速度
         v = norm(v_)
-        alpha = np.arccos(np.dot(L_,v_)/(v*dist))
+        alpha = np.arccos(np.dot(L_,v_)/(v*dist+0.01)) # 防止计算误差导致分子>分母
         # 速度观测量
         v_own = v
         # 本机高度
@@ -449,6 +453,9 @@ class Battle(object):
         p = own.p
         q = own.q
         r = own.r
+
+        # 上一步动作
+        act1_last, act2_last, act3_last = own.act_memory
 
         theta_v = own.theta_v
         psi_v = own.psi_v
@@ -525,9 +532,9 @@ class Battle(object):
             ],
 
             "ego_control": [
-                float(p), # 0 rad/s
-                float(q), # 1 rad/s
-                float(r), # 2 rad/s
+                float(p), # 0 p rad/s act1_last
+                float(q), # 1 q rad/s act2_last
+                float(r), # 2 r rad/s act3_last
                 float(theta_v), # 3
                 float(psi_v), # 4
                 float(alpha_air), # 5 rad
@@ -571,7 +578,7 @@ class Battle(object):
         self.state_init["warning"]=0
         self.state_init["target_information"]=[0,0,0,100,0,0,0,0]
         self.state_init["ego_main"]=[300, 5000, 0, 1, 0, 1, 0]
-        self.state_init["ego_control"]=[0, 0, 0, 0, 0, 0, 0]
+        self.state_init["ego_control"]= [0, 0, 0, 0, 0, 0, 0] # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
         self.state_init["weapon"]=120
         self.state_init["threat"]=[0,0,100]
         self.state_init["border"]=[self.R_cage, 0]
@@ -623,9 +630,9 @@ class Battle(object):
             s["target_information"][5] /= 340
             s["ego_main"][0] /= 340
             s["ego_main"][1] /= 5e3
-            s["ego_control"][0] /= (2 * pi)
-            s["ego_control"][1] /= (2 * pi)
-            s["ego_control"][2] /= (2 * pi)
+            s["ego_control"][0] /= (2 * pi) # (2 * pi) 5000
+            s["ego_control"][1] /= (2 * pi) # (2 * pi) pi
+            s["ego_control"][2] /= (2 * pi) # (2 * pi) 340
             s["weapon"] /= 120
             s["threat"][2] /= 10e3
             s["border"][0] = max(0, 1-s["border"][0]/20e3)
@@ -646,6 +653,11 @@ class Battle(object):
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         full_obs["border"] = copy.deepcopy(self.obs_init["border"])
         
+        # 新增信息--历史动作/pqr
+        full_obs["ego_control"][0]=self.base_obs(side)["ego_control"][0]
+        full_obs["ego_control"][1]=self.base_obs(side)["ego_control"][1]
+        full_obs["ego_control"][2]=self.base_obs(side)["ego_control"][2]
+
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
         return flat_obs
@@ -702,9 +714,12 @@ class Battle(object):
         if side == 'r':
             uav = self.RUAV
             enm = self.BUAV
+            current_action = self.r_actions
+            
         if side == 'b':
             uav = self.BUAV
             enm = self.RUAV
+            current_action = self.b_actions
 
         # 结束判断：超时/损毁
         if self.t > self.game_time_limit:
@@ -738,8 +753,10 @@ class Battle(object):
         r_dist = (dist<=10e3)*(dist-0)/(10e3-0)+\
                     (dist>10e3)*(1-(dist-10e3)/(50e3-10e3))
 
-        # 平稳性惩罚
-        r_roll = 0 # -abs(uav.p)/(2*pi) # 假设最大角速度是1s转一圈， 训偏了
+        # 平稳性惩罚，debug 有错误，一直是0
+        delta_acts_ = np.array(state["ego_control"][0:2+1]) # 历史动作 current_action-np.array(state["ego_control"][0:2+1])
+        delta_acts_norm_ = delta_acts_/2/pi # pqr -abs(uav.p)/(2*pi) 历史动作 delta_acts_ * np.array([1/5000, 1/pi, 1/340])
+        r_steady = - norm(delta_acts_norm_) 
 
         # 事件奖励
         reward_event = 0
@@ -747,14 +764,17 @@ class Battle(object):
             reward_event = -1
         if self.win:
             reward_event = 1
-
-        reward = np.sum(np.array([2,1,1,1,5,0.5])*\
-            np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_roll]))
+        
+        # 0.2? 0.02?
+        reward = np.sum(np.array([2,1,1,1,5,0.02])*\
+            np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_steady]))
 
         if terminate:
             self.running = False
         
-        return terminate, reward, reward_event
+        reward_for_show = reward
+
+        return terminate, reward, reward_for_show
 
     def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
         # copy了进攻的，还没改
@@ -771,11 +791,11 @@ class Battle(object):
 
         if side == 'r':
             ego = self.RUAV
-            # ego_missile = self.Rmissiles[0]
+            ego_missile = self.Rmissiles[0]
             enm = self.BUAV
         if side == 'b':
             ego = self.BUAV
-            # ego_missile = self.Bmissiles[0]
+            ego_missile = self.Bmissiles[0]
             enm = self.RUAV
         
         '''
@@ -806,23 +826,23 @@ class Battle(object):
         # 超时结束
         if self.t > self.game_time_limit:
             terminate = True
-        # 雷达丢失目标判为失败 (会导致训练不稳定)
+        # 雷达丢失目标判为失败 (会导致训练不稳定?)
         if alpha > ego.max_radar_angle:
-            # terminate = True
-            # self.lose = 1
+            terminate = True
+            self.lose = 1
             pass
         # 出界失败
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
             self.lose = 1
-        # # 导弹命中目标成功
-        # if enm.got_hit:
-        #     terminate = True
-        #     self.win = 1
-        # # 导弹miss，失败
-        # if ego_missile.dead and not enm.got_hit:
-        #     terminate = True
-        #     self.lose = 1
+        # 导弹命中目标成功
+        if enm.dead:
+            terminate = True
+            self.win = 1
+        # 导弹miss，失败
+        if ego_missile.dead and not enm.dead:
+            terminate = True
+            self.lose = 1
         
         # 左crank角度奖励
         x_alpha = np.sign(delta_psi)*alpha * 180/pi
@@ -842,22 +862,22 @@ class Battle(object):
 
         # 事件奖励
         r_event = 0
-        # # A-pole奖励
-        # if ego_missile.A_pole_moment:
-        #     r_event += dist / 30e3 * 20
-        #     r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-        # # F-pole奖励
-        # if ego_missile.hit:
-        #     r_event += dist / 30e3 * 40
-        #     r_event += alt
-        #     r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-        # if self.lose:
-        #     r_event -= 20
+        # A-pole奖励
+        if ego_missile.A_pole_moment:
+            r_event += dist / 30e3 * 20
+            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        # F-pole奖励
+        if ego_missile.hit:
+            r_event += dist / 30e3 * 40
+            r_event += alt
+            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        if self.lose:
+            r_event -= 20
         # if alpha > ego.max_radar_angle:
-        #     r_event -= 30 # 超出雷达范围严重惩罚
+        #     r_event -= 3 # 超出雷达范围惩罚
 
         # 平稳性惩罚
-        r_steady = -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2
+        r_steady = 0 # -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2
 
         reward = np.sum(np.array([2, 1, 1, 0.5, 1])*\
             np.array([r_angle, r_alt, r_speed, r_event, r_steady]))

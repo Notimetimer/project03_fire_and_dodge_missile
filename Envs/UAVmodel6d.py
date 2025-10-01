@@ -91,6 +91,7 @@ class UAVModel(object):
         self.start_lon = None
         self.start_lat = None
         self.obs_memory = None
+        self.act_memory = None
 
     def reset(self, lon0=118, lat0=30, h0=8000, v0=200, psi0=0, phi0=0, theta0=0, o00=np.array([118, 30])):
         sim = jsbsim.FGFDMExec(None, None)
@@ -160,6 +161,7 @@ class UAVModel(object):
         self.PIDController = F16PIDController()
 
         self.obs_memory = None
+        self.act_memory = np.array([0,0,340]) # 动作记忆
 
     # todo 阻力系数：应该是和马赫数和迎角有关的，但是先借用下导弹的阻力系数函数了
     def Cd(self, mach):

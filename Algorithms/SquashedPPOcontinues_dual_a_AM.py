@@ -8,6 +8,20 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
+from numpy.linalg import norm
+
+# AM超参数
+tau_A = 1.25
+p_star_A = 0.1
+k_shared = 2  # 2 / 1.5
+ita_A = 0.3
+rau_A = 0.1
+epsilon_A = 10 ** -5
+alpha_minA = 10 ** -12
+alpha_maxA = 10 ** 12
+rau_sat_A = 0.98
+alpha_A_ema = 1.0
+s_prev_A_ema = 0.1
 
 # 计算并记录 actor / critic 的梯度范数（L2）
 def model_grad_norm(model):
@@ -228,15 +242,7 @@ class PPOContinuous:
         a = 2.0 * (a_exec - amin) / span - 1.0
         # numerical stability
         return a.clamp(-0.999999, 0.999999)
-    
-    # 对外接口（保证numpy输入和numpy输出）
-    def unscale_exec_to_normalized(self, a_exec, action_bounds):
-        """Public wrapper: accepts numpy or torch, returns numpy on CPU."""
-        a_exec_t = torch.as_tensor(a_exec, dtype=torch.float, device=self.device)
-        action_bounds_t = torch.as_tensor(action_bounds, dtype=torch.float, device=self.device)
-        a_norm_t = self._unscale_exec_to_normalized(a_exec_t, action_bounds_t)
-        return a_norm_t.cpu().numpy()
-    
+
     def take_action(self, state, action_bounds, explore=True):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
         # 检查state中是否存在nan
@@ -292,15 +298,34 @@ class PPOContinuous:
         # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
         # advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
+        # AM部分
+        # 使用并更新模块级 AM 状态变量
+        global alpha_A_ema, s_prev_A_ema
+        N_Amb = norm(advantage)
+        sigma_A_mb = (torch.std(advantage) + epsilon_A).item()
+        A_hat_mb = advantage / (N_Amb + epsilon_A)
+        alpha_A_current = alpha_A_ema
+        Z_A_mb = alpha_A_current * A_hat_mb
+        A_mod_mb = abs(advantage) * (k_shared * torch.tanh(Z_A_mb))
+        alpha_A_hat = k_shared * (N_Amb + epsilon_A) / sigma_A_mb * (
+                p_star_A / (s_prev_A_ema + epsilon_A)) ** ita_A
+        alpha_A_ema = np.clip((1 - rau_A) * alpha_A_ema + rau_A * alpha_A_hat, alpha_minA, alpha_maxA)
+        # print(Z_A_mb)
+        temp = torch.abs(Z_A_mb) > tau_A
+        true_count = torch.sum(temp).item()
+        total_count = temp.numel()
+        s_curr_A = true_count / total_count
+        s_prev_A_ema = (1 - rau_sat_A) * s_prev_A_ema + rau_sat_A * s_curr_A
+        advantage = A_mod_mb  # 塑形后优势度函数
+        critic_values = self.critic(states)
+        old_critic_values = critic_values.detach().clone()
+        v_target_mb = A_mod_mb + old_critic_values
+
         # 策略输出（未压缩的 mu,std）
         mu, std = self.actor(states)
         # 构造 SquashedNormal 并计算 old_log_probs
         dist = SquashedNormal(mu.detach(), std.detach())
 
-        # # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
-        # actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
-        
-        # # 反算 u = atanh(a)
         u_old = u_s
         old_log_probs = dist.log_prob(0, u_old) # (N,1)
 
@@ -352,6 +377,20 @@ class PPOContinuous:
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
             critic_loss = F.mse_loss(self.critic(states), td_target.detach())
+
+            # AM
+            # print('原有CriticLoss',critic_loss)
+            # critic_loss = torch.max(F.mse_loss(self.critic(states), v_target_mb),
+            #                         F.mse_loss(old_critic_values + torch.clamp(self.critic(states) - old_critic_values,
+            #                                                                    -self.eps, self.eps), v_target_mb)
+            #                         )  # test 1
+            # critic_loss = torch.mean(
+            #     torch.max((self.critic(states) - v_target_mb)**2,
+            #               (old_critic_values + torch.clamp(self.critic(states) - old_critic_values, -self.eps,
+            #                                                          self.eps) - v_target_mb)**2
+            #               ))  # test 2
+            # print('新的CriticLoss',critic_loss)
+
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
             actor_loss.backward()
@@ -423,7 +462,7 @@ class PPOContinuous:
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             post_clip_actor_grad.append(model_grad_norm(self.actor))
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=100)
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             self.actor_optimizer.step()
 
             actor_grad_list.append(model_grad_norm(self.actor))
@@ -462,7 +501,7 @@ class PPOContinuous:
             # 裁剪前梯度
             post_clip_critic_grad.append(model_grad_norm(self.critic)) 
             # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=100)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
             self.critic_optimizer.step()
 
             critic_grad_list.append(model_grad_norm(self.critic))            

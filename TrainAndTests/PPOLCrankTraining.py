@@ -177,7 +177,7 @@ if __name__=="__main__":
                                             'psi': blue_psi
                                             }
                 env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=0, blue_init_ammo=0)
+                        red_init_ammo=0, blue_init_ammo=1)
 
                 done = False
                 
@@ -215,7 +215,6 @@ if __name__=="__main__":
                     # 反向转回字典方便排查
                     b_check_obs = copy.deepcopy(env.state_init)
                     key_order = env.key_order
-
                     # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
                     arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
                     idx = 0
@@ -256,6 +255,9 @@ if __name__=="__main__":
                                             ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                             o00=o00, R_cage=env.R_cage, wander=1
                                             )
+                    if np.isnan(b_obs).any() or np.isinf(b_obs).any():
+                        print('b_obs', b_check_obs)
+                        print()
                     b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
 
                     # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
