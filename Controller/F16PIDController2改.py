@@ -239,6 +239,10 @@ class F16PIDController:
         # else:
         # print('pull')
 
+        # 特例：abs(delta_x_angle *180/pi)>45 时杆量减半
+        if abs(delta_x_angle *180/pi)>30:
+            elevetor /= 2
+
         # 通用
         roll_error = delta_x_angle
         aileron = roll_error / pi * 3 - p / pi * 1 # 1
@@ -329,8 +333,8 @@ if __name__ == '__main__':
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 1e3  # m # 测试飞行控制器
-    target_heading = 270  # 度 to rad
+    target_height = 4e3  # m # 测试飞行控制器 1e3
+    target_heading = 50  # 度 to rad 270
     target_speed = 340 * 1.13  # m/s
     t_last = 60 * 5
 

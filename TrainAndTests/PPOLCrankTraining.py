@@ -6,6 +6,8 @@
 2、目标速度和高度为随机数,与我机同高度
 3、蓝方只有一枚导弹，开始就发射导弹，后续需保持雷达照射
 
+todo 把这个从回合数限制改成步数限制的，回合结束的太快，1000回合不够用了!!!!!
+
 '''
 
 
@@ -136,6 +138,7 @@ if __name__=="__main__":
 
     out_range_count = 0
     return_list = []
+    win_list = []
     steps_count = 0
 
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
@@ -270,7 +273,7 @@ if __name__=="__main__":
                     b_action_list.append(b_action_n)
 
                     _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                    done, b_reward, _ = env.left_crank_terminate_and_reward('b')
+                    done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
                     next_b_obs = env.left_crank_obs('b')  # 子策略的训练不要用get_obs
 
                     done = done or fake_terminate
@@ -318,24 +321,24 @@ if __name__=="__main__":
                 agent.update(transition_dict)
 
                 # tensorboard 训练进度显示
-                logger.add("train/episode_return", episode_return, i_episode + 1)
+                logger.add("train/1 episode_return", episode_return, i_episode + 1)
+                logger.add("train/2 not lose", 1-env.lose, i_episode + 1)
 
                 actor_grad_norm = agent.actor_grad
                 actor_post_clip_grad = agent.post_clip_actor_grad
                 critic_grad_norm = agent.critic_grad
                 critic_post_clip_grad = agent.post_clip_critic_grad
                 # 梯度监控
-                logger.add("train/1 actor_grad_norm", actor_grad_norm, i_episode + 1)
-                # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
-                logger.add("train/2 critic_grad_norm", critic_grad_norm, i_episode + 1)
-                # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
+                logger.add("train/3 actor_grad_norm", actor_grad_norm, i_episode + 1)
+                logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
+                logger.add("train/4 critic_grad_norm", critic_grad_norm, i_episode + 1)
+                logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
                 # 损失函数监控
-                logger.add("train/3 actor_loss", agent.actor_loss, i_episode + 1)
-                logger.add("train/4 critic_loss", agent.critic_loss, i_episode + 1)
+                logger.add("train/7 actor_loss", agent.actor_loss, i_episode + 1)
+                logger.add("train/8 critic_loss", agent.critic_loss, i_episode + 1)
                 # 强化学习actor特殊项监控
-                logger.add("train/5 entropy", agent.entropy_mean, i_episode + 1)
-                logger.add("train/6 ratio", agent.ratio_mean, i_episode + 1)     
-                logger.add("train/7 advantange", agent.advantage, i_episode + 1)
+                logger.add("train/9 entropy", agent.entropy_mean, i_episode + 1)
+                logger.add("train/10 ratio", agent.ratio_mean, i_episode + 1)     
 
                 # print(t_bias)
                 env.clear_render(t_bias=t_bias)

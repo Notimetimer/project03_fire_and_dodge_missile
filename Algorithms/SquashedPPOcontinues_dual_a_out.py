@@ -488,3 +488,34 @@ class PPOContinuous:
 #   'dones': [...],
 #   'action_bounds': [(amin0,amax0), (amin1,amax1), ...]  # 可选
 # }
+
+
+'''
+- 过程摘要（在 update() 里发生的事情）  
+  1. forward：actor(states) -> mu, std（std = softplus(fc_std(x)) 且被 clamp 到 [min_std, max_std]）  
+  2. 构造分布 SquashedNormal(mu,std)，计算 log_probs、ratio、surrogate objective 和 entropy 项目  
+  3. actor_loss = -E[min(surr1,surr2)] - k_entropy * entropy，随后 backward() 计算关于 mu 和 std 的梯度  
+  4. optimizer.step() 根据这些梯度更新 actor 的参数（包括产生 std 的 fc_std 层），因此 std 会被反向传播更新（除非对应参数没有梯度）
+
+- std 为什么会改变（从源头上看）  
+  - std 通过两条路径影响 actor_loss：  
+    a) log_prob（通过 ratio * advantage 的 surrogate）：对于每个样本 u_old，log_prob(u_old|mu,std) = -0.5*(u-mu)^2/std^2 - ln std + const。对 std 的偏导为 ( (u-mu)^2 / std^3 ) - 1/std 。  
+       - 该导数的符号依赖于样本是否在“一个 sigma 范围内”：当 (u-mu)^2 > std^2 （即 |u-mu| > std）时，导数为正 —— 增大 std 会增加该样本的 log_prob；反之当 |u-mu| < std 导数为负 —— 增大 std 会降低该样本的 log_prob。  
+       - surrogate 会以 advantage 加权：若 advantage>0，梯度会推动增加该样本的 log_prob；若 advantage<0，梯度会推动减少该样本的 log_prob。  
+    b) entropy 项：entropy( Normal(mu,std) ) 单调随 std 增大，因 actor_loss 包含 -k_entropy*entropy，entropy 项恒倾向于推动 std 增大（强度由 k_entropy 决定）。
+
+- 什么时候 std 会“增大”？  
+  - 当 entropy 项占主导（k_entropy 较大）时会整体推动 std 增大；或  
+  - 对于许多 advantage>0 的样本，如果这些样本的 |u-mu| > std（落在分布尾部），增加 std 会提升它们的 log_prob，从而被优化器采纳，导致 std 增大。
+
+- 什么时候 std 会“减小”？  
+  - 当为了提高对有利动作（advantage>0）的概率更有效的方法是把分布集中（把 mu 移向 u 或减小 std），即多数有利样本位于当前 σ 范围内（|u-mu| < std），那么梯度会推动 std 变小；或  
+  - 当 advantage<0 的样本较多时，优化会减少这些动作的概率，增加 std 有时会增加或减少 log_prob（取决于 |u-mu|），但通常将质量集中到好动作（减小 std）是常见结果。
+
+- 其他限制与注意  
+  - std 是通过 softplus(fc_std(x)) 参数化，softplus 的导数、小的 min_std 和 clamp 会限制极端变化（保证 >0、<=max_std）。  
+  - 实际变化由样本批次的统计（advantage 的符号与大小、(u-mu) 距离分布）和超参（actor lr、k_entropy、clip、batch size）共同决定。  
+  - 若你想控制 std 的行为：调节 k_entropy（增大鼓励更大 std）、或在 loss 中显式加入关于 std 的项（如对 std 的目标或正则）会更直接。
+
+简短结论：std 不是单一方向被“自动增大”或“自动减小”。它由 surrogate（ratio*advantage）和 entropy 两股力共同驱动，具体取向取决于样本 (u-mu) 相对 std 的位置、advantage 的符号/大小，以及 entropy 权重和其它超参。
+'''

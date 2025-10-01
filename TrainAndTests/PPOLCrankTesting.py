@@ -5,7 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from TrainAndTests.PPOLCrankTraining import *
 import re
 
-dt_maneuver= 0.2 
+dt_maneuver= 0.08 # 0.2 
 action_eps = 0.8 # 动作平滑度
 
 # 找出日期最大的目录

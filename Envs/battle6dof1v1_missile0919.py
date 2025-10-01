@@ -653,10 +653,10 @@ class Battle(object):
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         full_obs["border"] = copy.deepcopy(self.obs_init["border"])
         
-        # 新增信息--历史动作/pqr
-        full_obs["ego_control"][0]=self.base_obs(side)["ego_control"][0]
-        full_obs["ego_control"][1]=self.base_obs(side)["ego_control"][1]
-        full_obs["ego_control"][2]=self.base_obs(side)["ego_control"][2]
+        # # 新增信息--历史动作/pqr
+        # full_obs["ego_control"][0]=self.base_obs(side)["ego_control"][0]
+        # full_obs["ego_control"][1]=self.base_obs(side)["ego_control"][1]
+        # full_obs["ego_control"][2]=self.base_obs(side)["ego_control"][2]
 
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -754,9 +754,11 @@ class Battle(object):
                     (dist>10e3)*(1-(dist-10e3)/(50e3-10e3))
 
         # 平稳性惩罚，debug 有错误，一直是0
-        delta_acts_ = np.array(state["ego_control"][0:2+1]) # 历史动作 current_action-np.array(state["ego_control"][0:2+1])
-        delta_acts_norm_ = delta_acts_/2/pi # pqr -abs(uav.p)/(2*pi) 历史动作 delta_acts_ * np.array([1/5000, 1/pi, 1/340])
-        r_steady = - norm(delta_acts_norm_) 
+        # delta_acts_ = np.array(state["ego_control"][0:2+1]) # 历史动作 current_action-np.array(state["ego_control"][0:2+1])
+        # delta_acts_norm_ = delta_acts_/2/pi # pqr -abs(uav.p)/(2*pi) 历史动作 delta_acts_ * np.array([1/5000, 1/pi, 1/340])
+        # r_steady = - norm(delta_acts_norm_) 
+
+        r_steady = 0
 
         # 事件奖励
         reward_event = 0
@@ -772,7 +774,7 @@ class Battle(object):
         if terminate:
             self.running = False
         
-        reward_for_show = reward
+        reward_for_show = np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_steady])
 
         return terminate, reward, reward_for_show
 
@@ -791,11 +793,11 @@ class Battle(object):
 
         if side == 'r':
             ego = self.RUAV
-            ego_missile = self.Rmissiles[0]
+            ego_missile = self.Rmissiles[0] if self.Rmissiles else None
             enm = self.BUAV
         if side == 'b':
             ego = self.BUAV
-            ego_missile = self.Bmissiles[0]
+            ego_missile = self.Bmissiles[0] if self.Bmissiles else None
             enm = self.RUAV
         
         '''
@@ -830,7 +832,6 @@ class Battle(object):
         if alpha > ego.max_radar_angle:
             terminate = True
             self.lose = 1
-            pass
         # 出界失败
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
@@ -840,21 +841,26 @@ class Battle(object):
             terminate = True
             self.win = 1
         # 导弹miss，失败
-        if ego_missile.dead and not enm.dead:
-            terminate = True
-            self.lose = 1
+        if ego_missile is not None:
+            if ego_missile.dead and not enm.dead:
+                terminate = True
+                self.lose = 1
         
         # 左crank角度奖励
         x_alpha = np.sign(delta_psi)*alpha * 180/pi
         alpha_max = ego.max_radar_angle*180/pi # 60
         mid_switch = sigmoid(0.4 * (x_alpha + alpha_max)) * sigmoid(0.4 * (alpha_max - x_alpha))
         r_angle = (x_alpha/alpha_max * mid_switch - (1 - mid_switch))
+        if alpha > ego.max_radar_angle:
+            r_angle -= 20
 
         # 高度奖励
         pre_alt_opt = target_alt - 1e3 # 比目标低1000m方便增加阻力
         alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
         r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
                     (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+        if not self.min_alt<=alt<=self.max_alt:
+            r_alt -= 20
                 
         # 速度奖励
         speed_opt = 0.95*340
@@ -862,15 +868,16 @@ class Battle(object):
 
         # 事件奖励
         r_event = 0
-        # A-pole奖励
-        if ego_missile.A_pole_moment:
-            r_event += dist / 30e3 * 20
-            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-        # F-pole奖励
-        if ego_missile.hit:
-            r_event += dist / 30e3 * 40
-            r_event += alt
-            r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        if ego_missile is not None:
+            # A-pole奖励
+            if ego_missile.A_pole_moment:
+                r_event += dist / 30e3 * 20
+                r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+            # F-pole奖励
+            if ego_missile.hit:
+                r_event += dist / 30e3 * 40
+                r_event += alt
+                r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
         if self.lose:
             r_event -= 20
         # if alpha > ego.max_radar_angle:
@@ -879,7 +886,7 @@ class Battle(object):
         # 平稳性惩罚
         r_steady = 0 # -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2
 
-        reward = np.sum(np.array([2, 1, 1, 0.5, 1])*\
+        reward = np.sum(np.array([2, 1, 1, 0, 1])*\
             np.array([r_angle, r_alt, r_speed, r_event, r_steady]))
 
         if terminate:
