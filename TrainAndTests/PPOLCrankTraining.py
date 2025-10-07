@@ -16,7 +16,8 @@ import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.battle6dof1v1_missile0919 import *
+from Envs.CrankManeuverEnv import *
+# from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
@@ -66,7 +67,7 @@ parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
 args = parser.parse_args()
 
 # 超参数
-dt_maneuver = 2
+dt_maneuver = 0.4 # 0.2 2
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
@@ -80,7 +81,8 @@ pre_train_rate = 0 # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
 mission_name = 'LCrank'
 
-env = Battle(args, tacview_show=use_tacview)
+env = CrankTrainEnv(args, tacview_show=use_tacview)
+# env = Battle(args, tacview_show=use_tacview)
 # r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
 # b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces

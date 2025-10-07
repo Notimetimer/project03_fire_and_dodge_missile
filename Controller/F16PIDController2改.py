@@ -239,9 +239,9 @@ class F16PIDController:
         # else:
         # print('pull')
 
-        # 特例：abs(delta_x_angle *180/pi)>45 时杆量减半
-        if abs(delta_x_angle *180/pi)>30:
-            elevetor /= 2
+        # # 特例：abs(delta_x_angle *180/pi)>45 时杆量减半
+        # if abs(delta_x_angle *180/pi)>30:
+        #     elevetor /= 2
 
         # 通用
         roll_error = delta_x_angle
@@ -373,7 +373,9 @@ if __name__ == '__main__':
         sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
         sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
 
-        # target_heading = np.random.rand()*10
+        if step % 10 == 0:
+            target_heading = np.random.rand()*160 # test
+            target_height = sim["position/h-sl-ft"] * 0.3048 # test
 
         # # ### 逗猫
         # if current_t < 15:

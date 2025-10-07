@@ -897,7 +897,13 @@ class Battle(object):
     def right_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
         pass
 
+    def escape_terminate_and_reward(self, side): # 规避策略训练与奖励
+        # 任务：敌机一开始就发射导弹，规避的时候
+        pass
 
+    def choose_action_terminate_and_reward(self, side):
+        
+        pass
 
     def get_reward(self, missiled_combat='Flase'): # 策略选择器奖励
         if missiled_combat == True:
