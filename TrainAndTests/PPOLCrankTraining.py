@@ -43,7 +43,7 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 from Algorithms.SquashedPPOcontinues_dual_a_out import *
-from tqdm import tqdm
+# from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 
 use_tacview = 0  # 是否可视化
@@ -66,9 +66,11 @@ parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
 args = parser.parse_args()
 
 # 超参数
+dt_maneuver = 2
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-num_episodes = 1000 # 1000
+# max_episodes = 1000 # 1000
+max_steps = 65e4
 hidden_dim = [128, 128, 128]  # 128
 gamma = 0.9
 lmbda = 0.9
@@ -143,6 +145,8 @@ if __name__=="__main__":
 
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
+    total_steps = 0
+    i_episode = 0
 
     training_start_time = time.time()
     launch_time_count = 0
@@ -152,218 +156,219 @@ if __name__=="__main__":
     # transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
     try:
         # 强化学习训练
-        rl_steps = 0
-        with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
-            for i_episode in range(int(num_episodes*(1-pre_train_rate))):
-                # print("轮次", i_episode+1)
-                episode_return = 0
-                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+        # for i_episode in range(int(max_episodes*(1-pre_train_rate))):
+        while total_steps < int(max_steps*(1-pre_train_rate)):
+            i_episode += 1
+            episode_return = 0
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
-                # 飞机出生状态指定
-                init_case = np.random.randint(initial_states.shape[0])
+            # 飞机出生状态指定
+            init_case = np.random.randint(initial_states.shape[0])
 
-                red_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
-                
-                blue_height = initial_states[init_case][0]
-                red_height = initial_states[init_case][1]
+            red_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
+            
+            blue_height = initial_states[init_case][0]
+            red_height = initial_states[init_case][1]
 
-                blue_psi = random.uniform(-pi, pi)
-                red_psi = sub_of_radian(blue_psi, pi)
-                red_beta = blue_psi
-                red_N = red_R*cos(red_beta)
-                red_E = red_R*sin(red_beta)
+            blue_psi = random.uniform(-pi, pi)
+            red_psi = sub_of_radian(blue_psi, pi)
+            red_beta = blue_psi
+            red_N = red_R*cos(red_beta)
+            red_E = red_R*sin(red_beta)
 
-                DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                        'psi': red_psi
+            DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+                                    'psi': red_psi
+                                    }
+            DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
+                                        'psi': blue_psi
                                         }
-                DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-                                            'psi': blue_psi
-                                            }
-                env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=0, blue_init_ammo=1)
+            env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
+                    red_init_ammo=0, blue_init_ammo=1)
 
-                done = False
-                
-                actor_grad_list = []
-                critc_grad_list = []
-                actor_loss_list = []
-                critic_loss_list = []
-                entropy_list = []
-                ratio_list = []
+            done = False
 
-                r_action_list = []
-                b_action_list = []
-                
-                episode_start_time = time.time()
+            env.dt_maneuver = dt_maneuver
+            actor_grad_list = []
+            critc_grad_list = []
+            actor_loss_list = []
+            critic_loss_list = []
+            entropy_list = []
+            ratio_list = []
 
-                # 环境运行一轮的情况
-                for count in range(round(args.max_episode_len / dt_maneuver)):
-                    # print(f"time: {env.t}")  # 打印当前的 count 值
-                    # 回合结束判断
-                    # print(env.running)
-                    current_t = count * dt_maneuver
-                    if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
-                        # print('回合结束，时间为：', env.t, 's')
-                        break
-                    # 获取观测信息
-                    r_obs_n = env.attack_obs('r')
-                    b_obs_n = env.left_crank_obs('b')
+            r_action_list = []
+            b_action_list = []
+            
+            episode_start_time = time.time()
 
-                    # 在这里将观测信息压入记忆
-                    env.RUAV.obs_memory = r_obs_n.copy()
-                    env.BUAV.obs_memory = b_obs_n.copy()
+            # 环境运行一轮的情况
+            for count in range(round(args.max_episode_len / dt_maneuver)):
+                # print(f"time: {env.t}")  # 打印当前的 count 值
+                # 回合结束判断
+                # print(env.running)
+                current_t = count * dt_maneuver
+                if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
+                    # print('回合结束，时间为：', env.t, 's')
+                    break
+                # 获取观测信息
+                r_obs_n = env.attack_obs('r')
+                b_obs_n = env.left_crank_obs('b')
 
-                    b_obs = np.squeeze(b_obs_n)
+                # 在这里将观测信息压入记忆
+                env.RUAV.obs_memory = r_obs_n.copy()
+                env.BUAV.obs_memory = b_obs_n.copy()
 
-                    # 反向转回字典方便排查
-                    b_check_obs = copy.deepcopy(env.state_init)
-                    key_order = env.key_order
-                    # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
-                    arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
-                    idx = 0
-                    for k in key_order:
-                        if k not in b_check_obs:
-                            raise KeyError(f"key '{k}' not in state_init")
-                        v0 = b_check_obs[k]
-                        # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-                        if isinstance(v0, (list, tuple, np.ndarray)):
-                            length = len(v0)
-                            slice_v = arr[idx: idx + length]
-                            if isinstance(v0, np.ndarray):
-                                b_check_obs[k] = slice_v.copy()
-                            else:
-                                b_check_obs[k] = slice_v.tolist()
-                            idx += length
+                b_obs = np.squeeze(b_obs_n)
+
+                # 反向转回字典方便排查
+                b_check_obs = copy.deepcopy(env.state_init)
+                key_order = env.key_order
+                # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
+                arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
+                idx = 0
+                for k in key_order:
+                    if k not in b_check_obs:
+                        raise KeyError(f"key '{k}' not in state_init")
+                    v0 = b_check_obs[k]
+                    # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
+                    if isinstance(v0, (list, tuple, np.ndarray)):
+                        length = len(v0)
+                        slice_v = arr[idx: idx + length]
+                        if isinstance(v0, np.ndarray):
+                            b_check_obs[k] = slice_v.copy()
                         else:
-                            # 标量
-                            b_check_obs[k] = float(arr[idx])
-                            idx += 1
-                    if idx != arr.size:
-                        # 长度不匹配时给出提示（便于调试）
-                        print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
+                            b_check_obs[k] = slice_v.tolist()
+                        idx += length
+                    else:
+                        # 标量
+                        b_check_obs[k] = float(arr[idx])
+                        idx += 1
+                if idx != arr.size:
+                    # 长度不匹配时给出提示（便于调试）
+                    print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
 
-                    distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-                    
-                    # 开局就发射一枚导弹
-                    if env.BUAV.ammo>0:
-                        new_missile = env.BUAV.launch_missile(env.RUAV, env.t, missile_class)
-                        env.BUAV.ammo -= 1
-                        new_missile.side = 'blue'
-                        env.Bmissiles.append(new_missile)
-                        env.missiles = env.Rmissiles + env.Bmissiles
-
-                    # 机动决策
-                    r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-                                            enm_pos_=env.BUAV.pos_, distance=distance,
-                                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                            o00=o00, R_cage=env.R_cage, wander=1
-                                            )
-                    if np.isnan(b_obs).any() or np.isinf(b_obs).any():
-                        print('b_obs', b_check_obs)
-                        print()
-                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
-
-                    # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
-                    #                         enm_pos_=env.RUAV.pos_, distance=distance,
-                    #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
-                    #                         o00=o00, R_cage=env.R_cage, wander=0
-                    #                         )
-                    
-                    r_action_list.append(r_action_n)
-                    b_action_list.append(b_action_n)
-
-                    _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                    done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
-                    next_b_obs = env.left_crank_obs('b')  # 子策略的训练不要用get_obs
-
-                    done = done or fake_terminate
-
-                    transition_dict['states'].append(b_obs)
-                    transition_dict['actions'].append(u)
-                    transition_dict['next_states'].append(next_b_obs)
-                    transition_dict['rewards'].append(b_reward)
-                    transition_dict['dones'].append(done)
-                    transition_dict['action_bounds'].append(action_bound)
-                    # state = next_state
-                    episode_return += b_reward * env.dt_maneuver
-                    # steps_since_update += 1
-
-                    # if steps_since_update >= transition_dict_capacity:
-                    #     steps_since_update = 0
-                    #     agent.update(transition_dict)
-                    #     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
-                    #     actor_grad_norm = agent.actor_grad
-                    #     actor_post_clip_grad = agent.post_clip_actor_grad
-                    #     critic_grad_norm = agent.critic_grad
-                    #     critic_post_clip_grad = agent.post_clip_critic_grad
-                    #     # 梯度监控
-                    #     logger.add("train/actor_grad_norm", actor_grad_norm, i_episode + 1)
-                    #     # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
-                    #     logger.add("train/critic_grad_norm", critic_grad_norm, i_episode + 1)
-                    #     # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
-                    #     # 损失函数监控
-                    #     logger.add("train/actor_loss", agent.actor_loss, i_episode + 1)
-                    #     logger.add("train/critic_loss", agent.critic_loss, i_episode + 1)
-                    #     # 强化学习actor特殊项监控
-                    #     logger.add("train/entropy", agent.entropy_mean, i_episode + 1)
-                    #     logger.add("train/ratio", agent.ratio_mean, i_episode + 1)     
-
-                    '''显示运行轨迹'''
-                    # 可视化
-                    env.render(t_bias=t_bias)
+                distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 
-                episode_end_time = time.time()  # 记录结束时间
-                # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
+                # 开局就发射一枚导弹
+                if env.BUAV.ammo>0:
+                    new_missile = env.BUAV.launch_missile(env.RUAV, env.t, missile_class)
+                    env.BUAV.ammo -= 1
+                    new_missile.side = 'blue'
+                    env.Bmissiles.append(new_missile)
+                    env.missiles = env.Rmissiles + env.Bmissiles
 
-                if env.lose==1:
-                    out_range_count+=1
-                return_list.append(episode_return)
-                agent.update(transition_dict)
+                # 机动决策
+                r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
+                                        enm_pos_=env.BUAV.pos_, distance=distance,
+                                        ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
+                                        o00=o00, R_cage=env.R_cage, wander=1
+                                        )
+                if np.isnan(b_obs).any() or np.isinf(b_obs).any():
+                    print('b_obs', b_check_obs)
+                    print()
+                b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
 
-                # tensorboard 训练进度显示
-                logger.add("train/1 episode_return", episode_return, i_episode + 1)
-                logger.add("train/2 not lose", 1-env.lose, i_episode + 1)
-
-                actor_grad_norm = agent.actor_grad
-                actor_post_clip_grad = agent.post_clip_actor_grad
-                critic_grad_norm = agent.critic_grad
-                critic_post_clip_grad = agent.post_clip_critic_grad
-                # 梯度监控
-                logger.add("train/3 actor_grad_norm", actor_grad_norm, i_episode + 1)
-                logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, i_episode + 1)
-                logger.add("train/4 critic_grad_norm", critic_grad_norm, i_episode + 1)
-                logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, i_episode + 1)
-                # 损失函数监控
-                logger.add("train/7 actor_loss", agent.actor_loss, i_episode + 1)
-                logger.add("train/8 critic_loss", agent.critic_loss, i_episode + 1)
-                # 强化学习actor特殊项监控
-                logger.add("train/9 entropy", agent.entropy_mean, i_episode + 1)
-                logger.add("train/10 ratio", agent.ratio_mean, i_episode + 1)     
-
-                # print(t_bias)
-                env.clear_render(t_bias=t_bias)
-                t_bias += env.t
-                r_action_list = np.array(r_action_list)
-                b_action_list = np.array(b_action_list)
-
-                # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
-                os.makedirs(log_dir, exist_ok=True)
-                # critic overwrite
-                critic_path = os.path.join(log_dir, "critic.pt")
-                th.save(agent.critic.state_dict(), critic_path)
-                # actor RL snapshot
-                if i_episode % 10 == 0:
-                    actor_name = f"actor_rein{i_episode}.pt"
-                    actor_path = os.path.join(log_dir, actor_name)
-                    th.save(agent.actor.state_dict(), actor_path)
+                # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
+                #                         enm_pos_=env.RUAV.pos_, distance=distance,
+                #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
+                #                         o00=o00, R_cage=env.R_cage, wander=0
+                #                         )
                 
-                # tqdm 训练进度显示
-                if (i_episode + 1) >= 10:
-                    pbar.set_postfix({'episode': '%d' % (i_episode + 1),
-                                    'return': '%.3f' % np.mean(return_list[-10:])})
-                pbar.update(1)
+                r_action_list.append(r_action_n)
+                b_action_list.append(b_action_n)
 
-                
+                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
+                next_b_obs = env.left_crank_obs('b')  # 子策略的训练不要用get_obs
+
+                done = done or fake_terminate
+                total_steps += 1
+
+                transition_dict['states'].append(b_obs)
+                transition_dict['actions'].append(u)
+                transition_dict['next_states'].append(next_b_obs)
+                transition_dict['rewards'].append(b_reward)
+                transition_dict['dones'].append(done)
+                transition_dict['action_bounds'].append(action_bound)
+                # state = next_state
+                episode_return += b_reward * env.dt_maneuver
+                # steps_since_update += 1
+
+                # if steps_since_update >= transition_dict_capacity:
+                #     steps_since_update = 0
+                #     agent.update(transition_dict)
+                #     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+                #     actor_grad_norm = agent.actor_grad
+                #     actor_post_clip_grad = agent.post_clip_actor_grad
+                #     critic_grad_norm = agent.critic_grad
+                #     critic_post_clip_grad = agent.post_clip_critic_grad
+                #     # 梯度监控
+                #     logger.add("train/actor_grad_norm", actor_grad_norm, total_steps)
+                #     # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, total_steps)
+                #     logger.add("train/critic_grad_norm", critic_grad_norm, total_steps)
+                #     # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, total_steps)
+                #     # 损失函数监控
+                #     logger.add("train/actor_loss", agent.actor_loss, total_steps)
+                #     logger.add("train/critic_loss", agent.critic_loss, total_steps)
+                #     # 强化学习actor特殊项监控
+                #     logger.add("train/entropy", agent.entropy_mean, total_steps)
+                #     logger.add("train/ratio", agent.ratio_mean, total_steps)     
+
+                '''显示运行轨迹'''
+                # 可视化
+                env.render(t_bias=t_bias)
+            
+            episode_end_time = time.time()  # 记录结束时间
+            # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
+
+            if env.lose==1:
+                out_range_count+=1
+            return_list.append(episode_return)
+            agent.update(transition_dict)
+
+            # tensorboard 训练进度显示
+            logger.add("train/1 episode_return", episode_return, total_steps)
+            logger.add("train/2 not lose", 1-env.lose, total_steps)
+
+            actor_grad_norm = agent.actor_grad
+            actor_post_clip_grad = agent.post_clip_actor_grad
+            critic_grad_norm = agent.critic_grad
+            critic_post_clip_grad = agent.post_clip_critic_grad
+            # 梯度监控
+            logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
+            logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, total_steps)
+            logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
+            logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, total_steps)
+            # 损失函数监控
+            logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
+            logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
+            # 强化学习actor特殊项监控
+            logger.add("train/9 entropy", agent.entropy_mean, total_steps)
+            logger.add("train/10 ratio", agent.ratio_mean, total_steps)     
+
+            # print(t_bias)
+            env.clear_render(t_bias=t_bias)
+            t_bias += env.t
+            r_action_list = np.array(r_action_list)
+            b_action_list = np.array(b_action_list)
+
+            # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
+            os.makedirs(log_dir, exist_ok=True)
+            # critic overwrite
+            critic_path = os.path.join(log_dir, "critic.pt")
+            th.save(agent.critic.state_dict(), critic_path)
+            # actor RL snapshot
+            if i_episode % 10 == 0:
+                actor_name = f"actor_rein{i_episode}.pt"
+                actor_path = os.path.join(log_dir, actor_name)
+                th.save(agent.actor.state_dict(), actor_path)
+            
+            # 训练进度显示
+            if (i_episode) >= 10:
+                print(f"进度: {total_steps/max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
+            else:
+                print(f"episode {i_episode}, total_steps {total_steps}")
+
+
         training_end_time = time.time()  # 记录结束时间
         elapsed = training_end_time - training_start_time
         from datetime import timedelta
