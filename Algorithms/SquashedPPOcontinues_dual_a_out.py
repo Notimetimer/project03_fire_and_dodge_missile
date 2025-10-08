@@ -416,10 +416,18 @@ class PPOContinuous:
         actor_loss_list = []
         post_clip_actor_grad = []
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
+        # 超参：目标 std 与权重（可改成 self.attr 并由构造函数传入）
+        target_std_value = 0.5
+        std_loss_weight = 1.0
+
         for _ in range(self.epochs):
-            # Actor 监督学习：拟合 mu -> u_old
+            # Actor 监督学习：拟合 mu -> u_old，同时把 std 拉向目标值
             mu, std = self.actor(states)
-            actor_loss = F.mse_loss(mu, u_old)  # mu 与 u_old 都是 pre-squash 空间
+            mse_mu = F.mse_loss(mu, u_old)  # 拟合 mu
+            # 为 std 构造目标张量并计算 MSE（std 已由网络经过 softplus/clamp）
+            std_target = torch.full_like(std, fill_value=target_std_value)
+            mse_std = F.mse_loss(std, std_target)
+            actor_loss = mse_mu + std_loss_weight * mse_std
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             post_clip_actor_grad.append(model_grad_norm(self.actor))
