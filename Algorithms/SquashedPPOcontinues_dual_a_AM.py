@@ -376,7 +376,7 @@ class PPOContinuous:
             actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor # 标量
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
-            critic_loss = F.mse_loss(self.critic(states), td_target.detach())
+            # critic_loss = F.mse_loss(self.critic(states), td_target.detach())
 
             # AM
             # print('原有CriticLoss',critic_loss)
@@ -384,11 +384,13 @@ class PPOContinuous:
             #                         F.mse_loss(old_critic_values + torch.clamp(self.critic(states) - old_critic_values,
             #                                                                    -self.eps, self.eps), v_target_mb)
             #                         )  # test 1
-            # critic_loss = torch.mean(
-            #     torch.max((self.critic(states) - v_target_mb)**2,
-            #               (old_critic_values + torch.clamp(self.critic(states) - old_critic_values, -self.eps,
-            #                                                          self.eps) - v_target_mb)**2
-            #               ))  # test 2
+            critic_loss = torch.mean(
+                torch.max((self.critic(states) - v_target_mb)**2,
+                          (old_critic_values + torch.clamp(self.critic(states) - old_critic_values, -self.eps,
+                                                                     self.eps) - v_target_mb)**2
+                          ))  # test 2
+            # critic_loss = F.mse_loss(self.critic(states), v_target_mb)  # test 3
+            
             # print('新的CriticLoss',critic_loss)
 
             self.actor_optimizer.zero_grad()

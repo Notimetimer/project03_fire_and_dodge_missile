@@ -175,7 +175,7 @@ class UAVModel(object):
             cd = 0.2
         return cd / 10
 
-    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False):
+    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False, p2p=False):
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
             self.set_height = target_height
@@ -232,11 +232,15 @@ class UAVModel(object):
         # norm_act由F16control函数输出
         # norm_act, self.rnn_states, self.hist_act = F16control(obs_jsbsim, self.rnn_states, self.hist_act)
         # print(self.label, norm_act)
-        if with_theta_req == False:
-            norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)  # # 测试飞行控制器
-        else:
-            obs_jsbsim[0] = np.clip(target_height, -pi/2, pi/2)  # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
-            norm_act = self.PIDController.att_output(obs_jsbsim, dt=self.dt)
+
+        if p2p==False: # 通过控制器间接控制
+            if with_theta_req == False:
+                norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)  # # 测试飞行控制器
+            else:
+                obs_jsbsim[0] = np.clip(target_height, -pi/2, pi/2)  # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
+                norm_act = self.PIDController.att_output(obs_jsbsim, dt=self.dt)
+        else: # 直接输出舵偏角
+            norm_act = np.array([delta_heading, target_height, 0, target_speed]) # 端到端控制，不使用方向舵,拿前三个当舵偏角来输入
         # print(obs_jsbsim)
 
         self.alpha_air = self.sim["aero/alpha-deg"] * pi / 180  # 当前迎角
@@ -276,10 +280,6 @@ class UAVModel(object):
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])
     
-    # 
-    def p2p_move(self, throttle, elevetor, aileron):
-        pass
-
     def short_range_kill(self, target):
         # 近距杀，不需要导弹的模型
         pt_ = target.pos_

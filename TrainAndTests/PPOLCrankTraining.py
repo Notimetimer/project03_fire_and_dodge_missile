@@ -16,7 +16,7 @@ import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.CrankManeuverEnv import *
+from Envs.Tasks.CrankManeuverEnv import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
@@ -185,7 +185,7 @@ if __name__=="__main__":
                                         'psi': blue_psi
                                         }
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=0, blue_init_ammo=1)
+                    red_init_ammo=0, blue_init_ammo=0) # 1
 
             done = False
 
