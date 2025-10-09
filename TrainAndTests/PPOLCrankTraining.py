@@ -67,7 +67,7 @@ parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
 args = parser.parse_args()
 
 # 超参数
-dt_maneuver = 0.4 # 0.2 2
+dt_maneuver = 0.2 # 0.2 2
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
@@ -83,8 +83,6 @@ mission_name = 'LCrank'
 
 env = CrankTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
-# r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
-# b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
@@ -212,7 +210,7 @@ if __name__=="__main__":
                     # print('回合结束，时间为：', env.t, 's')
                     break
                 # 获取观测信息
-                r_obs_n = env.attack_obs('r')
+                r_obs_n = env.left_crank_obs('r')
                 b_obs_n = env.left_crank_obs('b')
 
                 # 在这里将观测信息压入记忆

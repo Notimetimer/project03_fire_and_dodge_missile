@@ -5,8 +5,19 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from TrainAndTests.PPOLCrankTraining import *
 import re
 
-dt_maneuver= 0.08 # 0.2 
-action_eps = 0.8 # 动作平滑度
+dt_maneuver= 0.2 # 0.2 
+action_eps = 0 # 动作平滑度
+
+# 作为参考的规则动作
+def crank_behavior(delta_psi, delta_height):
+    """
+    crank 行为：返回 (heading_cmd, speed_cmd)
+    """
+    delta_psi_angle = delta_psi*180/pi
+    temp = delta_psi_angle - 55
+    heading_cmd = temp*pi/180
+    speed_cmd = 1.1 * 340
+    return delta_height, heading_cmd, speed_cmd
 
 # 找出日期最大的目录
 def get_latest_log_dir(pre_log_dir, mission_name=None):
@@ -50,7 +61,7 @@ if latest_actor_path:
 t_bias = 0
 
 try:
-    env = Battle(args, tacview_show=1)
+    env = CrankTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
     for i_episode in range(3):  # 10
         r_action_list=[]
         b_action_list=[]
@@ -87,7 +98,7 @@ try:
         while not done:
             # print(env.t)
             # 获取观测信息
-            r_obs_n = env.attack_obs('r')
+            r_obs_n = env.left_crank_obs('r')
             b_obs_n = env.left_crank_obs('b')
             
             # 反向转回字典方便排查
@@ -138,7 +149,14 @@ try:
             if np.isnan(b_obs_n).any() or np.isinf(b_obs_n).any():
                 print('b_obs_n', b_check_obs)
                 print()
-            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+            
+            # # 神经网络输出动作
+            # b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)
+
+            # 规则动作
+            delta_psi = b_check_obs['target_information'][1]
+            delta_height = b_check_obs['target_information'][0]
+            b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
             
             # 动作平滑（实验性）
             b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
@@ -148,7 +166,7 @@ try:
             b_action_list.append(b_action_n)
 
             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-            done, b_reward, _ = env.attack_terminate_and_reward('b')
+            done, b_reward, _ = env.left_crank_terminate_and_reward('b')
             done = done or fake_terminate # debug 这里需要解决下仿真结束判断的问题
 
             if env.RUAV.dead:

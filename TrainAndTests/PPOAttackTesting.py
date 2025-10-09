@@ -33,6 +33,8 @@ def get_latest_log_dir(pre_log_dir, mission_name=None):
 pre_log_dir = os.path.join("./logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
+#
+log_dir = os.path.join(pre_log_dir, "Attack-run-20251001-150929")
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
@@ -50,7 +52,7 @@ if latest_actor_path:
 t_bias = 0
 
 try:
-    env = Battle(args, tacview_show=1)
+    env = AttackTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
     for i_episode in range(3):  # 10
         r_action_list=[]
         b_action_list=[]
@@ -90,7 +92,7 @@ try:
                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                     o00=o00, R_cage=env.R_cage, wander=1
                                     )
-            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)
             
             # 动作平滑（实验性）
             b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n

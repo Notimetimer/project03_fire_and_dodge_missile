@@ -292,7 +292,10 @@ if __name__ == '__main__':
 
     tacview_show = 1  # 是否显示Tacview
 
-    dt = 0.02  # 0.02
+    # dt = 0.02  # 0.02
+    dt_control = 0.02
+    dt_move = 0.01
+    control_move_rate = int(round(dt_control/dt_move))
 
     if tacview_show:
         print('please prepare tacview')
@@ -324,7 +327,7 @@ if __name__ == '__main__':
     # 启动 JSBSim
     sim = jsbsim.FGFDMExec(None, None)
     sim.set_debug_level(0)
-    sim.set_dt(dt)  # 解算步长 dt 秒
+    sim.set_dt(dt_move)  # 解算步长 dt 秒
 
     # 设置模型路径（一般 JSBSim pip 包自动包含）
     sim.load_model("f16")  # f15, p51d, ball 等模型可选
@@ -364,18 +367,20 @@ if __name__ == '__main__':
     throttle_last = 0.5
 
     f16PIDController = F16PIDController()
+    norm_act = np.array([0,0,0,0.5])
 
     # hist_act=np.array([0,0,0,1])
-    for step in range(int(t_last / dt)):
-        current_t = step * dt
+    for step in range(int(t_last / dt_move)):
+        current_t = step * dt_move
 
         # 无限燃油
         sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
         sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
 
-        if step % 10 == 0:
-            target_heading = np.random.rand()*160 # test
-            target_height = sim["position/h-sl-ft"] * 0.3048 # test
+        # 随机
+        # if step % 10 == 0:
+        #     target_heading = np.random.rand()*160 # test
+        #     target_height = sim["position/h-sl-ft"] * 0.3048 # test
 
         # # ### 逗猫
         # if current_t < 15:
@@ -395,7 +400,7 @@ if __name__ == '__main__':
         #     target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
 
         sim.run()
-        current_time = step * dt
+        current_time = step * dt_move
         time_steps.append(current_time)
 
         # delta_height = (target_height - sim["position/h-sl-ft"]) / 3.2808
@@ -448,8 +453,9 @@ if __name__ == '__main__':
         # obs_jsbsim[15] = psi * pi / 180  # test
 
         # 输出姿态控制指令
-        # norm_act = f16PIDController.att_output(obs_jsbsim, dt=dt) # 测试姿态控制器
-        norm_act = f16PIDController.flight_output(obs_jsbsim, dt=dt)  # # 测试飞行控制器
+        if step % control_move_rate==0:
+            # norm_act = f16PIDController.att_output(obs_jsbsim, dt=dt) # 测试姿态控制器
+            norm_act = f16PIDController.flight_output(obs_jsbsim, dt=dt_control)  # # 测试飞行控制器
 
         # # 指数滑动平均控制量
         # last_control = np.array([aileron_last, elevator_last, rudder_last, throttle_last])
@@ -493,7 +499,7 @@ if __name__ == '__main__':
         fuels.append(sim["propulsion/total-fuel-lbs"])
 
         # 通过tacview可视化
-        if tacview_show:  # and step % np.round(0.4 / dt) == 0:
+        if tacview_show:
             send_t = f"{current_time:.2f}"
             name_R = '001'
             loc_r = [float(lon), float(lat), float(alt)]
