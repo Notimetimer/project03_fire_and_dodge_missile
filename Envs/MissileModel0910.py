@@ -356,12 +356,12 @@ class missile_class:
         v_rel_ = vtt_-vmt_
         L_dot = np.dot(v_rel_, line_t_)/distance
         self.time2hit = -distance/L_dot if L_dot<0 else 120 # 弹目距离
+        vmt = np.linalg.norm(vmt_)
         if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):
             self.in_angle = 1
         else:
             self.in_angle = 0
 
-        vmt = np.linalg.norm(vmt_)
         vtt = np.linalg.norm(vtt_)
         psi_mt = np.arctan2(vmt_[2], vmt_[0])
         psi_tt = np.arctan2(vtt_[2], vtt_[0])
