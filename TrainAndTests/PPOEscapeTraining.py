@@ -187,7 +187,7 @@ if __name__=="__main__":
                                         'psi': blue_psi
                                         }
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=0, blue_init_ammo=0) # 1
+                    red_init_ammo=1, blue_init_ammo=0)
 
             done = False
 
@@ -253,13 +253,13 @@ if __name__=="__main__":
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 
                 # 开局就发射一枚导弹
-                if env.BUAV.ammo>0:
-                    new_missile = env.BUAV.launch_missile(env.RUAV, env.t, missile_class)
-                    env.BUAV.ammo -= 1
-                    new_missile.side = 'blue'
-                    env.Bmissiles.append(new_missile)
+                if env.RUAV.ammo>0:
+                    new_missile = env.RUAV.launch_missile(env.BUAV, env.t, missile_class)
+                    env.RUAV.ammo -= 1
+                    new_missile.side = 'red'
+                    env.Rmissiles.append(new_missile)
                     env.missiles = env.Rmissiles + env.Bmissiles
-
+    
                 height_ego = env.BUAV.alt
                 delta_psi = b_check_obs['target_information'][1]
 
