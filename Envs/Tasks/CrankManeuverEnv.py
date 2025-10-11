@@ -68,8 +68,8 @@ class CrankTrainEnv(Battle):
         delta_psi = state["target_information"][1]
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
-        # alpha = state["target_information"][4]
-        alpha = abs(delta_psi) # 实际上是把alpha换掉
+        alpha = state["target_information"][4]
+        # alpha = abs(delta_psi) # 实际上是把alpha换掉
 
         if side == 'r':
             ego = self.RUAV
@@ -120,6 +120,7 @@ class CrankTrainEnv(Battle):
         if enm.dead:
             terminate = True
             self.win = 1
+            
         # # 导弹miss，失败
         # if ego_missile is not None:
         #     if ego_missile.dead and not enm.dead:

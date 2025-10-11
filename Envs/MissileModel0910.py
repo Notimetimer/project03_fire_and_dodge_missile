@@ -139,12 +139,17 @@ class missile_class:
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
         self.detect_range = 20e3  # 20e3  # m todo 计算截获距离
+        self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
         self.t = 0  # 导弹初始计时
         self.t_max = 120  # 最大运行时间
+        self.time2hit = 120
         self.trajectory = np.empty((0, 7))  # 导弹轨迹, 结构为时间、位置（3）、速度（3）
         self.guidance_stage = 2  # 2为中制导，3为末制导
+        self.in_angle = 1
+        self.q_beta = 0
+        self.q_epsilon = 0
         self.nzt = 0  # 过载量记忆值
         self.nyt = 0
         self.last_target_pos = None
@@ -199,6 +204,7 @@ class missile_class:
         line_t_ = ptt_ - pmt_
         vrt_ = v_target_ - v_missile_
         distance = np.linalg.norm(line_t_)
+        self.distance = distance
         vmt = np.linalg.norm(vmt_)
         vm_hor = np.linalg.norm([vmt_[2], vmt_[0]])  # 导弹水平分速度
         distance_hor = np.linalg.norm([line_t_[2], line_t_[0]])  # 弹目线水平距离
@@ -342,12 +348,18 @@ class missile_class:
         # test
         line_t_ = ptt_ - pmt_
         distance = np.linalg.norm(line_t_)
+        self.distance = distance
         # print('导弹感知到的距离:' + str(distance))
 
         case, temp = self.guidance(vmt_, vtt_, pmt_, ptt_, datalink=datalink)
 
-        # 仅为画图准备的部分start
-
+        v_rel_ = vtt_-vmt_
+        L_dot = np.dot(v_rel_, line_t_)/distance
+        self.time2hit = -distance/L_dot if L_dot<0 else 120 # 弹目距离
+        if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):
+            self.in_angle = 1
+        else:
+            self.in_angle = 0
 
         vmt = np.linalg.norm(vmt_)
         vtt = np.linalg.norm(vtt_)
@@ -362,7 +374,9 @@ class missile_class:
         theta_tt = np.arctan2(vtt_[1], vt_hor)
         theta = atan2(vmt_[1], np.linalg.norm([vmt_[0], vmt_[2]]))  # 速度倾角
         psi = atan2(vmt_[2], vmt_[0])  # 速度航向角
-        # 仅为画图准备的部分end
+
+        self.q_beta = q_beta_t
+        self.q_epsilon = q_epsilon_t
 
         # 继续处理制导指令
         if case == 1:

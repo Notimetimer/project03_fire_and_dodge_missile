@@ -128,6 +128,8 @@ class Battle(object):
         self.Rmissiles = []
         self.Bmissiles = []
         self.missiles = []
+        self.alive_r_missiles=[]
+        self.alive_b_missiles=[]
         self.dt_maneuver = dt_maneuver  # simulation interval，1 second
         self.t = 0
         # self.game_time_limit = self.args.max_episode_len
@@ -373,6 +375,23 @@ class Battle(object):
             own_missiles = self.Bmissiles
             enm_missiles = self.Rmissiles
 
+        alive_own_missiles = own_missiles.copy()
+        for missile in alive_own_missiles[:]: # 遍历
+            if missile.dead:
+                alive_own_missiles.remove(missile)
+        
+        alive_enm_missiles = enm_missiles.copy()
+        for missile in alive_enm_missiles[:]: # 遍历
+            if missile.dead:
+                alive_enm_missiles.remove(missile)
+
+        if side == 'r':
+            self.alive_r_missiles = alive_own_missiles
+            self.alive_b_missiles = alive_enm_missiles
+        else:
+            self.alive_r_missiles = alive_enm_missiles
+            self.alive_b_missiles = alive_own_missiles
+
         # 目标存活标志
         target_alive = not adv.dead    
         # 目标可见性标志 0 完全不可见 1 可获取角度信息 2 可获取全部信息
@@ -412,44 +431,60 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        target_locked = 1
-
-        # 导弹中制导状态 bool
+        if alpha < own.max_radar_angle and dist < own.max_radar_range:
+            target_locked = 1
+        else:
+            target_locked = 0
+        
+        # 导弹中制导状态 bool 与 预计碰撞时间
         missile_in_mid_term = 0
+        missile_time_to_hit_obs = 120
+        if not alive_own_missiles: # len(alive_own_missiles) == 0
+            pass
+        else:
+            time2hits = np.ones(len(alive_own_missiles))*120
+            for i, missile in enumerate(alive_own_missiles):
+                time2hits[i] = missile.time2hit
+                if missile.guidance_stage < 3:
+                    missile_in_mid_term = 1
+                    break
+            missile_time_to_hit_obs = min(time2hits)
+                    
         # 首先找到所有存活的友方导弹是否由本机发射
-
         # 然后判断该导弹的 .guidance_stage是否<3
 
-        pass # todo 需要由导弹的类实例报告
-
-        # 导弹预计碰撞时间, 如果没有在飞行导弹，在get_obs中置为(120s)
-        missile_time_to_hit_obs = 120
-        pass # todo 需要由导弹的类实例报告
-
         # 目标雷达跟踪标志 bool
-        locked_by_target = 0
-        pass # 和雷达跟踪目标的逻辑一起做
+        alpha_enm = np.arccos(np.dot(-L_, adv.vel_)/(norm(adv.vel_)*dist+0.01)) # 防止计算误差导致分子>分母
+        if alpha_enm < own.max_radar_angle and dist < own.max_radar_range:
+            locked_by_target = 1
+        else:
+            locked_by_target = 0
 
-        # 告警标志 bool
-        warning = 0
-        pass # 取自目标发射导弹的雷达状态
-
-        # 最近来袭导弹判断
-        for missile in enm_missiles:
-            pass
-
-        # 最近来袭导弹相对方位角(rad), 如果没有导弹，在get_obs置为pi
-        threat_delta_psi = pi
-        pass
-
-        # 最近来袭导弹相对俯仰角(rad), 如果没有导弹，在get_obs置为0
-        threat_delta_theta = 0
-        pass
-
-        # 最近来袭导弹距离模糊值(0:<8km, 1: <20km, 2:>20km), 如果没有导弹，在get_obs置为最大
-        threat_distance = 100
-        pass
-
+        # 告警信息
+        if not alive_enm_missiles:
+            warning = 0
+            threat_delta_psi = pi
+            threat_delta_theta = 0
+            threat_distance = 100e3
+        else:
+            warnings = np.zeros(len(alive_enm_missiles))
+            distances = np.ones(len(alive_enm_missiles)) * 100e3
+            threat_delta_psis = np.zeros(len(alive_enm_missiles))
+            threat_delta_thetas = np.zeros(len(alive_enm_missiles))
+            for i, missile in enumerate(alive_enm_missiles):
+                if missile.distance < missile.dectect_range and missile.in_angle:
+                    warnings[i] = 1
+                    distances[i] = missile.distance
+                    threat_delta_psis[i] = sub_of_radian(pi+missile.q_beta, own.psi)
+                    threat_delta_thetas[i] = -missile.q_epsilon
+            
+            # 告警标志 bool
+            warning = bool(max(warnings))
+            min_idx = int(np.argmin(distances))
+            threat_delta_psi = threat_delta_psis[min_idx]
+            threat_delta_theta = threat_delta_thetas[min_idx]
+            threat_distance = distances[min_idx]
+        
         p = own.p
         q = own.q
         r = own.r
@@ -585,40 +620,31 @@ class Battle(object):
 
         # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
         if pomdp: # 只有在部分观测情况下需要添加屏蔽
-            if not uav.obs_memory: # 假如不存在记忆，给默认值
-                memory = np.array([0,0,0,0,100e3, 0, 1, 2, 0, 1, 0, 1, 0, 0, 4, 0, 0, 0, 0, 2, 1])
+            if uav.obs_memory is None: # 假如不存在记忆，给默认值
+                memory = copy.deepcopy(self.state_init)
             else:
                 memory = uav.obs_memory
             
-            alpha = state[5]
-            dist = state[4]
+            alpha = state["target_information"][4]
+            dist = state["target_information"][3]
 
             # 超出探测距离
             if dist > 160e3: # 啥也看不到
-                state[0, 12, 15] = 0
-                state[1:5+1] = memory[1:5+1]
-            # 跟踪距离到探测距离
-            elif dist > 120e3: # 不能跟踪目标，
-                state[12] = 0
-                if alpha > pi/3 and state[20]==0:  # 夹角>3/pi时观测不到目标
-                    state[0] = 0
-                    state[1:5+1] = memory[1:5+1]
-                elif state[20] == 0: # 被目标探测后有对目标的角度信息
-                    state[1, 4] = memory[1, 4]
-                else:
-                    pass # 否则除了不能发射导弹，都是可见的
-            # 跟踪距离内超出角度
+                state["target_observable"] = 0
+                state["target_information"] = memory["target_information"].copy()
+            # 探测距离到近距
             elif dist > 10e3:
-                if alpha > pi/3 and state[20]==0: # 看不到对面
-                    state[0] = 0
-                    state[1:5+1] = memory[1:5+1]
-                elif state[20] == 0: # 被目标探测后有对目标的角度信息
-                    state[1, 4] = memory[1, 4]
+                if alpha > pi/3 and state["locked_by_target"]==0:  # 夹角>3/pi时观测不到目标
+                    state["target_observable"] = 0
+                    state["target_information"] = memory["target_information"].copy()
+                elif state["locked_by_target"] == 1: # 被目标探测后有对目标的角度信息
+                    state["target_observable"] = 1
+                    state["target_information"][0, 3, 5, 6, 7] = memory["target_information"][0, 3, 5, 6, 7]
                 else:
-                    pass # 否则所有信息可见
+                    state["target_observable"] = 2 # 否则除了不能发射导弹，都是可见的
             else:
-                pass # 10km类信息完全可见
-        # todo 不该看到的改为默认值或者残留值
+                state["target_observable"] = 2 # 10km类信息完全可见
+
         uav.obs_memory = copy.deepcopy(state) # 更新残留值
 
         # 尺度缩放

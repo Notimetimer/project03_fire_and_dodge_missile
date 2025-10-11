@@ -267,7 +267,7 @@ class PPOContinuous:
         return a_exec[0].cpu().detach().numpy().flatten(), u[0].cpu().detach().numpy().flatten()
     
 
-    def update(self, transition_dict):
+    def update(self, transition_dict, adv_normed=False):
         """更新函数兼容以下几种调用方式：
         - 如果 action_bounds 是 None: 期望 transition_dict 中包含 'action_bounds'，其形状为 (N,2) 或每步 (amin,amax)
         - 如果 action_bounds 是标量/二元元组/数组：作为全局固定区间使用
@@ -288,9 +288,10 @@ class PPOContinuous:
         td_delta = td_target - self.critic(states)
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
         
-        # # 优势归一化（目前只发现了阻碍）
-        # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
-        # advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+        # 优势归一化（目前只发现了阻碍）
+        if adv_normed:
+            adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
+            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
         # 策略输出（未压缩的 mu,std）
         mu, std = self.actor(states)

@@ -9,6 +9,7 @@ import sys
 import os
 import importlib
 import copy
+from math import *
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -38,16 +39,17 @@ class EscapeTrainEnv(Battle):
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
         full_obs["target_alive"] = copy.deepcopy(self.obs_init["target_alive"])
-        full_obs["target_locked"] = copy.deepcopy(self.obs_init["target_locked"])
         full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
         
+        # 逃逸过程中会出现部分观测的情况，已在base_obs中写下规则
+        # 只有在warning为TRUE的时候才能够获取威胁信息，已在get_state中写下规则
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
         return flat_obs
     
-    def escape_terminate_and_reward(self, side): # 进攻策略训练与奖励
+    def escape_terminate_and_reward(self, side): # 逃逸策略训练与奖励
         # copy了进攻的，还没改
         terminate = False
         state = self.get_state(side)
@@ -59,104 +61,101 @@ class EscapeTrainEnv(Battle):
         dist = state["target_information"][3]
         # alpha = state["target_information"][4]
         alpha = abs(delta_psi) # 实际上是把alpha换掉
+        threat_delta_psi, threat_delta_theta, threat_distance =\
+            state["threat"]
+
+        RWR = state["warning"]
+        obs = self.base_obs(side)
+        d_hor = obs["border"][0]
 
         if side == 'r':
             ego = self.RUAV
             ego_missile = self.Rmissiles[0] if self.Rmissiles else None
             enm = self.BUAV
+            alive_own_missiles = self.alive_r_missiles
+            alive_enm_missiles = self.alive_b_missiles
         if side == 'b':
             ego = self.BUAV
             ego_missile = self.Bmissiles[0] if self.Bmissiles else None
             enm = self.RUAV
+            alive_enm_missiles = self.alive_r_missiles
+            alive_own_missiles = self.alive_b_missiles
         
         '''
-        todo：状态空间与导弹相关的部分：制导阶段
-
-        一阶段：对方不还手
-        crank训练初始情况：
-        1、目标初始化前首先计算导弹可发射区范围，然后将目标置于可发射区内、不可逃逸区外，对我机纯追踪
-        2、目标出现在我机正前方40~80km向我机做纯追踪机动、速度和高度为随机数,与我机同高度
-        3、初始只有一枚导弹，开始就发射导弹
-
-        crank训练结束的情况
-        0、超时结束
-        1、超出雷达范围，立即失败
-        2、飞机出界、立即失败
-        3、导弹命中目标，立即成功
-        4、导弹自爆、立即失败
-
-        奖励种类：
-        1、角度奖励：左crank需要delta_psi接近雷达正向边界、右crank需要-delta_psi接近雷达边界
-        2、高度奖励：应该比目标略低但保持在安全区域
-        3、A-pole奖励：导弹进入锁定范围瞬间根据敌我距离提供奖励
-        4、F-pole奖励：导弹命中敌机瞬间根据敌我距离提供奖励
-
-        二阶段：互射一枚导弹（状态空间还没做好，做完规避再回来做二阶段）
-
+        逃逸机动训练
+        目标机从不可逃逸区外~40km向本机发射一枚导弹并对本机做纯追踪，
+        本机被导弹命中有惩罚，除此之外根据和导弹的ATA和提供密集奖励
         '''
-        # 超时结束
-        if self.t > self.game_time_limit:
-            terminate = True
-        # 雷达丢失目标判为失败 (会导致训练不稳定?)
-        if alpha > ego.max_radar_angle:
+        # 被命中判为失败
+        if ego.got_hit:
             terminate = True
             self.lose = 1
-        # 出界失败
+
+        # 高度出界失败
         if not self.min_alt<=alt<=self.max_alt:
             terminate = True
             self.lose = 1
-        # 导弹命中目标成功
-        if enm.dead:
+
+        # 飞出水平边界失败
+        if self.out_range(ego):
             terminate = True
+            self.lose = 1
+        
+        # 导弹规避成功
+        if self.t > self.game_time_limit \
+            and not ego.dead and enm.ammo==0 and \
+                len(alive_enm_missiles)==0:
             self.win = 1
-        # 导弹miss，失败
-        if ego_missile is not None:
-            if ego_missile.dead and not enm.dead:
-                terminate = True
-                self.lose = 1
+            terminate = True
         
-        # 左crank角度奖励
-        x_alpha = np.sign(delta_psi)*alpha * 180/pi
-        alpha_max = ego.max_radar_angle*180/pi # 60
-        mid_switch = sigmoid(0.4 * (x_alpha + alpha_max)) * sigmoid(0.4 * (alpha_max - x_alpha))
-        r_angle = (x_alpha/alpha_max * mid_switch - (1 - mid_switch))
-        if alpha > ego.max_radar_angle:
-            r_angle -= 20
+        # 密集奖励
+        if RWR: # 存在雷达告警时, 规避雷达
+            # 水平角度奖励， 奖励置尾机动
+            r_angle_h = abs(threat_delta_psi)/pi
 
-        # 高度奖励
-        pre_alt_opt = target_alt - 1e3 # 比目标低1000m方便增加阻力
-        alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
-        r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
-                    (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
-        if not self.min_alt<=alt<=self.max_alt:
-            r_alt -= 20
-                
-        # 速度奖励
-        speed_opt = 0.95*340
-        r_speed = abs(speed-speed_opt)/(2*340)
+            # 垂直角度奖励，导弹相对飞机俯仰角>-30°时越低越好，否则应该水平规避
+            sin_theta = state["ego_main"][2]
+            if threat_delta_theta>-pi/6:
+                sin_theta_opt = -1*np.clip((alt-self.min_alt_save)/5000, -0.99, 0.99)
+            else:
+                sin_theta_opt = 0
+            r_angle_v = (sin_theta<=sin_theta_opt)*(sin_theta-(-1))/(sin_theta_opt-(-1))+\
+                        (sin_theta>sin_theta_opt)*(1-(sin_theta-sin_theta_opt)/(1-sin_theta_opt))
+            
+            # 速度奖励
+            temp = abs(threat_delta_psi)/pi # 远离度,对头时候最好是0.8Ma，置尾的时候越快越好
+            v_opt = (0.8+(2-0.8)*temp)*340
+            r_v = 1 - np.abs(speed-v_opt)/(2*340)
 
-        # 事件奖励
-        r_event = 0
-        if ego_missile is not None:
-            # A-pole奖励
-            if ego_missile.A_pole_moment:
-                r_event += dist / 30e3 * 20
-                r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-            # F-pole奖励
-            if ego_missile.hit:
-                r_event += dist / 30e3 * 40
-                r_event += alt
-                r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+            # 高度奖励
+            pre_alt_opt = self.min_alt_save + 1e3 # 比最小安全高度高1000m
+            alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+            r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
+                        (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+        else:
+            # 不存在雷达告警时，对敌机做三九
+            # 水平角度奖励， 奖励和敌机在同一高度层的三九机动
+            r_angle_h = abs(abs(threat_delta_psi)-pi/2)/pi*2
+            r_angle_v = abs(ego.theta - obs["target_information"][2])/pi
+            r_v = 1 - np.abs(speed-0.95*340)/(2*340)
+            pre_alt_opt = 5e3*obs["target_information"][0] # 和目标相同高度
+            alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+            r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
+                        (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+
+        # 水平边界奖励
+        r_border = 1-d_hor
+
+        # 稀疏奖励
+        # 失败惩罚
         if self.lose:
-            r_event -= 20
-        # if alpha > ego.max_radar_angle:
-        #     r_event -= 3 # 超出雷达范围惩罚
+            r_event = -20
+        # 取胜奖励
+        if self.win:
+            r_event = 20
 
-        # 平稳性惩罚
-        r_steady = 0 # -abs(ego.p**2 + ego.q**2 +ego.r**2)/(2*pi)**2
-
-        reward = np.sum(np.array([2, 1, 1, 0, 1])*\
-            np.array([r_angle, r_alt, r_speed, r_event, r_steady]))
+        reward = np.sum(np.array([1, 1, 1, 1, 1, 2])*\
+            np.array([r_angle_h, r_angle_v, r_v, r_alt, r_event, r_border]))
 
         if terminate:
             self.running = False
