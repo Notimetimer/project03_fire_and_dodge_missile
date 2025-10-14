@@ -88,7 +88,7 @@ class PolicyNetContinuous(torch.nn.Module):
 
     def forward(self, x, action_bound=2.0, min_std=1e-3):
         x = self.net(x)
-        mu = action_bound * torch.tanh(self.fc_mu(x))
+        mu = action_bound * self.fc_mu(x) # torch.tanh(self.fc_mu(x))
         std = action_bound * F.softplus(self.fc_std(x))  # + 1e-8
         std = torch.clamp(std, min=min_std)  # 设置 std 的最小值
         return mu, std

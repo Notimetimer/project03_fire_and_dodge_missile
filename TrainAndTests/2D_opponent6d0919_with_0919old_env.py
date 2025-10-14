@@ -187,11 +187,22 @@ for i in range(10):
             launch_missile_if_possible(env, side='b')
 
         # 机动决策
-        r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-                                   enm_pos_=env.BUAV.pos_, distance=distance,
-                                   ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                   o00=o00, R_cage=env.R_cage, wander=1
-                                   )
+        # r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
+        #                            enm_pos_=env.BUAV.pos_, distance=distance,
+        #                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
+        #                            o00=o00, R_cage=env.R_cage, wander=0 #1
+        #                            )
+        
+        L_ = env.BUAV.pos_ - env.RUAV.pos_
+        q_beta = atan2(L_[2], L_[0])
+        L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
+        L_v = L_[1]
+        q_epsilon = atan2(L_v, L_h)
+        delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
+        r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save)-env.RUAV.pos_[1]
+        r_action_n_1 = delta_psi
+        r_action_n_2 = 340
+        r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
         b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
                                    enm_pos_=env.RUAV.pos_, distance=distance,

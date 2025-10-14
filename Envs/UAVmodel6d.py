@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Controller.F16PIDController2 import *
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
-
+from Math_calculates.coord_rotations import *
 
 # 无人机模型
 class UAVModel(object):
@@ -132,7 +132,8 @@ class UAVModel(object):
         self.q = self.sim["velocities/q-rad_sec"]  # 俯仰角速度（弧度/秒）
         self.r = self.sim["velocities/r-rad_sec"]        
         self.speed = self.sim["velocities/vt-fps"] * 0.3048  # ego_vc (unit: m/s)
-
+        self.point_ = active_rotation(np.array([1,0,0]), self.psi, self.theta, self.phi)
+        
         # 取当前位置
         lon = self.sim["position/long-gc-deg"]  # 经度
         lat = self.sim["position/lat-gc-deg"]  # 纬度
@@ -276,6 +277,7 @@ class UAVModel(object):
         self.psi = self.sim["attitude/psi-deg"] * pi / 180  # 航向角 (yaw)
 
         self.vel_ = np.array([vn, vu, ve]) # ft.s转m/s
+        self.point_ = active_rotation(np.array([1,0,0]), self.psi, self.theta, self.phi)
 
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])

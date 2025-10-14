@@ -415,7 +415,7 @@ class Battle(object):
         vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
         vv_ = own.vel_[1]  # 掩模 取垂直速度
         v = norm(v_)
-        alpha = np.arccos(np.dot(L_,v_)/(v*dist+0.01)) # 防止计算误差导致分子>分母
+        ATA = np.arccos(np.dot(L_, own.point_)/(dist*norm(own.point_)+0.001)) # 防止计算误差导致分子>分母
         # 速度观测量
         v_own = v
         # 本机高度
@@ -431,7 +431,7 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        if alpha < own.max_radar_angle and dist < own.max_radar_range:
+        if ATA < own.max_radar_angle and dist < own.max_radar_range:
             target_locked = 1
         else:
             target_locked = 0
@@ -460,10 +460,10 @@ class Battle(object):
         else:
             locked_by_target = 0
 
-        # 告警信息
+        # 告警信息 pi和-pi是突变点，置尾机动的时候不易训练，暂时不想用sin和cos，试试改为追一个东西
         if not alive_enm_missiles:
             warning = 0
-            threat_delta_psi = pi
+            threat_delta_psi = 0 # pi
             threat_delta_theta = 0
             threat_distance = 100e3
         else:
@@ -472,11 +472,15 @@ class Battle(object):
             threat_delta_psis = np.zeros(len(alive_enm_missiles))
             threat_delta_thetas = np.zeros(len(alive_enm_missiles))
             for i, missile in enumerate(alive_enm_missiles):
-                if missile.distance < missile.dectect_range and missile.in_angle:
+                if missile.distance < missile.detect_range and missile.in_angle:
                     warnings[i] = 1
                     distances[i] = missile.distance
-                    threat_delta_psis[i] = sub_of_radian(pi+missile.q_beta, own.psi)
-                    threat_delta_thetas[i] = -missile.q_epsilon
+                    # 作为追踪去训练，视图避开(pi -pi)突变点问题
+                    threat_delta_psis[i] = sub_of_radian(missile.q_beta, own.psi)
+                    threat_delta_thetas[i] = missile.q_epsilon
+                    # 作为远离去训练，效果不是很好
+                    # threat_delta_psis[i] = sub_of_radian(pi+missile.q_beta, own.psi)
+                    # threat_delta_thetas[i] = -missile.q_epsilon
             
             # 告警标志 bool
             warning = bool(max(warnings))
@@ -550,7 +554,7 @@ class Battle(object):
                 float(delta_psi),       # 1相对方位 rad
                 float(delta_theta),     # 2相对俯仰角 rad
                 float(dist_obs),        # 3距离 m
-                float(alpha),           # 4夹角 rad
+                float(ATA),           # 4夹角 rad
                 float(speed_T),         # 5目标速度 m/s
                 float(AA_hor),          # 6水平进入角 rad
                 float(AA_vert)          # 7垂直进入角 rad
@@ -625,7 +629,7 @@ class Battle(object):
             else:
                 memory = uav.obs_memory
             
-            alpha = state["target_information"][4]
+            ATA = state["target_information"][4]
             dist = state["target_information"][3]
 
             # 超出探测距离
@@ -634,7 +638,7 @@ class Battle(object):
                 state["target_information"] = memory["target_information"].copy()
             # 探测距离到近距
             elif dist > 10e3:
-                if alpha > pi/3 and state["locked_by_target"]==0:  # 夹角>3/pi时观测不到目标
+                if ATA > pi/3 and state["locked_by_target"]==0:  # 夹角>3/pi时观测不到目标
                     state["target_observable"] = 0
                     state["target_information"] = memory["target_information"].copy()
                 elif state["locked_by_target"] == 1: # 被目标探测后有对目标的角度信息
@@ -661,8 +665,8 @@ class Battle(object):
             s["ego_control"][2] /= (2 * pi) # (2 * pi) 340
             s["weapon"] /= 120
             s["threat"][2] /= 10e3
-            s["border"][0] = max(0, 1-s["border"][0]/20e3)
-            s["border"][1] = 0 if s["border"][0]==0 else s["border"][1]
+            s["border"][0] = min(1, s["border"][0]/50e3)
+            s["border"][1] = 0 if s["border"][0]==1 else s["border"][1]
             return s
 
         observation = scale_state(state)
@@ -768,6 +772,39 @@ class Battle(object):
                 out = False
         return out
     
+    # 近距处理
+    def close_range_kill(self):
+        # todo 使用这个最好在奖励函数里面加上距离奖励
+        for ruav in self.RUAVs:
+            if ruav.dead:
+                continue
+            for buav in self.BUAVs:
+                if buav.dead:
+                    continue
+                elif norm(ruav.pos_-buav.pos_)>=8e3:
+                    continue
+                else:
+                    Lbr_ = ruav.pos_ - buav.pos_
+                    Lrb_ = buav.pos_ - ruav.pos_
+                    dist = norm(Lbr_)
+                    # 求解hot-cold关系
+                    cos_ATA_r = np.dot(Lrb_, ruav.vel_)/(dist*ruav.speed)
+                    cos_ATA_b = np.dot(Lbr_, buav.vel_)/(dist*buav.speed)
+                    # 双杀
+                    if cos_ATA_r>=cos(pi/3) and cos_ATA_b>=cos(pi/3):
+                        ruav.dead = True
+                        buav.dead = True
+                        ruav.got_hit = True
+                        buav.got_hit = True
+                        # todo win-lose
+                    # 单杀
+                    if cos_ATA_r>=cos(pi/3) and cos_ATA_b<cos(pi/3):
+                        buav.dead = True
+                        buav.got_hit = True
+                    if cos_ATA_r<cos(pi/3) and cos_ATA_b>=cos(pi/3):
+                        ruav.dead = True
+                        ruav.got_hit = True
+
     def render(self, t_bias=0):
         if self.tacview_show:
             send_t = self.t+t_bias
@@ -782,14 +819,14 @@ class Battle(object):
                         f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
                         f"Name=F16,Color={UAV.label}\n"
                     )
-                    data_to_send+=(
-                        f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
-                        f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                        f"Type=Beam, Color={UAV.label},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
-                    )
+                    # data_to_send+=(
+                    #     f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
+                    #     f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
+                    #     f"Type=Beam, Color={UAV.label},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
+                    # )
                 else:
                     data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
-                    data_to_send += f"#-{UAV.id+1000}\n"
+                    # data_to_send += f"#-{UAV.id+1000}\n"
 
             # 传输导弹信息
             for missile in self.missiles:
@@ -813,7 +850,7 @@ class Battle(object):
             data_to_send = ''
             for UAV in self.UAVs:
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
-                data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
+                # data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
             for missile in self.missiles:
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
             self.tacview.send_data_to_client(data_to_send)
