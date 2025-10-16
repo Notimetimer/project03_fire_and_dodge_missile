@@ -80,6 +80,7 @@ state_dim = 34 # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+print("running on:", device)
 
 # 整一下高度-攻击区离散表（使用有限的选择）
 # 水平距离20km~80km, 我机高度 env.min_alt_save 到 env.max_alt_save 按 2e3 间隔划分
