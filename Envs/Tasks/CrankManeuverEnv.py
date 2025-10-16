@@ -80,31 +80,6 @@ class CrankTrainEnv(Battle):
             ego_missile = self.Bmissiles[0] if self.Bmissiles else None
             enm = self.RUAV
         
-        '''
-        todo：状态空间与导弹相关的部分：制导阶段
-
-        一阶段：对方不还手
-        crank训练初始情况：
-        1、目标初始化前首先计算导弹可发射区范围，然后将目标置于可发射区内、不可逃逸区外，对我机纯追踪
-        2、目标出现在我机正前方40~80km向我机做纯追踪机动、速度和高度为随机数,与我机同高度
-        3、初始只有一枚导弹，开始就发射导弹
-
-        crank训练结束的情况
-        0、超时结束
-        1、超出雷达范围，立即失败
-        2、飞机出界、立即失败
-        3、导弹命中目标，立即成功
-        4、导弹自爆、立即失败
-
-        奖励种类：
-        1、角度奖励：左crank需要delta_psi接近雷达正向边界、右crank需要-delta_psi接近雷达边界
-        2、高度奖励：应该比目标略低但保持在安全区域
-        3、A-pole奖励：导弹进入锁定范围瞬间根据敌我距离提供奖励
-        4、F-pole奖励：导弹命中敌机瞬间根据敌我距离提供奖励
-
-        二阶段：互射一枚导弹（状态空间还没做好，做完规避再回来做二阶段）
-
-        '''
         # 超时结束
         if self.t > self.game_time_limit:
             terminate = True
@@ -126,7 +101,7 @@ class CrankTrainEnv(Battle):
         #     terminate = True
         #     self.win = 1
 
-        # 如果取得近距杀条件，判定为成功，近距再crank已经没有必要了
+        # 如果取得近距杀条件，判定为成功
         Los_ = enm.pos_ - ego.pos_
         dist = norm(Los_)
         # 求解hot-cold关系
@@ -141,6 +116,9 @@ class CrankTrainEnv(Battle):
         alpha_max = ego.max_radar_angle*180/pi # 60
         x_opt = 52
         temp = (x<x_opt)*(x+alpha_max)/(x_opt+alpha_max)+(x>=x_opt)*(x-alpha_max)/(x_opt-alpha_max)
+
+        temp = temp*np.clip(1-abs(ego.theta)/pi*6, 0, 1)
+
         r_angle = temp*2-1
         # mid_switch = sigmoid(0.4 * (x + alpha_max)) * sigmoid(0.4 * (alpha_max - x))
         # r_angle = (x/alpha_max * mid_switch - (1 - mid_switch))
@@ -149,7 +127,7 @@ class CrankTrainEnv(Battle):
 
         # 垂直角度惩罚
         q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
-        r_angle_v = -abs(ego.theta-q_epsilon)/pi*2
+        r_angle_v = 0 # -abs(ego.theta-q_epsilon)/pi*2
 
         # 高度奖励
         pre_alt_opt = target_alt - 2e3 # 比目标低1000m方便增加阻力

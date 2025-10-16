@@ -33,6 +33,17 @@ from Envs.battle6dof1v1_missile0919 import *
 # 通过继承构建观测空间、奖励函数和终止条件
 
 class EscapeTrainEnv(Battle):
+    def __init__(self, args, tacview_show=0):
+        super().__init__(args, tacview_show)
+    
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):       
+        # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
+        super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
+        # 初始化红蓝远离速度
+        self.last_dist_dot = None
+        self.last_dhor = None
+        
+
     # # 任务：敌机一开始就发射导弹，规避的时候我机需要做置尾下高机动尽力逃脱追击
     def escape_obs(self, side):
         full_obs = self.base_obs(side)
@@ -59,8 +70,7 @@ class EscapeTrainEnv(Battle):
         delta_psi = state["target_information"][1]
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
-        # alpha = state["target_information"][4]
-        alpha = abs(delta_psi) # 实际上是把alpha换掉
+        alpha = state["target_information"][4]
         threat_delta_psi, threat_delta_theta, threat_distance =\
             state["threat"]
 
@@ -110,56 +120,58 @@ class EscapeTrainEnv(Battle):
             self.win = 1
             terminate = True
         
-        # 密集奖励
-        if RWR: # 存在雷达告警时, 规避雷达
-            # 水平角度奖励， 奖励置尾机动， 因为状态信息被投影到了另一边，现在变成追踪训练了
-            r_angle_h = 1-abs(threat_delta_psi)/pi
+        # 水平角度奖励， 奖励和敌机在同一高度层的置尾机动(√)
 
-            # 垂直角度奖励，导弹相对飞机俯仰角>-30°时越低越好，否则应该水平规避
-            sin_theta = state["ego_main"][2]
-            if -threat_delta_theta>-pi/6:
-                sin_theta_opt = -1*np.clip((alt-self.min_alt_save)/5000, -0.99, 0.99)
-            else:
-                sin_theta_opt = 0
-            r_angle_v = (sin_theta<=sin_theta_opt)*(sin_theta-(-1))/(sin_theta_opt-(-1))+\
-                        (sin_theta>sin_theta_opt)*(1-(sin_theta-sin_theta_opt)/(1-sin_theta_opt))
-            
-            # 距离奖励，和导弹之间的距离
-            
-        else:
-            # 不存在雷达告警时，对敌机做三九
-            # 水平角度奖励， 奖励和敌机在同一高度层的 三九机动(×) 置尾机动(√)
-            # r_angle_h = abs(abs(threat_delta_psi)-pi/2)/pi*2
-            r_angle_h = 1-abs(delta_psi)/pi
-            r_angle_v = abs(ego.theta + obs["target_information"][2])/pi
-            # r_angle_h = abs(threat_delta_psi)/pi
-            # r_angle_v = abs(ego.theta - obs["target_information"][2])/pi
-            r_v = 1 - np.abs(speed-0.95*340)/(2*340)
-            pre_alt_opt = 5e3*obs["target_information"][0] # 和目标相同高度
-            alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
-            r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
-                        (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
-            # 距离奖励，和目标机之间的距离
-            r_dist = -1+np.clip(dist/30e3, -1, 1)
+        r_angle = alpha / pi
+        # r_angle_h = abs(delta_psi)/pi
+        # r_angle_v = 1-abs(obs["target_information"][2])/pi*2 # 不对
+        r_angle_v = 1-abs(ego.theta/pi*2)
+        
+        L_ = enm.pos_-ego.pos_
+        delta_v_ = enm.vel_-ego.vel_
+        dist_dot = np.dot(delta_v_, L_)/dist
+        self.dist_dot = dist_dot
 
         # 速度奖励
-        temp = abs(threat_delta_psi)/pi # 远离度,对头时候最好是0.8Ma，置尾的时候越快越好
-        v_opt = (0.8+(2-0.8)*temp)*340
-        r_v = 1 - np.abs(speed-v_opt)/(2*340)
+        if self.last_dist_dot is None:
+            dist_dot2 = 0
+        else:
+            dist_dot2 = (self.dist_dot-self.last_dist_dot)/self.dt_maneuver
+        self.last_dist_dot = self.dist_dot
 
+        r_v = dist_dot2/9.8
+
+        # temp = abs(threat_delta_psi)/pi # 远离度,对头时候最好是0.8Ma，置尾的时候越快越好
+        # v_opt = (0.8+(2-0.8)*temp)*340
+        # r_v = 1 - np.abs(speed-v_opt)/(2*340)
+
+        # r_v = dist_dot/(2*340) # 远离给奖励，接近给惩罚
+        
         # 高度奖励
-        pre_alt_opt = self.min_alt_save + 1e3 # 比最小安全高度高1000m
-        alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
-        r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
-                    (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+        # r_alt = (alt<=self.min_alt_save) * (alt-self.min_alt)/(self.min_alt_save-self.min_alt) + \
+        #         (alt>=self.max_alt_save) * (alt-self.max_alt)/(self.max_alt_save-self.max_alt)
+        r_alt = (alt<=self.min_alt_save) * np.clip(ego.vu/100, -1, 1) + \
+                (alt>=self.max_alt_save) * np.clip(-ego.vu/100, -1, 1)
+
+        # pre_alt_opt = self.min_alt_save + 1e3 # 比最小安全高度高1000m
+        # alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+        # r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt),
+        #             (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
         
         # 距离奖励，和目标机之间的距离
         r_dist = -1+np.clip(dist/30e3, -1, 1)
 
-        # 水平边界奖励
-        r_border = d_hor
+        # # 水平边界奖励
+        self.dhor = d_hor
+        if self.last_dhor is None:
+            d_hor_dot = 0
+        else:
+            d_hor_dot = (self.dhor-self.last_dhor)/self.dt_maneuver
+        self.last_dhor = self.dhor
+        r_border = d_hor_dot /340*50e3
+        # r_border = 0
 
-        # 稀疏奖励
+        # # 稀疏奖励
         # 失败惩罚
         if self.lose:
             r_event = -20
@@ -168,11 +180,21 @@ class EscapeTrainEnv(Battle):
             r_event = 20
         else:
             r_event = 0
+        # r_event = 0
 
-        reward = np.sum(\
-            np.array([1, 0.5, 1, 1, 1, 2, 0.5])*\
-            np.array([r_angle_h, r_angle_v, r_v, r_alt, r_event, r_border, r_dist]))
+        w_angle =  1 # d_hor**2
+        w_border = 1 # 1-w_angle
 
+        reward = np.sum([
+            w_angle * r_angle ,
+            1 * r_angle_v ,
+            1 * r_v ,
+            2 * r_alt ,
+            1 * r_event ,
+            w_border * r_border , # 10
+            0.5 * r_dist,
+            ])
+        
         if terminate:
             self.running = False
         

@@ -135,7 +135,7 @@ class PolicyNetContinuous(torch.nn.Module):
         self.fc_mu = torch.nn.Linear(prev_size, action_dim)
         self.fc_std = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x, min_std=1e-7, max_std=0.6): 
+    def forward(self, x, min_std=1e-6, max_std=0.3): # max_std=0.6
         # 最小方差 1e-3, 最大方差不要超过0.707否则tanh后会出现双峰函数
         x = self.net(x)
         mu = self.fc_mu(x)

@@ -81,7 +81,7 @@ try:
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                 'psi': red_psi}
         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
-                                    'psi': blue_psi}
+                                'psi': blue_psi}
         # # 飞机出生状态指定
         # init_case = np.random.randint(initial_states.shape[0])
 

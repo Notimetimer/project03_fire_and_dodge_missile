@@ -63,7 +63,7 @@ def sigmoid(x):
 
 class Battle(object):
     def __init__(self, args, tacview_show=0):
-        # super(Battle, self).__init__() 
+        super(Battle, self).__init__()
         self.BUAV = None
         self.RUAV = None
         self.dt_maneuver = dt_maneuver
@@ -94,11 +94,9 @@ class Battle(object):
         self.lose = None
         self.draw = None
         self.max_alt = 15e3
-        self.max_alt_danger = 14e3
         self.max_alt_save = 13e3
         self.min_alt_save= 3e3
-        self.min_alt_danger = 2e3
-        self.min_alt = 0.5e3 # 1e3
+        self.min_alt = 1e3
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
 
         # # 智能体的观察空间

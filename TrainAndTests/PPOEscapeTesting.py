@@ -2,7 +2,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.PPOEscapeTraining import *
+# from TrainAndTests.PPOEscapeTraining import *
+from TrainAndTests.PPOPlaneEscapeTraining import *
 import re
 
 dt_maneuver= 0.2 # 0.2 
@@ -57,24 +58,26 @@ try:
         r_action_list=[]
         b_action_list=[]
         
-        # 飞机出生状态指定
-        # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-        blue_height = np.random.uniform(4000, 12000)
-        red_height = blue_height + np.random.uniform(-2000, 2500)
-        red_psi = (random.randint(0,1)*2-1) * pi/2 # random.uniform(-pi, pi)
-        blue_psi = random.uniform(-pi, pi)
-        # blue_beta = red_psi
-        red_N = random.uniform(-52e3, 52e3)
-        red_E = -np.sign(red_psi) * 30e3
-        blue_N = red_N
-        blue_E = 0
+        # # 飞机出生状态指定
+        # # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+        # blue_height = np.random.uniform(4000, 12000)
+        # red_height = blue_height + np.random.uniform(-2000, 2500)
+        # red_psi = (random.randint(0,1)*2-1) * pi/2 # random.uniform(-pi, pi)
+        # blue_psi = random.uniform(-pi, pi)
+        # # blue_beta = red_psi
+        # red_N = random.uniform(-52e3, 52e3)
+        # red_E = -np.sign(red_psi) * 40e3
+        # blue_N = red_N
+        # blue_E = 0
 
-        DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                'psi': red_psi
-                                }
-        DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
-                                    'psi': blue_psi
-                                    }
+        # DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+        #                         'psi': red_psi
+        #                         }
+        # DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+        #                             'psi': blue_psi
+        #                             }
+        
+        DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=1, blue_init_ammo=0)
 
@@ -153,7 +156,7 @@ try:
                 print()
             
             # 神经网络输出动作
-            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)
+            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False) # explore=False
             
             if b_check_obs["warning"]==1:
                 print(b_check_obs["threat"])
