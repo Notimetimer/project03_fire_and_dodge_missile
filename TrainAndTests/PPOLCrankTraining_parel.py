@@ -59,7 +59,7 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=320,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
                     help="")
@@ -154,7 +154,7 @@ def test_win_rate(seed, test_run=1):
 
     blue_psi = pi/2
     red_psi = -pi/2
-    red_N = random.uniform(-50e3, 50e3)
+    red_N = random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
     red_E = 35e3
     blue_N = red_N
     blue_E = -35e3
@@ -300,7 +300,7 @@ if __name__=="__main__":
     t_bias = 0
     steps_since_update = 0
 
-    test_interval = 50 # 50
+    test_interval = 10 # 50
 
     try:
         # 强化学习训练
@@ -308,7 +308,7 @@ if __name__=="__main__":
         while total_steps < int(max_steps*(1-pre_train_rate)):
             i_episode += 1
             if i_episode % test_interval == test_interval-1: # 每100回合测试20次
-                num_processes = 10
+                num_processes = 2 # 10
                 test_run = 1
                 
                 # results = test_win_rate(1, test_run)
@@ -331,7 +331,7 @@ if __name__=="__main__":
                 red_height = np.clip(blue_height+random.uniform(-2e3, 2e3), 3e3, 12e3)
                 blue_psi = pi/2
                 red_psi = -pi/2
-                red_N = random.uniform(-50e3, 50e3)
+                red_N = random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
                 red_E = 35e3
                 blue_N = red_N
                 blue_E = -35e3
@@ -494,23 +494,24 @@ if __name__=="__main__":
 
                     # if steps_since_update >= transition_dict_capacity:
                     #     steps_since_update = 0
-                    #     agent.update(transition_dict)
+                    #     agent.update(transition_dict, adv_normed=0)
                     #     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
                     #     actor_grad_norm = agent.actor_grad
                     #     actor_post_clip_grad = agent.post_clip_actor_grad
                     #     critic_grad_norm = agent.critic_grad
                     #     critic_post_clip_grad = agent.post_clip_critic_grad
+                    #     logger.add("train/1 episode_return", np.mean(episode_return), total_steps)
                     #     # 梯度监控
-                    #     logger.add("train/actor_grad_norm", actor_grad_norm, total_steps)
-                    #     # logger.add("train/actor_post_clip_grad", actor_post_clip_grad, total_steps)
-                    #     logger.add("train/critic_grad_norm", critic_grad_norm, total_steps)
-                    #     # logger.add("train/critic_post_clip_grad", critic_post_clip_grad, total_steps)
+                    #     logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
+                    #     logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, total_steps)
+                    #     logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
+                    #     logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, total_steps)
                     #     # 损失函数监控
-                    #     logger.add("train/actor_loss", agent.actor_loss, total_steps)
-                    #     logger.add("train/critic_loss", agent.critic_loss, total_steps)
+                    #     logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
+                    #     logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
                     #     # 强化学习actor特殊项监控
-                    #     logger.add("train/entropy", agent.entropy_mean, total_steps)
-                    #     logger.add("train/ratio", agent.ratio_mean, total_steps)     
+                    #     logger.add("train/9 entropy", agent.entropy_mean, total_steps)
+                    #     logger.add("train/10 ratio", agent.ratio_mean, total_steps)
 
                     '''显示运行轨迹'''
                     # 可视化
@@ -525,7 +526,7 @@ if __name__=="__main__":
 
                 # tensorboard 训练进度显示
                 if not test_run:
-                    agent.update(transition_dict, adv_normed=True)
+                    agent.update(transition_dict, adv_normed=False)
                     actor_grad_norm = agent.actor_grad
                     actor_post_clip_grad = agent.post_clip_actor_grad
                     critic_grad_norm = agent.critic_grad

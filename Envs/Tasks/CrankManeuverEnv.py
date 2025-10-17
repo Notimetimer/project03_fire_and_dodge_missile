@@ -9,6 +9,7 @@ import sys
 import os
 import importlib
 import copy
+from scipy.interpolate import LinearNDInterpolator
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -32,6 +33,23 @@ from Envs.battle6dof1v1_missile0919 import *
 # 通过继承构建观测空间、奖励函数和终止条件
 
 class CrankTrainEnv(Battle):
+    def __init__(self, args, tacview_show=0):
+        super().__init__(args, tacview_show)
+        # 1. 原始散点数据
+        # ----------------------------
+        x = np.array([-60, 50, 50, 50, 60, -180, 180, 50, 50, -180, -180, 180, 180, -60,-60])
+        y = np.array([0, -30, 0, 30, 0, 0, 0, -90, 90, 90,-90, 90,-90, -90, 90])
+        z = np.array([-1, -1, 1, -1, -1, -5, -5, -5, -5, -5,-5,-5,-5, -5, -5])
+        self.L_interp = LinearNDInterpolator(list(zip(x, y)), z, fill_value=np.nan)
+        
+    
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):       
+        # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
+        super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
+        # 初始化红蓝远离速度
+        self.last_dist_dot = None
+        self.last_dhor = None
+
     def left_crank_obs(self, side):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
@@ -83,8 +101,9 @@ class CrankTrainEnv(Battle):
         # 超时结束
         if self.t > self.game_time_limit:
             terminate = True
-        # 雷达丢失目标判为失败
+        # 雷达丢失目标判为失败 ###
         if alpha > ego.max_radar_angle:
+        # if alpha > pi/2: ### 放宽要求
             terminate = True
             self.lose = 1
         # 高度出界失败
@@ -112,22 +131,44 @@ class CrankTrainEnv(Battle):
             self.win = 1
         
         # 左crank角度奖励
-        x = np.sign(delta_psi)*alpha * 180/pi
-        alpha_max = ego.max_radar_angle*180/pi # 60
-        x_opt = 52
-        temp = (x<x_opt)*(x+alpha_max)/(x_opt+alpha_max)+(x>=x_opt)*(x-alpha_max)/(x_opt-alpha_max)
+        x = delta_psi*180/pi
+        y = delta_theta*180/pi
+        r_angle = self.L_interp(x,y)
 
-        temp = temp*np.clip(1-abs(ego.theta)/pi*6, 0, 1)
+        # x = np.sign(delta_psi)*alpha * 180/pi
+        # alpha_max = ego.max_radar_angle*180/pi # 60
+        # x_opt = 50
+        # r_angle_delta_psi = np.clip(delta_psi/(60*pi/180), -1, 1)
+        # if alpha < 50*pi/180:
+        #     r_angle_alpha = -(alpha/(50*pi/180))**2
+        # else:
+        #     r_angle_alpha = -(6/5)*(alpha/(60*pi/180))**2
 
-        r_angle = temp*2-1
+        # r_angle = r_angle_alpha + 0.8*r_angle_delta_psi
+
+        # temp = (delta_psi<x_opt)*(delta_psi+alpha_max)/(x_opt+alpha_max)+(delta_psi>=x_opt)*(delta_psi-(alpha_max-5))/(x_opt-(alpha_max-5))
+        # temp = temp*np.clip(1-abs(ego.theta)/pi*6, 0, 1)
+        # theta_threshold = pi/12
+        # if abs(ego.theta)<theta_threshold:
+        #     r_angle = temp * (theta_threshold-abs(ego.theta))/theta_threshold
+        # else:
+        #     r_angle = -(abs(ego.theta)-theta_threshold)/theta_threshold
+        
         # mid_switch = sigmoid(0.4 * (x + alpha_max)) * sigmoid(0.4 * (alpha_max - x))
         # r_angle = (x/alpha_max * mid_switch - (1 - mid_switch))
         # if alpha > ego.max_radar_angle:
         #     r_angle -= 20
 
-        # 垂直角度惩罚
-        q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
+        # # 垂直角度惩罚
+        # q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
         r_angle_v = 0 # -abs(ego.theta-q_epsilon)/pi*2
+        ### 
+        r_angle_v -= abs(np.clip(ego.vu/100, -1, 1)) * 0.5
+        # 上升下降率惩罚
+        if Los_[1]<0: # 目标在下面，我应该下降
+            r_angle_v -= np.clip(ego.vu/100, -1, 1)
+        if Los_[1]>0: # 目标在上面，我应该上升
+            r_angle_v += np.clip(ego.vu/100, -1, 1)
 
         # 高度奖励
         pre_alt_opt = target_alt - 2e3 # 比目标低1000m方便增加阻力
@@ -136,6 +177,9 @@ class CrankTrainEnv(Battle):
                     (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
         # if not self.min_alt<=alt<=self.max_alt:
         #     r_alt -= 20
+        ###
+        r_alt += (alt<=self.min_alt_save) * np.clip(ego.vu/100, -1, 1) + \
+                (alt>=self.max_alt_save) * np.clip(-ego.vu/100, -1, 1)
                 
         # 速度奖励
         speed_opt = 0.95*340
@@ -144,7 +188,15 @@ class CrankTrainEnv(Battle):
         # 边界距离奖励
         obs = self.base_obs(side)
         d_hor = obs["border"][0]
-        r_border = d_hor
+        # # 水平边界奖励
+        self.dhor = d_hor
+        if self.last_dhor is None:
+            d_hor_dot = 0
+        else:
+            d_hor_dot = (self.dhor-self.last_dhor)/self.dt_maneuver
+        self.last_dhor = self.dhor
+        r_border = d_hor_dot /340*50e3
+        # r_border = 0
 
         # 事件奖励
         r_event = 0
@@ -159,15 +211,21 @@ class CrankTrainEnv(Battle):
         #         r_event += alt
         #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
         if self.lose:
-            r_event -= 20
+            r_event -= 100 # 20
         if self.win:
-            r_event += 20
+            r_event += 100 # 20
 
         # if alpha > ego.max_radar_angle:
         #     r_event -= 3 # 超出雷达范围惩罚
 
-        reward = np.sum(np.array([1, 3, 1, 1, 1, 1])*\
-            np.array([r_angle, r_angle_v, r_alt, r_speed, r_event, r_border]))
+        reward = np.sum([
+            1 * r_angle,
+            2 * r_angle_v, # 3
+            1 * r_alt,
+            1 * r_speed,
+            1 * r_event,
+            1 * r_border,
+            ])
 
         if terminate:
             self.running = False

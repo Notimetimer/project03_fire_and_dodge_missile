@@ -44,7 +44,7 @@ def get_latest_log_dir(pre_log_dir, mission_name=None):
 pre_log_dir = os.path.join("./logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
-log_dir = os.path.join(pre_log_dir, "LCrank-run-20251010-114608")
+# log_dir = os.path.join(pre_log_dir, "LCrank-run-20251010-114608")
 
 
 # 测试训练效果
@@ -73,7 +73,7 @@ try:
 
         blue_psi = pi/2
         red_psi = -pi/2
-        red_N = random.uniform(-50e3, 50e3)
+        red_N = random.choice([-54e3, 54e3])
         red_E = 35e3
         blue_N = red_N
         blue_E = -35e3
@@ -82,26 +82,7 @@ try:
                                 'psi': red_psi}
         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                 'psi': blue_psi}
-        # # 飞机出生状态指定
-        # init_case = np.random.randint(initial_states.shape[0])
 
-        # red_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
-        
-        # blue_height = initial_states[init_case][0]
-        # red_height = initial_states[init_case][1]
-
-        # blue_psi = random.uniform(-pi, pi)
-        # red_psi = sub_of_radian(blue_psi, pi)
-        # red_beta = blue_psi
-        # red_N = red_R*cos(red_beta)
-        # red_E = red_R*sin(red_beta)
-
-        # DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-        #                         'psi': red_psi
-        #                         }
-        # DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-        #                             'psi': blue_psi
-        #                             }
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=0, blue_init_ammo=0)
 
@@ -170,10 +151,18 @@ try:
             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)
 
             # # 规则动作
-            # delta_psi = b_check_obs['target_information'][1]
+            delta_psi = b_check_obs['target_information'][1]
             # delta_height = b_check_obs['target_information'][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
             
+            # # # 动作裁剪
+            # # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+            # if delta_psi>0:
+            #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+            # else:
+            #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
+
+
             # # 动作平滑（实验性）
             # b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
             hist_b_action = b_action_n

@@ -52,6 +52,26 @@ if latest_actor_path:
 
 t_bias = 0
 
+def creat_initial_state():
+    # 飞机出生状态指定
+    # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+    blue_height = np.random.uniform(4000, 12000)
+    red_height = blue_height + np.random.uniform(-2000, 2500)
+    red_psi =  np.random.choice([-1, 1]) * pi/2 # random.uniform(-pi, pi)
+    blue_psi = random.uniform(-pi, pi)
+    # blue_beta = red_psi
+    red_N = (random.randint(0,1)*2-1)*57e3 # random.uniform(-52e3, 52e3) 38
+    red_E = -np.sign(red_psi) * 25e3 #40e3
+    blue_N = red_N
+    blue_E = 0
+    DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+                        'psi': red_psi
+                        }
+    DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+                                'psi': blue_psi
+                                }
+    return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+
 try:
     env = EscapeTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
     for i_episode in range(3):  # 10
@@ -76,7 +96,7 @@ try:
         # DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
         #                             'psi': blue_psi
         #                             }
-        
+
         DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=1, blue_init_ammo=0)

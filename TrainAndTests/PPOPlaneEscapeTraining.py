@@ -110,7 +110,7 @@ def creat_initial_state():
     blue_psi = random.uniform(-pi, pi)
     # blue_beta = red_psi
     red_N = (random.randint(0,1)*2-1)*57e3 # random.uniform(-52e3, 52e3) 38
-    red_E = -np.sign(red_psi) * 40e3
+    red_E = -np.sign(red_psi) * 40e3 #40e3
     blue_N = red_N
     blue_E = 0
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),

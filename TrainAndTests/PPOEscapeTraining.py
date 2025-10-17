@@ -46,9 +46,9 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=130,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=300,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=90e3,  # 8 * 60, 
+parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60, 
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -99,6 +99,26 @@ def save_meta_once(path, state_dict):
     meta = {k: list(v.shape) for k, v in state_dict.items()}
     with open(path, "w") as f:
         json.dump(meta, f)
+
+def creat_initial_state():
+    # 飞机出生状态指定
+    # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+    blue_height = np.random.uniform(4000, 12000)
+    red_height = blue_height + np.random.uniform(-2000, 2500)
+    red_psi =  np.random.choice([-1, 1]) * pi/2 # random.uniform(-pi, pi)
+    blue_psi = random.uniform(-pi, pi)
+    # blue_beta = red_psi
+    red_N = (random.randint(0,1)*2-1)*57e3 # random.uniform(-52e3, 52e3) 38
+    red_E = -np.sign(red_psi) * 40e3
+    blue_N = red_N
+    blue_E = 0
+    DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+                        'psi': red_psi
+                        }
+    DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+                                'psi': blue_psi
+                                }
+    return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
 if __name__=="__main__":
     
@@ -157,30 +177,33 @@ if __name__=="__main__":
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
-            # 飞机出生状态指定
-            # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-            blue_height = np.random.uniform(4000, 12000)
-            red_height = blue_height + np.random.uniform(-2000, 2500)
-            # init_case = np.random.randint(initial_states.shape[0])
-            # blue_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
-            # blue_height = initial_states[init_case][0]
-            # red_height = initial_states[init_case][1]
-            red_psi = random.uniform(-pi, pi)
-            blue_psi = random.uniform(-pi, pi)
-            blue_beta = red_psi
-            init_R_min = sub_of_radian(pi+blue_psi, blue_beta)/pi * (50e3-25e3) + 25e3
-            init_R_max = init_R_min + 10e3
-            blue_R = random.uniform(init_R_min, init_R_max)
+            # # 飞机出生状态指定
+            # # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+            # blue_height = np.random.uniform(4000, 12000)
+            # red_height = blue_height + np.random.uniform(-2000, 2500)
+            # # init_case = np.random.randint(initial_states.shape[0])
+            # # blue_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
+            # # blue_height = initial_states[init_case][0]
+            # # red_height = initial_states[init_case][1]
+            # red_psi = random.uniform(-pi, pi)
+            # blue_psi = random.uniform(-pi, pi)
+            # blue_beta = red_psi
+            # init_R_min = sub_of_radian(pi+blue_psi, blue_beta)/pi * (50e3-25e3) + 25e3
+            # init_R_max = init_R_min + 10e3
+            # blue_R = random.uniform(init_R_min, init_R_max)
 
-            blue_N = blue_R*cos(blue_beta)
-            blue_E = blue_R*sin(blue_beta)
+            # blue_N = blue_R*cos(blue_beta)
+            # blue_E = blue_R*sin(blue_beta)
 
-            DEFAULT_RED_BIRTH_STATE = {'position': np.array([0.0, red_height, 0.0]),
-                                    'psi': red_psi
-                                    }
-            DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
-                                        'psi': blue_psi
-                                        }
+            # DEFAULT_RED_BIRTH_STATE = {'position': np.array([0.0, red_height, 0.0]),
+            #                         'psi': red_psi
+            #                         }
+            # DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+            #                             'psi': blue_psi
+            #                             }
+
+            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=1, blue_init_ammo=0)
 
@@ -389,7 +412,7 @@ if __name__=="__main__":
             
             # 训练进度显示
             if (i_episode) >= 10:
-                print(f"进度: {total_steps/max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
+                print(f"episode {i_episode}, 进度: {total_steps/max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
             else:
                 print(f"episode {i_episode}, total_steps {total_steps}")
 

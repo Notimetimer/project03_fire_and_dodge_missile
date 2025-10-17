@@ -135,7 +135,7 @@ class PolicyNetContinuous(torch.nn.Module):
         self.fc_mu = torch.nn.Linear(prev_size, action_dim)
         self.fc_std = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x, min_std=1e-6, max_std=0.4): # max_std=0.6
+    def forward(self, x, min_std=1e-6, max_std=0.3): # max_std=0.6
         # 最小方差 1e-3, 最大方差不要超过0.707否则tanh后会出现双峰函数
         x = self.net(x)
         mu = self.fc_mu(x)
@@ -159,7 +159,7 @@ class PPOContinuous:
     '''
 
     def __init__(self, state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2):
         self.actor = PolicyNetContinuous(state_dim, hidden_dim, action_dim).to(device)
         self.critic = ValueNet(state_dim, hidden_dim).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -173,7 +173,6 @@ class PPOContinuous:
         self.k_entropy = k_entropy
         self.critic_max_grad=critic_max_grad
         self.actor_max_grad=actor_max_grad
-        self.max_std = max_std
     
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -245,7 +244,7 @@ class PPOContinuous:
             print('state', state)
         # 检查actor参数中是否存在nan
         check_weights_bias_nan(self.actor, "actor", "take action中")
-        mu, std = self.actor(state, min_std=1e-6, max_std=self.max_std)
+        mu, std = self.actor(state)
         # 检查mu, std是否含有nan
         if torch.isnan(mu).any() or torch.isnan(std).any() or torch.isinf(mu).any() or torch.isinf(std).any():
             print('mu', mu)
@@ -268,7 +267,7 @@ class PPOContinuous:
         return a_exec[0].cpu().detach().numpy().flatten(), u[0].cpu().detach().numpy().flatten()
     
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
+    def update(self, transition_dict, adv_normed=False):
         """更新函数兼容以下几种调用方式：
         - 如果 action_bounds 是 None: 期望 transition_dict 中包含 'action_bounds'，其形状为 (N,2) 或每步 (amin,amax)
         - 如果 action_bounds 是标量/二元元组/数组：作为全局固定区间使用
@@ -289,19 +288,13 @@ class PPOContinuous:
         td_delta = td_target - self.critic(states)
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
         
-        # 优势归一化
+        # 优势归一化（目前只发现了阻碍）
         if adv_normed:
-            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
-            # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
-            
-            # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
+            adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
-        # 提前计算一次旧的 value 预测（用于 value clipping）
-        v_pred_old = self.critic(states).detach()  # (N,1)
-
         # 策略输出（未压缩的 mu,std）
-        mu, std = self.actor(states, min_std=1e-6, max_std=self.max_std)
+        mu, std = self.actor(states)
         # 构造 SquashedNormal 并计算 old_log_probs
         dist = SquashedNormal(mu.detach(), std.detach())
 
@@ -312,8 +305,8 @@ class PPOContinuous:
         u_old = u_s
         old_log_probs = dist.log_prob(0, u_old) # (N,1)
 
-        # 提前在action_dim维度求和
-        old_log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)    # -> (N,1)
+        # # 提前在action_dim维度求和
+        # old_log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)    # -> (N,1)
 
         if torch.isnan(old_log_probs).any():
             raise ValueError("old_log_probs 包含 NaN，检查 action_bounds 或 actions 的合法性")
@@ -328,7 +321,7 @@ class PPOContinuous:
         ratio_list = []
 
         for _ in range(self.epochs):
-            mu, std = self.actor(states, min_std=1e-6, max_std=self.max_std)
+            mu, std = self.actor(states)
             if torch.isnan(mu).any() or torch.isnan(std).any():
                 raise ValueError("NaN in Actor outputs in loop")
             critic_values = self.critic(states)
@@ -343,31 +336,23 @@ class PPOContinuous:
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
             log_probs = dist.log_prob(0, u_old) # (N,1)
 
-            # 提前在action_dim维度求和
-            log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)   # -> (N,1)
+            # # 提前在action_dim维度求和
+            # log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)   # -> (N,1)
 
             ratio = torch.exp(log_probs - old_log_probs) # (N,1)
             # surr1 = ratio * advantage
             # calmp surr1
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
-            
+            # 取消提前求和 # actor_loss = -torch.min(surr1, surr2).mean() - 0.1 * dist.entropy().mean()
+
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
 
-            entropy_factor = dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            entropy_factor = torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
             actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor # 标量
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
-            # 计算 critic_loss：支持可选的 value clipping（PPO 风格）
-            if clip_vf:
-                v_pred = self.critic(states)                                  # 当前预测 (N,1)
-                v_pred_clipped = torch.clamp(v_pred, v_pred_old - clip_range, v_pred_old + clip_range)
-                vf_loss1 = (v_pred - td_target.detach()).pow(2)               # (N,1)
-                vf_loss2 = (v_pred_clipped - td_target.detach()).pow(2)       # (N,1)
-                critic_loss = torch.max(vf_loss1, vf_loss2).mean()
-            else:
-                critic_loss = F.mse_loss(self.critic(states), td_target.detach())
-
+            critic_loss = F.mse_loss(self.critic(states), td_target.detach())
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
             actor_loss.backward()

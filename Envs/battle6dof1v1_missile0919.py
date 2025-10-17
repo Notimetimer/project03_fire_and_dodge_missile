@@ -465,12 +465,12 @@ class Battle(object):
         # 告警信息 pi和-pi是突变点，置尾机动的时候不易训练，暂时不想用sin和cos，试试改为追一个东西
         if not alive_enm_missiles:
             warning = 0
-            threat_delta_psi = 0 # pi
+            threat_delta_psi = 0 # pi 0
             threat_delta_theta = 0
-            threat_distance = 100e3
+            threat_distance = 30e3
         else:
             warnings = np.zeros(len(alive_enm_missiles))
-            distances = np.ones(len(alive_enm_missiles)) * 100e3
+            distances = np.ones(len(alive_enm_missiles)) * 30e3
             threat_delta_psis = np.zeros(len(alive_enm_missiles))
             threat_delta_thetas = np.zeros(len(alive_enm_missiles))
             for i, missile in enumerate(alive_enm_missiles):
@@ -479,8 +479,8 @@ class Battle(object):
                     distances[i] = missile.distance
                     # 作为追踪去训练，视图避开(pi -pi)突变点问题
                     threat_delta_psis[i] = sub_of_radian(missile.q_beta, own.psi)
-                    threat_delta_thetas[i] = missile.q_epsilon
-                    # 作为远离去训练，效果不是很好
+                    threat_delta_thetas[i] = sub_of_radian(missile.q_epsilon, own.theta) # missile.q_epsilon
+                    # # 作为远离去训练，效果不是很好
                     # threat_delta_psis[i] = sub_of_radian(pi+missile.q_beta, own.psi)
                     # threat_delta_thetas[i] = -missile.q_epsilon
             
@@ -621,7 +621,7 @@ class Battle(object):
         self.state_init["ego_main"]=[300, 5000, 0, 1, 0, 1, 0]
         self.state_init["ego_control"]= [0, 0, 0, 0, 0, 0, 0] # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
         self.state_init["weapon"]=120
-        self.state_init["threat"]=[0,0,100]
+        self.state_init["threat"]=[0,0,30e3] # [pi,0,30e3]  [0,0,30e3]
         self.state_init["border"]=[self.R_cage, 0]
 
         # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
