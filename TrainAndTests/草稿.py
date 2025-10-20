@@ -211,10 +211,11 @@ class CrankTrainEnv(Battle):
         #         r_event += dist / 30e3 * 40
         #         r_event += alt
         #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
-        if self.lose:
-            r_event -= 20 # 20 100 50
-        if self.win:
-            r_event += 20 # 20 100 50
+        # 结果奖励 ###
+        # if self.lose:
+        #     r_event -= 20 # 20 100 50
+        # if self.win:
+        #     r_event += 20 # 20 100 50
 
         # if alpha > ego.max_radar_angle:
         #     r_event -= 3 # 超出雷达范围惩罚

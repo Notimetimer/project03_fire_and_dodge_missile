@@ -148,7 +148,7 @@ try:
                 print()
             
             # 神经网络输出动作
-            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)
+            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=0) 
 
             # # 规则动作
             delta_psi = b_check_obs['target_information'][1]
