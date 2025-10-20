@@ -177,8 +177,8 @@ def test_win_rate(seed, test_run=1):
     hist_b_action = np.zeros(3)
 
     while not done:
-        r_obs_n = env.left_crank_obs('r')
-        b_obs_n = env.left_crank_obs('b')
+        r_obs_n, _ = env.crank_obs('r')
+        b_obs_n, _ = env.crank_obs('b')
         
         # 反向转回字典方便排查
         b_check_obs = copy.deepcopy(env.state_init)
@@ -386,8 +386,8 @@ if __name__=="__main__":
                         # print('回合结束，时间为：', env.t, 's')
                         break
                     # 获取观测信息
-                    r_obs_n = env.left_crank_obs('r')
-                    b_obs_n = env.left_crank_obs('b')
+                    r_obs_n, _ = env.crank_obs('r')
+                    b_obs_n, _ = env.crank_obs('b')
 
                     # 在这里将观测信息压入记忆
                     env.RUAV.obs_memory = r_obs_n.copy()
@@ -477,7 +477,7 @@ if __name__=="__main__":
 
                     _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                     done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
-                    next_b_obs = env.left_crank_obs('b')  # 子策略的训练不要用get_obs
+                    next_b_obs, _ = env.crank_obs('b')  # 子策略的训练不要用get_obs
 
                     done = done or fake_terminate
                     if not test_run:

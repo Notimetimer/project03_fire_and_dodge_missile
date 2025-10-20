@@ -50,7 +50,7 @@ class CrankTrainEnv(Battle):
         self.last_dist_dot = None
         self.last_dhor = None
 
-    def left_crank_obs(self, side):
+    def crank_obs(self, side):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
@@ -61,21 +61,8 @@ class CrankTrainEnv(Battle):
         
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs
+        return flat_obs, full_obs
     
-    def right_crank_obs(self, side):
-        full_obs = self.base_obs(side)
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        full_obs["target_locked"] = copy.deepcopy(self.obs_init["target_locked"])
-        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
-        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        
-        # 将观测按顺序拉成一维数组
-        flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs
-
     def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
         # copy了进攻的，还没改
         terminate = False

@@ -110,8 +110,8 @@ try:
         while not done:
             # print(env.t)
             # 获取观测信息
-            r_obs_n = env.escape_obs('r')
-            b_obs_n = env.escape_obs('b')
+            r_obs_n, _ = env.escape_obs('r')
+            b_obs_n, _ = env.escape_obs('b')
             
             # 反向转回字典方便排查
             b_check_obs = copy.deepcopy(env.state_init)

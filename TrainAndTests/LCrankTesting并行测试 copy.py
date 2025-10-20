@@ -113,8 +113,8 @@ def run_single_test(seed):
         hist_b_action = np.zeros(3)
 
         while not done:
-            r_obs_n = env.left_crank_obs('r')
-            b_obs_n = env.left_crank_obs('b')
+            r_obs_n, _ = env.crank_obs('r')
+            b_obs_n, _ = env.crank_obs('b')
             
             # 反向转回字典方便排查
             b_check_obs = copy.deepcopy(env.state_init)

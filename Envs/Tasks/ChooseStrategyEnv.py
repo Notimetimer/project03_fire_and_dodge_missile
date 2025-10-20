@@ -1,0 +1,271 @@
+'''
+出生点改在外面指定
+
+子策略暂时使用规则智能体，留下使用神经网络的接口
+
+'''
+
+import numpy as np
+from random import random
+import random
+from gym import spaces
+import copy
+import jsbsim
+import sys
+import os
+import importlib
+import copy
+from math import *
+
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 获取project目录
+def get_current_file_dir():
+    # 判断是否在 Jupyter Notebook 环境
+    try:
+        shell = get_ipython().__class__.__name__  # ← 误报，不用管
+        if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
+            # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
+            return os.getcwd()
+        else:  # 其他 shell
+            return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        # 普通 Python 脚本
+        return os.path.dirname(os.path.abspath(__file__))
+
+current_dir = get_current_file_dir()
+sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
+
+from Envs.battle6dof1v1_missile0919 import *
+from Envs.Tasks.AttackManeuverEnv import *
+from Envs.Tasks.CrankManeuverEnv import *
+from Envs.Tasks.EscapeManeuverEnv import *
+from Algorithms.Rules import *
+
+# 通过继承构建观测空间、奖励函数和终止条件
+# 通过类的组合获取各子策略的观测量裁剪
+
+class ChooseStrategyEnv(Battle):
+    def __init__(self, args, tacview_show=0):
+        super().__init__(args, tacview_show)
+        
+    
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):       
+        # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
+        super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
+        # # 初始化红蓝远离速度
+        # self.last_dist_dot = None
+        # self.last_dhor = None
+
+    def attack_obs(self, side):
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
+        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
+        full_obs["border"] = copy.deepcopy(self.obs_init["border"])
+
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs, full_obs
+    
+    def escape_obs(self, side):
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["target_alive"] = copy.deepcopy(self.obs_init["target_alive"])
+        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
+        
+        # 逃逸过程中会出现部分观测的情况，已在base_obs中写下规则
+        # 只有在warning为TRUE的时候才能够获取威胁信息，已在get_state中写下规则
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs, full_obs
+    
+    def crank_obs(self, side):
+        full_obs = self.base_obs(side)
+        # 先对dict的元素mask
+        # 只需要 target_information 和 ego_main
+        full_obs["target_locked"] = copy.deepcopy(self.obs_init["target_locked"])
+        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
+        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
+        
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order)
+        return flat_obs, full_obs
+
+    # def get_obs(self, side):
+    #     # 调用 AttackTrainEnv 的实现并传入当前实例（不创建新对象）
+    #     return AttackTrainEnv.attack_obs(self, side)
+    
+    def step(self, r_actions, b_actions):
+        # 这一层的action是离散的动作类型
+
+        # 对每个动作类型，调用子策略产生连续动作指令值
+        report_move_time_rate = int(round(self.dt_maneuver / dt_move))
+        # 输入动作（范围为[-1,1]
+        self.t += self.dt_maneuver
+        self.t = round(self.t, 2)  # 保留两位小数
+
+        actions = [r_actions] + [b_actions]
+        self.r_actions = r_actions.copy()
+        self.b_actions = b_actions.copy()
+
+        # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
+        # 运动按照dt_move更新，结果合并到dt_maneuver中
+
+        for j1 in range(int(report_move_time_rate)):
+            # 飞机移动
+            for UAV, action in zip(self.UAVs, actions):
+                if UAV.dead:
+                    continue
+                # 输入动作与动力运动学状态
+                
+                delta_psi = state["target_information"][1]
+                delta_theta = state["target_information"][2]
+                # 进攻机动
+                if action == 0:
+                    pass # 调用进攻策略
+                    obs = self.attack_obs(UAV.side)
+                    delta_psi = 
+
+                if action == 1:
+                    pass # 调用escape策略
+
+                if action == 2:
+                    pass # 调用Lcrank策略
+
+                if action == 3:
+                    pass # 调用Rcrank策略
+
+                if action == 4:
+                    pass # 转圈搜索目标
+
+
+
+
+
+
+
+
+
+
+
+
+
+                # print(action)
+                target_height = action[0] # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
+                delta_heading = action[1] # 相对方位(弧度)
+                target_speed = action[2] # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
+                # print('target_height',target_height)
+                # for i in range(int(self.dt_maneuver // dt_move)):
+                UAV.move(target_height, delta_heading, target_speed, relevant_height=True)
+                # 上一步动作
+                # UAV.act_memory = np.array([action[0],action[1],action[2]])
+
+            # 导弹移动
+            self.missiles = self.Rmissiles + self.Bmissiles
+            for missile in self.missiles[:]:  # 使用切片创建副本以允许删除
+                target = self.get_target_by_id(missile.target_id)
+                if target is None:  # 目标不存在, 不更换目标而是击毁导弹
+                    missile.dead = True
+                    continue
+                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹, 在飞机1V1的时候可以节省一点计算量，不用费事处理多目标的问题
+                    missile.dead = True
+                    continue
+                else:
+                    missile.target = target
+                # if not missile.dead:
+                # print('目标位置', target.pos_)
+                # 计算前导弹和目标位速
+                last_pmt_ = missile.pos_
+                last_vmt_ = missile.vel_
+                last_ptt_ = target.pos_
+                last_vtt_ = target.vel_
+                if not missile.dead:
+                    # 获取目标信息
+                    target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
+                    # 更新导弹制导阶段
+                    has_datalink = False
+                    for uav in self.UAVs:
+                        # 找到载机，判断载机能否为导弹提供中制导
+                        if uav.id == missile.launcher_id:
+                            if uav.can_offer_guidance(missile, self.UAVs):
+                                has_datalink = True
+                    last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
+                        missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
+
+                vmt1 = norm(last_vmt_)
+                if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
+                    missile.dead = True
+                if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
+                    missile.dead = True
+                if missile.t > missile.t_max:  # 超时自爆
+                    missile.dead = True
+                if missile.t >= 0 + self.dt_move and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
+                    hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
+                                                       dt=self.dt_move)
+                    if hit:
+                        print(target.label, 'is hit')
+                        missile.dead = True
+                        missile.hit = True
+                        missile.pos_ = point_m
+                        missile.vel_ = last_vmt_
+                        target.pos_ = point_t
+                        target.vel_ = last_vtt_
+                        target.dead = True
+                        target.got_hit = True
+                        self.UAV_hit[self.UAV_ids.index(target.id)] = True
+
+            # 毁伤判断
+            for i, UAV in enumerate(self.UAVs):
+                # 飞机被导弹命中判断
+                if UAV.red:
+                    adv = self.BUAV
+                if UAV.blue:
+                    adv = self.RUAV
+                if self.UAV_hit[i]:
+                    UAV.dead = True
+                    UAV.got_hit = True
+                # 其他毁伤判断
+                adv = self.UAVs[1 - i]
+                pt_ = adv.pos_
+                L_ = pt_ - UAV.pos_
+                distance = np.linalg.norm(L_)
+                # 近距杀
+                #     short_range_killed = UAV.short_range_kill(adv)
+                #     if short_range_killed:
+                #         # self.running = False
+                #         adv.got_hit = True
+                # 出界判别
+                if self.out_range(UAV):
+                    UAV.dead = True
+                    # self.running = False
+
+        r_reward_n, b_reward_n = self.get_reward()
+        terminate = self.get_terminate()
+
+        for UAV in self.UAVs:
+            if UAV.got_hit or UAV.crash or self.out_range(UAV):
+                UAV.dead = True
+                # self.running = False
+
+        r_dones = False
+        b_dones = False
+        if self.RUAV.dead:
+            r_dones = True
+        if self.BUAV.dead:
+            b_dones = True
+
+        self.RUAV = self.UAVs[0]
+        self.BUAV = self.UAVs[1]
+
+        if terminate:
+            self.running = False
+
+        return r_reward_n, b_reward_n, r_dones, b_dones, terminate
+
+

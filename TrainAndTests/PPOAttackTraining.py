@@ -208,8 +208,8 @@ if __name__=="__main__":
         #         done = False
         #         while not done:  # 每个训练回合
         #             # 获取观测信息
-        #             r_obs_n = env.attack_obs('r')
-        #             b_obs_n = env.attack_obs('b')
+        #             r_obs_n, _ = env.attack_obs('r')
+        #             b_obs_n, _ = env.attack_obs('b')
         #             # 在这里将观测信息压入记忆
         #             env.RUAV.obs_memory = r_obs_n.copy()
         #             env.BUAV.obs_memory = b_obs_n.copy()
@@ -232,7 +232,7 @@ if __name__=="__main__":
 
         #             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
         #             done, b_reward, _ = env.attack_terminate_and_reward('b')
-        #             next_b_obs = env.attack_obs('b')  # 子策略的训练不要用get_obs
+        #             next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
 
         #             transition_dict['states'].append(b_obs_n)
         #             transition_dict['actions'].append(u)
@@ -341,8 +341,8 @@ if __name__=="__main__":
                     # print('回合结束，时间为：', env.t, 's')
                     break
                 # 获取观测信息
-                r_obs_n = env.attack_obs('r')
-                b_obs_n = env.attack_obs('b')
+                r_obs_n, _ = env.attack_obs('r')
+                b_obs_n, _ = env.attack_obs('b')
 
                 # 在这里将观测信息压入记忆
                 env.RUAV.obs_memory = r_obs_n.copy()
@@ -376,7 +376,7 @@ if __name__=="__main__":
 
                 _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, _ = env.attack_terminate_and_reward('b')
-                next_b_obs = env.attack_obs('b')  # 子策略的训练不要用get_obs
+                next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy() # 存储上一步动作
                 total_steps += 1
 
@@ -506,8 +506,8 @@ if __name__=="__main__":
         #         step = 0
         #         done = False
         #         while not done:
-        #             r_obs_n = env.attack_obs('r')
-        #             b_obs_n = env.attack_obs('b')
+        #             r_obs_n, _ = env.attack_obs('r')
+        #             b_obs_n, _ = env.attack_obs('b')
         #             # 在这里将观测信息压入记忆
         #             env.RUAV.obs_memory = r_obs_n.copy()
         #             env.BUAV.obs_memory = b_obs_n.copy()

@@ -49,7 +49,8 @@ class AttackTrainEnv(Battle):
 
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs
+        return flat_obs, full_obs
+    
     def attack_terminate_and_reward(self, side): # 进攻策略训练与奖励
         terminate = False
         state = self.get_state(side)

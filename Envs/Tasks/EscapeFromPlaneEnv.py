@@ -58,7 +58,7 @@ class EscapeTrainEnv(Battle):
         # 只有在warning为TRUE的时候才能够获取威胁信息，已在get_state中写下规则
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs
+        return flat_obs, full_obs
     
     def escape_terminate_and_reward(self, side): # 逃逸策略训练与奖励
         # copy了进攻的，还没改

@@ -80,8 +80,8 @@ try:
 
         while not done:
             print(env.t)
-            r_obs_n = env.attack_obs('r')
-            b_obs_n = env.attack_obs('b')
+            r_obs_n, _ = env.attack_obs('r')
+            b_obs_n, _ = env.attack_obs('b')
             # 在这里将观测信息压入记忆
             env.RUAV.obs_memory = r_obs_n.copy()
             env.BUAV.obs_memory = b_obs_n.copy()
