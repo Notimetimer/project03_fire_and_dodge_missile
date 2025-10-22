@@ -34,7 +34,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.SquashedPPOcontinues_dual_a_out import *
+from Algorithms.SquashedPPOcontinues_dual_a_std_clip import *
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 import multiprocessing as mp
@@ -109,6 +109,18 @@ def save_meta_once(path, state_dict):
     with open(path, "w") as f:
         json.dump(meta, f)
 
+def softplus(x):
+    """
+    计算softplus函数值
+    
+    参数:
+    x -- 输入值（可以是标量、列表或NumPy数组）
+    
+    返回:
+    计算后的softplus值，与输入形状相同
+    """
+    x_np = np.asarray(x)  # 确保输入是NumPy数组
+    return np.log(1 + np.exp(x_np))
 
 if __name__=="__main__":
     
@@ -166,7 +178,7 @@ if __name__=="__main__":
             else:
                 test_run = 0
                 episode_return = 0
-                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': [], 'max_stds':[]}
             
             # # 飞机出生状态指定
             # init_case = np.random.randint(initial_states.shape[0])
@@ -213,41 +225,41 @@ if __name__=="__main__":
                     # print('回合结束，时间为：', env.t, 's')
                     break
                 # 获取观测信息
-                r_obs_n, _ = env.crank_obs('r')
-                b_obs_n, _ = env.crank_obs('b')
+                r_obs_n, r_check_obs = env.crank_obs('r')
+                b_obs_n, b_check_obs = env.crank_obs('b')
 
                 # 在这里将观测信息压入记忆
-                env.RUAV.obs_memory = r_obs_n.copy()
-                env.BUAV.obs_memory = b_obs_n.copy()
+                env.RUAV.obs_memory = r_obs_check.copy()
+                env.BUAV.obs_memory = b_obs_check.copy()
 
                 b_obs = np.squeeze(b_obs_n)
 
-                # 反向转回字典方便排查
-                b_check_obs = copy.deepcopy(env.state_init)
-                key_order = env.key_order
-                # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
-                arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
-                idx = 0
-                for k in key_order:
-                    if k not in b_check_obs:
-                        raise KeyError(f"key '{k}' not in state_init")
-                    v0 = b_check_obs[k]
-                    # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-                    if isinstance(v0, (list, tuple, np.ndarray)):
-                        length = len(v0)
-                        slice_v = arr[idx: idx + length]
-                        if isinstance(v0, np.ndarray):
-                            b_check_obs[k] = slice_v.copy()
-                        else:
-                            b_check_obs[k] = slice_v.tolist()
-                        idx += length
-                    else:
-                        # 标量
-                        b_check_obs[k] = float(arr[idx])
-                        idx += 1
-                if idx != arr.size:
-                    # 长度不匹配时给出提示（便于调试）
-                    print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
+                # # 反向转回字典方便排查
+                # b_check_obs = copy.deepcopy(env.state_init)
+                # key_order = env.key_order
+                # # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
+                # arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
+                # idx = 0
+                # for k in key_order:
+                #     if k not in b_check_obs:
+                #         raise KeyError(f"key '{k}' not in state_init")
+                #     v0 = b_check_obs[k]
+                #     # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
+                #     if isinstance(v0, (list, tuple, np.ndarray)):
+                #         length = len(v0)
+                #         slice_v = arr[idx: idx + length]
+                #         if isinstance(v0, np.ndarray):
+                #             b_check_obs[k] = slice_v.copy()
+                #         else:
+                #             b_check_obs[k] = slice_v.tolist()
+                #         idx += length
+                #     else:
+                #         # 标量
+                #         b_check_obs[k] = float(arr[idx])
+                #         idx += 1
+                # if idx != arr.size:
+                #     # 长度不匹配时给出提示（便于调试）
+                #     print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
 
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 
@@ -272,11 +284,21 @@ if __name__=="__main__":
                     print('b_obs', b_check_obs)
                     print()
 
+                # 方差裁剪
+                max_std = 0.3
+                # temp1 = min(height_ego-env.min_alt, env.max_alt-height_ego)
+                if height_ego<env.min_alt_save+1e3 or height_ego>env.max_alt_save-1e3:
+                    max_std = 0.1
+
+                if delta_psi>50*pi/180 or delta_psi<-50*pi/180:
+                    max_std = softplus(0.05+(60-abs(delta_psi)*180/pi)*0.25/10)
+
+
                 # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
                 if not test_run:
-                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
+                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True, max_std=max_std)
                 else:
-                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
+                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False, max_std=max_std)
 
                 # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
                 #                         enm_pos_=env.RUAV.pos_, distance=distance,
@@ -284,12 +306,12 @@ if __name__=="__main__":
                 #                         o00=o00, R_cage=env.R_cage, wander=0
                 #                         )
                 
-                # 动作裁剪
-                b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
-                if delta_psi>0:
-                    b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
-                else:
-                    b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
+                # # 动作裁剪
+                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+                # if delta_psi>0:
+                #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+                # else:
+                #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
                 _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
@@ -304,6 +326,7 @@ if __name__=="__main__":
                     transition_dict['rewards'].append(b_reward)
                     transition_dict['dones'].append(done)
                     transition_dict['action_bounds'].append(action_bound)
+                    transition_dict['max_stds'].append(max_std)
                 # state = next_state
                 episode_return += b_reward * env.dt_maneuver
                 # steps_since_update += 1

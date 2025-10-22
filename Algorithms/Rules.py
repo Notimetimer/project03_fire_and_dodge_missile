@@ -35,8 +35,9 @@ def escape_behavior(rel_psi_m):
     逃逸行为：返回 (heading_cmd, speed_cmd)
     rel_psi_m 是导弹相对方位
     """
-    temp = 0.4 * sub_of_radian(rel_psi_m, pi) / pi * 4
-    heading_cmd = np.clip(temp, -0.4, 0.4)
+    heading_cmd = np.clip(sub_of_radian(rel_psi_m, pi), -pi/2, pi/2)
+    # temp = 0.4 * sub_of_radian(rel_psi_m, pi) / pi * 4
+    # heading_cmd = np.clip(temp, -0.4, 0.4)
     speed_cmd = 1.5 * 340
     return heading_cmd, speed_cmd
 

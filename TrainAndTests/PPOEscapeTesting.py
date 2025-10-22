@@ -110,8 +110,8 @@ try:
         while not done:
             # print(env.t)
             # 获取观测信息
-            r_obs_n, _ = env.escape_obs('r')
-            b_obs_n, _ = env.escape_obs('b')
+            r_obs_n, r_obs_check = env.escape_obs('r')
+            b_obs_n, b_obs_check = env.escape_obs('b')
             
             # 反向转回字典方便排查
             b_check_obs = copy.deepcopy(env.state_init)
@@ -141,8 +141,8 @@ try:
                 print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
 
             # 在这里将观测信息压入记忆
-            env.RUAV.obs_memory = r_obs_n.copy()
-            env.BUAV.obs_memory = b_obs_n.copy()
+            env.RUAV.obs_memory = r_obs_check.copy()
+            env.BUAV.obs_memory = b_obs_check.copy()
             state = np.squeeze(b_obs_n)
             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
 

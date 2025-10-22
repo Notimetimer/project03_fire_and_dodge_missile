@@ -80,11 +80,11 @@ try:
 
         while not done:
             print(env.t)
-            r_obs_n, _ = env.attack_obs('r')
-            b_obs_n, _ = env.attack_obs('b')
+            r_obs_n, r_obs_check = env.attack_obs('r')
+            b_obs_n, b_obs_check = env.attack_obs('b')
             # 在这里将观测信息压入记忆
-            env.RUAV.obs_memory = r_obs_n.copy()
-            env.BUAV.obs_memory = b_obs_n.copy()
+            env.RUAV.obs_memory = r_obs_check.copy()
+            env.BUAV.obs_memory = b_obs_check.copy()
             state = np.squeeze(b_obs_n)
             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,

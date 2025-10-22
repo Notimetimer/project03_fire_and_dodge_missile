@@ -155,7 +155,7 @@ class Battle(object):
             UAV.id = i + 1
             UAV.red = True
             UAV.blue = False
-            UAV.label = "red"
+            UAV.side = "red"
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             # UAV.pos_ = birthpointr.copy() + \
@@ -183,7 +183,7 @@ class Battle(object):
             UAV.id = i + 201
             UAV.red = False
             UAV.blue = True
-            UAV.label = "blue"
+            UAV.side = "blue"
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             # UAV.pos_ = birthpointb.copy() + \
@@ -291,7 +291,7 @@ class Battle(object):
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
                                                        dt=self.dt_move)
                     if hit:
-                        print(target.label, 'is hit')
+                        print(target.side, 'is hit')
                         missile.dead = True
                         missile.hit = True
                         missile.pos_ = point_m
@@ -586,7 +586,7 @@ class Battle(object):
     #                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, ptt1_, last_vtt_,
     #                                                        dt=dt / report_move_time_rate)
     #                     if hit:
-    #                         print(target.label, 'is hit')
+    #                         print(target.side, 'is hit')
     #                         missile.dead = True
     #                         missile.hit = True
     #                         missile.pos_ = point_m

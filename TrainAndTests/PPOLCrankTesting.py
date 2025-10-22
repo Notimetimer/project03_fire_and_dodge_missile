@@ -62,8 +62,20 @@ if latest_actor_path:
 
 t_bias = 0
 
+parser = argparse.ArgumentParser("UAV swarm confrontation")
+# Environment
+parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
+                    help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
+parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
+                    help="")
+
+# parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
+# parser.add_argument("--num-BUAVs", type=int, default=1, help="number of blue UAVs")
+args = parser.parse_args()
+
 try:
     env = CrankTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
+
     for i_episode in range(3):  # 10
         r_action_list=[]
         b_action_list=[]
@@ -85,6 +97,7 @@ try:
 
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=0, blue_init_ammo=0)
+        
 
         done = False
         
@@ -95,8 +108,8 @@ try:
         while not done:
             # print(env.t)
             # 获取观测信息
-            r_obs_n, _ = env.crank_obs('r')
-            b_obs_n, _ = env.crank_obs('b')
+            r_obs_n, r_obs_check = env.crank_obs('r')
+            b_obs_n, b_obs_check = env.crank_obs('b')
             
             # 反向转回字典方便排查
             b_check_obs = copy.deepcopy(env.state_init)
@@ -126,8 +139,8 @@ try:
                 print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
 
             # 在这里将观测信息压入记忆
-            env.RUAV.obs_memory = r_obs_n.copy()
-            env.BUAV.obs_memory = b_obs_n.copy()
+            env.RUAV.obs_memory = r_obs_check.copy()
+            env.BUAV.obs_memory = b_obs_check.copy()
             state = np.squeeze(b_obs_n)
             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
             # 开局就发射一枚导弹
@@ -156,12 +169,12 @@ try:
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
             height_ego = env.BUAV.alt
 
-            # # 动作裁剪
-            b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
-            if delta_psi>0:
-                b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
-            else:
-                b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
+            # # # 动作裁剪
+            # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+            # if delta_psi>0:
+            #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+            # else:
+            #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
 
             # # 动作平滑（实验性）

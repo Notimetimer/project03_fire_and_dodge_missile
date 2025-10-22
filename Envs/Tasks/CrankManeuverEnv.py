@@ -9,6 +9,13 @@ import sys
 import os
 import importlib
 import copy
+
+import os
+# 在导入 scipy / 相关 Fortran/MKL 库之前禁用 Fortran 运行时的控制台处理器
+os.environ.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
+# 可选：限制线程数，减少并发 shutdown 问题
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 from scipy.interpolate import LinearNDInterpolator
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,12 +42,12 @@ from Envs.battle6dof1v1_missile0919 import *
 class CrankTrainEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
-        # 1. 原始散点数据
-        # ----------------------------
-        x = np.array([-60, 50, 50, 50, 60, -180, 180, 50, 50, -180, -180, 180, 180, -60,-60])
-        y = np.array([0, -30, 0, 30, 0, 0, 0, -90, 90, 90,-90, 90,-90, -90, 90])
-        z = np.array([-1, -1, 1, -1, -1, -5, -5, -5, -5, -5,-5,-5,-5, -5, -5])
-        self.L_interp = LinearNDInterpolator(list(zip(x, y)), z, fill_value=np.nan) ###
+        # # 1. 原始散点数据
+        # # ----------------------------
+        # x = np.array([-60, 50, 50, 50, 60, -180, 180, 50, 50, -180, -180, 180, 180, -60,-60])
+        # y = np.array([0, -30, 0, 30, 0, 0, 0, -90, 90, 90,-90, 90,-90, -90, 90])
+        # z = np.array([-1, -1, 1, -1, -1, -5, -5, -5, -5, -5,-5,-5,-5, -5, -5])
+        # self.L_interp = LinearNDInterpolator(list(zip(x, y)), z, fill_value=np.nan) ###
         
     
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):       
@@ -120,8 +127,8 @@ class CrankTrainEnv(Battle):
         # 左crank角度奖励
         x = delta_psi*180/pi
         y = delta_theta*180/pi
-        r_angle = self.L_interp(x,y) ###
-        # r_angle = sub_of_degree(x, 50)/50 -y/20 + (180+50)/50 + 180/20
+        # r_angle = self.L_interp(x,y) ###
+        r_angle = sub_of_degree(x, 50)/50 -y/20 + 120/60 + 90/20
 
         # x = np.sign(delta_psi)*alpha * 180/pi
         # alpha_max = ego.max_radar_angle*180/pi # 60
@@ -199,9 +206,9 @@ class CrankTrainEnv(Battle):
         #         r_event += alt
         #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
         if self.lose:
-            r_event -= 20 # 20 100 50
+            r_event -= 70 # 20 100 50
         if self.win:
-            r_event += 20 # 20 100 50
+            r_event += 70 # 20 100 50
 
         # if alpha > ego.max_radar_angle:
         #     r_event -= 3 # 超出雷达范围惩罚

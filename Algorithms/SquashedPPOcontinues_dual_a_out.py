@@ -46,7 +46,7 @@ def moving_average(a, window_size):
 
 
 def compute_advantage(gamma, lmbda, td_delta):
-    td_delta = td_delta.detach().numpy()
+    td_delta = td_delta.detach().cpu().numpy()
     advantage_list = []
     advantage = 0.0
     for delta in td_delta[::-1]:
@@ -238,7 +238,8 @@ class PPOContinuous:
         a_norm_t = self._unscale_exec_to_normalized(a_exec_t, action_bounds_t)
         return a_norm_t.cpu().numpy()
     
-    def take_action(self, state, action_bounds, explore=True):
+    # take action
+    def take_action(self, state, action_bounds, explore=True, max_std=0.3):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
         # 检查state中是否存在nan
         if torch.isnan(state).any() or torch.isinf(state).any():
@@ -348,7 +349,6 @@ class PPOContinuous:
 
             ratio = torch.exp(log_probs - old_log_probs) # (N,1)
             # surr1 = ratio * advantage
-            # calmp surr1
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
             

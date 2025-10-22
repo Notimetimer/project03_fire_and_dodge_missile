@@ -80,7 +80,7 @@ class height_track_env():
         UAV.id = 1
         UAV.red = True
         UAV.blue = False
-        UAV.label = "red"
+        UAV.side = "red"
         UAV.color = np.array([1, 0, 0])
         # 红方出生点
         UAV.pos_ = self.DEFAULT_RED_BIRTH_STATE['position']

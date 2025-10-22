@@ -31,7 +31,7 @@ class UAVModel(object):
         self.id = None
         self.red = False
         self.blue = False
-        self.label = None  # 阵营
+        self.side = None  # 阵营
         self.size = 5  # meter
         self.area = 27.87  # F-16机翼面积
         self.m = 12000  # F-16 正常起飞重量
@@ -232,7 +232,7 @@ class UAVModel(object):
 
         # norm_act由F16control函数输出
         # norm_act, self.rnn_states, self.hist_act = F16control(obs_jsbsim, self.rnn_states, self.hist_act)
-        # print(self.label, norm_act)
+        # print(self.side, norm_act)
 
         if p2p==False: # 通过控制器间接控制
             if with_theta_req == False:
@@ -365,10 +365,10 @@ class UAVModel(object):
         # new_missile = missile_class(self.pos_, self.vel_, current_time)
         new_missile = missile_class(self.pos_, self.vel_, target.pos_, target.vel_, current_time)  # test
         if self.blue:  # target.red:
-            new_missile.label = 'blue'
+            new_missile.side = 'b'
             new_missile.id = 301 + self.missile_count
         if self.red:  # target.blue:
-            new_missile.label = 'red'
+            new_missile.side = 'r'
             new_missile.id = 101 + self.missile_count
         # 根据距离调整导弹参数
         distance = np.linalg.norm(target.pos_ - self.pos_)

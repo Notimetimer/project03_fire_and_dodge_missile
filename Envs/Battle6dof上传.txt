@@ -154,7 +154,7 @@ class Battle(object):
             UAV.id = i + 1
             UAV.red = True
             UAV.blue = False
-            UAV.label = "Red"
+            UAV.side = "Red"
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             UAV.pos_ = red_birth_state['position']  # np.array([-38841.96119795, 9290.02131746, -1686.95469864])
@@ -173,7 +173,7 @@ class Battle(object):
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
             self.RUAVs.append(UAV)
-            self.RUAVsTable[UAV.id]=(UAV, UAV.label, UAV.dead)
+            self.RUAVsTable[UAV.id]=(UAV, UAV.side, UAV.dead)
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=dt_move)
@@ -181,7 +181,7 @@ class Battle(object):
             UAV.id = i + 201
             UAV.red = False
             UAV.blue = True
-            UAV.label = "Blue"
+            UAV.side = "Blue"
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             UAV.pos_ = blue_birth_state['position']  # np.array([38005.14540582, 6373.80721704, -1734.42509136])
@@ -198,7 +198,7 @@ class Battle(object):
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
             self.BUAVs.append(UAV)
-            self.BUAVsTable[UAV.id]=(UAV, UAV.label, UAV.dead)
+            self.BUAVsTable[UAV.id]=(UAV, UAV.side, UAV.dead)
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
         self.UAVsTable = {**self.RUAVsTable, **self.BUAVsTable}
@@ -297,7 +297,7 @@ class Battle(object):
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
                                                        dt=self.dt_move)
                     if hit:
-                        print(target.label, 'is hit')
+                        print(target.side, 'is hit')
                         missile.dead = True
                         missile.hit = True
                         missile.pos_ = point_m
@@ -817,12 +817,12 @@ class Battle(object):
                         f"#{send_t:.2f}\n"
                         f"{UAV.id},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                         f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                        f"Name=F16,Color={UAV.label}\n"
+                        f"Name=F16,Color={UAV.side}\n"
                     )
                     # data_to_send+=(
                     #     f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                     #     f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                    #     f"Type=Beam, Color={UAV.label},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
+                    #     f"Type=Beam, Color={UAV.side},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
                     # )
                 else:
                     data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"

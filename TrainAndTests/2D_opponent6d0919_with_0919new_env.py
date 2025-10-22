@@ -106,7 +106,7 @@ def launch_missile_if_possible(env, side='r'):
             # 发射导弹
             new_missile = uav.launch_missile(target, env.t, missile_class)
             uav.ammo -= 1
-            new_missile.side = 'red' if side == 'r' else 'blue'
+            new_missile.side = 'r' if side == 'r' else 'b'
             if side == 'r':
                 env.Rmissiles.append(new_missile)
             else:
@@ -204,11 +204,24 @@ for i in range(10):
         r_action_n_2 = 340
         r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
-        b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
-                                   enm_pos_=env.RUAV.pos_, distance=distance,
-                                   ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
-                                   o00=o00, R_cage=env.R_cage, wander=0
-                                   )
+        # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
+        #                            enm_pos_=env.RUAV.pos_, distance=distance,
+        #                            ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
+        #                            o00=o00, R_cage=env.R_cage, wander=0
+        #                            )
+        
+        b_states = env.base_obs('b', pomdp=1)
+        distance = b_states['target_information'][3] * 10e3
+        warning = b_states["warning"]
+        enm_delta_psi = b_states["target_information"][1]
+        threat_delta_psi = b_states["threat"][0]
+
+        # b_action_n = env.right_crank_behavior(env.BUAV.alt, enm_delta_psi)
+
+        b_action_n = env.decision_rule(
+            env.BUAV.pos_, env.BUAV.psi, enm_delta_psi, distance, 
+            warning, threat_delta_psi, env.Bmissiles, wander=0
+        )
         
         r_action_list.append(r_action_n)
         b_action_list.append(b_action_n)

@@ -125,7 +125,8 @@ class EscapeTrainEnv(Battle):
                                        sin(threat_delta_theta), 
                                        cos(threat_delta_theta)*sin(threat_delta_psi)])
             L_only_theta_ = np.array([cos(ego.theta),sin(ego.theta), 0])
-            cos_alpha_anti_missile = np.dot(L_anti_missile_, L_only_theta_)
+            # L_anti_missile_ 前正号表示导弹指向飞机，负号即飞机指向导弹
+            cos_alpha_anti_missile = np.dot(-L_anti_missile_, L_only_theta_) 
 
             r_angle = cos_alpha_anti_missile
 

@@ -9,6 +9,7 @@ import sys
 import os
 import importlib
 import copy
+from numpy.linalg import norm
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -102,7 +103,6 @@ class Battle(object):
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
 
         # # 智能体的观察空间
-        # r_obs_n, b_obs_n = self.base_obs()
         # self.r_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      r_obs_n]
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
@@ -156,7 +156,7 @@ class Battle(object):
             UAV.id = i + 1
             UAV.red = True
             UAV.blue = False
-            UAV.label = "Red"
+            UAV.side = 'r'
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             UAV.pos_ = red_birth_state['position']  # np.array([-38841.96119795, 9290.02131746, -1686.95469864])
@@ -175,7 +175,7 @@ class Battle(object):
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
             self.RUAVs.append(UAV)
-            self.RUAVsTable[UAV.id]=(UAV, UAV.label, UAV.dead)
+            self.RUAVsTable[UAV.id]=(UAV, UAV.side, UAV.dead)
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=dt_move)
@@ -183,7 +183,7 @@ class Battle(object):
             UAV.id = i + 201
             UAV.red = False
             UAV.blue = True
-            UAV.label = "Blue"
+            UAV.side = 'b'
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             UAV.pos_ = blue_birth_state['position']  # np.array([38005.14540582, 6373.80721704, -1734.42509136])
@@ -200,7 +200,7 @@ class Battle(object):
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
             self.BUAVs.append(UAV)
-            self.BUAVsTable[UAV.id]=(UAV, UAV.label, UAV.dead)
+            self.BUAVsTable[UAV.id]=(UAV, UAV.side, UAV.dead)
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
         self.UAVsTable = {**self.RUAVsTable, **self.BUAVsTable}
@@ -213,19 +213,6 @@ class Battle(object):
 
         # print(red_birth_state)
         # print(blue_birth_state)
-
-    def get_obs_spaces(self, side):
-        self.reset()
-        
-        # 智能体的观察空间
-        # r_obs_n, b_obs_n = self.base_obs()
-        obs_n = self.base_obs(side)
-        # b_obs_n = self.base_obs('b')
-        self.obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
-                             obs_n]
-        # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
-        #                      b_obs_n]
-        return self.obs_spaces
 
     def step(self, r_actions, b_actions):
         report_move_time_rate = int(round(self.dt_maneuver / dt_move))
@@ -299,7 +286,7 @@ class Battle(object):
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
                                                        dt=self.dt_move)
                     if hit:
-                        print(target.label, 'is hit')
+                        print(target.side, 'is hit')
                         missile.dead = True
                         missile.hit = True
                         missile.pos_ = point_m
@@ -364,7 +351,6 @@ class Battle(object):
         这里不缩放，统一在get_obs缩放（因为有些会直接输入到规则里面）
         默认值在这里设定
         '''
-        side = self.UAV_ids
         
         if side == 'r':
             own = self.RUAV
@@ -465,7 +451,7 @@ class Battle(object):
         # 告警信息 pi和-pi是突变点，置尾机动的时候不易训练，暂时不想用sin和cos，试试改为追一个东西
         if not alive_enm_missiles:
             warning = 0
-            threat_delta_psi = 0 # pi 0
+            threat_delta_psi = pi # pi 0
             threat_delta_theta = 0
             threat_distance = 30e3
         else:
@@ -477,12 +463,12 @@ class Battle(object):
                 if missile.distance < missile.detect_range and missile.in_angle:
                     warnings[i] = 1
                     distances[i] = missile.distance
-                    # 作为追踪去训练，视图避开(pi -pi)突变点问题
-                    threat_delta_psis[i] = sub_of_radian(missile.q_beta, own.psi)
-                    threat_delta_thetas[i] = sub_of_radian(missile.q_epsilon, own.theta) # missile.q_epsilon
-                    # # 作为远离去训练，效果不是很好
-                    # threat_delta_psis[i] = sub_of_radian(pi+missile.q_beta, own.psi)
-                    # threat_delta_thetas[i] = -missile.q_epsilon
+                    # # 作为追踪去训练，视图避开(pi -pi)突变点问题
+                    # threat_delta_psis[i] = sub_of_radian(missile.q_beta, own.psi)
+                    # threat_delta_thetas[i] = sub_of_radian(missile.q_epsilon, own.theta) # missile.q_epsilon
+                    # 作为远离去训练，效果不是很好
+                    threat_delta_psis[i] = sub_of_radian(pi+missile.q_beta, own.psi)
+                    threat_delta_thetas[i] = -missile.q_epsilon
             
             # 告警标志 bool
             warning = bool(max(warnings))
@@ -551,7 +537,7 @@ class Battle(object):
             "warning": bool(warning),
 
             # 打包的向量 / 子组
-            "target_information": [
+            "target_information": np.array([
                 float(delta_alt_obs),   # 0相对高度 m
                 float(delta_psi),       # 1相对方位 rad
                 float(delta_theta),     # 2相对俯仰角 rad
@@ -560,9 +546,9 @@ class Battle(object):
                 float(speed_T),         # 5目标速度 m/s
                 float(AA_hor),          # 6水平进入角 rad
                 float(AA_vert)          # 7垂直进入角 rad
-            ],
+            ]),
 
-            "ego_main": [
+            "ego_main": np.array([
                 float(v_own),   # 0本机速度 m/s
                 float(h_own),   # 1本机高度 m
                 float(sin_theta), # 2
@@ -570,9 +556,9 @@ class Battle(object):
                 float(sin_phi), # 4
                 float(cos_phi), # 5
                 int(ammo)       # 6剩余导弹数量
-            ],
+            ]),
 
-            "ego_control": [
+            "ego_control": np.array([
                 float(p), # 0 p rad/s act1_last
                 float(q), # 1 q rad/s act2_last
                 float(r), # 2 r rad/s act3_last
@@ -580,20 +566,20 @@ class Battle(object):
                 float(psi_v), # 4
                 float(alpha_air), # 5 rad
                 float(beta_air) # 6 rad
-            ],
+            ]),
 
             "weapon": float(missile_time_to_hit_obs),
 
-            "threat": [
+            "threat": np.array([
                 float(threat_delta_psi), # 0
                 float(threat_delta_theta), # 1
                 float(threat_distance) # 2
-            ],
+            ]),
 
-            "border":[
+            "border":np.array([
                 float(d_hor), # 0
                 int(left_or_right), # 1
-            ]
+            ])
 
         }
 
@@ -617,12 +603,12 @@ class Battle(object):
         self.state_init["missile_in_mid_term"]=0
         self.state_init["locked_by_target"]=0
         self.state_init["warning"]=0
-        self.state_init["target_information"]=[0,0,0,100,0,0,0,0]
-        self.state_init["ego_main"]=[300, 5000, 0, 1, 0, 1, 0]
-        self.state_init["ego_control"]= [0, 0, 0, 0, 0, 0, 0] # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
+        self.state_init["target_information"]=np.array([0,0,0,100e3,0,0,0,0])
+        self.state_init["ego_main"]=np.array([300, 5000, 0, 1, 0, 1, 0])
+        self.state_init["ego_control"]= np.array([0, 0, 0, 0, 0, 0, 0]) # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
         self.state_init["weapon"]=120
-        self.state_init["threat"]=[0,0,30e3] # [pi,0,30e3]  [0,0,30e3]
-        self.state_init["border"]=[self.R_cage, 0]
+        self.state_init["threat"]=np.array([pi,0,30e3]) # [pi,0,30e3]  [0,0,30e3]
+        self.state_init["border"]=np.array([50e3, 0])
 
         # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
         if pomdp: # 只有在部分观测情况下需要添加屏蔽
@@ -643,9 +629,10 @@ class Battle(object):
                 if ATA > pi/3 and state["locked_by_target"]==0:  # 夹角>3/pi时观测不到目标
                     state["target_observable"] = 0
                     state["target_information"] = memory["target_information"].copy()
-                elif state["locked_by_target"] == 1: # 被目标探测后有对目标的角度信息
+                elif ATA > pi/3 and state["locked_by_target"] == 1: # 被目标探测后有对目标的角度信息
                     state["target_observable"] = 1
-                    state["target_information"][0, 3, 5, 6, 7] = memory["target_information"][0, 3, 5, 6, 7]
+                    for idx in (0, 3, 5, 6, 7):
+                        state["target_information"][idx] = memory["target_information"][idx]
                 else:
                     state["target_observable"] = 2 # 否则除了不能发射导弹，都是可见的
             else:
@@ -815,16 +802,23 @@ class Battle(object):
             for UAV in self.UAVs:
                 loc_LLH = UAV.lon, UAV.lat, UAV.alt
                 if not UAV.dead:
+                    if UAV.side == 'r':
+                        color = 'Red'
+                    elif UAV.side == 'b':
+                        color = 'Blue'
+                    else:
+                        color = 'Black'
+
                     data_to_send += (
                         f"#{send_t:.2f}\n"
                         f"{UAV.id},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                         f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                        f"Name=F16,Color={UAV.label}\n"
+                        f"Name=F16,Color={color}\n"
                     )
                     # data_to_send+=(
                     #     f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                     #     f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                    #     f"Type=Beam, Color={UAV.label},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
+                    #     f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
                     # )
                 else:
                     data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
@@ -837,10 +831,12 @@ class Battle(object):
                 else:
                     # 记录导弹的位置
                     loc_m = NUE2LLH(missile.pos_[0], missile.pos_[1], missile.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
-                    if missile.side == 'red':
+                    if missile.side == 'r':
                         color = 'Orange'
-                    else:
+                    elif missile.side == 'b':
                         color = 'Green'
+                    else:
+                        color = 'White'
                     data_to_send += f"#{send_t:.2f}\n{missile.id},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}," \
                                     f"Name=AIM-120C,Color={color}\n"
 
@@ -888,6 +884,114 @@ class Battle(object):
         print('cage set')
 
 
+    # 规则机动模型
+    def track_behavior(self, ego_height, delta_psi):
+        """
+        追踪行为：返回 (heading_cmd, speed_cmd)
+        """
+        height_cmd = 7e3 - ego_height
+        heading_cmd = delta_psi
+        speed_cmd = 1.5 * 340
+        return np.array([height_cmd, heading_cmd, speed_cmd])
+
+    def escape_behavior(self, ego_height, enm_delta_psi, warning, threat_delta_psi):
+        """
+        逃逸行为：返回 (heading_cmd, speed_cmd)
+        没有导弹威胁的时候躲飞机，有导弹威胁的时候躲导弹
+        """
+        height_cmd = 7e3 - ego_height
+        if warning:
+            heading_cmd = np.clip(sub_of_radian(threat_delta_psi, pi), -pi/2, pi/2)
+        else:
+            heading_cmd = np.clip(sub_of_radian(enm_delta_psi, pi), -pi/2, pi/2)
+        speed_cmd = 1.5 * 340
+        return np.array([height_cmd, heading_cmd, speed_cmd])
+
+    def left_crank_behavior(self, ego_height, delta_psi):
+        """
+        crank 行为：返回 (heading_cmd, speed_cmd)
+        """
+        height_cmd = 7e3 - ego_height
+        heading_cmd = np.clip(delta_psi-pi/4, -pi/2, pi/2)
+        # temp = 0.4 * (delta_psi - pi / 4) / (pi / 4) * 2
+        # heading_cmd = np.clip(temp, -0.4, 0.4)
+        speed_cmd = 1.1 * 340
+        return np.array([height_cmd, heading_cmd, speed_cmd])
+    
+    def right_crank_behavior(self, ego_height, delta_psi):
+        """
+        crank 行为：返回 (heading_cmd, speed_cmd)
+        """
+        height_cmd = 7e3 - ego_height
+        heading_cmd = np.clip(delta_psi+pi/4, -pi/2, pi/2)
+        # temp = 0.4 * (delta_psi + pi / 4) / (pi / 4) * 2
+        # heading_cmd = np.clip(temp, -0.4, 0.4)
+        speed_cmd = 1.1 * 340
+        return np.array([height_cmd, heading_cmd, speed_cmd])
+
+    def wander_behavior():
+        """
+        wander 随机漫步行为：返回 (alt_cmd, heading_cmd, speed_cmd)
+        """
+        alt_cmd = 3000 * np.random.uniform(-1, 1)
+        heading_cmd = np.random.normal(0, 25 * pi / 180)
+        speed_cmd = 300
+        return np.array([alt_cmd, heading_cmd, speed_cmd])
+
+    def back_in_cage(self, cmd, ego_pos_, ego_psi):
+        height_cmd, heading_cmd, speed_cmd = cmd
+        ego_height = ego_pos_[1]
+        R_to_o00 = sqrt(ego_pos_[0]**2+ego_pos_[2]**2)
+        if ego_height > 13e3:
+            height_cmd = -5000
+        elif ego_height < 3e3:
+            height_cmd = 5000
+        if self.R_cage - R_to_o00 < 8e3:
+            beta_of_o00 = atan2(-ego_pos_[2], -ego_pos_[0])
+            heading_cmd = sub_of_radian(beta_of_o00, ego_psi)
+        return np.array([height_cmd, heading_cmd, speed_cmd])
+    
+    def decision_rule(self, ego_pos_, ego_psi, enm_delta_psi, distance, warning, threat_delta_psi, ally_missiles, wander=0):
+        ego_height = ego_pos_[1]
+        # 输出为所需的绝对高度、相对方位和绝对速度
+        # 是否有导弹可用
+        has_missile_in_the_air = 0
+        for missile in ally_missiles:
+            if not missile.dead:
+                has_missile_in_the_air = 1
+                break
+        # 是否被敌机导弹锁定
+        if warning:
+            should_escape = 1
+        else:
+            should_escape = 0
+        action_n = np.array([0.0, 0.0, 400])
+
+        # 行为决策：按原逻辑分支调用独立函数
+        if distance > 40e3:
+            cmd = self.track_behavior(ego_height, enm_delta_psi)
+        elif not should_escape and has_missile_in_the_air:
+            if enm_delta_psi>=0:
+                cmd = self.left_crank_behavior(ego_height, enm_delta_psi)
+            else:
+                cmd = self.right_crank_behavior(ego_height, enm_delta_psi)
+        elif should_escape:
+            # rel_psi_m 在 should_escape 时应已被设置
+            cmd = self.escape_behavior(ego_height, enm_delta_psi, warning, threat_delta_psi)
+        else:
+            cmd = self.track_behavior(ego_height, enm_delta_psi)
+
+        # 追踪任务的目标在散步
+        if wander:
+            cmd = self.wander_behavior()
+
+        # 最高优先级：不许出圈
+        cmd = self.back_in_cage(cmd, ego_pos_, ego_psi)
+
+        return cmd
+
+
+
 def launch_missile_if_possible(env, side='r'):
     """
     根据条件判断是否发射导弹
@@ -913,10 +1017,12 @@ def launch_missile_if_possible(env, side='r'):
             # 发射导弹
             new_missile = uav.launch_missile(target, env.t, missile_class)
             uav.ammo -= 1
-            new_missile.side = 'red' if side == 'r' else 'blue'
+            new_missile.side = 'r' if side == 'r' else 'b'
             if side == 'r':
                 env.Rmissiles.append(new_missile)
             else:
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+
+

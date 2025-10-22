@@ -134,7 +134,7 @@ class UAVModel(object):
         self.id = None
         self.red = False
         self.blue = False
-        self.label = None  # 阵营
+        self.side = None  # 阵营
         self.size = 5  # meter
         self.area = 27.87  # F-16机翼面积
         self.m = 12000  # F-16 正常起飞重量
@@ -278,10 +278,10 @@ class UAVModel(object):
         # new_missile = missile_class(self.pos_, self.vel_, current_time)
         new_missile = missile_class(self.pos_, self.vel_, target.pos_, target.vel_, current_time)  # test
         if target.red:
-            new_missile.label = 'blue'
+            new_missile.side = 'blue'
             new_missile.id = 301 + self.missile_count  # len(self.missiles)
         if target.blue:
-            new_missile.label = 'red'
+            new_missile.side = 'red'
             new_missile.id = 101 + self.missile_count  # len(self.missiles)
         # 根据距离调整导弹参数
         distance = np.linalg.norm(target.pos_ - self.pos_)
@@ -343,7 +343,7 @@ class Battle(object):
             UAV.id = i + 1
             UAV.red = True
             UAV.blue = False
-            UAV.label = "red"
+            UAV.side = "red"
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             # UAV.pos_ = birthpointr.copy() + \
@@ -363,7 +363,7 @@ class Battle(object):
             UAV.id = i + 201
             UAV.red = False
             UAV.blue = True
-            UAV.label = "blue"
+            UAV.side = "blue"
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             # UAV.pos_ = birthpointb.copy() + \
@@ -765,7 +765,7 @@ class Battle(object):
                         hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, ptt1_, last_vtt_,
                                                            dt1=dt / plane_missile_time_rate)
                         if hit:
-                            print(target.label, 'is hit')
+                            print(target.side, 'is hit')
                             missile.dead = True
                             missile.hit = True
                             missile.pos_ = point_m

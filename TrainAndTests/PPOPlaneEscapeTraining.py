@@ -245,12 +245,12 @@ if __name__=="__main__":
                     # print('回合结束，时间为：', env.t, 's')
                     break
                 # 获取观测信息
-                r_obs_n, _ = env.escape_obs('r')
-                b_obs_n, _ = env.escape_obs('b')
+                r_obs_n, r_obs_check = env.escape_obs('r')
+                b_obs_n, b_obs_check = env.escape_obs('b')
 
                 # 在这里将观测信息压入记忆
-                env.RUAV.obs_memory = r_obs_n.copy()
-                env.BUAV.obs_memory = b_obs_n.copy()
+                env.RUAV.obs_memory = r_obs_check.copy()
+                env.BUAV.obs_memory = b_obs_check.copy()
 
                 b_obs = np.squeeze(b_obs_n)
 

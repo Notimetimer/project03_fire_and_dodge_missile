@@ -43,7 +43,7 @@ class UAVModel(object):
         self.id = None
         self.red = False
         self.blue = False
-        self.label = None  # 阵营
+        self.side = None  # 阵营
         self.size = 5  # meter
         self.area = 27.87  # F-16机翼面积
         self.m = 12000  # F-16 正常起飞重量
@@ -214,7 +214,7 @@ if __name__ == '__main__':
     UAV.id = 1
     UAV.red = True
     UAV.blue = False
-    UAV.label = "red"
+    UAV.side = "red"
     UAV.color = np.array([1, 0, 0])
 
     o00 = np.array([118, 30])  # 地理原点的经纬

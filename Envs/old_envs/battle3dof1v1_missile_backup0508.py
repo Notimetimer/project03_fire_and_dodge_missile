@@ -136,7 +136,7 @@ class UAVModel(object):
         self.id = None
         self.red = False
         self.blue = False
-        self.label = None  # 阵营
+        self.side = None  # 阵营
         self.size = 5  # meter
         self.area = 27.87  # F-16机翼面积
         self.m = 12000  # F-16 正常起飞重量
@@ -247,7 +247,7 @@ class UAVModel(object):
         speed = np.linalg.norm(self.vel_)
         attack_angle = acos(np.dot(self.vel_, L_) / (distance * speed))
         if distance < 8e3 and attack_angle * 180 / pi < 30:
-            if target.label == "red":  # test 红方开无敌
+            if target.side == "red":  # test 红方开无敌
                 return False
             else:
                 return True  # "绝对杀伤锥"
@@ -364,13 +364,13 @@ class Battle(object):
             if i < 1:
                 UAV.red = True
                 UAV.blue = False
-                UAV.label = "red"
+                UAV.side = "red"
                 UAV.color = np.array([1, 0, 0])
                 self.RUAV = UAV
             else:
                 UAV.red = False
                 UAV.blue = True
-                UAV.label = "blue"
+                UAV.side = "blue"
                 UAV.color = np.array([0, 0, 1])
                 self.BUAV = UAV
 

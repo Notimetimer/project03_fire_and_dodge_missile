@@ -208,11 +208,11 @@ if __name__=="__main__":
         #         done = False
         #         while not done:  # 每个训练回合
         #             # 获取观测信息
-        #             r_obs_n, _ = env.attack_obs('r')
-        #             b_obs_n, _ = env.attack_obs('b')
+        #             r_obs_n, r_obs_check = env.attack_obs('r')
+        #             b_obs_n, b_obs_check = env.attack_obs('b')
         #             # 在这里将观测信息压入记忆
-        #             env.RUAV.obs_memory = r_obs_n.copy()
-        #             env.BUAV.obs_memory = b_obs_n.copy()
+        #             env.RUAV.obs_memory = r_obs_check.copy()
+        #             env.BUAV.obs_memory = b_obs_check.copy()
         #             # 执行示范动作收集数据
         #             action_height = env.get_state('b')["target_information"][0] # env.RUAV.pos_[1]-env.BUAV.pos_[1]
         #             action_delta_psi = env.get_state('b')["target_information"][1]
@@ -341,12 +341,12 @@ if __name__=="__main__":
                     # print('回合结束，时间为：', env.t, 's')
                     break
                 # 获取观测信息
-                r_obs_n, _ = env.attack_obs('r')
-                b_obs_n, _ = env.attack_obs('b')
+                r_obs_n, r_obs_check = env.attack_obs('r')
+                b_obs_n, b_obs_check = env.attack_obs('b')
 
                 # 在这里将观测信息压入记忆
-                env.RUAV.obs_memory = r_obs_n.copy()
-                env.BUAV.obs_memory = b_obs_n.copy()
+                env.RUAV.obs_memory = r_obs_check.copy()
+                env.BUAV.obs_memory = b_obs_check.copy()
 
                 b_obs = np.squeeze(b_obs_n)
 
@@ -506,11 +506,11 @@ if __name__=="__main__":
         #         step = 0
         #         done = False
         #         while not done:
-        #             r_obs_n, _ = env.attack_obs('r')
-        #             b_obs_n, _ = env.attack_obs('b')
+        #             r_obs_n, r_obs_check = env.attack_obs('r')
+        #             b_obs_n, b_obs_check = env.attack_obs('b')
         #             # 在这里将观测信息压入记忆
-        #             env.RUAV.obs_memory = r_obs_n.copy()
-        #             env.BUAV.obs_memory = b_obs_n.copy()
+        #             env.RUAV.obs_memory = r_obs_check.copy()
+        #             env.BUAV.obs_memory = b_obs_check.copy()
         #             state = np.squeeze(b_obs_n)
         #             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
         #             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,

@@ -57,7 +57,7 @@ class ChooseStrategyEnv(Battle):
         # self.last_dhor = None
 
     def attack_obs(self, side):
-        full_obs = self.base_obs(side)
+        full_obs = self.base_obs(side, pomdp=0)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
@@ -70,7 +70,7 @@ class ChooseStrategyEnv(Battle):
         return flat_obs, full_obs
     
     def escape_obs(self, side):
-        full_obs = self.base_obs(side)
+        full_obs = self.base_obs(side, pomdp=0) ###
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
         full_obs["target_alive"] = copy.deepcopy(self.obs_init["target_alive"])
@@ -84,7 +84,7 @@ class ChooseStrategyEnv(Battle):
         flat_obs = flatten_obs(full_obs, self.key_order)
         return flat_obs, full_obs
     
-    def crank_obs(self, side):
+    def crank_obs(self, side, pomdp=0):
         full_obs = self.base_obs(side)
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
@@ -96,10 +96,6 @@ class ChooseStrategyEnv(Battle):
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
         return flat_obs, full_obs
-
-    # def get_obs(self, side):
-    #     # 调用 AttackTrainEnv 的实现并传入当前实例（不创建新对象）
-    #     return AttackTrainEnv.attack_obs(self, side)
     
     def step(self, r_actions, b_actions):
         # 这一层的action是离散的动作类型
@@ -111,8 +107,8 @@ class ChooseStrategyEnv(Battle):
         self.t = round(self.t, 2)  # 保留两位小数
 
         actions = [r_actions] + [b_actions]
-        self.r_actions = r_actions.copy()
-        self.b_actions = b_actions.copy()
+        self.r_actions = r_actions # .copy()
+        self.b_actions = b_actions # .copy()
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
@@ -123,48 +119,79 @@ class ChooseStrategyEnv(Battle):
                 if UAV.dead:
                     continue
                 # 输入动作与动力运动学状态
-                
-                delta_psi = state["target_information"][1]
-                delta_theta = state["target_information"][2]
+                uav_obs = self.base_obs(UAV.side, pomdp=0) ### test 部分观测的话用1
+                delta_height_scaled = uav_obs["target_information"][0]
+                delta_psi = uav_obs["target_information"][1]
+                delta_theta = uav_obs["target_information"][2]
+                distance = uav_obs['target_information'][3] * 10e3
+                d_hor, leftright = uav_obs["border"]
+
+                move_action = np.zeros(3)
+
                 # 进攻机动
                 if action == 0:
                     pass # 调用进攻策略
-                    obs = self.attack_obs(UAV.side)
-                    delta_psi = 
+                    # 规则智能体
+                    move_action = self.track_behavior(UAV.alt, delta_psi)
+
+                    # 训练出的智能体
+                    pass
+
+                    # 武器发射决策
+                    pass
 
                 if action == 1:
                     pass # 调用escape策略
+                    # 规则智能体
+                    move_action = self.escape_behavior(UAV.alt, delta_psi, uav_obs["warning"], uav_obs["threat"][0])
+
+                    # 训练出的智能体
+                    pass
+                
 
                 if action == 2:
                     pass # 调用Lcrank策略
+                    # 规则智能体
+                    move_action = self.left_crank_behavior(UAV.alt, delta_psi)
+
+                    # 训练出的智能体
+                    pass
 
                 if action == 3:
                     pass # 调用Rcrank策略
+                    # 规则智能体
+                    move_action = self.right_crank_behavior(UAV.alt, delta_psi)
+
+                    # 训练出的智能体
+                    pass
+
 
                 if action == 4:
-                    pass # 转圈搜索目标
+                    # 转圈搜索目标
+                    # 该部分不训练智能体，改为使用规则智能体
+                    move_action[0] = np.clip(delta_height_scaled, self.min_alt_save-UAV.alt, self.max_alt_save-UAV.alt) * 5000
+                    
+                    if leftright>=0:
+                        move_action[1] = pi
+                    else:
+                        move_action[1] = -pi
+                    move_action[2] = 1.0 * 340
+                
+                
+                # 避让水平边界动作修正：
+                # print(UAV.side)
+                state = self.get_state(UAV.side)
+                dist_2_hor = state["border"][0]
+                move_action = self.back_in_cage(move_action, UAV.pos_, UAV.psi)
+                
+                # if UAV.side == 'r':
+                #     print(move_action)
+                #     print()
 
+                pass
 
+                UAV.move(move_action[0], move_action[1], move_action[2], relevant_height=True)
 
-
-
-
-
-
-
-
-
-
-
-                # print(action)
-                target_height = action[0] # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
-                delta_heading = action[1] # 相对方位(弧度)
-                target_speed = action[2] # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
-                # print('target_height',target_height)
-                # for i in range(int(self.dt_maneuver // dt_move)):
-                UAV.move(target_height, delta_heading, target_speed, relevant_height=True)
-                # 上一步动作
-                # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
             self.missiles = self.Rmissiles + self.Bmissiles
@@ -209,7 +236,7 @@ class ChooseStrategyEnv(Battle):
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
                                                        dt=self.dt_move)
                     if hit:
-                        print(target.label, 'is hit')
+                        print(target.side, 'is hit')
                         missile.dead = True
                         missile.hit = True
                         missile.pos_ = point_m
@@ -267,5 +294,17 @@ class ChooseStrategyEnv(Battle):
             self.running = False
 
         return r_reward_n, b_reward_n, r_dones, b_dones, terminate
+
+    def combat_terminate_and_reward(self, side):
+        terminate = self.get_terminate()
+
+        done = terminate
+
+        # todo 奖励函数调用或是重写都要在这实现
+        reward = 0
+        event_reward = 0
+
+        return done, reward, event_reward
+
 
 
