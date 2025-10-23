@@ -327,15 +327,18 @@ if __name__=="__main__":
                         transition_dict['rewards'].append(b_reward)
                         transition_dict['dones'].append(done)
                         transition_dict['action_bounds'].append(action_bound)
+
                 # state = next_state
-                episode_return += b_reward * env.dt_maneuver
-                steps_since_update += 1
+                if battle_control_on_line:
+                    episode_return += b_reward * env.dt_maneuver
+                    steps_since_update += 1
 
                 # 可视化
                 env.render(t_bias=t_bias)
             
             episode_end_time = time.time()  # 记录结束时间
             # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
+
 
             return_list.append(episode_return)
 
