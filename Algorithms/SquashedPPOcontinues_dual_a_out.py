@@ -84,7 +84,9 @@ class SquashedNormal:
 
     def __init__(self, mu, std, eps=1e-6):
         self.mu = mu
-        self.std = std
+        if not torch.is_tensor(std):
+            std = torch.as_tensor(std, device=mu.device, dtype=mu.dtype)
+        self.std = torch.clamp(std, min=float(eps))
         self.normal = Normal(mu, std)
         self.eps = eps
         self.mean = mu
@@ -239,14 +241,18 @@ class PPOContinuous:
         return a_norm_t.cpu().numpy()
     
     # take action
-    def take_action(self, state, action_bounds, explore=True, max_std=0.3):
+    def take_action(self, state, action_bounds, explore=True, max_std=None):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
         # 检查state中是否存在nan
         if torch.isnan(state).any() or torch.isinf(state).any():
             print('state', state)
         # 检查actor参数中是否存在nan
         check_weights_bias_nan(self.actor, "actor", "take action中")
-        mu, std = self.actor(state, min_std=1e-6, max_std=self.max_std)
+        if max_std is None:
+            max_action_std = self.max_std
+        else:
+            max_action_std = max_std
+        mu, std = self.actor(state, min_std=1e-6, max_std=max_action_std)
         # 检查mu, std是否含有nan
         if torch.isnan(mu).any() or torch.isnan(std).any() or torch.isinf(mu).any() or torch.isinf(std).any():
             print('mu', mu)
@@ -293,10 +299,8 @@ class PPOContinuous:
         # 优势归一化
         if adv_normed:
             adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
-            # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
-            
-            # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+            # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
 
         # 提前计算一次旧的 value 预测（用于 value clipping）
         v_pred_old = self.critic(states).detach()  # (N,1)
@@ -311,7 +315,7 @@ class PPOContinuous:
         
         # # 反算 u = atanh(a)
         u_old = u_s
-        old_log_probs = dist.log_prob(0, u_old) # (N,1)
+        # old_log_probs = dist.log_prob(0, u_old) # (N,1)
 
         # 提前在action_dim维度求和
         old_log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)    # -> (N,1)
@@ -342,20 +346,21 @@ class PPOContinuous:
 
             dist = SquashedNormal(mu, std)
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
-            log_probs = dist.log_prob(0, u_old) # (N,1)
+            # log_probs = dist.log_prob(0, u_old) # (N,1)
 
             # 提前在action_dim维度求和
             log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)   # -> (N,1)
 
             ratio = torch.exp(log_probs - old_log_probs) # (N,1)
             # surr1 = ratio * advantage
+            # clamp surr1
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
-            
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
-
             entropy_factor = dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
-            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor # 标量
+            actor_loss_reward_term = -torch.min(surr1, surr2).sum(-1).mean()
+            actor_loss = actor_loss_reward_term - self.k_entropy * entropy_factor
+
             # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
             # 计算 critic_loss：支持可选的 value clipping（PPO 风格）
@@ -412,16 +417,16 @@ class PPOContinuous:
 
 
     # 特殊用法
-    def update_actor_supervised(self, transition_dict):
+    def update_actor_supervised(self, supervisor_dict):
         """
         Supervised update:
         - Actor: 通过监督学习克隆经验池中的行为策略。具体地，用执行动作反归一化得到的 u_old = atanh(a_normalized)
                  作为目标，最小化 actor 输出 mu 与 u_old 之间的 MSE（即拟合 pre-squash 均值）。
         """
         # 转换为 tensor（先用 np.array 以避免警告/性能问题）
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
+        states = torch.tensor(np.array(supervisor_dict['states']), dtype=torch.float).to(self.device)
+        actions_exec = torch.tensor(np.array(supervisor_dict['actions']), dtype=torch.float).to(self.device)
+        action_bounds = torch.tensor(np.array(supervisor_dict['action_bounds']), dtype=torch.float).to(self.device)
 
         # 将执行动作反向归一化到 [-1,1] 并计算 u_old = atanh(a)
         actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
