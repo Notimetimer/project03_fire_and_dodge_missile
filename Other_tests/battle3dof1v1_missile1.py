@@ -328,7 +328,7 @@ class UAVModel(object):
                     target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, ptt1_)
                     # 更新导弹状态
                     last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-                        missile.step(target_info, dt1=dt / plane_missile_time_rate)
+                        missile.step(target_info, dt=dt / plane_missile_time_rate)
 
                     # 毁伤判定
                     # 判断命中情况并终止运行
@@ -341,7 +341,7 @@ class UAVModel(object):
                         missile.dead = True
                     if missile.t >= 0 + dt:
                         hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, ptt1_, last_vtt_,
-                                                           dt1=dt / plane_missile_time_rate)
+                                                           dt=dt / plane_missile_time_rate)
                         if hit:
                             print('Target hit')
                             missile.dead = True
@@ -356,7 +356,7 @@ class UAVModel(object):
 
         return target_hit
 
-        #     hit, _, _ = hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt1=dt/plane_missile_time_rate)
+        #     hit, _, _ = hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=dt/plane_missile_time_rate)
         #     if hit:
         #         print('target hit')
         #         missile.dead = True

@@ -26,7 +26,7 @@ def latest(vectors):
     elif vectors.ndim == 2:  # 二维数组
         return vectors[-1]  # 直接返回最后一行
 
-from LaunchZone.calc_hit_points import *
+from LaunchZone.calc_hit_points_maneuver_from_RWR import *
 
 if __name__ == '__main__':
     p_carrier_ = np.array([0, 10000, 0], dtype='float64')

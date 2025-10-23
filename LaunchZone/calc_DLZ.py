@@ -6,7 +6,7 @@ from math import *
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from LaunchZone.calc_hit_points import *
+from LaunchZone.calc_hit_points_maneuver_from_RWR import *
 from Envs.MissileModel0910 import *
 from joblib import Parallel, delayed
 

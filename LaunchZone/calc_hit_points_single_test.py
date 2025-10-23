@@ -35,7 +35,7 @@ t = 0
 g_ = np.array([0, -g, 0])
 theta_limit = 85 * pi / 180
 
-from LaunchZone.calc_hit_points import *
+from LaunchZone.calc_hit_points_maneuver_from_RWR import *
 
 # 为了可视化，sim_hit函数有所变动
 def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
@@ -110,9 +110,10 @@ def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
 
 
 if __name__ == '__main__':
-    p_carrier_ = np.array([0, 10000, 0], dtype='float64')
+    height_init = 11e3
+    p_carrier_ = np.array([0, height_init, 0], dtype='float64')
     v_carrier_ = np.array([350, 0, 0], dtype='float64')
-    p_target_ = np.array([20e3, 10000, 0e3], dtype='float64')
+    p_target_ = np.array([35e3, height_init, 0e3], dtype='float64')
     v_target_ = np.array([-300, 0, 0], dtype='float64')
 
     move_pattern = 2

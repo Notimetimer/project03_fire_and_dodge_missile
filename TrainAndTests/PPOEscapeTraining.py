@@ -29,7 +29,8 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.SquashedPPOcontinues_dual_a_out import *
+from Algorithms.SquashedPPOcontinues_std_no_state import *
+# from Algorithms.SquashedPPOcontinues_dual_a_out import *
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 
@@ -84,9 +85,9 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# data_dir = os.path.join(project_root, "data")
-# save_path = os.path.join(data_dir, "Crankinitial_states.npy")
-# initial_states = np.load(save_path)
+data_dir = os.path.join(project_root, "data")
+save_path = os.path.join(data_dir, "Crankinitial_states.npy")
+initial_states = np.load(save_path)
 # print("读取的数据\n", initial_states)
 
 
@@ -100,35 +101,69 @@ def save_meta_once(path, state_dict):
 def creat_initial_state():
     # 飞机出生状态指定
     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-    blue_height = np.random.uniform(4000, 12000)
-    red_height = blue_height + np.random.uniform(-2000, 2500)
-    red_psi =  np.random.choice([-1, 1]) * pi/2 # random.uniform(-pi, pi)
-    blue_psi = random.uniform(-pi, pi)
+    cases = initial_states.shape[0]  # 读取攻击区数据
+    line_number = np.random.choice(cases)
+
+    red_height = initial_states[line_number, 0]
+    blue_height = initial_states[line_number, 1]
+
+    if blue_height <= 9e3:
+        initial_dist = 30e3
+    elif blue_height <= 11e3:
+        initial_dist = 35e3
+    else:
+        initial_dist = 40e3
+
+    red_psi = np.random.choice([-1, 1]) * pi/2  # random.uniform(-pi, pi)
+    blue_psi = -red_psi
     # blue_beta = red_psi
-    red_N = (random.randint(0,1)*2-1)*57e3 # random.uniform(-52e3, 52e3) 38
-    red_E = -np.sign(red_psi) * 40e3
+    red_N = (random.randint(0, 1)*2-1)*47e3  # (random.randint(0,1)*2-1)*57e3
+    red_E = -np.sign(red_psi) * initial_dist
     blue_N = red_N
     blue_E = 0
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                        'psi': red_psi
-                        }
+                                'psi': red_psi
+                                }
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                 'psi': blue_psi
                                 }
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+
+# def creat_initial_state():
+#     # 飞机出生状态指定
+#     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+#     blue_height = np.random.uniform(4000, 12000)
+#     red_height = blue_height + np.random.uniform(-2000, 2500)
+#     red_psi =  np.random.choice([-1, 1]) * pi/2 # random.uniform(-pi, pi)
+#     blue_psi = random.uniform(-pi, pi)
+#     # blue_beta = red_psi
+#     red_N = (random.randint(0,1)*2-1)*57e3 # random.uniform(-52e3, 52e3) 38
+#     red_E = -np.sign(red_psi) * 40e3
+#     blue_N = red_N
+#     blue_E = 0
+#     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+#                         'psi': red_psi
+#                         }
+#     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+#                                 'psi': blue_psi
+#                                 }
+#     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
 if __name__=="__main__":
     
     transition_dict_capacity = env.args.max_episode_len//env.dt_maneuver + 1
 
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2) # 2,2
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2, max_std=0.5)  # 2,2
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
     from datetime import datetime
     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logs_dir = os.path.join(project_root, "logs")
+    log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
@@ -145,7 +180,7 @@ if __name__=="__main__":
 
     from Visualize.tensorboard_visualize import TensorBoardLogger
 
-    out_range_count = 0
+
     return_list = []
     win_list = []
     steps_count = 0
@@ -165,41 +200,20 @@ if __name__=="__main__":
         # for i_episode in range(int(max_episodes*(1-pre_train_rate))):
         while total_steps < int(max_steps*(1-pre_train_rate)):
             i_episode += 1
+
+            test_run = 0
             # if i_episode % 10 == 9: # 每10回合测试一次
             #     test_run = 1
             # else:
             #     test_run = 0
-            test_run = 0
 
+            battle_control_on_line = 0  # 只有RWR第一次响起，才是训练阶段
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
-            # # 飞机出生状态指定
-            # # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-            # blue_height = np.random.uniform(4000, 12000)
-            # red_height = blue_height + np.random.uniform(-2000, 2500)
-            # # init_case = np.random.randint(initial_states.shape[0])
-            # # blue_R = random.uniform(initial_states[init_case][2], min(50e3, initial_states[init_case][3])) # 目标随机游走的话，没法使用最大攻击区的数据
-            # # blue_height = initial_states[init_case][0]
-            # # red_height = initial_states[init_case][1]
-            # red_psi = random.uniform(-pi, pi)
-            # blue_psi = random.uniform(-pi, pi)
-            # blue_beta = red_psi
-            # init_R_min = sub_of_radian(pi+blue_psi, blue_beta)/pi * (50e3-25e3) + 25e3
-            # init_R_max = init_R_min + 10e3
-            # blue_R = random.uniform(init_R_min, init_R_max)
-
-            # blue_N = blue_R*cos(blue_beta)
-            # blue_E = blue_R*sin(blue_beta)
-
-            # DEFAULT_RED_BIRTH_STATE = {'position': np.array([0.0, red_height, 0.0]),
-            #                         'psi': red_psi
-            #                         }
-            # DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
-            #                             'psi': blue_psi
-            #                             }
-
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+
+            initial_blue_height = DEFAULT_BLUE_BIRTH_STATE['position'][1]
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=1, blue_init_ammo=0)
@@ -216,7 +230,7 @@ if __name__=="__main__":
 
             r_action_list = []
             b_action_list = []
-            
+
             episode_start_time = time.time()
 
             # 环境运行一轮的情况
@@ -225,7 +239,7 @@ if __name__=="__main__":
                 # 回合结束判断
                 # print(env.running)
                 current_t = count * dt_maneuver
-                if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
+                if env.running == False or done:  # count == round(args.max_episode_len / dt_maneuver) - 1:
                     # print('回合结束，时间为：', env.t, 's')
                     break
                 # 获取观测信息
@@ -238,61 +252,27 @@ if __name__=="__main__":
 
                 b_obs = np.squeeze(b_obs_n)
 
-                # 反向转回字典方便排查
-                b_check_obs = copy.deepcopy(env.state_init)
-                key_order = env.key_order
-                # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
-                arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
-                idx = 0
-                for k in key_order:
-                    if k not in b_check_obs:
-                        raise KeyError(f"key '{k}' not in state_init")
-                    v0 = b_check_obs[k]
-                    # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-                    if isinstance(v0, (list, tuple, np.ndarray)):
-                        length = len(v0)
-                        slice_v = arr[idx: idx + length]
-                        if isinstance(v0, np.ndarray):
-                            b_check_obs[k] = slice_v.copy()
-                        else:
-                            b_check_obs[k] = slice_v.tolist()
-                        idx += length
-                    else:
-                        # 标量
-                        b_check_obs[k] = float(arr[idx])
-                        idx += 1
-                if idx != arr.size:
-                    # 长度不匹配时给出提示（便于调试）
-                    print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
-
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 
                 # 红方开局就发射一枚导弹
                 if env.RUAV.ammo>0:
                     new_missile = env.RUAV.launch_missile(env.BUAV, env.t, missile_class)
                     env.RUAV.ammo -= 1
-                    new_missile.side = 'red'
+                    new_missile.side = 'r'
                     env.Rmissiles.append(new_missile)
                     env.missiles = env.Rmissiles + env.Bmissiles
 
                 height_ego = env.BUAV.alt
-                delta_psi = b_check_obs['target_information'][1]
+                delta_psi = atan2(b_obs_check['target_information'][1], b_obs_check['target_information'][0])
+                RWR_b = b_obs_check['warning']
 
-                # 动作重映射
-                # action_bound 根据高度、角度设置
-                # action_bound[0][0] = max(action_bound0[0][0], env.min_alt_save-height_ego)
-                # action_bound[0][1] = min(action_bound0[0][1], env.max_alt_save-height_ego)
+                if RWR_b==1 and battle_control_on_line==0:
+                    battle_control_on_line = 1
 
-                # action_bound[1][0] = max(action_bound0[1][0], sub_of_radian(delta_psi-50*pi/180, 0))
-                # action_bound[1][1] = min(action_bound0[1][1], sub_of_radian(delta_psi+50*pi/180, 0))
+                # 动作重映射不做了
 
                 # 机动决策
-                r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-                                        enm_pos_=env.BUAV.pos_, distance=distance,
-                                        ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                        o00=o00, R_cage=env.R_cage, wander=0
-                                        )
-                
+                # 红方发射完导弹飞慢点，给蓝方机会
                 L_ = env.BUAV.pos_ - env.RUAV.pos_
                 q_beta = atan2(L_[2], L_[0])
                 L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
@@ -301,34 +281,37 @@ if __name__=="__main__":
                 delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
                 r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save)-env.RUAV.pos_[1]
                 r_action_n_1 = delta_psi
-                r_action_n_2 = 340
+                r_action_n_2 = 300
                 r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
                 if np.isnan(b_obs).any() or np.isinf(b_obs).any():
-                    print('b_obs', b_check_obs)
+                    print('b_obs', b_obs_check)
                     print()
 
-                # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
-                if not test_run:
-                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
+                if not battle_control_on_line:
+                    L_ = env.RUAV.pos_ - env.BUAV.pos_
+                    q_beta = atan2(L_[2], L_[0])
+                    L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
+                    L_v = L_[1]
+                    q_epsilon = atan2(L_v, L_h)
+                    delta_psi = sub_of_radian(q_beta, env.BUAV.psi)
+                    b_action_n_0 = initial_blue_height - env.BUAV.pos_[1]
+                    b_action_n_1 = delta_psi
+                    b_action_n_2 = 340
+                    b_action_n = [b_action_n_0, b_action_n_1, b_action_n_2]
                 else:
-                    b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
+                    # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
+                    if not test_run:
+                        b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
+                    else:
+                        b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
 
-                # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
-                #                         enm_pos_=env.RUAV.pos_, distance=distance,
-                #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
-                #                         o00=o00, R_cage=env.R_cage, wander=0
-                #                         )
-                
-                # 动作裁剪
-                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
-                # if delta_psi>0:
-                #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
-                # else:
-                #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
-
-                r_action_list.append(r_action_n)
-                b_action_list.append(b_action_n)
+                    # 动作裁剪
+                    # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+                    # if delta_psi>0:
+                    #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+                    # else:
+                    #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
                 _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, b_event_reward = env.escape_terminate_and_reward('b')
@@ -336,35 +319,31 @@ if __name__=="__main__":
 
                 done = done or fake_terminate
                 if not test_run:
-                    total_steps += 1
-                    transition_dict['states'].append(b_obs)
-                    transition_dict['actions'].append(u)
-                    transition_dict['next_states'].append(next_b_obs)
-                    transition_dict['rewards'].append(b_reward)
-                    transition_dict['dones'].append(done)
-                    transition_dict['action_bounds'].append(action_bound)
+                    if battle_control_on_line:
+                        total_steps += 1
+                        transition_dict['states'].append(b_obs)
+                        transition_dict['actions'].append(u)
+                        transition_dict['next_states'].append(next_b_obs)
+                        transition_dict['rewards'].append(b_reward)
+                        transition_dict['dones'].append(done)
+                        transition_dict['action_bounds'].append(action_bound)
                 # state = next_state
                 episode_return += b_reward * env.dt_maneuver
                 steps_since_update += 1
 
-                # 只有并行训练情况下才需要在回合没结束的时候就更新智能体，否则可以等到回合结束
-
-                '''显示运行轨迹'''
                 # 可视化
                 env.render(t_bias=t_bias)
             
             episode_end_time = time.time()  # 记录结束时间
             # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
 
-            if env.lose==1:
-                out_range_count+=1
             return_list.append(episode_return)
 
             # tensorboard 训练进度显示
             if test_run:
                 # logger.add("train/1 episode_return", episode_return, total_steps)
                 # logger.add("train/2 not lose", 1-env.lose, total_steps)
-                pass # 不专门区分训练和测试回合
+                pass  # 不专门区分训练和测试回合
             else:
                 logger.add("train/1 episode_return", episode_return, total_steps)
                 logger.add("train/2 not lose", 1-env.lose, total_steps)

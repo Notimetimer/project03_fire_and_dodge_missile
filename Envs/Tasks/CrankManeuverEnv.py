@@ -71,13 +71,13 @@ class CrankTrainEnv(Battle):
         return flat_obs, full_obs
 
     def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
-        # copy了进攻的，还没改
         terminate = False
         state = self.get_state(side)
         speed = state["ego_main"][0]
         alt = state["ego_main"][1]
-        target_alt = alt+state["target_information"][0]
-        delta_psi = state["target_information"][1]
+        cos_delta_psi = state["target_information"][0]
+        sin_delta_psi = state["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
         alpha = state["target_information"][4]
@@ -91,6 +91,7 @@ class CrankTrainEnv(Battle):
             ego = self.BUAV
             ego_missile = self.Bmissiles[0] if self.Bmissiles else None
             enm = self.RUAV
+        target_alt = enm.alt
         
         # 超时结束
         if self.t > self.game_time_limit:

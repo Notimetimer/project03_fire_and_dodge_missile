@@ -41,11 +41,7 @@ class AttackTrainEnv(Battle):
         full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
         full_obs["border"] = copy.deepcopy(self.obs_init["border"])
-        
-        # # 新增信息--历史动作/pqr
-        # full_obs["ego_control"][0]=self.base_obs(side)["ego_control"][0]
-        # full_obs["ego_control"][1]=self.base_obs(side)["ego_control"][1]
-        # full_obs["ego_control"][2]=self.base_obs(side)["ego_control"][2]
+
 
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -56,7 +52,7 @@ class AttackTrainEnv(Battle):
         state = self.get_state(side)
         speed = state["ego_main"][0]
         alt = state["ego_main"][1]
-        target_alt = alt+state["target_information"][0]
+
         delta_psi = state["target_information"][1]
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
@@ -71,6 +67,8 @@ class AttackTrainEnv(Battle):
             uav = self.BUAV
             enm = self.RUAV
             current_action = self.b_actions
+
+        target_alt = enm.alt
 
         # 结束判断：超时/损毁
         if self.t > self.game_time_limit:

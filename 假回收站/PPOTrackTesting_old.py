@@ -19,7 +19,9 @@ def get_latest_log_dir(pre_log_dir):
     else:
         return None
 
-pre_log_dir = os.path.join("./logs")
+# pre_log_dir = os.path.join("./logs")
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+pre_log_dir = os.path.join(project_root, "logs")
 log_dir = get_latest_log_dir(pre_log_dir)
 
 

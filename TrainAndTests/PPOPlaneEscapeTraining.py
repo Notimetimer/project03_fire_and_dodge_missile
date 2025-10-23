@@ -88,10 +88,10 @@ print("running on:", device)
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# data_dir = os.path.join(project_root, "data")
-# save_path = os.path.join(data_dir, "Crankinitial_states.npy")
-# initial_states = np.load(save_path)
-# print("读取的数据\n", initial_states)
+data_dir = os.path.join(project_root, "data")
+save_path = os.path.join(data_dir, "Crankinitial_states.npy")
+initial_states = np.load(save_path)
+print("读取的数据\n", initial_states)
 
 
 def save_meta_once(path, state_dict):
@@ -104,18 +104,29 @@ def save_meta_once(path, state_dict):
 def creat_initial_state():
     # 飞机出生状态指定
     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-    blue_height = np.random.uniform(4000, 12000)
-    red_height = blue_height + np.random.uniform(-2000, 2500)
-    red_psi =  np.random.choice([-1, 1]) * pi/2 # random.uniform(-pi, pi)
-    blue_psi = random.uniform(-pi, pi)
+    cases = initial_states.shape[0]  # 读取攻击区数据
+    line_number = np.random.choice(cases)
+
+    red_height = initial_states[line_number, 0]
+    blue_height = initial_states[line_number, 1]
+
+    if blue_height <= 9e3:
+        initial_dist = 30e3
+    elif blue_height <= 11e3:
+        initial_dist = 35e3
+    else:
+        initial_dist = 40e3
+
+    red_psi = np.random.choice([-1, 1]) * pi/2  # random.uniform(-pi, pi)
+    blue_psi = -red_psi
     # blue_beta = red_psi
-    red_N = (random.randint(0,1)*2-1)*57e3 # random.uniform(-52e3, 52e3) 38
-    red_E = -np.sign(red_psi) * 40e3 #40e3
+    red_N = (random.randint(0, 1)*2-1)*47e3  # (random.randint(0,1)*2-1)*57e3
+    red_E = -np.sign(red_psi) * initial_dist
     blue_N = red_N
     blue_E = 0
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                        'psi': red_psi
-                        }
+                                'psi': red_psi
+                                }
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                 'psi': blue_psi
                                 }
@@ -132,7 +143,10 @@ if __name__=="__main__":
     # log_dir = "./logs"
     from datetime import datetime
     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logs_dir = os.path.join(project_root, "logs")
+    log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
@@ -404,7 +418,7 @@ if __name__=="__main__":
                     logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
                     # 强化学习actor特殊项监控
                     logger.add("train/9 entropy", agent.entropy_mean, total_steps)
-                    logger.add("train/10 ratio", agent.ratio_mean, total_steps)     
+                    logger.add("train/10 ratio", agent.ratio_mean, total_steps)
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
@@ -422,7 +436,7 @@ if __name__=="__main__":
                 actor_name = f"actor_rein{i_episode}.pt"
                 actor_path = os.path.join(log_dir, actor_name)
                 th.save(agent.actor.state_dict(), actor_path)
-            
+
             # 训练进度显示
             if (i_episode) >= 10:
                 print(f"进度: {total_steps/max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
