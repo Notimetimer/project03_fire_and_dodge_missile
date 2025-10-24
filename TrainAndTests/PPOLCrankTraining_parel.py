@@ -109,9 +109,9 @@ save_path = os.path.join(data_dir, "Crankinitial_states.npy")
 from datetime import datetime
 # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
-    log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+logs_dir = os.path.join(project_root, "logs")
+log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 
 def save_meta_once(path, state_dict):

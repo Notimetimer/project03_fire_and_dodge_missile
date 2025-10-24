@@ -44,6 +44,7 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 from Algorithms.SquashedPPOcontinues_dual_a_out import *
+# from Algorithms.SquashedPPOcontinues_std_no_state import *
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 import multiprocessing as mp
@@ -109,9 +110,9 @@ save_path = os.path.join(data_dir, "Crankinitial_states.npy")
 from datetime import datetime
 # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
-    log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+logs_dir = os.path.join(project_root, "logs")
+log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 
 def save_meta_once(path, state_dict):
@@ -237,33 +238,6 @@ if __name__=="__main__":
 
                 b_obs = np.squeeze(b_obs_n)
 
-                # 反向转回字典方便排查
-                b_check_obs = copy.deepcopy(env.state_init)
-                key_order = env.key_order
-                # 将扁平向量 b_obs 按 key_order 的顺序还原到字典 b_check_obs
-                arr = np.atleast_1d(np.asarray(b_obs)).reshape(-1)
-                idx = 0
-                for k in key_order:
-                    if k not in b_check_obs:
-                        raise KeyError(f"key '{k}' not in state_init")
-                    v0 = b_check_obs[k]
-                    # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-                    if isinstance(v0, (list, tuple, np.ndarray)):
-                        length = len(v0)
-                        slice_v = arr[idx: idx + length]
-                        if isinstance(v0, np.ndarray):
-                            b_check_obs[k] = slice_v.copy()
-                        else:
-                            b_check_obs[k] = slice_v.tolist()
-                        idx += length
-                    else:
-                        # 标量
-                        b_check_obs[k] = float(arr[idx])
-                        idx += 1
-                if idx != arr.size:
-                    # 长度不匹配时给出提示（便于调试）
-                    print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
-
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 
                 # 开局就发射一枚导弹
@@ -275,7 +249,7 @@ if __name__=="__main__":
                     env.missiles = env.Rmissiles + env.Bmissiles
 
                 height_ego = env.BUAV.alt
-                delta_psi = b_check_obs['target_information'][1]
+                delta_psi = b_obs_check['target_information'][1]
 
                 # 机动决策
                 r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
@@ -284,7 +258,7 @@ if __name__=="__main__":
                                         o00=o00, R_cage=env.R_cage, wander=1
                                         )
                 if np.isnan(b_obs).any() or np.isinf(b_obs).any():
-                    print('b_obs', b_check_obs)
+                    print('b_obs', b_obs_check)
                     print()
 
                 # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
@@ -299,12 +273,12 @@ if __name__=="__main__":
                 #                         o00=o00, R_cage=env.R_cage, wander=0
                 #                         )
                 
-                # 动作裁剪
-                b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
-                if delta_psi>0:
-                    b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
-                else:
-                    b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
+                # # 动作裁剪
+                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+                # if delta_psi>0:
+                #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+                # else:
+                #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
                 _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')

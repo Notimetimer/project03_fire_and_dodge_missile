@@ -11,12 +11,14 @@ import importlib
 import copy
 
 import os
+
 # 在导入 scipy / 相关 Fortran/MKL 库之前禁用 Fortran 运行时的控制台处理器
 os.environ.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
 # 可选：限制线程数，减少并发 shutdown 问题
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 from scipy.interpolate import LinearNDInterpolator
+
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -33,9 +35,11 @@ def get_current_file_dir():
         # 普通 Python 脚本
         return os.path.dirname(os.path.abspath(__file__))
 
+
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 from Envs.battle6dof1v1_missile0919 import *
+
 
 # 通过继承构建观测空间、奖励函数和终止条件
 
@@ -48,14 +52,14 @@ class CrankTrainEnv(Battle):
         # y = np.array([0, -30, 0, 30, 0, 0, 0, -90, 90, 90,-90, 90,-90, -90, 90])
         # z = np.array([-1, -1, 1, -1, -1, -5, -5, -5, -5, -5,-5,-5,-5, -5, -5])
         # self.L_interp = LinearNDInterpolator(list(zip(x, y)), z, fill_value=np.nan) ###
-        
-    
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):       
+
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
         super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
         # 初始化红蓝远离速度
         self.last_dist_dot = None
         self.last_dhor = None
+        self.last_delta_psi = None
 
     def crank_obs(self, side):
         full_obs = self.base_obs(side)
@@ -65,12 +69,12 @@ class CrankTrainEnv(Battle):
         full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        
+
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
         return flat_obs, full_obs
 
-    def left_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
+    def left_crank_terminate_and_reward(self, side):  # 进攻策略训练与奖励
         terminate = False
         state = self.get_state(side)
         speed = state["ego_main"][0]
@@ -92,17 +96,17 @@ class CrankTrainEnv(Battle):
             ego_missile = self.Bmissiles[0] if self.Bmissiles else None
             enm = self.RUAV
         target_alt = enm.alt
-        
+
         # 超时结束
         if self.t > self.game_time_limit:
             terminate = True
         # 雷达丢失目标判为失败 ###
         if alpha > ego.max_radar_angle:
-        # if alpha > pi/2: ### 放宽要求
+            # if alpha > pi/2: ### 放宽要求
             terminate = True
             self.lose = 1
         # 高度出界失败
-        if not self.min_alt<=alt<=self.max_alt:
+        if not self.min_alt <= alt <= self.max_alt:
             terminate = True
             self.lose = 1
         # 水平出界失败
@@ -119,17 +123,26 @@ class CrankTrainEnv(Battle):
         Los_ = enm.pos_ - ego.pos_
         dist = norm(Los_)
         # 求解hot-cold关系
-        cos_ATA_ego = np.dot(Los_, ego.point_)/(dist*norm(ego.point_))
+        cos_ATA_ego = np.dot(Los_, ego.point_) / (dist * norm(ego.point_))
         # 近距杀
-        if cos_ATA_ego>=cos(pi/3) and dist<8e3:
+        if cos_ATA_ego >= cos(pi / 3) and dist < 8e3:
             terminate = True
             self.win = 1
-        
+
         # 左crank角度奖励
-        x = delta_psi*180/pi
-        y = delta_theta*180/pi
+        x = delta_psi * 180 / pi
+        y = delta_theta * 180 / pi
         # r_angle = self.L_interp(x,y) ###
-        r_angle = sub_of_degree(x, 50)/50 -y/20 + 120/60 + 90/20
+        r_angle = 4 * (x <= 50) * (x - 50) / 50 + (x > 50) * ((50 - x) / 10 - 10) - 5 * abs(y) / 20 + 120 / 60 + 90 / 20
+
+        # 角速度惩罚
+        if self.last_delta_psi is None:
+            delta_psi_dot = 0
+        else:
+            delta_psi_dot = (delta_psi - self.last_delta_psi) / self.dt_maneuver
+        self.last_delta_psi = delta_psi
+        if abs(x) > 53:
+            r_angle -= 3 * np.sign(x) * delta_psi_dot * 180 / pi * self.dt_maneuver / 4
 
         # x = np.sign(delta_psi)*alpha * 180/pi
         # alpha_max = ego.max_radar_angle*180/pi # 60
@@ -149,7 +162,7 @@ class CrankTrainEnv(Battle):
         #     r_angle = temp * (theta_threshold-abs(ego.theta))/theta_threshold
         # else:
         #     r_angle = -(abs(ego.theta)-theta_threshold)/theta_threshold
-        
+
         # mid_switch = sigmoid(0.4 * (x + alpha_max)) * sigmoid(0.4 * (alpha_max - x))
         # r_angle = (x/alpha_max * mid_switch - (1 - mid_switch))
         # if alpha > ego.max_radar_angle:
@@ -157,29 +170,29 @@ class CrankTrainEnv(Battle):
 
         # # 垂直角度惩罚
         # q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
-        r_angle_v = 0 # -abs(ego.theta-q_epsilon)/pi*2
+        r_angle_v = 0  # -abs(ego.theta-q_epsilon)/pi*2
         ### 
-        r_angle_v -= abs(np.clip(ego.vu/100, -1, 1)) * 0.5
+        r_angle_v -= abs(np.clip(ego.vu / 100, -1, 1)) * 0.5
         # 上升下降率惩罚
-        if Los_[1]<0: # 目标在下面，我应该下降
-            r_angle_v -= np.clip(ego.vu/100, -1, 1)
-        if Los_[1]>0: # 目标在上面，我应该上升
-            r_angle_v += np.clip(ego.vu/100, -1, 1)
+        if Los_[1] < 0:  # 目标在下面，我应该下降
+            r_angle_v -= np.clip(ego.vu / 100, -1, 1)
+        if Los_[1] > 0:  # 目标在上面，我应该上升
+            r_angle_v += np.clip(ego.vu / 100, -1, 1)
 
         # 高度奖励
-        pre_alt_opt = target_alt - 2e3 # 比目标低1000m方便增加阻力
+        pre_alt_opt = target_alt - 2e3  # 比目标低1000m方便增加阻力
         alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
-        r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
-                    (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+        r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
+                (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
         # if not self.min_alt<=alt<=self.max_alt:
         #     r_alt -= 20
         ###
-        r_alt += (alt<=self.min_alt_save) * np.clip(ego.vu/100, -1, 1) + \
-                (alt>=self.max_alt_save) * np.clip(-ego.vu/100, -1, 1)
-                
+        r_alt += (alt <= self.min_alt_save) * np.clip(ego.vu / 100, -1, 1) + \
+                 (alt >= self.max_alt_save) * np.clip(-ego.vu / 100, -1, 1)
+
         # 速度奖励
-        speed_opt = 0.95*340
-        r_speed = abs(speed-speed_opt)/(2*340)
+        speed_opt = 0.95 * 340
+        r_speed = abs(speed - speed_opt) / (2 * 340)
 
         # 边界距离奖励
         obs = self.base_obs(side)
@@ -189,9 +202,9 @@ class CrankTrainEnv(Battle):
         if self.last_dhor is None:
             d_hor_dot = 0
         else:
-            d_hor_dot = (self.dhor-self.last_dhor)/self.dt_maneuver
+            d_hor_dot = (self.dhor - self.last_dhor) / self.dt_maneuver
         self.last_dhor = self.dhor
-        r_border = d_hor_dot /340*50e3
+        r_border = d_hor_dot / 340 * 50e3
         # r_border = 0
 
         # 事件奖励
@@ -207,26 +220,25 @@ class CrankTrainEnv(Battle):
         #         r_event += alt
         #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
         if self.lose:
-            r_event -= 70 # 20 100 50
+            r_event -= 70  # 20 100 50
         if self.win:
-            r_event += 70 # 20 100 50
+            r_event += 70  # 20 100 50
 
         # if alpha > ego.max_radar_angle:
         #     r_event -= 3 # 超出雷达范围惩罚
 
         reward = np.sum([
             1 * r_angle,
-            2 * r_angle_v, # 3
+            2 * r_angle_v,  # 3
             1 * r_alt,
             1 * r_speed,
             1 * r_event,
             0.5 * r_border,
-            ])
+        ])
 
         if terminate:
             self.running = False
-        
+
         return terminate, reward, r_event
 
     # def right_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
-    

@@ -46,7 +46,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 pre_log_dir = os.path.join(project_root, "logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
-# log_dir = os.path.join(pre_log_dir, "LCrank-run-20251010-114608")
+# log_dir = os.path.join(pre_log_dir, "LCrank-run-20251024-112053")
 
 
 # 测试训练效果
@@ -112,33 +112,6 @@ try:
             # 获取观测信息
             r_obs_n, r_obs_check = env.crank_obs('r')
             b_obs_n, b_obs_check = env.crank_obs('b')
-            
-            # 反向转回字典方便排查
-            b_check_obs = copy.deepcopy(env.state_init)
-            key_order = env.key_order
-            # 将扁平向量 b_obs_n 按 key_order 的顺序还原到字典 b_check_obs
-            arr = np.atleast_1d(np.asarray(b_obs_n)).reshape(-1)
-            idx = 0
-            for k in key_order:
-                if k not in b_check_obs:
-                    raise KeyError(f"key '{k}' not in state_init")
-                v0 = b_check_obs[k]
-                # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-                if isinstance(v0, (list, tuple, np.ndarray)):
-                    length = len(v0)
-                    slice_v = arr[idx: idx + length]
-                    if isinstance(v0, np.ndarray):
-                        b_check_obs[k] = slice_v.copy()
-                    else:
-                        b_check_obs[k] = slice_v.tolist()
-                    idx += length
-                else:
-                    # 标量
-                    b_check_obs[k] = float(arr[idx])
-                    idx += 1
-            if idx != arr.size:
-                # 长度不匹配时给出提示（便于调试）
-                print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
 
             # 在这里将观测信息压入记忆
             env.RUAV.obs_memory = r_obs_check.copy()
@@ -166,7 +139,7 @@ try:
             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=0) 
 
             # # 规则动作
-            delta_psi = b_check_obs['target_information'][1]
+            delta_psi = b_obs_check['target_information'][1]
             # delta_height = b_check_obs['target_information'][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
             height_ego = env.BUAV.alt

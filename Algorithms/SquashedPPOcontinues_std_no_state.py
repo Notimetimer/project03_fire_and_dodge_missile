@@ -155,7 +155,8 @@ class PolicyNetContinuous(torch.nn.Module):
 
         # broadcast to batch: shape (batch_size, action_dim)
         if mu.dim() == 2:
-            std = std.unsqueeze(0).expand(mu.size(0), -1)
+            pass
+            # std = std.unsqueeze(0).expand(mu.size(0), -1)
         else:
             std = std.expand_as(mu)
 
