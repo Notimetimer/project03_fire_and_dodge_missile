@@ -70,7 +70,7 @@ gamma = 0.95 # 0.9
 lmbda = 0.95 # 0.9
 epochs = 10  # 10
 eps = 0.2
-pre_train_rate = 0 # 0.25 # 0.25
+pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
 mission_name = 'LCrank_with_std_clipping'
 
@@ -79,7 +79,7 @@ env = CrankTrainEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound0 = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 action_bound = copy.deepcopy(action_bound0)
-state_dim = 34 # len(b_obs_spaces)
+state_dim = 34  # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -193,7 +193,7 @@ if __name__=="__main__":
             red_height = np.clip(blue_height+random.uniform(-2e3, 2e3), 3e3, 12e3)
             blue_psi = pi/2
             red_psi = -pi/2
-            red_N = random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
+            red_N = 0  # random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
             red_E = 35e3
             blue_N = red_N
             blue_E = -35e3

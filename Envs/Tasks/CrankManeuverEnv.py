@@ -69,6 +69,7 @@ class CrankTrainEnv(Battle):
         full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
         full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
         full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
+        # full_obs["border"] = copy.deepcopy(self.obs_init["border"]) ###
 
         # 将观测按顺序拉成一维数组
         flat_obs = flatten_obs(full_obs, self.key_order)
@@ -102,17 +103,17 @@ class CrankTrainEnv(Battle):
             terminate = True
         # 雷达丢失目标判为失败 ###
         if alpha > ego.max_radar_angle:
-            # if alpha > pi/2: ### 放宽要求
             terminate = True
             self.lose = 1
-        # 高度出界失败
-        if not self.min_alt <= alt <= self.max_alt:
+        # 高度出界失败 ###
+        if not self.min_alt <= alt:  # <= self.max_alt:
             terminate = True
             self.lose = 1
-        # 水平出界失败
-        if self.out_range(ego):
-            terminate = True
-            self.lose = 1
+
+        # # 水平出界失败
+        # if self.out_range(ego):
+        #     terminate = True
+        #     self.lose = 1
 
         # # 导弹命中目标成功
         # if enm.dead:
@@ -194,18 +195,18 @@ class CrankTrainEnv(Battle):
         speed_opt = 0.95 * 340
         r_speed = abs(speed - speed_opt) / (2 * 340)
 
-        # 边界距离奖励
+        # # 边界距离奖励 ###
         obs = self.base_obs(side)
         d_hor = obs["border"][0]
-        # # 水平边界奖励
-        self.dhor = d_hor
-        if self.last_dhor is None:
-            d_hor_dot = 0
-        else:
-            d_hor_dot = (self.dhor - self.last_dhor) / self.dt_maneuver
-        self.last_dhor = self.dhor
-        r_border = d_hor_dot / 340 * 50e3
-        # r_border = 0
+        # # # 水平边界奖励
+        # self.dhor = d_hor
+        # if self.last_dhor is None:
+        #     d_hor_dot = 0
+        # else:
+        #     d_hor_dot = (self.dhor - self.last_dhor) / self.dt_maneuver
+        # self.last_dhor = self.dhor
+        # r_border = d_hor_dot / 340 * 10e3
+        r_border = d_hor
 
         # 事件奖励
         r_event = 0

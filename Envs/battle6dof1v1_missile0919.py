@@ -243,7 +243,11 @@ class Battle(object):
                 delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
                 # print('target_height',target_height)
-                # for i in range(int(self.dt_maneuver // dt_move)):
+                # 出界强制按回
+                if self.out_range(UAV):
+                    target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
+                    delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
+
                 UAV.move(target_height, delta_heading, target_speed, relevant_height=True)
                 # 上一步动作
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
@@ -323,15 +327,15 @@ class Battle(object):
                 #         # self.running = False
                 #         adv.got_hit = True
                 # 出界判别
-                if self.out_range(UAV):
+                if self.crash(UAV):
                     UAV.dead = True
-                    # self.running = False
+                # self.running = False
 
         r_reward_n, b_reward_n = self.get_reward()
         terminate = self.get_terminate()
 
         for UAV in self.UAVs:
-            if UAV.got_hit or UAV.crash or self.out_range(UAV):
+            if UAV.got_hit or UAV.crash:  # or self.out_range(UAV): ###
                 UAV.dead = True
                 # self.running = False
 
@@ -708,32 +712,6 @@ class Battle(object):
         A = [0, 0]  # R, B
         rewards = [0, 0]  # R, B
         for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
-            # adv = UAVs[1 - i]
-            # # # 出界剩余时间惩罚：
-            # t_last_max = 60
-            # t_last = np.ones(6)
-            # # 出界惩罚
-            # if out_range(UAV):
-            #     rewards[i] -= 100
-            # # 超出限高惩罚
-            # if UAV.pos_[1] >= max_height:
-            #     rewards[i] -= 80
-            # # 对手出界
-            # if out_range(adv):
-            #     rewards[i] += 10
-            # # 被命中(不管是导弹还是"扫描枪")
-            # if UAV.got_hit:
-            #     rewards[i] -= 100
-            # # 命中对手
-            # if adv.got_hit:
-            #     rewards[i] += 200  # 增加命中奖励
-            # # 撞机
-            # if UAV.crash:
-            #     rewards[i] -= 70
-            # # 平局
-            # if self.t >= self.game_time_limit and not any([UAV.dead, adv.dead]):
-            #     rewards[i] -= 10
-            # test 目标追赶
 
             r_obs_n = self.base_obs('r')
             b_obs_n = self.base_obs('b')
@@ -741,13 +719,6 @@ class Battle(object):
             rewards[0] = 0
             rewards[1] = 0
 
-            # rewards[0] = (1 - np.linalg.norm((r_obs_n[7] - RUAV.theta) / pi * 2 * 2)) * 100  # test
-            # rewards[1] = (1 - np.linalg.norm((b_obs_n[7] - BUAV.theta) / pi * 2 * 2)) * 100  # test
-
-            # rewards[0] += (1 - np.linalg.norm(r_obs_n[8] / pi)) * 100
-            # rewards[1] += (1 - np.linalg.norm(b_obs_n[8] / pi)) * 100
-            # 稀疏奖励
-        # return rewards[0], rewards[1]
         # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
         return (rewards[0], rewards[0]), (rewards[1], rewards[1])
 
@@ -784,15 +755,28 @@ class Battle(object):
         #     return True
         return False
 
+    def crash(self, UAV):
+        position = UAV.pos_
+        if position[1] < self.min_alt:
+            return True
+        else:
+            return False
+
+    def too_high(self, UAV):
+        position = UAV.pos_
+        if position[1] > self.max_alt:
+            return True
+        else:
+            return False
+
     def out_range(self, UAV):
         horizontal_center = np.array([0, 0])
         position = UAV.pos_
         pos_h = np.array([position[0], position[2]])
         R_uav = norm(pos_h - horizontal_center)
         out = True
-        if self.min_alt <= position[1] <= self.max_alt:
-            if R_uav <= self.R_cage:
-                out = False
+        if R_uav <= self.R_cage:
+            out = False
         return out
 
     # 近距处理

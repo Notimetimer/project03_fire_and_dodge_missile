@@ -2,7 +2,9 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.PPOLCrankTraining_parel import *
+from TrainAndTests.PPOLCrankTraining import *
+# from TrainAndTests.PPOLCrankTraining_std_clipping import *
+
 import re
 
 dt_maneuver= 0.2 # 0.2 
@@ -68,7 +70,7 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -87,7 +89,7 @@ try:
 
         blue_psi = pi/2
         red_psi = -pi/2
-        red_N = random.choice([-54e3, 54e3])
+        red_N = 54e3  # random.choice([-54e3, 54e3])
         red_E = 35e3
         blue_N = red_N
         blue_E = -35e3
@@ -132,7 +134,7 @@ try:
                                     o00=o00, R_cage=env.R_cage, wander=1
                                     )
             if np.isnan(b_obs_n).any() or np.isinf(b_obs_n).any():
-                print('b_obs_n', b_check_obs)
+                print('b_obs_n', b_obs_check)
                 print()
             
             # 神经网络输出动作

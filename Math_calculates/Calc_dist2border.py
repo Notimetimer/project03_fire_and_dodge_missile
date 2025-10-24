@@ -49,8 +49,11 @@ def calc_intern_dist2cylinder(R, pos_, psi, theta):
     eta = atan2(pos_[2], pos_[0])
     
     # 计算水平距离
-    dh_list = rho*cos(pi+eta-psi) + sqrt(R**2-rho**2*sin(pi+eta-psi)**2)
-    dh = dh_list
+    if rho<R:
+        dh_list = rho*cos(pi+eta-psi) + sqrt(R**2-rho**2*sin(pi+eta-psi)**2)
+        dh = dh_list
+    else:
+        dh = 0
     
     # 计算斜距离
     d = dh/(cos(theta)+1e-5)
