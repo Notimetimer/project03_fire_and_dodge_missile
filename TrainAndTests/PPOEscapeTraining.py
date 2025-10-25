@@ -36,10 +36,10 @@ from LaunchZone.calc_DLZ import *
 
 use_tacview = 0  # 是否可视化
 
-# matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
-if matplotlib.get_backend() != 'TkAgg':
-    matplotlib.use('TkAgg')
-    plt.switch_backend('TkAgg')
+# # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
+# if matplotlib.get_backend() != 'TkAgg':
+#     matplotlib.use('TkAgg')
+#     plt.switch_backend('TkAgg')
 
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")

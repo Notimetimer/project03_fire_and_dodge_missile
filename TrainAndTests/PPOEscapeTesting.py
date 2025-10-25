@@ -3,8 +3,8 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# from TrainAndTests.PPOEscapeTraining import *
-from TrainAndTests.PPOPlaneEscapeTraining import *
+from TrainAndTests.PPOEscapeTraining import *
+# from TrainAndTests.PPOPlaneEscapeTraining import *
 import re
 
 dt_maneuver = 0.2  # 0.2
@@ -63,6 +63,16 @@ if latest_actor_path:
 
 t_bias = 0
 
+parser = argparse.ArgumentParser("UAV swarm confrontation")
+# Environment
+parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
+                    help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
+parser.add_argument("--R-cage", type=float, default=170e3,  # 8 * 60,
+                    help="")
+
+# parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
+# parser.add_argument("--num-BUAVs", type=int, default=1, help="number of blue UAVs")
+args = parser.parse_args()
 
 def creat_initial_state():
     # 飞机出生状态指定
@@ -126,32 +136,32 @@ try:
             r_obs_n, r_obs_check = env.escape_obs('r')
             b_obs_n, b_obs_check = env.escape_obs('b')
 
-            # 反向转回字典方便排查
-            b_check_obs = copy.deepcopy(env.state_init)
-            key_order = env.key_order
-            # 将扁平向量 b_obs_n 按 key_order 的顺序还原到字典 b_check_obs
-            arr = np.atleast_1d(np.asarray(b_obs_n)).reshape(-1)
-            idx = 0
-            for k in key_order:
-                if k not in b_check_obs:
-                    raise KeyError(f"key '{k}' not in state_init")
-                v0 = b_check_obs[k]
-                # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-                if isinstance(v0, (list, tuple, np.ndarray)):
-                    length = len(v0)
-                    slice_v = arr[idx: idx + length]
-                    if isinstance(v0, np.ndarray):
-                        b_check_obs[k] = slice_v.copy()
-                    else:
-                        b_check_obs[k] = slice_v.tolist()
-                    idx += length
-                else:
-                    # 标量
-                    b_check_obs[k] = float(arr[idx])
-                    idx += 1
-            if idx != arr.size:
-                # 长度不匹配时给出提示（便于调试）
-                print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
+            # # 反向转回字典方便排查
+            # b_obs_check = copy.deepcopy(env.state_init)
+            # key_order = env.key_order
+            # # 将扁平向量 b_obs_n 按 key_order 的顺序还原到字典 b_obs_check
+            # arr = np.atleast_1d(np.asarray(b_obs_n)).reshape(-1)
+            # idx = 0
+            # for k in key_order:
+            #     if k not in b_obs_check:
+            #         raise KeyError(f"key '{k}' not in state_init")
+            #     v0 = b_obs_check[k]
+            #     # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
+            #     if isinstance(v0, (list, tuple, np.ndarray)):
+            #         length = len(v0)
+            #         slice_v = arr[idx: idx + length]
+            #         if isinstance(v0, np.ndarray):
+            #             b_obs_check[k] = slice_v.copy()
+            #         else:
+            #             b_obs_check[k] = slice_v.tolist()
+            #         idx += length
+            #     else:
+            #         # 标量
+            #         b_obs_check[k] = float(arr[idx])
+            #         idx += 1
+            # if idx != arr.size:
+            #     # 长度不匹配时给出提示（便于调试）
+            #     print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
 
             # 在这里将观测信息压入记忆
             env.RUAV.obs_memory = r_obs_check.copy()
@@ -185,20 +195,20 @@ try:
             r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
             if np.isnan(b_obs_n).any() or np.isinf(b_obs_n).any():
-                print('b_obs_n', b_check_obs)
+                print('b_obs_n', b_obs_check)
                 print()
 
             # 神经网络输出动作
             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)  # explore=False
 
-            if b_check_obs["warning"] == 1:
-                print(b_check_obs["threat"])
-                print(b_check_obs["border"])
+            if b_obs_check["warning"] == 1:
+                print(b_obs_check["threat"])
+                print(b_obs_check["border"])
                 print()
 
             # # 规则动作
-            # delta_psi = b_check_obs['target_information'][1]
-            # delta_height = b_check_obs['target_information'][0]
+            # delta_psi = b_obs_check['target_information'][1]
+            # delta_height = b_obs_check['target_information'][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
 
             # # 动作平滑（实验性）
