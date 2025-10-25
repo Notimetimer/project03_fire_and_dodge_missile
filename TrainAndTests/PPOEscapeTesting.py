@@ -77,27 +77,62 @@ args = parser.parse_args()
 def creat_initial_state():
     # 飞机出生状态指定
     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-    blue_height = np.random.uniform(4000, 12000)
-    red_height = blue_height + np.random.uniform(-2000, 2500)
-    red_psi = np.random.choice([-1, 1]) * pi / 2  # random.uniform(-pi, pi)
-    blue_psi = random.uniform(-pi, pi)
+    cases = initial_states.shape[0]  # 读取攻击区数据
+    line_number = np.random.choice(cases)
+
+    red_height = initial_states[line_number, 0]
+    blue_height = initial_states[line_number, 1]
+
+    red_height = 13e3
+    blue_height = 11e3
+
+    if blue_height <= 9e3:
+        initial_dist = 30e3
+    elif blue_height <= 11e3:
+        initial_dist = 35e3
+    else:
+        initial_dist = 40e3
+
+    red_psi = np.random.choice([-1, 1]) * pi/2  # random.uniform(-pi, pi)
+    blue_psi = -red_psi
     # blue_beta = red_psi
-    red_N = (random.randint(0, 1) * 2 - 1) * 57e3  # random.uniform(-52e3, 52e3) 38
-    red_E = -np.sign(red_psi) * 25e3  # 40e3
+    red_N = 0  # (random.randint(0, 1)*2-1)*47e3  # (random.randint(0,1)*2-1)*57e3
+    red_E = -np.sign(red_psi) * initial_dist
     blue_N = red_N
     blue_E = 0
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                               'psi': red_psi
-                               }
+                                'psi': red_psi
+                                }
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                 'psi': blue_psi
                                 }
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
 
+# def creat_initial_state():
+#     # 飞机出生状态指定
+#     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+#     blue_height = np.random.uniform(4000, 12000)
+#     red_height = blue_height + np.random.uniform(-2000, 2500)
+#     red_psi = np.random.choice([-1, 1]) * pi / 2  # random.uniform(-pi, pi)
+#     blue_psi = random.uniform(-pi, pi)
+#     # blue_beta = red_psi
+#     red_N = (random.randint(0, 1) * 2 - 1) * 57e3  # random.uniform(-52e3, 52e3) 38
+#     red_E = -np.sign(red_psi) * 25e3  # 40e3
+#     blue_N = red_N
+#     blue_E = 0
+#     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+#                                'psi': red_psi
+#                                }
+#     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+#                                 'psi': blue_psi
+#                                 }
+#     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+
+
 try:
     env = EscapeTrainEnv(args, tacview_show=1)  # Battle(args, tacview_show=1)
-    for i_episode in range(3):  # 10
+    for i_episode in range(1):  # 10
         r_action_list = []
         b_action_list = []
 
@@ -120,7 +155,10 @@ try:
         #                             'psi': blue_psi
         #                             }
 
+        battle_control_on_line = 0
+
         DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+        initial_blue_height = DEFAULT_BLUE_BIRTH_STATE['position'][1]
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                   red_init_ammo=1, blue_init_ammo=0)
 
@@ -166,44 +204,85 @@ try:
             # 在这里将观测信息压入记忆
             env.RUAV.obs_memory = r_obs_check.copy()
             env.BUAV.obs_memory = b_obs_check.copy()
-            state = np.squeeze(b_obs_n)
-            distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
 
+            b_obs = np.squeeze(b_obs_n)
+
+            distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+            
             # 红方开局就发射一枚导弹
-            if env.RUAV.ammo > 0:
+            if env.RUAV.ammo>0:
                 new_missile = env.RUAV.launch_missile(env.BUAV, env.t, missile_class)
                 env.RUAV.ammo -= 1
                 new_missile.side = 'r'
                 env.Rmissiles.append(new_missile)
                 env.missiles = env.Rmissiles + env.Bmissiles
 
+            height_ego = env.BUAV.alt
+            delta_psi = atan2(b_obs_check['target_information'][1], b_obs_check['target_information'][0])
+            RWR_b = b_obs_check['warning']
+
+            b_state = env.get_state('b')
+            dist = b_state["threat"][3]
+            if dist<25e3:
+                RWR_b = 1
+            if RWR_b==1 and battle_control_on_line==0:
+                battle_control_on_line = 1
+
+            # 动作重映射不做了
+
             # 机动决策
-            r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-                                       enm_pos_=env.BUAV.pos_, distance=distance,
-                                       ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                       o00=o00, R_cage=env.R_cage, wander=1
-                                       )
+            # 红方发射完导弹飞慢点，给蓝方机会
             L_ = env.BUAV.pos_ - env.RUAV.pos_
             q_beta = atan2(L_[2], L_[0])
             L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
             L_v = L_[1]
             q_epsilon = atan2(L_v, L_h)
             delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
-            r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save) - env.RUAV.pos_[1]
+            r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save)-env.RUAV.pos_[1]
             r_action_n_1 = delta_psi
-            r_action_n_2 = 340
+            r_action_n_2 = 300
             r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
             if np.isnan(b_obs_n).any() or np.isinf(b_obs_n).any():
                 print('b_obs_n', b_obs_check)
                 print()
 
-            # 神经网络输出动作
-            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)  # explore=False
+            if not battle_control_on_line:
+                L_ = env.RUAV.pos_ - env.BUAV.pos_
+                q_beta = atan2(L_[2], L_[0])
+                L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
+                L_v = L_[1]
+                q_epsilon = atan2(L_v, L_h)
+                delta_psi = sub_of_radian(q_beta, env.BUAV.psi)
+                b_action_n_0 = initial_blue_height - env.BUAV.pos_[1]
+                b_action_n_1 = delta_psi               + 40*pi/180
+                b_action_n_2 = 340
+                b_action_n = np.array([b_action_n_0, b_action_n_1, b_action_n_2])
+                print("prepare")
+                print(env.t)
+            else:
+                print("escape")
+                print(env.t)
+                # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
+                b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
+
+                # 可躲性测试
+                L_ = env.RUAV.pos_ - env.BUAV.pos_
+                q_beta = atan2(L_[2], L_[0])
+                b_action_n[0] = np.clip(-300, env.min_alt_save-env.BUAV.pos_[1] , 5000)
+                b_action_n[1] = sub_of_radian(q_beta+pi, env.BUAV.psi)
+                b_action_n[2] = 400
+
+                # 动作裁剪
+                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+                # if delta_psi>0:
+                #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+                # else:
+                #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
             if b_obs_check["warning"] == 1:
-                print(b_obs_check["threat"])
-                print(b_obs_check["border"])
+                # print(b_obs_check["threat"])
+                # print(b_obs_check["border"])
                 print()
 
             # # 规则动作

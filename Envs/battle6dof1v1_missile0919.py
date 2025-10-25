@@ -488,9 +488,10 @@ class Battle(object):
             threat_delta_psis = np.zeros(len(alive_enm_missiles))
             threat_delta_thetas = np.zeros(len(alive_enm_missiles))
             for i, missile in enumerate(alive_enm_missiles):
+                distances[i] = missile.distance
                 if missile.distance < missile.detect_range and missile.in_angle:
                     warnings[i] = 1
-                    distances[i] = missile.distance
+                    
                     threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
 
