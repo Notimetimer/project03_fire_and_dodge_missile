@@ -255,7 +255,7 @@ try:
                 q_epsilon = atan2(L_v, L_h)
                 delta_psi = sub_of_radian(q_beta, env.BUAV.psi)
                 b_action_n_0 = initial_blue_height - env.BUAV.pos_[1]
-                b_action_n_1 = delta_psi               + 40*pi/180
+                b_action_n_1 = delta_psi               + 30*pi/180
                 b_action_n_2 = 340
                 b_action_n = np.array([b_action_n_0, b_action_n_1, b_action_n_2])
                 print("prepare")
