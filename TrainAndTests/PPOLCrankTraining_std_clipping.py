@@ -79,7 +79,7 @@ env = CrankTrainEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound0 = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 action_bound = copy.deepcopy(action_bound0)
-state_dim = 34  # len(b_obs_spaces)
+state_dim = 1+8+7+4+2  # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -251,8 +251,9 @@ if __name__=="__main__":
                     env.missiles = env.Rmissiles + env.Bmissiles
 
                 height_ego = env.BUAV.alt
-                delta_psi = b_obs_check['target_information'][1]
-
+                cos_delta_psi = b_obs_check["target_information"][0]
+                sin_delta_psi = b_obs_check["target_information"][1]
+                delta_psi = atan2(sin_delta_psi, cos_delta_psi)
                 # 机动决策
                 r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
                                         enm_pos_=env.BUAV.pos_, distance=distance,

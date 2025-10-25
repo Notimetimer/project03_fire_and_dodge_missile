@@ -214,7 +214,9 @@ for i in range(10):
         distance = b_states['target_information'][3] * 10e3
         warning = b_states["warning"]
         enm_delta_psi = b_states["target_information"][1]
-        threat_delta_psi = b_states["threat"][0]
+        cos_threat_delta_psi = b_states["threat"][0]
+        sin_threat_delta_psi = b_states["threat"][1]
+        threat_delta_psi = atan2(sin_threat_delta_psi, cos_threat_delta_psi)
 
         # b_action_n = env.right_crank_behavior(env.BUAV.alt, enm_delta_psi)
 

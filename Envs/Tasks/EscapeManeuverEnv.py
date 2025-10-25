@@ -39,6 +39,14 @@ class EscapeTrainEnv(Battle):
     # # 任务：敌机一开始就发射导弹，规避的时候我机需要做置尾下高机动尽力逃脱追击
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
+        self.escape_key_order = [
+            "locked_by_target",  # 1
+            "warning",  # 1
+            "target_information",  # 8
+            "ego_main",  # 7
+            "threat",  # 4
+            "border",  # 2
+        ]
 
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
@@ -49,18 +57,20 @@ class EscapeTrainEnv(Battle):
         self.last_dist2missile_dot = None
 
     def escape_obs(self, side):
-        full_obs = self.base_obs(side)
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        full_obs["target_alive"] = copy.deepcopy(self.obs_init["target_alive"])
-        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
-        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
+        pre_full_obs = self.base_obs(side)
+        full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
+                    for k in self.escape_key_order}
+        # # 先对dict的元素mask
+        # # 只需要 target_information 和 ego_main
+        # full_obs["target_alive"] = copy.deepcopy(self.obs_init["target_alive"])
+        # full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
+        # full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        # full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
 
         # 逃逸过程中会出现部分观测的情况，已在base_obs中写下规则
         # 只有在warning为TRUE的时候才能够获取威胁信息，已在get_state中写下规则
         # 将观测按顺序拉成一维数组
-        flat_obs = flatten_obs(full_obs, self.key_order)
+        flat_obs = flatten_obs(full_obs, self.escape_key_order)
         return flat_obs, full_obs
 
     def escape_terminate_and_reward(self, side):  # 逃逸策略训练与奖励
@@ -75,7 +85,7 @@ class EscapeTrainEnv(Battle):
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
         alpha = state["target_information"][4]
-        # threat_delta_psi, threat_delta_theta, threat_distance =\
+        # cos_threat_psi, sin_threat_psi, threat_delta_theta, threat_distance =\
         #     state["threat"]
 
         RWR = state["warning"]
@@ -125,15 +135,8 @@ class EscapeTrainEnv(Battle):
 
             ### todo 远离导弹就交给距离的二阶导奖励，角度奖励只用来惩罚低高度俯冲行为
 
-            # # 角度奖励， 奖励置尾机动， 因为状态信息被投影到了另一边，现在变成追踪训练了
-            # L_anti_missile_ = np.array([cos(threat_delta_theta)*cos(threat_delta_psi),
-            #                            sin(threat_delta_theta),
-            #                            cos(threat_delta_theta)*sin(threat_delta_psi)])
-            # L_only_theta_ = np.array([cos(ego.theta), sin(ego.theta), 0])
-            # # L_anti_missile_ 前正号表示导弹指向飞机，负号即飞机指向导弹
-            # cos_alpha_anti_missile = np.dot(-L_anti_missile_, L_only_theta_)
-
-            r_angle = 0  # cos_alpha_anti_missile
+            cos_threat_delta_psi = state["threat"][0]
+            r_angle = - cos_threat_delta_psi
 
             # # # 垂直角度奖励，导弹相对飞机俯仰角>-30°时越低越好，否则应该水平规避
             # if ego.alt > (self.min_alt_save + self.max_alt_save)/2 and -threat_delta_theta>-pi/6:
@@ -177,14 +180,13 @@ class EscapeTrainEnv(Battle):
                     (alt >= self.max_alt_save) * np.clip(-ego.vu / 100, -1, 1)
 
             # 距离奖励，和导弹之间的距离
-            dist2m = norm(state["threat"])
+            dist2m = state["threat"][3]
             r_dist = -1 + np.clip(dist2m / 30e3, -1, 1)
 
         else:  # 躲飞机
             ###
-            # r_angle = abs(delta_psi) / pi
-            # r_angle_v = 1-abs(ego.theta/pi*2) - abs(delta_theta/pi*2)
-            r_angle = 0
+            cos_delta_psi = state["target_information"][0]
+            r_angle = - cos_delta_psi
             r_angle_v = 0
             if ego.alt <= self.min_alt_save + 2e3 and ego.theta < 0:
                 r_angle_v -= abs(ego.theta / pi * 2)
@@ -226,10 +228,10 @@ class EscapeTrainEnv(Battle):
         # 稀疏奖励
         # 失败惩罚
         if self.lose:
-            r_event = -50
+            r_event = -30
         # 取胜奖励
         elif self.win:
-            r_event = 50
+            r_event = 30
         else:
             r_event = 0
 

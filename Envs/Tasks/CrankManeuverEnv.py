@@ -46,6 +46,13 @@ from Envs.battle6dof1v1_missile0919 import *
 class CrankTrainEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
+        self.crank_key_order = [
+            "target_locked",  # 1
+            "target_information",  # 8
+            "ego_main",  # 7
+            "threat",  # 4
+            "border",  # 2
+        ]
         # # 1. 原始散点数据
         # # ----------------------------
         # x = np.array([-60, 50, 50, 50, 60, -180, 180, 50, 50, -180, -180, 180, 180, -60,-60])
@@ -62,17 +69,19 @@ class CrankTrainEnv(Battle):
         self.last_delta_psi = None
 
     def crank_obs(self, side):
-        full_obs = self.base_obs(side)
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        full_obs["target_locked"] = copy.deepcopy(self.obs_init["target_locked"])
-        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
-        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        # full_obs["border"] = copy.deepcopy(self.obs_init["border"]) ###
+        pre_full_obs = self.base_obs(side)
+        full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
+                    for k in self.crank_key_order}
+        # # 先对dict的元素mask
+        # # 只需要 target_information 和 ego_main
+        # full_obs["target_locked"] = copy.deepcopy(self.obs_init["target_locked"])
+        # full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
+        # full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
+        # full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
+        # # full_obs["border"] = copy.deepcopy(self.obs_init["border"]) ###
 
         # 将观测按顺序拉成一维数组
-        flat_obs = flatten_obs(full_obs, self.key_order)
+        flat_obs = flatten_obs(full_obs, self.crank_key_order)
         return flat_obs, full_obs
 
     def left_crank_terminate_and_reward(self, side):  # 进攻策略训练与奖励
@@ -221,9 +230,9 @@ class CrankTrainEnv(Battle):
         #         r_event += alt
         #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
         if self.lose:
-            r_event -= 70  # 20 100 50
+            r_event -= 30  # 20 100 50 70
         if self.win:
-            r_event += 70  # 20 100 50
+            r_event += 30  # 20 100 50 70
 
         # if alpha > ego.max_radar_angle:
         #     r_event -= 3 # 超出雷达范围惩罚

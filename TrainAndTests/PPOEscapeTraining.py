@@ -74,7 +74,7 @@ env = EscapeTrainEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound0 = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 action_bound = copy.deepcopy(action_bound0)
-state_dim = 34 # len(b_obs_spaces)
+state_dim = 1*2+8+7+4+2 # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -117,7 +117,7 @@ def creat_initial_state():
     red_psi = np.random.choice([-1, 1]) * pi/2  # random.uniform(-pi, pi)
     blue_psi = -red_psi
     # blue_beta = red_psi
-    red_N = (random.randint(0, 1)*2-1)*47e3  # (random.randint(0,1)*2-1)*57e3
+    red_N = 0  # (random.randint(0, 1)*2-1)*47e3  # (random.randint(0,1)*2-1)*57e3
     red_E = -np.sign(red_psi) * initial_dist
     blue_N = red_N
     blue_E = 0

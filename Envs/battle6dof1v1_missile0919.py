@@ -491,10 +491,6 @@ class Battle(object):
                 if missile.distance < missile.detect_range and missile.in_angle:
                     warnings[i] = 1
                     distances[i] = missile.distance
-                    # # 作为追踪去训练，视图避开(pi -pi)突变点问题
-                    # threat_delta_psis[i] = sub_of_radian(missile.q_beta, own.psi)
-                    # threat_delta_thetas[i] = sub_of_radian(missile.q_epsilon, own.theta) # missile.q_epsilon
-                    # 作为远离去训练，效果不是很好
                     threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
 
@@ -545,13 +541,17 @@ class Battle(object):
 
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [
-            "target_alive", "target_observable", "target_locked",
-            "missile_in_mid_term", "locked_by_target", "warning",
+            "target_alive",  # 1 暂未使用
+            "target_observable",  # 1 仅用于动作切换
+            "target_locked",  # 1
+            "missile_in_mid_term",  # 1 仅用于动作切换
+            "locked_by_target",  # 1 仅用于动作切换
+            "warning",  # 1
             "target_information",  # 8
             "ego_main",  # 7
             "ego_control",  # 7
-            "weapon",  # 1
-            "threat",  # 3
+            "weapon",  # 1 仅用于动作切换
+            "threat",  # 4
             "border",  # 2
         ]
 
@@ -600,16 +600,19 @@ class Battle(object):
 
             "weapon": float(missile_time_to_hit_obs),
 
-            # "threat": np.array([
-            #     float(threat_delta_psi),  # 0
-            #     float(threat_delta_theta),  # 1
-            #     float(threat_distance)  # 2
-            # ]),
             "threat": np.array([
-                float(threat_distance * cos(threat_delta_psi) * cos(threat_delta_theta)),  # 0
-                float(threat_distance * sin(threat_delta_theta)),  # 1
-                float(threat_distance * sin(threat_delta_psi) * cos(threat_delta_theta))  # 2
+                float(cos(threat_delta_psi)),  # 0
+                float(sin(threat_delta_psi)),  # 1
+                float(threat_delta_theta),  # 2
+                float(threat_distance),  # 3
             ]),
+
+            # "threat": np.array([
+            #     float(cos(threat_delta_psi) * cos(threat_delta_theta)),  # 0
+            #     float(sin(threat_delta_theta)),  # 1
+            #     float(sin(threat_delta_psi) * cos(threat_delta_theta))  # 2
+            #     float(threat_distance),
+            # ]),
 
             "border": np.array([
                 float(d_hor),  # 0
@@ -645,7 +648,7 @@ class Battle(object):
             [0, 0, 0, 0, 0, 0, 0])  # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
         self.state_init["weapon"] = 120
         # self.state_init["threat"] = np.array([pi, 0, 30e3])  # [pi,0,30e3]  [0,0,30e3]
-        self.state_init["threat"] = np.array([-30e3, 0, 0])  # [pi,0,30e3]  [0,0,30e3]
+        self.state_init["threat"] = np.array([1, 0, 0, 30e3])
         self.state_init["border"] = np.array([50e3, 0])
 
         # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
@@ -691,8 +694,7 @@ class Battle(object):
             s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
             s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
             s["weapon"] /= 120
-            # s["threat"][2] /= 10e3
-            s["threat"] /= 10e3
+            s["threat"][3] /= 10e3
             s["border"][0] = min(1, s["border"][0] / 50e3)
             s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
             return s

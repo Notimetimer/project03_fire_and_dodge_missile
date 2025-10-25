@@ -145,7 +145,10 @@ class ChooseStrategyEnv(Battle):
                 if action == 1:
                     pass  # 调用escape策略
                     # 规则智能体
-                    move_action = self.escape_behavior(UAV.alt, delta_psi, uav_obs["warning"], uav_obs["threat"][0])
+                    cos_threat_psi = uav_obs["threat"][0]
+                    sin_threat_psi = uav_obs["threat"][1]
+                    threat_psi = atan2(sin_threat_psi, cos_threat_psi)
+                    move_action = self.escape_behavior(UAV.alt, delta_psi, uav_obs["warning"], threat_psi)
 
                     # 训练出的智能体
                     pass

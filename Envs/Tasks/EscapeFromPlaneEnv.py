@@ -72,7 +72,7 @@ class EscapeTrainEnv(Battle):
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
         alpha = state["target_information"][4]
-        threat_delta_psi, threat_delta_theta, threat_distance =\
+        cos_threat_delta_psi, sin_threat_delta_psi, threat_delta_theta, threat_distance =\
             state["threat"]
 
         RWR = state["warning"]
