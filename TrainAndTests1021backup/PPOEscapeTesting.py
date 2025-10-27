@@ -4,7 +4,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # from TrainAndTests.PPOEscapeTraining import *
-from TrainAndTests.PPOPlaneEscapeTraining import *
+from Envs1022backup.PPOPlaneEscapeTraining import *
 import re
 
 dt_maneuver = 0.2  # 0.2

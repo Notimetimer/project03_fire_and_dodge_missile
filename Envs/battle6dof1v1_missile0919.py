@@ -482,7 +482,7 @@ class Battle(object):
             threat_delta_psi = pi  # pi 0
             threat_delta_theta = 0
             threat_distance = 30e3
-        else:
+        else:  # 敌导弹一发射就告警
             warnings = np.zeros(len(alive_enm_missiles))
             distances = np.ones(len(alive_enm_missiles)) * 30e3
             threat_delta_psis = np.zeros(len(alive_enm_missiles))
@@ -491,9 +491,12 @@ class Battle(object):
                 distances[i] = missile.distance
                 if missile.distance < missile.detect_range and missile.in_angle:
                     warnings[i] = 1
-                    
                     threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
+                elif locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
+                    # 进入告警距离前用敌机方位作为导弹告警方位
+                    threat_delta_psis[i] = delta_psi
+                    threat_delta_thetas[i] = delta_theta + own.theta
 
             # 告警标志 bool
             warning = bool(max(warnings))

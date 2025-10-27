@@ -3,8 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.PPOEscapeTraining import *
-# from TrainAndTests.PPOPlaneEscapeTraining import *
+from TrainAndTests.PPOEscapeFromPlaneTraining import *
 import re
 
 dt_maneuver = 0.2  # 0.2
@@ -61,11 +60,18 @@ if latest_actor_path:
     agent.actor.load_state_dict(sd)  # , strict=False)  # 忽略缺失的键
     print(f"Loaded actor for test from: {latest_actor_path}")
 
+
+# 测试特定训练结果
+latest_actor_path = os.path.join(log_dir, "actor_rein800.pt")
+sd = th.load(latest_actor_path, map_location=device)
+agent.actor.load_state_dict(sd)
+
+
 t_bias = 0
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=240,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=170e3,  # 8 * 60,
                     help="")
@@ -122,7 +128,7 @@ try:
         DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE, line_number = creat_initial_state()
         initial_blue_height = DEFAULT_BLUE_BIRTH_STATE['position'][1]
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                  red_init_ammo=1, blue_init_ammo=0)
+                  red_init_ammo=0, blue_init_ammo=0)
 
         done = False
 
@@ -135,37 +141,6 @@ try:
             # 获取观测信息
             r_obs_n, r_obs_check = env.escape_obs('r')
             b_obs_n, b_obs_check = env.escape_obs('b')
-
-            # # 反向转回字典方便排查
-            # b_obs_check = copy.deepcopy(env.state_init)
-            # key_order = env.key_order
-            # # 将扁平向量 b_obs_n 按 key_order 的顺序还原到字典 b_obs_check
-            # arr = np.atleast_1d(np.asarray(b_obs_n)).reshape(-1)
-            # idx = 0
-            # for k in key_order:
-            #     if k not in b_obs_check:
-            #         raise KeyError(f"key '{k}' not in state_init")
-            #     v0 = b_obs_check[k]
-            #     # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-            #     if isinstance(v0, (list, tuple, np.ndarray)):
-            #         length = len(v0)
-            #         slice_v = arr[idx: idx + length]
-            #         if isinstance(v0, np.ndarray):
-            #             b_obs_check[k] = slice_v.copy()
-            #         else:
-            #             b_obs_check[k] = slice_v.tolist()
-            #         idx += length
-            #     else:
-            #         # 标量
-            #         b_obs_check[k] = float(arr[idx])
-            #         idx += 1
-            # if idx != arr.size:
-            #     # 长度不匹配时给出提示（便于调试）
-            #     print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
-
-            # # 在这里将观测信息压入记忆
-            # env.RUAV.obs_memory = r_obs_check.copy()
-            # env.BUAV.obs_memory = b_obs_check.copy()
 
             b_obs = np.squeeze(b_obs_n)
 
@@ -185,12 +160,12 @@ try:
 
             b_state = env.get_state('b')
             dist = b_state["threat"][3]
-            if dist<20e3:
-                RWR_b = 1
-            else:
-                RWR_b = 0
-            if RWR_b==1 and battle_control_on_line==0:
-                battle_control_on_line = 1
+            # if dist<20e3:
+            #     RWR_b = 1
+            # else:
+            #     RWR_b = 0
+            # if RWR_b==1 and battle_control_on_line==0:
+            battle_control_on_line = 1
 
             # 动作重映射不做了
 
@@ -204,7 +179,7 @@ try:
             delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
             r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save)-env.RUAV.pos_[1]
             r_action_n_1 = delta_psi
-            r_action_n_2 = 300
+            r_action_n_2 = env.BUAV.speed  ###
             r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
             if np.isnan(b_obs_n).any() or np.isinf(b_obs_n).any():
@@ -229,13 +204,6 @@ try:
                 print(env.t)
                 # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
                 b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
-
-                # 可躲性测试
-                L_ = env.RUAV.pos_ - env.BUAV.pos_
-                q_beta = atan2(L_[2], L_[0])
-                b_action_n[0] = np.clip(-300, env.min_alt_save-env.BUAV.pos_[1] , 5000)
-                b_action_n[1] = sub_of_radian(q_beta+pi, env.BUAV.psi)
-                b_action_n[2] = 400
 
                 # 动作裁剪
                 # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
@@ -270,7 +238,7 @@ try:
 
             step += 1
             env.render(t_bias=t_bias)
-            time.sleep(0.01)
+            # time.sleep(0.01)
 
         env.clear_render(t_bias=t_bias)
         t_bias += env.t

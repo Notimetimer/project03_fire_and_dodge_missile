@@ -136,7 +136,7 @@ class EscapeTrainEnv(Battle):
             ### todo 远离导弹就交给距离的二阶导奖励，角度奖励只用来惩罚低高度俯冲行为
 
             cos_threat_delta_psi = state["threat"][0]
-            r_angle = - cos_threat_delta_psi
+            r_angle = acos(cos_threat_delta_psi)/pi
 
             # # # 垂直角度奖励，导弹相对飞机俯仰角>-30°时越低越好，否则应该水平规避
             # if ego.alt > (self.min_alt_save + self.max_alt_save)/2 and -threat_delta_theta>-pi/6:
@@ -151,6 +151,9 @@ class EscapeTrainEnv(Battle):
                 r_angle_v -= abs(ego.theta / pi * 2)
             if ego.alt >= self.max_alt_save and ego.theta > 0:
                 r_angle_v -= abs(ego.theta / pi * 2)
+
+            # 下高奖励
+            # ego.theta_v 在高空至少应该俯冲，但是俯冲角度超过-30°就不再额外奖励
 
             # sin_theta = state["ego_main"][2]
             # if -threat_delta_theta>-pi/6:
@@ -186,7 +189,7 @@ class EscapeTrainEnv(Battle):
         else:  # 躲飞机
             ###
             cos_delta_psi = state["target_information"][0]
-            r_angle = - cos_delta_psi
+            r_angle = acos(cos_delta_psi)/pi
             r_angle_v = 0
             if ego.alt <= self.min_alt_save + 2e3 and ego.theta < 0:
                 r_angle_v -= abs(ego.theta / pi * 2)
@@ -217,13 +220,13 @@ class EscapeTrainEnv(Battle):
         else:
             d_hor_dot = (self.dhor - self.last_dhor) / self.dt_maneuver
         self.last_dhor = self.dhor
-        r_border = d_hor_dot / 340 * 10e3
+        r_border = d_hor_dot / 340 * 10e3 if d_hor*10e3 < 15e3 else 0
         # r_border = d_hor_dot /340 * 50e3
 
-        if d_hor <= 10e3:
-            r_border -= 20
-        elif d_hor <= 15e3:
-            r_border -= 10
+        # if d_hor <= 10e3:
+        #     r_border -= 20
+        # elif d_hor <= 15e3:
+        #     r_border -= 10
 
         # 稀疏奖励
         # 失败惩罚
@@ -236,7 +239,7 @@ class EscapeTrainEnv(Battle):
             r_event = 0
 
         w_angle = 1  # d_hor**2
-        w_border = 0.5  # 1-w_angle
+        w_border = 1  # 1-w_angle
         reward = np.sum([
             w_angle * r_angle,
             1 * r_angle_v,

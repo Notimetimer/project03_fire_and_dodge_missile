@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from math import *
 
+
 def onedim_reward(x):
     # 函数实现
     output = x
@@ -12,7 +13,13 @@ def onedim_reward(x):
 
 def twodim_rewward(x, y):
     # 函数实现
-    output = 5* (x<=50) * (x-50)/50 + (x>50) * ((50-x)/10-10) -5*abs(y)/20 + 120/60 + 90/20
+    output = 5 * (x <= 50) * (x - 50) / 50 + \
+             (x > 50) * ((50 - x) / 10 - 10) - \
+             5 * abs(y) / 20 * (abs(y) > 5) + \
+             120 / 60 + 90 / 20 - \
+             (x < 40) * 3
+
+    # todo 相对俯仰角允许一个小平台，相对方位角缺少一个“角度过小”的惩罚，alpha的作用还不是很清楚
 
     return output
 
@@ -73,5 +80,4 @@ def draw_twodim(x_range, y_range, spacing):
 
 if __name__ == "__main__":
     # draw_onedim([-10, 10], 0.1)
-    ax = draw_twodim([-180, 180], [-90, 90], 1)
-
+    ax = draw_twodim([-180, 180], [-90, 90], 0.1)
