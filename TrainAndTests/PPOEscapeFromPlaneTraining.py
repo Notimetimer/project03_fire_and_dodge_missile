@@ -67,7 +67,7 @@ lmbda = 0.95  # 0.9
 epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
-k_entropy = 0.01  # 熵系数
+k_entropy = 0  # 0.01  # 熵系数
 mission_name = 'EscapeFromPlane'
 
 env = EscapeTrainEnv(args, tacview_show=use_tacview)

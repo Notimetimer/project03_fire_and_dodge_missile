@@ -7,7 +7,7 @@ from TrainAndTests.PPOEscapeFromPlaneTraining import *
 import re
 
 dt_maneuver = 0.2  # 0.2
-action_eps = 0.7  # 动作平滑度
+action_eps = 0.0  # 0.7  # 动作平滑度
 
 
 # 找出日期最大的目录
@@ -39,8 +39,8 @@ pre_log_dir = os.path.join(project_root, "logs")
 
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
-
-# log_dir = os.path.join(pre_log_dir, "Escape-run-20251023-105633")
+###
+log_dir = os.path.join(pre_log_dir, "EscapeFromPlane-run-20251027-162521")
 
 print("log目录", log_dir)
 
@@ -62,7 +62,7 @@ if latest_actor_path:
 
 
 # 测试特定训练结果
-latest_actor_path = os.path.join(log_dir, "actor_rein800.pt")
+latest_actor_path = os.path.join(log_dir, "actor_rein420.pt")
 sd = th.load(latest_actor_path, map_location=device)
 agent.actor.load_state_dict(sd)
 

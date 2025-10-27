@@ -53,7 +53,7 @@ class EscapeTrainEnv(Battle):
         # 初始化红蓝远离速度
         self.last_dist_dot = None
         self.last_dhor = None
-        self.last_delta_psi_plus_pi = None
+        self.last_delta_psi = None
 
     # # 任务：敌机一开始就发射导弹，规避的时候我机需要做置尾下高机动尽力逃脱追击
     def escape_obs(self, side):
@@ -140,22 +140,24 @@ class EscapeTrainEnv(Battle):
 
         r_angle = alpha / pi
 
-        if self.last_delta_psi_plus_pi is None:
+        if self.last_delta_psi is None:
             delta_psi_dot = 0
         else:
-            delta_psi_dot = (sub_of_radian(delta_psi, -pi) - self.last_delta_psi_plus_pi) / self.dt_maneuver
-        self.last_delta_psi_plus_pi = sub_of_radian(delta_psi, -pi)
+            delta_psi_dot = sub_of_radian(delta_psi, self.last_delta_psi) / self.dt_maneuver
+        self.last_delta_psi = delta_psi
         r_angle += 2  ###
-        if alpha >= 3 / 4 * pi:  # abs(delta_psi) >= 3/4 * pi:
+        if alpha >= 160 * pi/180:  # abs(delta_psi) >= 3/4 * pi:
             r_angle -= alpha_air * 180 / pi / 10
-            r_angle -= abs(sin_phi) / sin(30 * pi / 180)
-            r_angle -= abs(p) / (2 * pi / 2)
+            r_angle -= abs(p) / (2 * pi / 2) * 2
+            r_angle -= abs(delta_psi_dot) / (2 * pi / 2) * 2
 
             # r_angle_h = abs(delta_psi)/pi
-        r_angle_v = 1 - abs(ego.theta / pi * 2)
+        r_angle_v = 1 - abs((theta_v+3*pi/180) / pi * 2)
         r_angle_v += 1  ###
-        if theta_v > 0:
-            r_angle_v -= theta_v / pi * 2
+        if alt > self.min_alt_save+1e3 and theta_v >= 0:
+            r_angle_v -= theta_v / pi * 2 * 3
+        if alt < self.min_alt_save:
+            r_angle_v = 1 - np.sqrt(abs(theta_v / pi * 2))
 
         L_ = enm.pos_ - ego.pos_
         delta_v_ = enm.vel_ - ego.vel_
@@ -188,9 +190,9 @@ class EscapeTrainEnv(Battle):
         # r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt),
         #             (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
 
-        # 距离奖励，和目标机之间的距离
-        r_dist = -1 + np.clip(dist / 30e3, -1, 1)
-        r_dist -= dist_dot
+        # 距离奖励，和目标机之间的距离变化率
+        # r_dist = -1 + np.clip(dist / 30e3, -1, 1) ###
+        r_dist = - dist_dot/340
 
         # # 水平边界奖励
         self.dhor = d_hor
