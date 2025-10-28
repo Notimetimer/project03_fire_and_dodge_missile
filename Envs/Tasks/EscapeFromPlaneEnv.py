@@ -147,7 +147,7 @@ class EscapeTrainEnv(Battle):
         self.last_delta_psi = delta_psi
         r_angle += 2  ###
         if alpha >= 160 * pi/180:  # abs(delta_psi) >= 3/4 * pi:
-            r_angle -= alpha_air * 180 / pi / 10
+            r_angle -= alpha_air * 180 / pi / 5  # 10 ###
             r_angle -= abs(p) / (2 * pi / 2) * 2
             r_angle -= abs(delta_psi_dot) / (2 * pi / 2) * 2
 

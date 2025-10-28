@@ -1,13 +1,9 @@
 import sys
 import os
-import numpy as np
 import torch as th
 from math import *
 from gym import spaces
-import copy
 import matplotlib.pyplot as plt
-import json
-import glob
 
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -30,10 +26,10 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 from Envs.UAVmodel6d import UAVModel
-from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
+from Math_calculates.CartesianOnEarth import NUE2LLH
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.SquashedPPOcontinues import *
+from Algorithms.废弃.SquashedPPOcontinues import *
 
 class height_track_env():
     def __init__(self, dt_move=0.02):
@@ -201,7 +197,6 @@ class height_track_env():
 
 
 env = height_track_env()
-from tqdm import tqdm
 obs_space = env.get_obs_spaces()
 action_space = env.action_space
 
@@ -231,8 +226,6 @@ from Math_calculates.ScaleLearningRate import scale_learning_rate
 # 根据动作维度缩放学习率
 actor_lr = scale_learning_rate(actor_lr, agent.actor)
 critic_lr = scale_learning_rate(critic_lr, agent.critic)
-
-from Visualize.tensorboard_visualize import TensorBoardLogger
 
 out_range_count = 0
 return_list = []

@@ -1,8 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from TrainAndTests.PPOLCrankTraining_parel import *
+from functools import partial
+from TrainAndTests.NotInUse.PPOLCrankTraining_parel import *
 import re
 
 dt_maneuver= 0.2 # 0.2 
@@ -63,8 +63,10 @@ if latest_actor_path:
 
 t_bias = 0
 
-def run_single_test(seed):
-    """单次测试的工厂函数"""
+def run_single_test(seed, fake_input1, fake_input2):
+    """单次测试的函数"""
+    fake = fake_input1+fake_input2
+
     np.random.seed(seed)
     random.seed(seed)
     
@@ -181,7 +183,7 @@ def run_single_test(seed):
         print(f"Process {seed} failed:", e)
         return None
         
-    return lose  # 返回这个进程中的平均lose率
+    return lose, 1  # 返回这个进程中的平均lose率
 
 if __name__ == '__main__':
     import multiprocessing as mp
@@ -190,14 +192,47 @@ if __name__ == '__main__':
     
     num_processes = 20
     t0 = time.time()
-    
+
+    fake_input1 = 42  # 示例值
+    fake_input2 = 0.5  # 示例值
+
+    # 多输入函数并行写法1，输入参数可变
+    args_list = [(i, fake_input1, fake_input2) for i in range(num_processes)]
+
+    # 多输入函数并行写法2，输入参数固定
+    # 创建偏函数，固定后两个参数
+    test_func = partial(run_single_test, 
+                       fake_input1=fake_input1,
+                       fake_input2=fake_input2)
+
     with Pool(num_processes) as p:
-        results = p.map(run_single_test, range(num_processes))
+        # results = p.map(run_single_test, range(num_processes)) # 单输入函数并行写法
+
+        # 多输入函数并行写法1，输入参数可变，结果统一返回
+        results = p.starmap(run_single_test, args_list)      
+
+        # # 多输入函数并行写法1.5，输入参数可变，且每个进程结果立即返回而不是统一返回
+        # async_result = p.starmap_async(run_single_test, args_list)  # 立即返回
+        # # 可以做其他事
+        # results = async_result.get()  # 需要结果时再等待
+
+        # 多输入函数并行写法2，输入参数固定
+        # results = p.map(test_func, range(num_processes))
+        # 使用 zip 解包成两个列表
+
+    print(results)
+    loses, episode_returns = zip(*results)
+    
+    # 转换为 numpy array 以便计算统计量
+    loses = np.array(loses)
+    episode_returns = np.array(episode_returns)
+    print(loses)
+    print(episode_returns)        
     
     t1 = time.time()
     
     # 过滤掉None结果（失败的进程）
-    valid_results = [r for r in results if r is not None]
+    valid_results = [r for r in loses if r is not None]
     if valid_results:
         mean_lose_rate = np.mean(valid_results)
         print(f"Average lose rate across {len(valid_results)} processes: {mean_lose_rate:.3f}")

@@ -27,6 +27,7 @@ from Envs.Tasks.AttackManeuverEnv import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
+from collections import deque
 import matplotlib
 import json
 import glob
@@ -50,13 +51,16 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
-# 常规PPO
-from Algorithms.SquashedPPOcontinues_std_no_state import *
+
+from Algorithms.PPOcontinues_std_no_state_withGRU import *
 
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 
 # 实验性 AMPPO
 # from Algorithms.SquashedPPOcontinues_dual_a_AM import *
+
+# GRU-MLP ppo
+from Algorithms.SharedLayers import *
 
 # from tqdm import tqdm
 
@@ -91,16 +95,14 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0 # 0.05 # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
-mission_name = 'Attack'
+mission_name = 'AttackWithGRU'
 
 env = AttackTrainEnv(args, tacview_show=use_tacview)
-# env = Battle(args, tacview_show=use_tacview)
-# r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
-# b_obs_spaces = env.get_obs_spaces('b')
+
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
-state_dim = 35 # len(b_obs_spaces)
+state_dim = 35  # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -149,7 +151,7 @@ if __name__=="__main__":
 
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2) # 2,2
-
+    SEQ_LEN = 10
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
     from datetime import datetime
@@ -187,110 +189,7 @@ if __name__=="__main__":
     t_bias = 0
 
     try:
-        # # 有监督预训练
-        # with tqdm(total=int(num_episodes*pre_train_rate), desc='Iteration') as pbar:  # 进度条
-        #     for i_episode in range(int(num_episodes*pre_train_rate)):  
-        #         episode_return = 0
-        #         transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
-                
-        #         # 飞机出生状态指定
-        #         red_R_ = random.uniform(20e3, 60e3)
-        #         red_beta = random.uniform(0, 2*pi)
-        #         red_psi = random.uniform(0, 2*pi)
-        #         red_height = random.uniform(3e3, 10e3)
-        #         red_N = red_R_*cos(red_beta)
-        #         red_E = red_R_*sin(red_beta)
-        #         blue_height = random.uniform(3e3, 10e3)
 
-        #         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-        #                                 'psi': red_psi
-        #                                 }
-        #         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-        #                                     'psi': pi
-        #                                     }
-        #         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-        #                 red_init_ammo=0, blue_init_ammo=0)
-                
-        #         done = False
-        #         while not done:  # 每个训练回合
-        #             # 获取观测信息
-        #             r_obs_n, r_obs_check = env.attack_obs('r')
-        #             b_obs_n, b_obs_check = env.attack_obs('b')
-        #             # 在这里将观测信息压入记忆
-        #             env.RUAV.obs_memory = r_obs_check.copy()
-        #             env.BUAV.obs_memory = b_obs_check.copy()
-        #             # 执行示范动作收集数据
-        #             action_height = env.get_state('b')["target_information"][0] # env.RUAV.pos_[1]-env.BUAV.pos_[1]
-        #             action_delta_psi = env.get_state('b')["target_information"][1]
-        #             action_v = 340
-        #             b_action_n = np.array([action_height, action_delta_psi, action_v])
-        #             # 参考动作 unscale
-        #             action_normal = agent.unscale_exec_to_normalized(b_action_n, action_bound)
-        #             # 参考动作 反tanh 
-        #             u = np.arctanh(action_normal)
-        #             # 对手动作
-        #             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-        #             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-        #                                     enm_pos_=env.BUAV.pos_, distance=distance,
-        #                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-        #                                     o00=o00, R_cage=env.R_cage, wander=1
-        #                                     )
-
-        #             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-        #             done, b_reward, _ = env.attack_terminate_and_reward('b')
-        #             next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
-
-        #             transition_dict['states'].append(b_obs_n)
-        #             transition_dict['actions'].append(u)
-        #             transition_dict['next_states'].append(next_b_obs)
-        #             transition_dict['rewards'].append(b_reward)
-        #             transition_dict['dones'].append(done)
-        #             transition_dict['action_bounds'].append(action_bound)
-        #             episode_return += b_reward * env.dt_maneuver # 奖励按秒分析
-        #             steps_count += 1 # todo 增加一个以step为横轴的训练曲线
-        #             # 可视化
-        #             env.render(t_bias=t_bias)
-
-        #         # if env.fail==1:
-        #         #     out_range_count+=1
-
-        #         agent.update_actor_supervised(transition_dict)
-        #         agent.update_critic_only(transition_dict)
-        #         win_list.append(1-env.lose)
-        #         return_list.append(episode_return)
-        #         logger.add("pre_train/episode_return", episode_return, total_steps)
-                
-        #         from Utilities.ModelGradNorm import model_grad_norm
-        #         actor_grad_norm = model_grad_norm(agent.actor)
-        #         critic_grad_norm = model_grad_norm(agent.critic)
-        #         # 梯度监控
-        #         logger.add("pre_train/actor_grad_norm", actor_grad_norm, total_steps)
-        #         logger.add("pre_train/critic_grad_norm", critic_grad_norm, total_steps)
-        #         # 损失函数监控
-        #         logger.add("pre_train/actor_loss", agent.actor_loss, total_steps)
-        #         logger.add("pre_train/critic_loss", agent.critic_loss, total_steps)
-
-        #         env.clear_render(t_bias=t_bias)
-        #         t_bias += env.t
-                
-        #         if i_episode % 10 ==0:
-        #             # --- 保存模型（有监督阶段：actor_sup + i_episode，critic 每次覆盖）
-        #             os.makedirs(log_dir, exist_ok=True)
-        #             # critic overwrite
-        #             critic_path = os.path.join(log_dir, "critic.pt")
-        #             th.save(agent.critic.state_dict(), critic_path)
-        #             # actor supervised snapshot
-        #             actor_name = f"actor_sup{i_episode}.pt"
-        #             actor_path = os.path.join(log_dir, actor_name)
-        #             th.save(agent.actor.state_dict(), actor_path)
-                
-        #         # tqdm 训练进度显示
-        #         if (i_episode + 1) >= 10:
-        #             pbar.set_postfix({'episode': '%d' % (i_episode + 1),
-        #                             'return': '%.3f' % np.mean(return_list[-10:])})
-        #         pbar.update(1)
-
-        # 强化学习训练
         rl_steps = 0
         return_list = []
         win_list = []
@@ -473,71 +372,3 @@ if __name__=="__main__":
     finally:
         logger.close()
         print(f"日志已保存到：{logger.run_dir}")
-
-        # # 测试训练效果
-        # agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-        #                 lmbda, epochs, eps, gamma, device)
-        # if os.path.exists(actor_meta_path):
-        #     rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-        #     sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-        #     latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
-        #     if latest_actor_path:
-        #         # 直接加载权重到现有的 agent
-        #         sd = th.load(latest_actor_path, map_location=device)
-        #         agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
-        #         print(f"Loaded actor for test from: {latest_actor_path}")
-
-        # try:
-        #     env = Battle(args, tacview_show=1)
-        #     for i_episode in range(3):  # 10
-        #         r_action_list=[]
-        #         b_action_list=[]
-        #         # 飞机出生状态指定
-        #         red_R_ = random.uniform(20e3, 60e3)
-        #         red_beta = random.uniform(0, 2*pi)
-        #         red_psi = random.uniform(0, 2*pi)
-        #         red_height = random.uniform(3e3, 10e3)
-        #         red_N = red_R_*cos(red_beta)
-        #         red_E = red_R_*sin(red_beta)
-        #         blue_height = random.uniform(3e3, 10e3)
-
-        #         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-        #                                 'psi': red_psi
-        #                                 }
-        #         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-        #                                     'psi': pi
-        #                                     }
-        #         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-        #                 red_init_ammo=0, blue_init_ammo=0)
-        #         step = 0
-        #         done = False
-        #         while not done:
-        #             r_obs_n, r_obs_check = env.attack_obs('r')
-        #             b_obs_n, b_obs_check = env.attack_obs('b')
-        #             # 在这里将观测信息压入记忆
-        #             env.RUAV.obs_memory = r_obs_check.copy()
-        #             env.BUAV.obs_memory = b_obs_check.copy()
-        #             state = np.squeeze(b_obs_n)
-        #             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-        #             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-        #                                     enm_pos_=env.BUAV.pos_, distance=distance,
-        #                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-        #                                     o00=o00, R_cage=env.R_cage, wander=1
-        #                                     )
-        #             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
-                    
-        #             r_action_list.append(r_action_n)
-        #             b_action_list.append(b_action_n)
-
-        #             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-        #             done, b_reward, _ = env.attack_terminate_and_reward('b')
-
-        #             step += 1
-        #             env.render(t_bias=t_bias)
-        #             time.sleep(0.01)
-                
-        #         env.clear_render(t_bias=t_bias)
-        #         t_bias += env.t
-
-        # except KeyboardInterrupt:
-        #     print("验证已中断")

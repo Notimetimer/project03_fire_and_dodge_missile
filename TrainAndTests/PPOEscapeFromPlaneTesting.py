@@ -40,7 +40,7 @@ pre_log_dir = os.path.join(project_root, "logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
 ###
-log_dir = os.path.join(pre_log_dir, "EscapeFromPlane-run-20251027-162521")
+# log_dir = os.path.join(pre_log_dir, "EscapeFromPlane-run-20251027-162521")
 
 print("log目录", log_dir)
 
@@ -61,10 +61,10 @@ if latest_actor_path:
     print(f"Loaded actor for test from: {latest_actor_path}")
 
 
-# 测试特定训练结果
-latest_actor_path = os.path.join(log_dir, "actor_rein420.pt")
-sd = th.load(latest_actor_path, map_location=device)
-agent.actor.load_state_dict(sd)
+# # 测试特定训练结果
+# latest_actor_path = os.path.join(log_dir, "actor_rein420.pt")
+# sd = th.load(latest_actor_path, map_location=device)
+# agent.actor.load_state_dict(sd)
 
 
 t_bias = 0
@@ -202,6 +202,7 @@ try:
             else:
                 print("escape")
                 print(env.t)
+                # print(env.BUAV.p)
                 # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
                 b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
 

@@ -1,10 +1,8 @@
 import sys
 import os
-import numpy as np
 import torch as th
 from math import *
 from gym import spaces
-import copy
 import matplotlib.pyplot as plt
 import json
 import glob
@@ -30,10 +28,10 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 
 from Envs.UAVmodel6d import UAVModel
-from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
+from Math_calculates.CartesianOnEarth import NUE2LLH
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.SquashedPPOcontinues import *
+from Algorithms.废弃.SquashedPPOcontinues import *
 
 # # 只能处理不分块的多层全连接神经网络，没必要单独拿出来
 # def parse_model_sizes_from_meta(meta_path):

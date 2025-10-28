@@ -31,7 +31,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.SquashedPPOcontinues_std_no_state import *
+from Algorithms.PPOcontinues_std_no_state import *
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
@@ -48,7 +48,7 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=300,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60, 
+parser.add_argument("--R-cage", type=float, default=170e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -67,7 +67,7 @@ lmbda = 0.95  # 0.9
 epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
-k_entropy = 0.01  # 熵系数
+k_entropy = 1e-4  # 熵系数
 mission_name = 'Escape'
 
 env = EscapeTrainEnv(args, tacview_show=use_tacview)
@@ -113,10 +113,12 @@ def creat_initial_state():
 
     if blue_height <= 9e3:
         initial_dist = 30e3
-    elif blue_height <= 11e3:
+    elif blue_height < 11e3:
         initial_dist = 35e3
+    elif blue_height < 12e3:
+        initial_dist = 42e3
     else:
-        initial_dist = 40e3
+        initial_dist = 50e3
 
     red_psi = np.random.choice([-1, 1]) * pi / 2  # random.uniform(-pi, pi)
     blue_psi = -red_psi
@@ -159,7 +161,7 @@ if __name__ == "__main__":
     transition_dict_capacity = env.args.max_episode_len // env.dt_maneuver + 1
 
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                          lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2, max_std=0.5)  # 2,2
+                          lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2, max_std=0.35)  # 2,2
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
@@ -273,12 +275,13 @@ if __name__ == "__main__":
                 delta_psi = atan2(b_obs_check['target_information'][1], b_obs_check['target_information'][0])
                 RWR_b = b_obs_check['warning']
 
-                # if RWR_b==1 and battle_control_on_line==0:
-                #     battle_control_on_line = 1
-                b_state = env.get_state('b')
-                dist2mis = b_state["threat"][3]
-                if battle_control_on_line == 0 and dist2mis < initial_states[line_number, 2] + 5e3:
+                if RWR_b == 1 and battle_control_on_line == 0:
                     battle_control_on_line = 1
+
+                # b_state = env.get_state('b')
+                # dist2mis = b_state["threat"][3]
+                # if battle_control_on_line == 0 and dist2mis < initial_states[line_number, 2] + 5e3:
+                #     battle_control_on_line = 1
 
                 # 动作重映射不做了
 
@@ -292,7 +295,7 @@ if __name__ == "__main__":
                 delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
                 r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save) - env.RUAV.pos_[1]
                 r_action_n_1 = delta_psi
-                r_action_n_2 = 300
+                r_action_n_2 = env.BUAV.speed  ### 300
                 r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
                 if np.isnan(b_obs).any() or np.isinf(b_obs).any():
@@ -382,6 +385,7 @@ if __name__ == "__main__":
                     # 强化学习actor特殊项监控
                     logger.add("train/9 entropy", agent.entropy_mean, total_steps)
                     logger.add("train/10 ratio", agent.ratio_mean, total_steps)
+                    logger.add("train/11 episode/step", i_episode, total_steps)
 
                     # print(t_bias)
             env.clear_render(t_bias=t_bias)
