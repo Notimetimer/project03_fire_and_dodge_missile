@@ -436,7 +436,8 @@ if __name__ == "__main__":
             # pbar.update(1)
             # 训练进度显示
             if (i_episode) >= 10:
-                print(f"进度: {total_steps / max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
+                print(
+                    f"episode {i_episode}, 进度: {total_steps / max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
             else:
                 print(f"episode {i_episode}, total_steps {total_steps}")
 

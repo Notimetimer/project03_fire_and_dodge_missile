@@ -53,7 +53,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 
-from Algorithms.PPOcontinues_std_no_state_withGRU import *
+from Algorithms.PPOcontinues_std_no_state_withGRU3 import *
 
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 
@@ -95,7 +95,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'AttackWithGRU'
+mission_name = 'AttackWithGRU3'
 
 env = AttackTrainEnv(args, tacview_show=use_tacview)
 
@@ -104,8 +104,8 @@ action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
 state_dim = 8+7+2  # 35 # len(b_obs_spaces)
 action_dim = 3
-gru_hidden_size = 64
-gru_num_layers = 2
+gru_hidden_size = state_dim
+gru_num_layers = 1
 middle_dim = state_dim
 head_hidden_dims = hidden_dim
 
@@ -207,7 +207,7 @@ if __name__ == "__main__":
         while total_steps < int(max_steps * (1 - pre_train_rate)):
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_values': [], 'rewards': [], 'dones': [], 'h0s': []}
+            transition_dict = {'states': [], 'actions': [], 'next_values': [], 'rewards': [], 'dones': [], 'h0as': [], 'h0cs': []}
 
             # 飞机出生状态指定
             red_R_ = random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
@@ -240,7 +240,8 @@ if __name__ == "__main__":
             # b1 = env.UAVs[0].pos_
             # b2 = env.UAVs[1].pos_
             done = False
-            agent.reset_hidden_state()
+            agent.reset_hidden_state_a()
+            agent.reset_hidden_state_c()
 
             actor_grad_list = []
             critc_grad_list = []
@@ -273,7 +274,8 @@ if __name__ == "__main__":
 
                 b_obs = np.squeeze(b_obs_n)
                 
-                h_current = agent.get_current_hidden_state()
+                h_a = agent.get_current_hidden_state_a()
+                h_c = agent.get_current_hidden_state_c()
 
                 # # 2. 更新观测序列
                 # obs_sequence_deque.append(b_obs)
@@ -306,7 +308,7 @@ if __name__ == "__main__":
                                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                            o00=o00, R_cage=env.R_cage, wander=1
                                            )
-                b_action_n, u, h_next = agent.take_action(state=b_obs, h_0=h_current, action_bounds=action_bound, explore=True)
+                b_action_n, u, h_a_next = agent.take_action(state=b_obs, h_0_a=h_a, action_bounds=action_bound, explore=True)
 
                 # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
                 #                         enm_pos_=env.RUAV.pos_, distance=distance,
@@ -322,14 +324,16 @@ if __name__ == "__main__":
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1
-                next_value, _ = agent.get_value(next_b_obs, h_next)
+                h_c_next = agent.get_current_hidden_state_c()
+                next_value, _ = agent.get_value(next_b_obs, h_c_next)
 
                 transition_dict['states'].append(b_obs)
                 transition_dict['actions'].append(u)
                 transition_dict['next_values'].append(next_value)
                 transition_dict['rewards'].append(b_reward)
                 transition_dict['dones'].append(done)
-                transition_dict['h0s'].append(h_current)
+                transition_dict['h0as'].append(h_a)
+                transition_dict['h0cs'].append(h_c)
                 # state = next_state
                 episode_return += b_reward * env.dt_maneuver
 
