@@ -56,24 +56,6 @@ def compute_advantage(gamma, lmbda, td_delta):
     return torch.tensor(np.array(advantage_list), dtype=torch.float)
 
 
-class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim):
-        super(ValueNet, self).__init__()
-
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
-
-    def forward(self, x):
-        y = self.net(x)
-        return self.fc_out(y)
-
-
 class SquashedNormal:
     """带 tanh 压缩的高斯分布。
 
@@ -161,6 +143,24 @@ class PolicyNetContinuous(torch.nn.Module):
             std = std.expand_as(mu)
 
         return mu, std
+
+
+class ValueNet(torch.nn.Module):
+    def __init__(self, state_dim, hidden_dim):
+        super(ValueNet, self).__init__()
+
+        layers = []
+        prev_size = state_dim
+        for layer_size in hidden_dim:
+            layers.append(torch.nn.Linear(prev_size, layer_size))
+            layers.append(nn.ReLU())
+            prev_size = layer_size
+        self.net = nn.Sequential(*layers)
+        self.fc_out = torch.nn.Linear(prev_size, 1)
+
+    def forward(self, x):
+        y = self.net(x)
+        return self.fc_out(y)
 
 
 class PPOContinuous:
@@ -377,7 +377,7 @@ class PPOContinuous:
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
-            entropy_factor = dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            entropy_factor = dist.entropy().mean()  # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
             actor_loss_reward_term = -torch.min(surr1, surr2).sum(-1).mean()
             actor_loss = actor_loss_reward_term - self.k_entropy * entropy_factor
 

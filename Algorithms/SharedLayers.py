@@ -5,38 +5,66 @@ import torch.nn.functional as F
 
 # GRU-MLP
 class GruMlp(nn.Module):
-    def __init__(self, input_dim, gru_hidden_size, output_dim):
+    def __init__(self, input_dim, gru_hidden_size, gru_num_layers=1, output_dim=None, batch_first=True):
         super(GruMlp, self).__init__()
         self.input_dim = input_dim
         self.gru_hidden_size = gru_hidden_size
+        self.gru_num_layers = gru_num_layers  # 添加GRU层数参数
         self.output_dim = output_dim
 
-        # GRU层处理序列数据
-        self.gru = nn.GRU(input_dim, gru_hidden_size, batch_first=True)
+        # GRU层处理序列数据，增加num_layers参数
+        self.gru = nn.GRU(input_dim, gru_hidden_size, num_layers=gru_num_layers, batch_first=batch_first)
 
         # MLP输出层
         self.mlp_out = nn.Linear(gru_hidden_size, output_dim)
 
-    def forward(self, x):
+        # # debug: 在 GruMlp 初始化完成后立即检查 self.gru._flat_weights 类型
+        # if hasattr(self, "gru") and hasattr(self.gru, "_flat_weights") and isinstance(self.gru._flat_weights, list):
+        #     import traceback
+        #     raise RuntimeError("DEBUG: GruMlp created with gru._flat_weights as list; "
+        #                        f"element types: {[type(w) for w in self.gru._flat_weights]}\\n"
+        #                        f"stack:\\n{''.join(traceback.format_stack())}")
+
+    def forward(self, x, h_0=None):
         # x: (B, S, D)
         B, S, D = x.shape
 
+        # 如果没有提供初始隐藏状态，则使用None，让PyTorch自动初始化
+        # h_0: (num_layers, B, gru_hidden_size) 或 None
+
+        # # 检查 GRU 内部 flat weights 类型，若为 list 则抛出错误以便定位问题源
+        # if hasattr(self.gru, "_flat_weights") and isinstance(self.gru._flat_weights, list):
+        #     raise TypeError(
+        #         "GRU internal _flat_weights is a list (unexpected). "
+        #         "This indicates GRU parameters were mutated/ wrapped incorrectly. "
+        #         f"_flat_weights element types: {[type(w) for w in self.gru._flat_weights]}"
+        #     )
+        # # 确保 h_0 是 Tensor 或 None
+        # if h_0 is not None and not isinstance(h_0, torch.Tensor):
+        #     raise TypeError(f"h_0 must be a torch.Tensor or None, got {type(h_0)}")
+        # # 确保 h_0 与输入在同一 device
+        # if h_0 is not None and isinstance(h_0, torch.Tensor) and h_0.device != x.device:
+        #     raise RuntimeError(f"h_0.device ({h_0.device}) != x.device ({x.device}); move h_0 to input device before calling forward")
+
         # GRU处理
-        gru_output, _ = self.gru(x)  # (B, S, gru_hidden_size)
+        gru_output, h_n = self.gru(x, h_0)  # gru_output: (B, S, gru_hidden_size), h_n: (num_layers, B, gru_hidden_size)
 
         # MLP输出
         output = self.mlp_out(gru_output)  # (B, S, output_dim)
 
-        return output
+        # 返回输出和最终隐藏状态
+        return output, h_n
 
 
 # ATT-MLP
 class AttMlp(nn.Module):
-    def __init__(self, input_dim, feature_embed_dim, attn_heads, output_dim):
+    def __init__(self, input_dim, feature_embed_dim, attn_heads, output_dim,
+                 dropout=0.0, bias=True, batch_first=False):
         super(AttMlp, self).__init__()
         self.input_dim = input_dim  # D
         self.feature_embed_dim = feature_embed_dim  # n1
         self.output_dim = output_dim
+        self.batch_first = batch_first
 
         # 特征嵌入层
         self.feature_embedding_layer = nn.Linear(1, feature_embed_dim)
@@ -44,7 +72,9 @@ class AttMlp(nn.Module):
         # 多头自注意力机制
         self.attention = nn.MultiheadAttention(embed_dim=feature_embed_dim,
                                                num_heads=attn_heads,
-                                               batch_first=False)
+                                               dropout=dropout,
+                                               bias=bias,
+                                               batch_first=batch_first)
 
         # MLP输出层
         self.mlp_out = nn.Linear(feature_embed_dim, output_dim)
@@ -53,157 +83,97 @@ class AttMlp(nn.Module):
         # x: (B, S, D)
         B, S, D = x.shape
 
-        # 为特征注意力准备 (B, S, D) -> (B*S, D, 1) -> (B*S, D, n1)
+        # 为特征注意力准备 (B, S, D) -> (B*S, D, 1)
         x_reshaped = x.view(B * S, D, 1)
-        x_embedded = self.feature_embedding_layer(x_reshaped)  # (B*S, D, n1)
+
+        # 嵌入每个1维特征到n1维 (B*S, D, n1)
+        x_embedded = self.feature_embedding_layer(x_reshaped)
 
         # 多头自注意力
-        attn_input = x_embedded.permute(1, 0, 2)  # (D, B*S, n1)
-        attn_output, _ = self.attention(attn_input, attn_input, attn_input)
-        attn_output = attn_output.permute(1, 0, 2)  # (B*S, D, n1)
+        if self.batch_first:
+            # (B*S, D, n1)
+            attn_output, _ = self.attention(x_embedded, x_embedded, x_embedded)
+        else:
+            # (D, B*S, n1)
+            attn_input = x_embedded.permute(1, 0, 2)
+            attn_output, _ = self.attention(attn_input, attn_input, attn_input)
+            attn_output = attn_output.permute(1, 0, 2)  # (B*S, D, n1)
 
-        # 池化/聚合特征注意力结果
-        pooled_features = attn_output.mean(dim=1)  # (B*S, n1)
+        # 池化/聚合特征注意力结果 (B*S, n1)
+        pooled_features = attn_output.mean(dim=1)
 
-        # 重塑回原始序列结构
-        mlp_input = pooled_features.view(B, S, self.feature_embed_dim)  # (B, S, n1)
+        # 重塑回原始序列结构 (B, S, n1)
+        final_output = pooled_features.view(B, S, self.feature_embed_dim)
 
-        # MLP输出
-        output = self.mlp_out(mlp_input)  # (B, S, output_dim)
+        # MLP 输出 (B, S, output_dim)
+        output = self.mlp_out(final_output)
 
         return output
 
 
 # ATT-GRU-MLP
 class AttGruMlp(nn.Module):
-    def __init__(self, input_dim, feature_embed_dim, attn_heads, gru_hidden_size, output_dim):
+    def __init__(self, input_dim, feature_embed_dim, attn_heads, gru_hidden_size, gru_num_layers, output_dim,
+                 dropout=0.0, bias=True, batch_first=True):
         super(AttGruMlp, self).__init__()
-        self.input_dim = input_dim  # Original D
-        self.feature_embed_dim = feature_embed_dim  # n1
-        self.gru_hidden_size = gru_hidden_size
-        self.output_dim = output_dim
+        # 初始化注意力模块，其输出维度为GRU的输入维度
+        self.att = AttMlp(input_dim=input_dim,
+                          feature_embed_dim=feature_embed_dim,
+                          attn_heads=attn_heads,
+                          output_dim=feature_embed_dim,  # ATT的输出作为GRU的输入
+                          dropout=dropout,
+                          bias=bias,
+                          batch_first=batch_first)
 
-        # Step 2: 嵌入层升维
-        # Original idea: (B*S, D, 1) -> (B*S, D, n1)
-        # More direct: (B*S, D) -> (B*S, D, n1) by treating each D element as an input for the linear layer
-        # A simple linear layer can process the last dimension (D) and project it to feature_embed_dim
-        # No, a better way to think about (B*S, D, 1) -> (B*S, D, n1) is each feature (1) is embedded.
-        # This implies a linear layer that takes 1 as input and outputs n1.
-        # It's more common to have (B*S, D) and then project each "feature item" D to n1.
-        # So we treat each D as a sequence element of n1 features
-        self.feature_embedding_layer = nn.Linear(1, feature_embed_dim)
-        # Alternatively, if D is itself considered an embed_dim for a sequence of 1,
-        # and we want to expand the '1' to 'n1' for each feature.
-        # More likely, we view D as sequence_length, and each feature has an original embed_dim=1.
+        # 初始化GRU模块，其输入维度是注意力模块的输出维度
+        self.gru_mlp = GruMlp(input_dim=feature_embed_dim,
+                              gru_hidden_size=gru_hidden_size,
+                              gru_num_layers=gru_num_layers,
+                              output_dim=output_dim)
 
-        # Let's adjust for the (B*S, D, 1) -> (B*S, D, n1) interpretation:
-        # Each "feature value" in D becomes a single-element sequence (embedding dim of 1).
-        # We want to embed this single element into feature_embed_dim.
-        # So the linear layer will operate on the *last* dimension (1).
-
-        # Step 3: 多头自注意力
-        # input: (Batch*SeqLen, D, n1) -> (SeqLen (D), Batch*SeqLen, EmbedDim (n1)) for MHA
-        self.attention = nn.MultiheadAttention(embed_dim=feature_embed_dim, num_heads=attn_heads,
-                                               batch_first=False)  # Or batch_first=True if you permute to (B*S, n1, D)
-
-        # Step 4 & 5: GRU 处理 (GRU takes (Batch, SeqLen, Feature_Dim))
-        # After pooling, output will be (B*S, n1), reshaped to (B, S, n1)
-        self.gru = nn.GRU(feature_embed_dim, gru_hidden_size, batch_first=True)
-
-        # Step 6: MLP 输出
-        self.mlp_out = nn.Linear(gru_hidden_size, output_dim)
-
-    def forward(self, x):
+    def forward(self, x, h_0=None):
         # x: (B, S, D)
 
-        B, S, D = x.shape
+        # Step 1: Attention处理
+        # att_output: (B, S, feature_embed_dim)
+        att_output = self.att(x)
 
-        # Step 2: 为特征注意力准备 (B, S, D) -> (B*S, D, 1) -> (B*S, D, n1)
-        # Reshape to (B*S, D) then unsqueeze to (B*S, D, 1)
-        x_reshaped = x.view(B * S, D, 1)  # Each feature value is now a single-dim embedding
+        # Step 2: GRU处理
+        # output: (B, S, output_dim), h_n: (num_layers, B, gru_hidden_size)
+        output, h_n = self.gru_mlp(att_output, h_0)
 
-        # Embed each 1-dim feature into n1-dim
-        # x_embedded: (B*S, D, n1)
-        x_embedded = self.feature_embedding_layer(x_reshaped)
-
-        # Step 3: 多头自注意力
-        # MultiheadAttention expects (SeqLen, Batch, EmbedDim) if batch_first=False
-        # Our current x_embedded is (B*S, D, n1).
-        # D is our sequence_length, B*S is our "batch_size" for MHA, n1 is embed_dim
-        # So we need to permute to (D, B*S, n1)
-        attn_input = x_embedded.permute(1, 0, 2)  # (D, B*S, n1)
-
-        # attn_output: (D, B*S, n1), attn_weights: (B*S, D, D)
-        attn_output, _ = self.attention(attn_input, attn_input, attn_input)
-
-        # Permute back to (B*S, D, n1) for pooling
-        attn_output = attn_output.permute(1, 0, 2)  # (B*S, D, n1)
-
-        # Step 4: 池化/聚合特征注意力结果
-        # Mean pool along D dimension: (B*S, D, n1) -> (B*S, n1)
-        pooled_features = attn_output.mean(dim=1)  # (B*S, n1)
-
-        # Step 5: 重塑回原始序列结构
-        # (B*S, n1) -> (B, S, n1)
-        gru_input = pooled_features.view(B, S, self.feature_embed_dim)
-
-        # Step 6: GRU 处理
-        gru_output, _ = self.gru(gru_input)  # (B, S, gru_hidden_size)
-
-        # Step 7: MLP 输出
-        output = self.mlp_out(gru_output)  # (B, S, output_dim)
-
-        return output
+        return output, h_n
 
 
 # GRU-ATT-MLP
 class GruAttMlp(nn.Module):
-    def __init__(self, input_dim, gru_hidden_size, feature_embed_dim, attn_heads, output_dim):
+    def __init__(self, input_dim, gru_hidden_size, gru_num_layers, feature_embed_dim, attn_heads, output_dim,
+                 dropout=0.0, bias=True, batch_first=True):
         super(GruAttMlp, self).__init__()
-        self.input_dim = input_dim
-        self.gru_hidden_size = gru_hidden_size  # G
-        self.feature_embed_dim = feature_embed_dim  # n1
-        self.output_dim = output_dim
+        # 初始化GRU模块，其输出维度为Attention的输入维度
+        self.gru_mlp = GruMlp(input_dim=input_dim,
+                              gru_hidden_size=gru_hidden_size,
+                              gru_num_layers=gru_num_layers,
+                              output_dim=gru_hidden_size)  # GRU的输出作为ATT的输入
 
-        # Step 2: GRU 处理
-        self.gru = nn.GRU(input_dim, gru_hidden_size, batch_first=True)
+        # 初始化Attention模块，其输入维度是GRU模块的隐藏层大小
+        self.att = AttMlp(input_dim=gru_hidden_size,
+                          feature_embed_dim=feature_embed_dim,
+                          attn_heads=attn_heads,
+                          output_dim=output_dim,
+                          dropout=dropout,
+                          bias=bias,
+                          batch_first=batch_first)
 
-        # Step 3: 为特征注意力准备 (B*S, G, 1) -> (B*S, G, n1)
-        self.feature_embedding_layer = nn.Linear(1, feature_embed_dim)
-
-        # Step 4: 多头自注意力
-        # input: (G, B*S, n1) if batch_first=False
-        self.attention = nn.MultiheadAttention(embed_dim=feature_embed_dim, num_heads=attn_heads, batch_first=False)
-
-        # Step 6: MLP 输出 (after pooling (B*S, n1) and reshaping (B, S, n1))
-        self.mlp_out = nn.Linear(feature_embed_dim, output_dim)
-
-    def forward(self, x):
+    def forward(self, x, h_0=None):
         # x: (B, S, D)
 
-        B, S, D = x.shape
+        # Step 1: GRU处理
+        # gru_output: (B, S, gru_hidden_size)
+        gru_output, h_n = self.gru_mlp(x, h_0)
 
-        # Step 2: GRU 处理
-        gru_output, _ = self.gru(x)  # (B, S, gru_hidden_size (G))
-        G = gru_output.shape[2]  # Get actual G
+        # Step 2: Attention处理
+        # output: (B, S, output_dim)
+        output = self.att(gru_output)
 
-        # Step 3: 为特征注意力准备 (B, S, G) -> (B*S, G, 1) -> (B*S, G, n1)
-        x_reshaped = gru_output.view(B * S, G, 1)
-        x_embedded = self.feature_embedding_layer(x_reshaped)  # (B*S, G, n1)
-
-        # Step 4: 多头自注意力
-        attn_input = x_embedded.permute(1, 0, 2)  # (G, B*S, n1)
-        attn_output, _ = self.attention(attn_input, attn_input, attn_input)
-        attn_output = attn_output.permute(1, 0, 2)  # (B*S, G, n1)
-
-        # Step 5: 池化/聚合特征注意力结果
-        pooled_features = attn_output.mean(dim=1)  # (B*S, n1)
-
-        # Step 6: 重塑回原始序列结构 (Optional if not passing through another GRU)
-        # pooled_features is already (B*S, n1), for MLP needs (B, S, n1)
-        final_attn_output = pooled_features.view(B, S, self.feature_embed_dim)
-
-        # Step 7: MLP 输出
-        output = self.mlp_out(final_attn_output)  # (B, S, output_dim)
-
-        return output
+        return output, h_n
