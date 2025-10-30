@@ -89,6 +89,7 @@ class AttackTrainEnv(Battle):
         if self.t > self.game_time_limit:
             terminate = True
             self.lose = 1  # 还没进入范围判定为负
+            
         if not self.min_alt <= alt <= self.max_alt:
             terminate = True
             self.lose = 1

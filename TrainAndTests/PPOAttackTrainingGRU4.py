@@ -377,7 +377,7 @@ if __name__ == "__main__":
 
             # tensorboard 训练进度显示
             logger.add("train/1 episode_return", episode_return, total_steps)
-            logger.add("train/2 not lose", 1 - env.lose, total_steps)
+            logger.add("train/2 win", env.win, total_steps)
 
             actor_grad_norm = agent.actor_grad
             actor_pre_clip_grad = agent.pre_clip_actor_grad
