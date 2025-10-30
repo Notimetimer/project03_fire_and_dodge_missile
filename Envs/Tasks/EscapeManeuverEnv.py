@@ -180,23 +180,23 @@ class EscapeTrainEnv(Battle):
                 r_angle -= abs(delta_psi_threat_dot) / (2 * pi / 2) * 2
 
             # # # 垂直角度奖励，导弹相对飞机俯仰角>-30°时越低越好，否则应该水平规避
-            # if ego.alt > (self.min_alt_save + self.max_alt_save)/2 and -threat_delta_theta>-pi/6:
+            # if ego.alt > (self.min_alt_safe + self.max_alt_safe)/2 and -threat_delta_theta>-pi/6:
             #     r_angle_v = -sin(ego.theta)
-            # elif ego.alt > self.min_alt_save:
-            #     theta_opt = (ego.alt-self.min_alt_save)/((self.max_alt_save-self.min_alt_save)/2)*-pi/2
+            # elif ego.alt > self.min_alt_safe:
+            #     theta_opt = (ego.alt-self.min_alt_safe)/((self.max_alt_safe-self.min_alt_safe)/2)*-pi/2
             #     r_angle_v = cos(ego.theta-theta_opt)
             # else:
             #     r_angle_v = cos(ego.theta)
             # r_angle_v = 0
             r_angle_v = 1 - abs((theta_v + 3 * pi / 180) / pi * 2)
-            # if ego.alt <= self.min_alt_save + 2e3 and ego.theta < 0:
+            # if ego.alt <= self.min_alt_safe + 2e3 and ego.theta < 0:
             #     r_angle_v -= abs(ego.theta / pi * 2)
-            # if ego.alt >= self.max_alt_save and ego.theta > 0:
+            # if ego.alt >= self.max_alt_safe and ego.theta > 0:
             #     r_angle_v -= abs(ego.theta / pi * 2)
             r_angle_v += 1  ###
-            if alt > self.min_alt_save + 1e3 and theta_v >= 0:
+            if alt > self.min_alt_safe + 1e3 and theta_v >= 0:
                 r_angle_v -= theta_v / pi * 2 * 3
-            if alt < self.min_alt_save:
+            if alt < self.min_alt_safe:
                 r_angle_v = 1 - np.sqrt(abs(theta_v / pi * 2))
 
             # 下高奖励
@@ -204,7 +204,7 @@ class EscapeTrainEnv(Battle):
 
             # sin_theta = state["ego_main"][2]
             # if -threat_delta_theta>-pi/6:
-            #     sin_theta_opt = -1*np.clip((alt-self.min_alt_save)/5000, -0.99, 0.99)
+            #     sin_theta_opt = -1*np.clip((alt-self.min_alt_safe)/5000, -0.99, 0.99)
             # else:
             #     sin_theta_opt = 0
             # r_angle_v = (sin_theta<=sin_theta_opt)*(sin_theta-(-1))/(sin_theta_opt-(-1))+\
@@ -226,8 +226,8 @@ class EscapeTrainEnv(Battle):
             r_v = np.clip(dist2m_dt2 / (9.8), -2, 2)
 
             # 高度奖励
-            r_alt = (alt <= self.min_alt_save + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
-                    (alt >= self.max_alt_save) * np.clip(-ego.vu / 100, -1, 1)
+            r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
+                    (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
 
             # 距离奖励，和导弹之间的距离变化率
             # dist2m = state["threat"][3]
@@ -239,9 +239,9 @@ class EscapeTrainEnv(Battle):
             # cos_delta_psi = state["target_information"][0]
             # r_angle = acos(cos_delta_psi)/pi
             # r_angle_v = 0
-            # if ego.alt <= self.min_alt_save + 2e3 and ego.theta < 0:
+            # if ego.alt <= self.min_alt_safe + 2e3 and ego.theta < 0:
             #     r_angle_v -= abs(ego.theta / pi * 2)
-            # if ego.alt >= self.max_alt_save and ego.theta > 0:
+            # if ego.alt >= self.max_alt_safe and ego.theta > 0:
             #     r_angle_v -= abs(ego.theta / pi * 2)
 
             # 水平角度奖励， 奖励和敌机在同一高度层的置尾机动(√)
@@ -256,9 +256,9 @@ class EscapeTrainEnv(Battle):
 
             r_angle_v = 1 - abs((theta_v + 3 * pi / 180) / pi * 2)
             r_angle_v += 1  ###
-            if alt > self.min_alt_save + 1e3 and theta_v >= 0:
+            if alt > self.min_alt_safe + 1e3 and theta_v >= 0:
                 r_angle_v -= theta_v / pi * 2 * 3
-            if alt < self.min_alt_save:
+            if alt < self.min_alt_safe:
                 r_angle_v = 1 - np.sqrt(abs(theta_v / pi * 2))
 
             L_ = enm.pos_ - ego.pos_
@@ -273,8 +273,8 @@ class EscapeTrainEnv(Battle):
             self.last_dist_dot = self.dist_dot
             r_v = dist_dot2 / 9.8
             # 高度奖励
-            r_alt = (alt <= self.min_alt_save + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
-                    (alt >= self.max_alt_save) * np.clip(-ego.vu / 100, -1, 1)
+            r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
+                    (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
             # 距离奖励，和目标机之间的距离 变化率
             # r_dist = -1 + np.clip(dist / 30e3, -1, 1)
             r_dist = - dist_dot / 340

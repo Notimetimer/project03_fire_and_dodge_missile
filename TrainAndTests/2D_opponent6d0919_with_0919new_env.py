@@ -199,7 +199,7 @@ for i in range(10):
         L_v = L_[1]
         q_epsilon = atan2(L_v, L_h)
         delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
-        r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save)-env.RUAV.pos_[1]
+        r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_safe, env.max_alt_safe)-env.RUAV.pos_[1]
         r_action_n_1 = delta_psi
         r_action_n_2 = 340
         r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]

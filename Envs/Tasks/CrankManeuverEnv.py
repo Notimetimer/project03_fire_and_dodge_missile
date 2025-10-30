@@ -191,14 +191,14 @@ class CrankTrainEnv(Battle):
 
         # 高度奖励
         pre_alt_opt = target_alt - 2e3  # 比目标低1000m方便增加阻力
-        alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
         r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
                 (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
         # if not self.min_alt<=alt<=self.max_alt:
         #     r_alt -= 20
         ###
-        r_alt += (alt <= self.min_alt_save) * np.clip(ego.vu / 100, -1, 1) + \
-                 (alt >= self.max_alt_save) * np.clip(-ego.vu / 100, -1, 1)
+        r_alt += (alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
 
         # 速度奖励
         speed_opt = 0.95 * 340

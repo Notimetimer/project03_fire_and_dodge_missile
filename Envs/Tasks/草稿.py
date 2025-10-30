@@ -122,10 +122,10 @@ def _compute_altitude_reward(self, aircraft: Aircraft):
         # 高度奖励
         # 爬升下降率惩罚
         r_vu = 0
-        if alt <= self.min_alt_save:
-            r_vu = np.clip(ego.vu / 100 * (self.min_alt_save - alt) / (self.min_alt_save-self.min_alt), 0., 1.)
-        if alt >= self.max_alt_save:
-            r_vu = -np.clip(ego.vu / 100 * (alt - self.max_alt_save) / (self.max_alt-self.max_alt_save), 0., 1.)
+        if alt <= self.min_alt_safe:
+            r_vu = np.clip(ego.vu / 100 * (self.min_alt_safe - alt) / (self.min_alt_safe-self.min_alt), 0., 1.)
+        if alt >= self.max_alt_safe:
+            r_vu = -np.clip(ego.vu / 100 * (alt - self.max_alt_safe) / (self.max_alt-self.max_alt_safe), 0., 1.)
 
         # 绝对高度惩罚
         r_abs_h = 0
@@ -134,18 +134,18 @@ def _compute_altitude_reward(self, aircraft: Aircraft):
         if alt >= self.max_alt_danger:
             r_abs_h = np.clip((self.max_alt-alt) / (self.max_alt-self.max_alt_danger), 0., 1.) - 1.
 
-        # r_alt = (alt<=self.min_alt_save) * (alt-self.min_alt)/(self.min_alt_save-self.min_alt) + \
-        #         (alt>=self.max_alt_save) * (alt-self.max_alt)/(self.max_alt_save-self.max_alt)
+        # r_alt = (alt<=self.min_alt_safe) * (alt-self.min_alt)/(self.min_alt_safe-self.min_alt) + \
+        #         (alt>=self.max_alt_safe) * (alt-self.max_alt)/(self.max_alt_safe-self.max_alt)
         # 相对高度奖励, 关于敌机或导弹
         r_rel_h = 0
 
         r_alt = r_vu + r_abs_h + r_rel_h
 
-        # r_alt = (alt<=self.min_alt_save) * np.clip(ego.vu/100, -1, 1) + \
-        #         (alt>=self.max_alt_save) * np.clip(-ego.vu/100, -1, 1)
+        # r_alt = (alt<=self.min_alt_safe) * np.clip(ego.vu/100, -1, 1) + \
+        #         (alt>=self.max_alt_safe) * np.clip(-ego.vu/100, -1, 1)
 
-        # pre_alt_opt = self.min_alt_save + 1e3 # 比最小安全高度高1000m
-        # alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+        # pre_alt_opt = self.min_alt_safe + 1e3 # 比最小安全高度高1000m
+        # alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
         # r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt),
         #             (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
         

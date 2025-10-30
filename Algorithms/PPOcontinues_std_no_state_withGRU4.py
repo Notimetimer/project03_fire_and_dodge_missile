@@ -1,7 +1,5 @@
 '''
-共用gru，backbone接收actor的loss
-
-相对改动：新增 back_bone 的学习率和optimizer
+共用backbone，但是gru接收critic的loss
 '''
 
 import os
@@ -210,7 +208,7 @@ class ValueNetGRU(nn.Module):
 
 class PPOContinuous:
     def __init__(self, state_dim, gru_hidden_size, gru_num_layers, middle_dim,
-                 head_hidden_dims, action_dim, actor_lr, critic_lr, backbone_lr,
+                 head_hidden_dims, action_dim, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device,
                  k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, batch_first=True):
 
@@ -226,15 +224,13 @@ class PPOContinuous:
 
 
         # 3. 设置优化器
-        # Actor 优化器负责更新 Actor 的头 + 共享的 backbone
-        self.actor_optimizer = torch.optim.Adam([
-            {'params': self.actor.backbone.parameters(), 'lr': backbone_lr},
-            {'params': self.actor.head.parameters(), 'lr': actor_lr},
-            {'params': self.actor.fc_mu.parameters(), 'lr': actor_lr},
-            {'params': self.actor.log_std_param, 'lr': actor_lr}
-        ])
-        # Critic 优化器只负责更新 Critic 自己的头
-        self.critic_optimizer = torch.optim.Adam(self.critic.head.parameters(), lr=critic_lr)
+        # Actor 优化器只负责更新 Actor 自己的头
+        self.actor_optimizer = torch.optim.Adam(self.actor.head.parameters(), lr=actor_lr)
+        
+        # Critic 优化器负责更新 Critic 的头 + 共享的 backbone
+        # 我们需要将两个部分的参数合并到一个迭代器中
+        critic_params = list(self.critic.head.parameters()) + list(self.actor.backbone.parameters())
+        self.critic_optimizer = torch.optim.Adam(critic_params, lr=critic_lr)
 
         self.gamma = gamma
         self.lmbda = lmbda
@@ -255,16 +251,14 @@ class PPOContinuous:
         """重置隐藏状态"""
         self.hidden_state = self.get_h0(batch_size=1)
 
-    def set_learning_rate(self, actor_lr=None, critic_lr=None, backbone_lr=None):
+    def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
         if actor_lr is not None:
-            for param_group in self.actor_optimizer.param_groups[1:]:
+            for param_group in self.actor_optimizer.param_groups:
                 param_group['lr'] = actor_lr
         if critic_lr is not None:
             for param_group in self.critic_optimizer.param_groups:
-                param_group['lr'] = critic_lr
-        if backbone_lr is not None:
-            self.actor_optimizer.param_groups[0]['lr'] = backbone_lr
+                param_group['lr'] = critic_lr    
 
     def _scale_action_to_exec(self, a, action_bounds):
         """把 normalized action a (in [-1,1]) 缩放到环境区间。
@@ -563,3 +557,6 @@ class PPOContinuous:
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
+
+
+

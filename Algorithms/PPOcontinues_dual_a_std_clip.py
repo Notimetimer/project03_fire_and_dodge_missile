@@ -340,8 +340,8 @@ class PPOContinuous:
         actor_grad_list = []
         actor_loss_list = []
         critic_grad_list = []
-        post_clip_actor_grad = []
-        post_clip_critic_grad = []
+        pre_clip_actor_grad = []
+        pre_clip_critic_grad = []
         critic_loss_list = []
         entropy_list = []
         ratio_list = []
@@ -393,15 +393,15 @@ class PPOContinuous:
             critic_loss.backward()
             
             # 裁剪前梯度
-            post_clip_actor_grad.append(model_grad_norm(self.actor))
-            post_clip_critic_grad.append(model_grad_norm(self.critic))  
+            pre_clip_actor_grad.append(model_grad_norm(self.actor))
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))  
 
             # 梯度裁剪
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            # self.actor_optimizer.step()
+            # self.critic_optimizer.step()
 
             # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
             actor_grad_list.append(model_grad_norm(self.actor))
@@ -410,6 +410,9 @@ class PPOContinuous:
             critic_loss_list.append(critic_loss.detach().cpu().item())
             entropy_list.append(dist.entropy().mean().detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
+
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
         
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -417,8 +420,8 @@ class PPOContinuous:
         self.critic_grad = np.mean(critic_grad_list)
         self.entropy_mean = np.mean(entropy_list)
         self.ratio_mean = np.mean(ratio_list)
-        self.post_clip_critic_grad = np.mean(post_clip_critic_grad)
-        self.post_clip_actor_grad = np.mean(post_clip_actor_grad)
+        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
+        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
         self.advantage = advantage.abs().mean().detach().cpu().item()
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")
@@ -449,7 +452,7 @@ class PPOContinuous:
 
         actor_grad_list = []
         actor_loss_list = []
-        post_clip_actor_grad = []
+        pre_clip_actor_grad = []
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
         # 超参：目标 std 与权重（可改成 self.attr 并由构造函数传入）
         target_std_value = 0.5
@@ -465,7 +468,7 @@ class PPOContinuous:
             actor_loss = mse_mu + std_loss_weight * mse_std
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
-            post_clip_actor_grad.append(model_grad_norm(self.actor))
+            pre_clip_actor_grad.append(model_grad_norm(self.actor))
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=100)
             self.actor_optimizer.step()
 
@@ -474,7 +477,7 @@ class PPOContinuous:
 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
-        self.post_clip_actor_grad = np.mean(post_clip_actor_grad)
+        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
     
     def update_critic_only(self, transition_dict):
         """
@@ -493,7 +496,7 @@ class PPOContinuous:
 
         critic_grad_list = []
         critic_loss_list = []
-        post_clip_critic_grad = []
+        pre_clip_critic_grad = []
 
         # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
         for _ in range(self.epochs):
@@ -503,7 +506,7 @@ class PPOContinuous:
             critic_loss.backward()
 
             # 裁剪前梯度
-            post_clip_critic_grad.append(model_grad_norm(self.critic)) 
+            pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
             # 梯度裁剪
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=100)
             self.critic_optimizer.step()
@@ -513,7 +516,7 @@ class PPOContinuous:
 
         self.critic_loss = np.mean(critic_loss_list)
         self.critic_grad = np.mean(critic_grad_list)
-        self.post_clip_critic_grad = np.mean(post_clip_critic_grad)
+        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
 
 
 

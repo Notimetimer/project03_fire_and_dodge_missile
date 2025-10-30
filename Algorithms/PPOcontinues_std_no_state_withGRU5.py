@@ -1,7 +1,5 @@
 '''
-共用gru，backbone接收actor的loss
-
-相对改动：新增 back_bone 的学习率和optimizer
+联合优化器，同时使用actor_loss和critic_loss
 '''
 
 import os
@@ -210,9 +208,9 @@ class ValueNetGRU(nn.Module):
 
 class PPOContinuous:
     def __init__(self, state_dim, gru_hidden_size, gru_num_layers, middle_dim,
-                 head_hidden_dims, action_dim, actor_lr, critic_lr, backbone_lr,
-                 lmbda, epochs, eps, gamma, device,
-                 k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, batch_first=True):
+                 head_hidden_dims, action_dim, actor_lr, critic_lr, backbone_lr=None,
+                 lmbda=None, epochs=10, eps=0.2, gamma=0.99, device='cpu',
+                 k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, critic_coef=0.5, batch_first=True):
 
         # 1. 创建 Actor，它内部包含了共享的 backbone
         self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim, 
@@ -225,16 +223,30 @@ class PPOContinuous:
 
 
 
-        # 3. 设置优化器
-        # Actor 优化器负责更新 Actor 的头 + 共享的 backbone
-        self.actor_optimizer = torch.optim.Adam([
-            {'params': self.actor.backbone.parameters(), 'lr': backbone_lr},
-            {'params': self.actor.head.parameters(), 'lr': actor_lr},
-            {'params': self.actor.fc_mu.parameters(), 'lr': actor_lr},
-            {'params': self.actor.log_std_param, 'lr': actor_lr}
+        # 3. 设置统一优化器，但为 backbone/actor_head/critic_head 保留独立 lr（使用 param_groups）
+        # 把参数分组：backbone / actor head (不含 backbone) / critic head (含 fc_out)
+        backbone_params = list(self.actor.backbone.parameters())
+        # actor head params: 所有 actor 参数中排除 backbone 部分
+        actor_head_params = [p for n, p in self.actor.named_parameters() if not n.startswith("backbone.")]
+        critic_head_params = list(self.critic.head.parameters()) + list(self.critic.fc_out.parameters())
+
+        # 如果未指定 backbone_lr，则默认使用 actor_lr
+        if backbone_lr is None:
+            backbone_lr = actor_lr
+
+        self.total_optimizer = torch.optim.Adam([
+            {"params": backbone_params, "lr": float(backbone_lr)},
+            {"params": actor_head_params, "lr": float(actor_lr)},
+            {"params": critic_head_params, "lr": float(critic_lr)},
         ])
-        # Critic 优化器只负责更新 Critic 自己的头
-        self.critic_optimizer = torch.optim.Adam(self.critic.head.parameters(), lr=critic_lr)
+
+        # 保留便捷引用与兼容性（避免外部直接依赖消失）
+        self.actor_optimizer = None
+        self.critic_optimizer = None
+        self._backbone_params = backbone_params
+        self._actor_head_params = actor_head_params
+        self._critic_head_params = critic_head_params
+        self.critic_coef = critic_coef
 
         self.gamma = gamma
         self.lmbda = lmbda
@@ -257,14 +269,14 @@ class PPOContinuous:
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None, backbone_lr=None):
         """动态设置 actor 和 critic 的学习率"""
-        if actor_lr is not None:
-            for param_group in self.actor_optimizer.param_groups[1:]:
-                param_group['lr'] = actor_lr
-        if critic_lr is not None:
-            for param_group in self.critic_optimizer.param_groups:
-                param_group['lr'] = critic_lr
+        # 如果使用合并的 total_optimizer，按 param_groups 顺序更新 lr
         if backbone_lr is not None:
-            self.actor_optimizer.param_groups[0]['lr'] = backbone_lr
+            self.total_optimizer.param_groups[0]['lr'] = float(backbone_lr)
+        if actor_lr is not None:
+            self.total_optimizer.param_groups[1]['lr'] = float(actor_lr)
+        if critic_lr is not None:
+            self.total_optimizer.param_groups[2]['lr'] = float(critic_lr)
+            
 
     def _scale_action_to_exec(self, a, action_bounds):
         """把 normalized action a (in [-1,1]) 缩放到环境区间。
@@ -524,10 +536,10 @@ class PPOContinuous:
             else:
                 critic_loss = F.mse_loss(self.critic(states, h0s)[0], td_target.detach())
 
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            actor_loss.backward()
-            critic_loss.backward()
+            # 使用合并优化器：基于总损失反向传播
+            self.total_optimizer.zero_grad()
+            total_loss = actor_loss + self.critic_coef * critic_loss
+            total_loss.backward()
             
             # 裁剪前梯度
             pre_clip_actor_grad.append(model_grad_norm(self.actor))
@@ -537,9 +549,6 @@ class PPOContinuous:
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
-            # self.actor_optimizer.step()
-            # self.critic_optimizer.step()
-
             # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
             actor_grad_list.append(model_grad_norm(self.actor))
             actor_loss_list.append(actor_loss.detach().cpu().item())
@@ -548,8 +557,7 @@ class PPOContinuous:
             entropy_list.append(dist.entropy().mean().detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
 
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            self.total_optimizer.step()
         
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -563,3 +571,6 @@ class PPOContinuous:
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
+
+
+

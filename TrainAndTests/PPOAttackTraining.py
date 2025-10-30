@@ -446,14 +446,14 @@ if __name__ == "__main__":
             logger.add("train/2 not lose", 1 - env.lose, total_steps)
 
             actor_grad_norm = agent.actor_grad
-            actor_post_clip_grad = agent.post_clip_actor_grad
+            actor_pre_clip_grad = agent.pre_clip_actor_grad
             critic_grad_norm = agent.critic_grad
-            critic_post_clip_grad = agent.post_clip_critic_grad
+            critic_pre_clip_grad = agent.pre_clip_critic_grad
             # 梯度监控
             logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
-            logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, total_steps)
+            logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
             logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
-            logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, total_steps)
+            logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
             # 损失函数监控
             logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
             logger.add("train/8 critic_loss", agent.critic_loss, total_steps)

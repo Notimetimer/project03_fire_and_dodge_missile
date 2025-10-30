@@ -54,8 +54,8 @@ class height_track_env():
         # 高于升限会导致动作无法实施，影响
         self.time_limit = 180 # 300 t_last
         self.min_alt = 1e3
-        self.min_alt_save = 3e3
-        self.max_alt_save = 14e3
+        self.min_alt_safe = 3e3
+        self.max_alt_safe = 14e3
         self.max_alt = 15e3
 
         # △h动作输出有效性测试

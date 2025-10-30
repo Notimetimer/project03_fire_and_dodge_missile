@@ -85,7 +85,7 @@ action_dim = b_action_spaces[0].shape[0]
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 整一下高度-攻击区离散表（使用有限的选择）
-# 水平距离20km~80km, 我机高度 env.min_alt_save 到 env.max_alt_save 按 2e3 间隔划分
+# 水平距离20km~80km, 我机高度 env.min_alt_safe 到 env.max_alt_safe 按 2e3 间隔划分
 # 目标高度 = 我机高度-2e3, 0, 2e3, 双方速度均为1.2Ma，最后构建一个[我机高度, 目标高度, 不可逃逸区边界，最大边界]的查询表
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -267,7 +267,7 @@ if __name__=="__main__":
                 # 方差裁剪
                 max_std = 0.3
                 # temp1 = min(height_ego-env.min_alt, env.max_alt-height_ego)
-                if height_ego<env.min_alt_save+1e3 or height_ego>env.max_alt_save-1e3:
+                if height_ego<env.min_alt_safe+1e3 or height_ego>env.max_alt_safe-1e3:
                     max_std = 0.1
 
                 if delta_psi>50*pi/180 or delta_psi<-50*pi/180:
@@ -287,7 +287,7 @@ if __name__=="__main__":
                 #                         )
                 
                 # # 动作裁剪
-                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
                 # if delta_psi>0:
                 #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
                 # else:
@@ -316,15 +316,15 @@ if __name__=="__main__":
                 #     agent.update(transition_dict, adv_normed=0)
                 #     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
                 #     actor_grad_norm = agent.actor_grad
-                #     actor_post_clip_grad = agent.post_clip_actor_grad
+                #     actor_pre_clip_grad = agent.pre_clip_actor_grad
                 #     critic_grad_norm = agent.critic_grad
-                #     critic_post_clip_grad = agent.post_clip_critic_grad
+                #     critic_pre_clip_grad = agent.pre_clip_critic_grad
                 #     logger.add("train/1 episode_return", np.mean(episode_return), total_steps)
                 #     # 梯度监控
                 #     logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
-                #     logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, total_steps)
+                #     logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
                 #     logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
-                #     logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, total_steps)
+                #     logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 #     # 损失函数监控
                 #     logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
                 #     logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
@@ -350,15 +350,15 @@ if __name__=="__main__":
             if test_run == 0:
                 agent.update(transition_dict, adv_normed=False)
                 actor_grad_norm = agent.actor_grad
-                actor_post_clip_grad = agent.post_clip_actor_grad
+                actor_pre_clip_grad = agent.pre_clip_actor_grad
                 critic_grad_norm = agent.critic_grad
-                critic_post_clip_grad = agent.post_clip_critic_grad
+                critic_pre_clip_grad = agent.pre_clip_critic_grad
                 logger.add("train/1 episode_return", np.mean(episode_return), total_steps)
                 # 梯度监控
                 logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
-                logger.add("train/5 actor_post_clip_grad", actor_post_clip_grad, total_steps)
+                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
                 logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
-                logger.add("train/6 critic_post_clip_grad", critic_post_clip_grad, total_steps)
+                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 # 损失函数监控
                 logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
                 logger.add("train/8 critic_loss", agent.critic_loss, total_steps)

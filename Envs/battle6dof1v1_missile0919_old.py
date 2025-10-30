@@ -87,8 +87,8 @@ class Battle(object):
         self.train_side_lose = None
         self.train_side_draw = None
         self.max_alt = 15e3
-        self.max_alt_save = 13e3
-        self.min_alt_save= 3e3
+        self.max_alt_safe = 13e3
+        self.min_alt_safe= 3e3
         self.min_alt = 1e3
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
 
@@ -654,7 +654,7 @@ class Battle(object):
 
         # 高度奖励
         pre_alt_opt = target_alt + np.clip((dist-10e3)/(40e3-10e3)*5e3, 0, 5e3)
-        alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
 
         r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt)+\
                     (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))

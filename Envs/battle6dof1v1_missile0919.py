@@ -101,8 +101,8 @@ class Battle(object):
         self.draw = None
         self.max_alt = 15e3
         self.max_alt_danger = 14e3
-        self.max_alt_save = 13e3
-        self.min_alt_save = 3e3
+        self.max_alt_safe = 13e3
+        self.min_alt_safe = 3e3
         self.min_alt_danger = 2e3
         self.min_alt = 0.5e3  # 1e3
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage

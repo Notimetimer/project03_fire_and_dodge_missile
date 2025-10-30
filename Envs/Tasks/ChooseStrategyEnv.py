@@ -172,8 +172,8 @@ class ChooseStrategyEnv(Battle):
                 if action == 4:
                     # 转圈搜索目标
                     # 该部分不训练智能体，改为使用规则智能体
-                    move_action[0] = np.clip(delta_height_scaled, self.min_alt_save - UAV.alt,
-                                             self.max_alt_save - UAV.alt) * 5000
+                    move_action[0] = np.clip(delta_height_scaled, self.min_alt_safe - UAV.alt,
+                                             self.max_alt_safe - UAV.alt) * 5000
 
                     if leftright >= 0:
                         move_action[1] = pi

@@ -177,8 +177,8 @@ class PPO_discrete:
         actor_grad_list = []
         actor_loss_list = []
         critic_grad_list = []
-        post_clip_actor_grad = []
-        post_clip_critic_grad = []
+        pre_clip_actor_grad = []
+        pre_clip_critic_grad = []
         critic_loss_list = []
         entropy_list = []
         ratio_list = []
@@ -226,8 +226,8 @@ class PPO_discrete:
             critic_loss.backward()
             
             # 裁剪前梯度
-            post_clip_actor_grad.append(model_grad_norm(self.actor))
-            post_clip_critic_grad.append(model_grad_norm(self.critic))  
+            pre_clip_actor_grad.append(model_grad_norm(self.actor))
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))  
 
             # 梯度裁剪
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
@@ -250,8 +250,8 @@ class PPO_discrete:
         self.critic_grad = np.mean(critic_grad_list)
         self.entropy_mean = np.mean(entropy_list)
         self.ratio_mean = np.mean(ratio_list)
-        self.post_clip_critic_grad = np.mean(post_clip_critic_grad)
-        self.post_clip_actor_grad = np.mean(post_clip_actor_grad)
+        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
+        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
         self.advantage = advantage.abs().mean().detach().cpu().item()
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")

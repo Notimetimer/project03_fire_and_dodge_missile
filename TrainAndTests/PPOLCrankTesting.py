@@ -147,7 +147,7 @@ try:
             height_ego = env.BUAV.alt
 
             # # # 动作裁剪
-            # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+            # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
             # if delta_psi>0:
             #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
             # else:

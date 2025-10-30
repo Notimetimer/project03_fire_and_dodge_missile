@@ -154,9 +154,9 @@ class EscapeTrainEnv(Battle):
             # r_angle_h = abs(delta_psi)/pi
         r_angle_v = 1 - abs((theta_v+3*pi/180) / pi * 2)
         r_angle_v += 1  ###
-        if alt > self.min_alt_save+1e3 and theta_v >= 0:
+        if alt > self.min_alt_safe+1e3 and theta_v >= 0:
             r_angle_v -= theta_v / pi * 2 * 3
-        if alt < self.min_alt_save:
+        if alt < self.min_alt_safe:
             r_angle_v = 1 - np.sqrt(abs(theta_v / pi * 2))
 
         L_ = enm.pos_ - ego.pos_
@@ -180,13 +180,13 @@ class EscapeTrainEnv(Battle):
         # r_v = dist_dot/(2*340) # 远离给奖励，接近给惩罚
 
         # 高度奖励
-        # r_alt = (alt<=self.min_alt_save) * (alt-self.min_alt)/(self.min_alt_save-self.min_alt) + \
-        #         (alt>=self.max_alt_save) * (alt-self.max_alt)/(self.max_alt_save-self.max_alt)
-        r_alt = (alt <= self.min_alt_save) * np.clip(ego.vu / 100, -1, 1) + \
-                (alt >= self.max_alt_save) * np.clip(-ego.vu / 100, -1, 1)
+        # r_alt = (alt<=self.min_alt_safe) * (alt-self.min_alt)/(self.min_alt_safe-self.min_alt) + \
+        #         (alt>=self.max_alt_safe) * (alt-self.max_alt)/(self.max_alt_safe-self.max_alt)
+        r_alt = (alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+                (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
 
-        # pre_alt_opt = self.min_alt_save + 1e3 # 比最小安全高度高1000m
-        # alt_opt = np.clip(pre_alt_opt, self.min_alt_save, self.max_alt_save)
+        # pre_alt_opt = self.min_alt_safe + 1e3 # 比最小安全高度高1000m
+        # alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
         # r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt),
         #             (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
 

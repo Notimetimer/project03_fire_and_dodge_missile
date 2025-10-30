@@ -90,12 +90,12 @@ env = Battle(args, tacview_show=use_tacview)
 # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 整一下高度-攻击区离散表（使用有限的选择）
-# 水平距离20km~80km, 我机高度 env.min_alt_save 到 env.max_alt_save 按 2e3 间隔划分
+# 水平距离20km~80km, 我机高度 env.min_alt_safe 到 env.max_alt_safe 按 2e3 间隔划分
 # 目标高度 = 我机高度-2e3, 0, 2e3, 双方速度均为1.2Ma，最后构建一个[我机高度, 目标高度, 不可逃逸区边界，最大边界]的查询表
 
 init_states = []
 start_time = time.time()
-for ego_height in np.arange(env.min_alt_save, env.max_alt_save+1, 2e3):
+for ego_height in np.arange(env.min_alt_safe, env.max_alt_safe+1, 2e3):
     enm_heights = [ego_height-2e3, ego_height, ego_height+2e3]
     for enm_height in enm_heights:
         if enm_height<3e3 or enm_height>13e3:

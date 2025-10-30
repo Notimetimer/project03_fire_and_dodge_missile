@@ -53,7 +53,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 
-from Algorithms.PPOcontinues_std_no_state_withGRU import *
+from Algorithms.PPOcontinues_std_no_state_withGRU4 import *
 
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 
@@ -95,7 +95,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'AttackWithGRU'
+mission_name = 'AttackWithGRU4'
 
 env = AttackTrainEnv(args, tacview_show=use_tacview)
 

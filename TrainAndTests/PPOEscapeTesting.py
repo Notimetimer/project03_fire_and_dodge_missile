@@ -202,7 +202,7 @@ try:
             L_v = L_[1]
             q_epsilon = atan2(L_v, L_h)
             delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
-            r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_save, env.max_alt_save)-env.RUAV.pos_[1]
+            r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_safe, env.max_alt_safe)-env.RUAV.pos_[1]
             r_action_n_1 = delta_psi
             r_action_n_2 = 300
             r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
@@ -233,12 +233,12 @@ try:
                 # 可躲性测试
                 L_ = env.RUAV.pos_ - env.BUAV.pos_
                 q_beta = atan2(L_[2], L_[0])
-                b_action_n[0] = np.clip(-300, env.min_alt_save-env.BUAV.pos_[1] , 5000)
+                b_action_n[0] = np.clip(-300, env.min_alt_safe-env.BUAV.pos_[1] , 5000)
                 b_action_n[1] = sub_of_radian(q_beta+pi, env.BUAV.psi)
                 b_action_n[2] = 400
 
                 # 动作裁剪
-                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_save-height_ego, env.max_alt_save-height_ego)
+                # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
                 # if delta_psi>0:
                 #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
                 # else:
