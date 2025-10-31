@@ -2,6 +2,44 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# 通道注意力
+class ChannelAttention(nn.Module):
+    def __init__(self, feature_dim, reduction_ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.feature_dim = feature_dim
+        self.reduction_ratio = reduction_ratio
+
+        # 定义 Squeeze-and-Excitation (SE) 块
+        # 这里的输入 feature_dim 已经是扁平的特征向量，
+        # 所以直接用全连接层进行压缩和激励
+        self.se_block = nn.Sequential(
+            nn.Linear(self.feature_dim, self.feature_dim // self.reduction_ratio, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.feature_dim // self.reduction_ratio, self.feature_dim, bias=False),
+            nn.Sigmoid() # 使用 Sigmoid 激活函数，输出权重在 (0, 1) 之间
+        )
+
+    def forward(self, x):
+        # x 的维度: (Batch, Feature_Dim)
+
+        # 1. Squeeze (挤压)
+        # 在 (Batch, Feature_Dim) 的情况下，Feature_Dim 已经是“通道”维度，
+        # 每个样本的 Feature_Dim 向量本身就是需要被激励的对象。
+        # 因此，这里的“挤压”实际上就是输入 x 本身，或者你可以认为它已经经过了某种全局池化
+        # 如果需要更强的抽象，可以在这里加一个额外的线性层，但通常不是必须的。
+        squeezed_features = x 
+        
+        # 2. Excitation (激励)
+        # 通过 MLP 生成每个通道的权重
+        weights = self.se_block(squeezed_features)
+        # weights 的维度: (Batch, Feature_Dim)
+
+        # 3. Scale (缩放)
+        # 将权重逐元素地乘以原始输入特征
+        # output 的维度: (Batch, Feature_Dim)
+        output = x * weights
+        
+        return output, weights
 
 # GRU-MLP
 class GruMlp(nn.Module):

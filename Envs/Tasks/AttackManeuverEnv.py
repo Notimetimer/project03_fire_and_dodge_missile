@@ -49,6 +49,7 @@ class AttackTrainEnv(Battle):
         # 初始化红蓝远离速度
         self.last_dist_dot = None
         self.last_dhor = None
+        self.lock_time_count = 0
 
     # 进攻策略观测量
     def attack_obs(self, side):
@@ -85,16 +86,21 @@ class AttackTrainEnv(Battle):
 
         target_alt = enm.alt
 
-        # 结束判断：超时/损毁
+        if alpha < 10*pi/180:
+            self.lock_time_count += dt_maneuver
+        if alpha > 30*pi/180:
+            self.lock_time_count = 0
+
+        # 结束判断
         if self.t > self.game_time_limit:
             terminate = True
             self.lose = 1  # 还没进入范围判定为负
-            
+
         if not self.min_alt <= alt <= self.max_alt:
             terminate = True
             self.lose = 1
 
-        if dist < 5e3 and alpha < pi / 12:
+        if dist < 5e3 and alpha < pi / 4  or  self.lock_time_count > 10:
             terminate = True
             self.win = 1
 
