@@ -439,7 +439,7 @@ if __name__=="__main__":
                         env.missiles = env.Rmissiles + env.Bmissiles
 
                     height_ego = env.BUAV.alt
-                    delta_psi = b_check_obs['target_information'][1]
+                    delta_psi = b_check_obs["target_information"][1]
 
                     # 动作重映射
                     # action_bound 根据高度、角度设置

@@ -272,7 +272,7 @@ if __name__ == "__main__":
                     env.missiles = env.Rmissiles + env.Bmissiles
 
                 height_ego = env.BUAV.alt
-                delta_psi = atan2(b_obs_check['target_information'][1], b_obs_check['target_information'][0])
+                delta_psi = atan2(b_obs_check["target_information"][1], b_obs_check["target_information"][0])
                 RWR_b = b_obs_check['warning']
 
                 if RWR_b == 1 and battle_control_on_line == 0:

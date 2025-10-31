@@ -41,13 +41,6 @@ if matplotlib.get_backend() != 'TkAgg':
     matplotlib.use('TkAgg')
     plt.switch_backend('TkAgg')
 
-# def main():
-# 将红蓝双方运行的速度和位置保存
-red_pos_list = np.empty((0, 3))
-blue_pos_list = np.empty((0, 3))
-red_vel_list = np.empty((0, 3))
-blue_vel_list = np.empty((0, 3))
-
 
 def launch_missile_if_possible(env, side='r'):
     """
@@ -116,7 +109,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'combat'
+mission_name = 'Combat'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
@@ -199,7 +192,6 @@ if __name__=="__main__":
 
     from Visualize.tensorboard_visualize import TensorBoardLogger
 
-    out_range_count = 0
     return_list = []
     win_list = []
     steps_count = 0
@@ -281,13 +273,15 @@ if __name__=="__main__":
                     b_action_label, _ = agent.take_action(b_obs, explore=False)
                 
                 # 动作裁剪 todo
+                # 根据probs np裁剪，裁剪
+
                 b_action_list = [
-                    "",
-                    "",
-                    "",
-                    "",
+                    "attack",
+                    "escape",
+                    "left",
+                    "right",
                 ]
-                print("蓝方动作编号", b_action_label)
+                print("蓝方动作", b_action_list[b_action_label])
 
                 ### 发射导弹
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
@@ -327,8 +321,6 @@ if __name__=="__main__":
             episode_end_time = time.time()  # 记录结束时间
             # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
 
-            if env.lose==1:
-                out_range_count+=1
             return_list.append(episode_return)
 
             # tensorboard 训练进度显示
@@ -338,7 +330,9 @@ if __name__=="__main__":
                 pass # 不专门区分训练和测试回合
             else:
                 logger.add("train/1 episode_return", episode_return, total_steps)
-                logger.add("train/2 not lose", 1-env.lose, total_steps)
+                logger.add("train/2 win", env.win, total_steps)
+                logger.add("train/2 lose", env.lose, total_steps)
+                logger.add("train/2 draw", env.draw, total_steps)
 
                 if steps_since_update >= transition_dict_capacity:
                     steps_since_update = 0
@@ -359,7 +353,8 @@ if __name__=="__main__":
                     logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
                     # 强化学习actor特殊项监控
                     logger.add("train/9 entropy", agent.entropy_mean, total_steps)
-                    logger.add("train/10 ratio", agent.ratio_mean, total_steps)     
+                    logger.add("train/10 ratio", agent.ratio_mean, total_steps) 
+                    logger.add("train/11 episode/step", i_episode, total_steps)    
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)

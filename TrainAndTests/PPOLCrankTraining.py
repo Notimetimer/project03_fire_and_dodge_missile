@@ -249,7 +249,7 @@ if __name__=="__main__":
                     env.missiles = env.Rmissiles + env.Bmissiles
 
                 height_ego = env.BUAV.alt
-                delta_psi = b_obs_check['target_information'][1]
+                delta_psi = b_obs_check["target_information"][1]
 
                 # 机动决策
                 r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
