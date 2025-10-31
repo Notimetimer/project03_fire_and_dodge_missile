@@ -86,10 +86,10 @@ class AttackTrainEnv(Battle):
 
         target_alt = enm.alt
 
-        if alpha < 10*pi/180:
-            self.lock_time_count += dt_maneuver
-        if alpha > 30*pi/180:
-            self.lock_time_count = 0
+        # if alpha < 10*pi/180:
+        #     self.lock_time_count += dt_maneuver
+        # if alpha > 30*pi/180:
+        #     self.lock_time_count = 0
 
         # 结束判断
         if self.t > self.game_time_limit:
