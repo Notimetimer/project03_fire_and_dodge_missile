@@ -213,24 +213,18 @@ class PPOContinuous:
                  k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, critic_coef=0.5, batch_first=True):
 
         # 1. 创建 Actor，它内部包含了共享的 backbone
-        self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim, 
+        self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim,
                                             head_hidden_dims, action_dim, batch_first=batch_first).to(device)
-
-
 
         # 2. 创建 Critic，并把 Actor 的 backbone 传递给它，以实现共享
         self.critic = ValueNetGRU(self.actor.backbone, middle_dim, head_hidden_dims).to(device)
 
-
-
         # 3. 设置统一优化器，但为 backbone/actor_head/critic_head 保留独立 lr（使用 param_groups）
-        # 把参数分组：backbone / actor head (不含 backbone) / critic head (含 fc_out)
         backbone_params = list(self.actor.backbone.parameters())
-        # actor head params: 所有 actor 参数中排除 backbone 部分
+        # actor head params: actor 的所有参数中排除 backbone 部分
         actor_head_params = [p for n, p in self.actor.named_parameters() if not n.startswith("backbone.")]
         critic_head_params = list(self.critic.head.parameters()) + list(self.critic.fc_out.parameters())
 
-        # 如果未指定 backbone_lr，则默认使用 actor_lr
         if backbone_lr is None:
             backbone_lr = actor_lr
 
@@ -240,25 +234,24 @@ class PPOContinuous:
             {"params": critic_head_params, "lr": float(critic_lr)},
         ])
 
-        # 保留便捷引用与兼容性（避免外部直接依赖消失）
-        self.actor_optimizer = None
-        self.critic_optimizer = None
+        # 便捷引用与参数组保留（用于裁剪/检查）
         self._backbone_params = backbone_params
         self._actor_head_params = actor_head_params
         self._critic_head_params = critic_head_params
         self.critic_coef = critic_coef
 
-        self.gamma = gamma
-        self.lmbda = lmbda
-        self.epochs = epochs
-        self.eps = eps
+        # 确保超参数为正确类型，避免被误传入非数值对象
         self.device = device
-        self.k_entropy = k_entropy
-        self.critic_max_grad = critic_max_grad
-        self.actor_max_grad = actor_max_grad
-        self.max_std = max_std
+        self.gamma = float(gamma)
+        self.lmbda = float(lmbda) if lmbda is not None else None
+        self.epochs = int(epochs)
+        self.eps = float(eps)
+        self.k_entropy = float(k_entropy)
+        self.critic_max_grad = float(critic_max_grad)
+        self.actor_max_grad = float(actor_max_grad)
+        self.max_std = float(max_std)
 
-        # 添加隐藏状态管理
+        # 隐藏态信息
         self.gru_num_layers = gru_num_layers
         self.gru_hidden_size = gru_hidden_size
         self.hidden_state = None
@@ -338,6 +331,10 @@ class PPOContinuous:
         # state 现在的形状是 (SeqLen, StateDim), e.g., (10, 35)
         # 需要增加一个 batch 维度 -> (1, 10, 35)
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
+        # 如果外部传入了以 CPU 存储的 hidden（或来自 get_current_hidden_state_*），
+        # 在送进模型前需要移动到 device
+        if h_0 is not None:
+            h_0 = self._maybe_move_h0_to_device(h_0)
         # 检查state中是否存在nan
         if torch.isnan(state).any() or torch.isinf(state).any():
             print('state', state)
@@ -380,8 +377,8 @@ class PPOContinuous:
         # 构造形状 (1,1,StateDim) 并传入 critic
         state_input = torch.tensor(state, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
         # 确保 h0 在同一 device（如果有）
-        if h0 is not None and torch.is_tensor(h0):
-            h0 = h0.to(self.device)
+        if h0 is not None:
+            h0 = self._maybe_move_h0_to_device(h0)
 
         value, h_out = self.critic(state_input, h0)
         # 返回：value 为 numpy (detached on CPU)，h_out 为 detached CPU tensor
@@ -405,6 +402,24 @@ class PPOContinuous:
         #     return self.get_h0(batch_size=1)  # 默认 batch_size 为 1
         return self.hidden_state
 
+    def _maybe_move_h0_to_device(self, h0):
+        """
+        如果 h0 是 Tensor，则把它移动到 self.device（in-place 不做，返回新 tensor）。
+        如果 h0 为 None 或非 Tensor，直接返回原值。
+        目的：外部/存储的 hidden 通常以 CPU tensor 存储，使用前要移动到模型所在 device。
+        """
+        if h0 is None:
+            return None
+        if torch.is_tensor(h0):
+            # 保证是同一 device（避免出现 input 在 cuda:0 而 hidden 在 cpu 的错误）
+            if h0.device != self.device:
+                return h0.to(self.device)
+            return h0
+        # 如果是 numpy 等，先转为 tensor 再移动
+        try:
+            return torch.as_tensor(h0, device=self.device)
+        except Exception:
+            return h0
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=0):
         # states 张量现在的形状是 (Batch, SeqLen, StateDim)
@@ -541,13 +556,17 @@ class PPOContinuous:
             total_loss = actor_loss + self.critic_coef * critic_loss
             total_loss.backward()
             
-            # 裁剪前梯度
+            # 裁剪前梯度（基于分组/模块）
             pre_clip_actor_grad.append(model_grad_norm(self.actor))
-            pre_clip_critic_grad.append(model_grad_norm(self.critic))  
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))
 
-            # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            # 针对不同参数集合分别裁剪梯度（backbone/actor_head 使用 actor_max_grad，critic_head 使用 critic_max_grad）
+            if hasattr(self, "_backbone_params") and len(self._backbone_params) > 0:
+                nn.utils.clip_grad_norm_(self._backbone_params, max_norm=self.actor_max_grad)
+            if hasattr(self, "_actor_head_params") and len(self._actor_head_params) > 0:
+                nn.utils.clip_grad_norm_(self._actor_head_params, max_norm=self.actor_max_grad)
+            if hasattr(self, "_critic_head_params") and len(self._critic_head_params) > 0:
+                nn.utils.clip_grad_norm_(self._critic_head_params, max_norm=self.critic_max_grad)
 
             # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
             actor_grad_list.append(model_grad_norm(self.actor))

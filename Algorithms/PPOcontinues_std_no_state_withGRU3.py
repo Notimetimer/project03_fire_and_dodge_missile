@@ -216,7 +216,7 @@ class PPOContinuous:
                  k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, batch_first=True):
 
         # 1. 创建 Actor, 它内部包含自己独立的 backbone
-        self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim, 
+        self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim,
                                             head_hidden_dims, action_dim, batch_first=batch_first).to(device)
 
 
@@ -327,6 +327,10 @@ class PPOContinuous:
         # state 现在的形状是 (SeqLen, StateDim), e.g., (10, 35)
         # 需要增加一个 batch 维度 -> (1, 10, 35)
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
+        # 如果外部传入了以 CPU 存储的 hidden（或来自 get_current_hidden_state_*），
+        # 在送进模型前需要移动到 device
+        if h_0_a is not None:
+            h_0_a = self._maybe_move_h0_to_device(h_0_a)
         # 检查state中是否存在nan
         if torch.isnan(state).any() or torch.isinf(state).any():
             print('state', state)
@@ -340,6 +344,7 @@ class PPOContinuous:
         mu, std, h_n_a = self.actor(state, h_0_a, min_std=1e-6, max_std=max_action_std)
 
         # 更新Actor的隐藏状态
+        # 输出的 hidden 应保存在 CPU 上，便于外部存储/传递；但后续再次作为输入前需调用 _maybe_move_h0_to_device
         self.hidden_state_a = h_n_a.detach().cpu()
 
         # 检查mu, std是否含有nan
@@ -369,8 +374,8 @@ class PPOContinuous:
         # 构造形状 (1,1,StateDim) 并传入 critic
         state_input = torch.tensor(state, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
         # 确保 h0 在同一 device（如果有）
-        if h_0_c is not None and torch.is_tensor(h_0_c):
-            h_0_c = h_0_c.to(self.device)
+        if h_0_c is not None:
+            h_0_c = self._maybe_move_h0_to_device(h_0_c)
 
         value, h_n_c = self.critic(state_input, h_0_c)
         # 返回：value 为 numpy (detached on CPU)，h_n_c 为 detached CPU tensor
@@ -405,6 +410,24 @@ class PPOContinuous:
         """
         return self.hidden_state_c
 
+    def _maybe_move_h0_to_device(self, h0):
+        """
+        如果 h0 是 Tensor，则把它移动到 self.device（in-place 不做，返回新 tensor）。
+        如果 h0 为 None 或非 Tensor，直接返回原值。
+        目的：外部/存储的 hidden 通常以 CPU tensor 存储，使用前要移动到模型所在 device。
+        """
+        if h0 is None:
+            return None
+        if torch.is_tensor(h0):
+            # 保证是同一 device（避免出现 input 在 cuda:0 而 hidden 在 cpu 的错误）
+            if h0.device != self.device:
+                return h0.to(self.device)
+            return h0
+        # 如果是 numpy 等，先转为 tensor 再移动
+        try:
+            return torch.as_tensor(h0, device=self.device)
+        except Exception:
+            return h0
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=0):
         # states 张量现在的形状是 (Batch, SeqLen, StateDim)
