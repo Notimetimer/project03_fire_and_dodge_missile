@@ -36,7 +36,7 @@ pre_log_dir = os.path.join(project_root, "logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
 #
-log_dir = os.path.join(pre_log_dir, "Attack-run-20251001-150929")
+log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,

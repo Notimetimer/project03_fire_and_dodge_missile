@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.PPOAttackTrainingGRU import *
+from TrainAndTests.PPOAttackTrainingGRU3 import *
 import re
 
 dt_maneuver= 0.2 
@@ -81,7 +81,8 @@ try:
         env.dt_maneuver = dt_maneuver
         step = 0
         done = False
-        agent.reset_hidden_state()
+        # agent.reset_hidden_state()
+        agent.reset_hidden_state_a()
         hist_b_action = np.zeros(3)
         count = 0
 
@@ -95,8 +96,8 @@ try:
             env.BUAV.obs_memory = b_obs_check.copy()
 
             state = np.squeeze(b_obs_n)
-
-            h_current = agent.get_current_hidden_state()
+            h_current = agent.get_current_hidden_state_a()
+            # h_current = agent.get_current_hidden_state()
             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
             # 发射导弹判决
             if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
@@ -110,7 +111,8 @@ try:
                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                     o00=o00, R_cage=env.R_cage, wander=1
                                     )
-            b_action_n, u, h_next = agent.take_action(state=b_obs_n, h_0=h_current, action_bounds=action_bound, explore=True)
+            # b_action_n, u, h_next = agent.take_action(state=b_obs_n, h_0=h_current, action_bounds=action_bound, explore=True)
+            b_action_n, u, h_next = agent.take_action(state=b_obs_n, h_0_a=h_current, action_bounds=action_bound, explore=True)
             
             # 动作平滑（实验性）
             b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
