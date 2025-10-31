@@ -158,8 +158,8 @@ def run_single_test(seed, fake_input1, fake_input2):
                                     o00=o00, R_cage=env.R_cage, wander=1)
 
             # # 规则动作
-            # delta_psi = b_check_obs['target_information'][1]
-            # delta_height = b_check_obs['target_information'][0]
+            # delta_psi = b_check_obs["target_information"][1]
+            # delta_height = b_check_obs["target_information"][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
 
             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)

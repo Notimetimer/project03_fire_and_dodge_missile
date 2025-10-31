@@ -141,8 +141,8 @@ try:
             b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=0) 
 
             # # 规则动作
-            delta_psi = b_obs_check['target_information'][1]
-            # delta_height = b_check_obs['target_information'][0]
+            delta_psi = b_obs_check["target_information"][1]
+            # delta_height = b_check_obs["target_information"][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
             height_ego = env.BUAV.alt
 

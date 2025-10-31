@@ -211,7 +211,7 @@ for i in range(10):
         #                            )
         
         b_states = env.base_obs('b', pomdp=1)
-        distance = b_states['target_information'][3] * 10e3
+        distance = b_states["target_information"][3] * 10e3
         warning = b_states["warning"]
         enm_delta_psi = b_states["target_information"][1]
         cos_threat_delta_psi = b_states["threat"][0]

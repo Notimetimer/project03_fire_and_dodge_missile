@@ -735,9 +735,9 @@ class Battle(object):
         return None
 
     def get_terminate(self):
-        # 超时强制结束回合
-        if self.t > self.game_time_limit:
-            return True
+        # # 超时强制结束回合
+        # if self.t > self.game_time_limit:
+        #     return True
 
         if all(self.UAV_hit):
             return True

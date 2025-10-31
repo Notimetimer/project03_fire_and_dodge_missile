@@ -155,7 +155,7 @@ try:
                 env.missiles = env.Rmissiles + env.Bmissiles
 
             height_ego = env.BUAV.alt
-            delta_psi = atan2(b_obs_check['target_information'][1], b_obs_check['target_information'][0])
+            delta_psi = atan2(b_obs_check["target_information"][1], b_obs_check["target_information"][0])
             RWR_b = b_obs_check['warning']
 
             b_state = env.get_state('b')
@@ -219,8 +219,8 @@ try:
                 print()
 
             # # 规则动作
-            # delta_psi = b_obs_check['target_information'][1]
-            # delta_height = b_obs_check['target_information'][0]
+            # delta_psi = b_obs_check["target_information"][1]
+            # delta_height = b_obs_check["target_information"][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
 
             # # 动作平滑（实验性）

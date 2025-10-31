@@ -57,47 +57,12 @@ class ChooseStrategyEnv(Battle):
         # # 初始化红蓝远离速度
         # self.last_dist_dot = None
         # self.last_dhor = None
+        self.last_obs = None
 
-    def attack_obs(self, side):
-        full_obs = self.base_obs(side, pomdp=0)
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
-        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        full_obs["border"] = copy.deepcopy(self.obs_init["border"])
-
-        # 将观测按顺序拉成一维数组
-        flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs, full_obs
-
-    def escape_obs(self, side):
-        full_obs = self.base_obs(side, pomdp=0)  ###
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        full_obs["target_alive"] = copy.deepcopy(self.obs_init["target_alive"])
-        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
-        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
-
-        # 逃逸过程中会出现部分观测的情况，已在base_obs中写下规则
-        # 只有在warning为TRUE的时候才能够获取威胁信息，已在get_state中写下规则
-        # 将观测按顺序拉成一维数组
-        flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs, full_obs
-
-    def crank_obs(self, side, pomdp=0):
-        full_obs = self.base_obs(side)
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        full_obs["target_locked"] = copy.deepcopy(self.obs_init["target_locked"])
-        full_obs["missile_in_mid_term"] = copy.deepcopy(self.obs_init["missile_in_mid_term"])
-        full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-
-        # 将观测按顺序拉成一维数组
-        flat_obs = flatten_obs(full_obs, self.key_order)
-        return flat_obs, full_obs
+    # def attack_obs(self, side):
+    # def escape_obs(self, side):
+    # def crank_obs(self, side, pomdp=0):
+        
 
     def step(self, r_actions, b_actions):
         # 这一层的action是离散的动作类型
@@ -122,11 +87,15 @@ class ChooseStrategyEnv(Battle):
                     continue
                 # 输入动作与动力运动学状态
                 uav_obs = self.base_obs(UAV.side, pomdp=0)  ### test 部分观测的话用1
-                delta_height_scaled = uav_obs["target_information"][0]
-                delta_psi = uav_obs["target_information"][1]
                 delta_theta = uav_obs["target_information"][2]
-                distance = uav_obs['target_information'][3] * 10e3
+                distance = uav_obs["target_information"][3] * 10e3
                 d_hor, leftright = uav_obs["border"]
+                # state = self.get_state(UAV.side)
+                speed = uav_obs["ego_main"][0]
+                alt = uav_obs["ego_main"][1]
+                cos_delta_psi = uav_obs["target_information"][0]
+                sin_delta_psi = uav_obs["target_information"][1]
+                delta_psi = atan2(sin_delta_psi, cos_delta_psi)
 
                 move_action = np.zeros(3)
 
@@ -172,7 +141,7 @@ class ChooseStrategyEnv(Battle):
                 if action == 4:
                     # 转圈搜索目标
                     # 该部分不训练智能体，改为使用规则智能体
-                    move_action[0] = np.clip(delta_height_scaled, self.min_alt_safe - UAV.alt,
+                    move_action[0] = np.clip(8000 - UAV.alt, self.min_alt_safe - UAV.alt,
                                              self.max_alt_safe - UAV.alt) * 5000
 
                     if leftright >= 0:
@@ -181,17 +150,16 @@ class ChooseStrategyEnv(Battle):
                         move_action[1] = -pi
                     move_action[2] = 1.0 * 340
 
-                # 避让水平边界动作修正：
-                # print(UAV.side)
-                state = self.get_state(UAV.side)
-                dist_2_hor = state["border"][0]
-                move_action = self.back_in_cage(move_action, UAV.pos_, UAV.psi)
+                # # 避让水平边界动作修正：
+                # # print(UAV.side)
+                # state = self.get_state(UAV.side)
+                # dist_2_hor = state["border"][0]
+                # move_action = self.back_in_cage(move_action, UAV.pos_, UAV.psi)
 
-                # if UAV.side == 'r':
-                #     print(move_action)
-                #     print()
-
-                pass
+                # # if UAV.side == 'r':
+                # #     print(move_action)
+                # #     print()
+                # pass
 
                 UAV.move(move_action[0], move_action[1], move_action[2], relevant_height=True)
 
@@ -330,14 +298,71 @@ class ChooseStrategyEnv(Battle):
         else:
             done = 0
 
+        if self.t > self.game_time_limit:
+            done = 1
+            # 如果超时，我方打光导弹，导弹全自爆，对手导弹还有剩，且存活，判定为负
+            if ego.ammo + len(alive_ally_missiles) == 0 and \
+                enm.ammo + len(alive_enm_missiles) > 0 and not enm.dead:
+                self.lose = 1
+
+            # 如果超时，对手打光导弹，导弹全自爆，我方导弹还有剩，且存活，判定为胜
+            elif enm.ammo + len(alive_enm_missiles) == 0 and \
+                ego.ammo + len(alive_ally_missiles) > 0 and not ego.dead:
+                self.win = 1                
+
+            # 如果超时，双方均未打光导弹/仍有导弹在空中飞，且双方均存活，判定为平
+            else:
+                self.draw = 1
+
         reward = 0
         event_reward = 0
         if self.win:
-            reward += 20
+            reward += 30
         if self.lose:
-            reward -= 20
+            reward -= 30
         if self.draw:
-            reward -= 10
+            reward -= 0
+
+        uav_obs = self.base_obs(side, pomdp=0)  ### test 部分观测的话用1
+        delta_theta = uav_obs["target_information"][2]
+        distance = uav_obs["target_information"][3] * 10e3
+        d_hor, leftright = uav_obs["border"]
+        # state = self.get_state(UAV.side)
+        speed = uav_obs["ego_main"][0] * 340
+        alt = uav_obs["ego_main"][1] *5000
+        cos_delta_psi = uav_obs["target_information"][0]
+        sin_delta_psi = uav_obs["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        alpha = uav_obs["target_information"][4]
+        warning = uav_obs["warning"]
+        missile_in_mid_term = uav_obs["missile_in_mid_term"]
+        missile_time_to_hit_obs = uav_obs["weapon"]*120
+
+        
+        # 密集奖励
+        # 没发射导弹时alpha越小越好
+        if len(alive_ally_missiles) == 0:
+            reward += 1 - alpha / pi
+
+        # 导弹处于中制导阶段时alpha在±pi/3之间为奖励高台， 其余随alpha线性减少
+        if missile_in_mid_term:
+            # 高台奖励：alpha在[-pi/3, pi/3]区间奖励高，其余线性递减
+            if abs(alpha) < np.pi / 3:
+                reward += 1
+            else:
+                reward += 1 - (alpha - pi / 3) / pi
+
+        # 有warning时alpha越大越好
+        if warning:
+            # 奖励大迎角（更利于规避来袭导弹）
+            reward += alpha / pi
+
+
+        
+        # deltapsi变化率奖励 todobedontinued
+
+
+        # 优势度函数 tobecontinued
 
 
         return done, reward, event_reward

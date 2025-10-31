@@ -93,11 +93,11 @@ try:
                 print()
             
             # # 规则动作
-            cos_delta_psi = b_obs_check['target_information'][0]
-            sin_delta_psi = b_obs_check['target_information'][1]
+            cos_delta_psi = b_obs_check["target_information"][0]
+            sin_delta_psi = b_obs_check["target_information"][1]
             delta_psi = atan2(sin_delta_psi, cos_delta_psi)
-            delta_theta = b_obs_check['target_information'][2]
-            dist = b_obs_check['target_information'][3]
+            delta_theta = b_obs_check["target_information"][2]
+            dist = b_obs_check["target_information"][3]
             delta_height = env.RUAV.alt - env.BUAV.alt
             b_action_n = crank_behavior(delta_psi, delta_height)
             height_ego = env.BUAV.alt
