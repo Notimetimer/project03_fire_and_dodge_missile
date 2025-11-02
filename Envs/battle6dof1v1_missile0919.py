@@ -68,6 +68,7 @@ def sigmoid(x):
 class Battle(object):
     def __init__(self, args, tacview_show=0):
         # super(Battle, self).__init__() 
+        self.p2p_control = False
         self.alive_b_missiles = None
         self.alive_r_missiles = None
         self.BUAV = None
@@ -248,7 +249,7 @@ class Battle(object):
                     target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
                     delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
 
-                UAV.move(target_height, delta_heading, target_speed, relevant_height=True)
+                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=self.p2p_control)
                 # 上一步动作
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
