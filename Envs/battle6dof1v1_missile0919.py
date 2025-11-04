@@ -166,14 +166,14 @@ class Battle(object):
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             UAV.pos_ = red_birth_state['position']  # np.array([-38841.96119795, 9290.02131746, -1686.95469864])
-            UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
-            speed = UAV.speed
-            mach, _ = calc_mach(speed, UAV.pos_[1])
-            UAV.mach = mach
-            UAV.psi = red_birth_state[
-                'psi']  # (0 + (random.randint(0, 1) - 0.5) * 2 * random.uniform(50, 60)) * pi / 180
-            UAV.theta = 0 * pi / 180
-            UAV.gamma = 0 * pi / 180
+            # 判断是否有自定义初始速度、theta、phi
+            UAV.speed = red_birth_state.get('speed', 300)  # (UAV.speed_max - UAV.speed_min) / 2
+            # speed = UAV.speed
+            # mach, _ = calc_mach(speed, UAV.pos_[1])
+            # UAV.mach = mach
+            UAV.psi = red_birth_state['psi']
+            UAV.theta = red_birth_state.get('theta', 0 * pi / 180)
+            UAV.gamma = red_birth_state.get('phi', 0 * pi / 180)
             UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
                                              sin(UAV.theta),
                                              cos(UAV.theta) * sin(UAV.psi)])
@@ -193,11 +193,10 @@ class Battle(object):
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             UAV.pos_ = blue_birth_state['position']  # np.array([38005.14540582, 6373.80721704, -1734.42509136])
-            UAV.speed = (UAV.speed_max - UAV.speed_min) / 2
+            UAV.speed = blue_birth_state.get('speed', (UAV.speed_max - UAV.speed_min) / 2)
             UAV.psi = blue_birth_state['psi']
-            # (180 + (random.randint(0, 1) - 0.5) * 2 * random.uniform(50, 60)) * pi / 180
-            UAV.theta = 0 * pi / 180
-            UAV.gamma = 0 * pi / 180
+            UAV.theta = blue_birth_state.get('theta', 0 * pi / 180)
+            UAV.gamma = blue_birth_state.get('phi', 0 * pi / 180)
             UAV.psi = sub_of_radian(UAV.psi, 0)
             UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
                                              sin(UAV.theta),
@@ -829,16 +828,19 @@ class Battle(object):
                 if not UAV.dead:
                     if UAV.side == 'r':
                         color = 'Red'
+                        pilot = 'Maverick'
                     elif UAV.side == 'b':
                         color = 'Blue'
+                        pilot = 'Ice'
                     else:
                         color = 'Black'
+                        pilot = 'invader'
 
                     data_to_send += (
                         f"#{send_t:.2f}\n"
                         f"{UAV.id},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                         f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                        f"Name=F16,Color={color}\n"
+                        f"Name=F16,Pilot={pilot},Color={color}\n"
                     )
                     # data_to_send+=(
                     #     f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"

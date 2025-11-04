@@ -344,7 +344,8 @@ if __name__=="__main__":
             return_list.append(episode_return)
 
             if test_run == 1:
-                logger.add("train/2 not lose", np.mean(env.win), total_steps)
+                logger.add("train/2 win", np.mean(env.win), total_steps)
+                logger.add("train/2 lose", np.mean(env.lose), total_steps)
 
             # tensorboard 训练进度显示
             if test_run == 0:

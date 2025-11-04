@@ -103,7 +103,8 @@ class UAVModel(object):
         sim["ic/h-sl-ft"] = h0 * 3.2808  # 高度：m -> ft
         sim["ic/vt-kts"] = v0 * 1.9438  # 空速： m/s-> 节 vt 真空速 ic/vc 仪表空速
         sim["ic/psi-true-deg"] = psi0 * 180 / pi  # 航向角: °
-        sim["ic/phi-deg"] = phi0 * 180 / pi
+        temp = phi0 * 180 / pi
+        sim["ic/phi-deg"] = temp if abs(abs(temp)/90-1)> 0.1 else temp*0.9
         sim["ic/theta-deg"] = theta0 * 180 / pi
         sim["ic/alpha-deg"] = 0
         sim["ic/beta-deg"] = 0

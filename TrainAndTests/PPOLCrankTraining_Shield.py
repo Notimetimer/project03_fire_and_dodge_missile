@@ -192,7 +192,7 @@ if __name__=="__main__":
             red_height = np.clip(blue_height+random.uniform(-2e3, 2e3), 3e3, 12e3)
             blue_psi = pi/2
             red_psi = -pi/2
-            red_N = random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
+            red_N = 0 # random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
             red_E = 35e3
             blue_N = red_N
             blue_E = -35e3
@@ -219,6 +219,8 @@ if __name__=="__main__":
             # b_action_list = []
             
             episode_start_time = time.time()
+
+            last_alpha = None
 
             # 环境运行一轮的情况
             for count in range(round(args.max_episode_len / dt_maneuver)):
@@ -274,18 +276,23 @@ if __name__=="__main__":
                 #                         o00=o00, R_cage=env.R_cage, wander=0
                 #                         )
                 
-                # # Shield介入
-                
+                # Shield介入
+                delta_theta = b_obs_check["target_information"][2]
                 alpha = b_obs_check["target_information"][4]
-                if alpha > alpha_trigger:
-                    if env.RUAV.alt > env.BUAV.alt:
-                        b_action_n[0] = 500
-                    elif env.RUAV.alt < env.BUAV.alt:
-                        b_action_n[0] = -500
-                    else:
-                        b_action_n[0] = 0
+                if last_alpha is None:
+                    alpha_dot = 0
+                else:
+                    alpha_dot = (alpha-last_alpha)/dt_maneuver
+                if alpha_dot > 0:
+                    t_last = (alpha_trigger-alpha)/alpha_dot
+                else:
+                    t_last = np.inf
 
-                    b_action_n[1] = delta_psi
+                last_alpha = alpha
+
+                if t_last < 2 or alpha > alpha_trigger:
+                    b_action_n[0] = 2 * delta_theta/pi*2*5000 # env.RUAV.alt - env.BUAV.alt
+                    b_action_n[1] = 2 * delta_psi
 
                     # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
                     # if delta_psi>0:
@@ -349,7 +356,8 @@ if __name__=="__main__":
             return_list.append(episode_return)
 
             if test_run == 1:
-                logger.add("train/2 not lose", np.mean(env.win), total_steps)
+                logger.add("train/2 win", np.mean(env.win), total_steps)
+                logger.add("train/2 lose", np.mean(env.lose), total_steps)
 
             # tensorboard 训练进度显示
             if test_run == 0:
