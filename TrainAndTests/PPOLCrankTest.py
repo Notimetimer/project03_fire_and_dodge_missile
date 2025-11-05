@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # from TrainAndTests.PPOLCrankTraining import *
-from TrainAndTests.PPOLCrankTraining_std_clipping import *
+from TrainAndTests.PPOLCrankTrain_std_clip import *
 
 import re
 

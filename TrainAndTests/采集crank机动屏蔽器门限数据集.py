@@ -108,9 +108,6 @@ if __name__=="__main__":
     t_bias = 0
     steps_since_update = 0
 
-    test_interval = 10 # 50
-
-
     # 准备数据集结构
 
     # v: 0.9*340到2*340，5个等间隔
@@ -146,18 +143,13 @@ if __name__=="__main__":
     # ATA: 40到60，步长1
     ATA = np.arange(40, 61, 1)
 
-
-
-    alpha_trigger = 51*pi/180
-
-
-    # 强化学习训练
-    # for i_episode in range(int(max_episodes*(1-pre_train_rate))):
-    while total_steps < int(max_steps*(1-pre_train_rate)):
-        i_episode += 1
-
-        # # 飞机出生状态指定
-        # init_case = np.random.randint(initial_states.shape[0])
+    # 采集样本
+    for i1 in range(data_array.shape[0]):
+        for i_D in range(len(D)):
+            ata_list = []
+            for ata in ATA:
+                # 初始化，仿真，打出
+                pass
 
         blue_height = random.uniform(3e3, 12e3)
         red_height = np.clip(blue_height+random.uniform(-2e3, 2e3), 3e3, 12e3)

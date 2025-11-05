@@ -281,7 +281,7 @@ if __name__=="__main__":
                     "left",
                     "right",
                 ]
-                print("蓝方动作", b_action_list[b_action_label])
+                # print("蓝方动作", b_action_list[b_action_label])
 
                 ### 发射导弹
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)

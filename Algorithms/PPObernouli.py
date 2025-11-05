@@ -77,9 +77,9 @@ class ValueNet(torch.nn.Module):
         return self.fc_out(y)
 
 
-class PolicyNetDiscrete(torch.nn.Module):
+class PolicyNetBernouli(torch.nn.Module):
     def __init__(self, state_dim, hidden_dims, action_dim):
-        super(PolicyNetDiscrete, self).__init__()
+        super(PolicyNetBernouli, self).__init__()
         self.prelu = torch.nn.PReLU()
         layers = []
         prev_size = state_dim
@@ -89,21 +89,22 @@ class PolicyNetDiscrete(torch.nn.Module):
             layers.append(nn.ReLU())
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, action_dim)
+        self.fc_out = torch.nn.Linear(prev_size, action_dim)  # 输出 action_dim 个概率值
 
         # # 固定神经网络初始化参数
         # torch.nn.init.xavier_normal_(self.fc_out.weight, gain=0.01)
 
     def forward(self, x):
         x = self.net(x)
-        return F.softmax(self.fc_out(x), dim=1)
+        return self.fc_out(x)  # 不再使用 sigmoid 激活函数
 
 
-class PPO_discrete:
+
+class PPO_bernouli:
     ''' PPO算法,采用截断方式 '''
     def __init__(self, state_dim, hidden_dims, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2):
-        self.actor = PolicyNetDiscrete(state_dim, hidden_dims, action_dim).to(device)
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2):
+        self.actor = PolicyNetBernouli(state_dim, hidden_dims, action_dim).to(device)  # 使用 PolicyNetBernouli
         self.critic = ValueNet(state_dim, hidden_dims).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
@@ -114,9 +115,8 @@ class PPO_discrete:
         self.eps = eps
         self.device = device
         self.k_entropy = k_entropy
-        self.actor_max_grad=actor_max_grad
-        self.critic_max_grad=critic_max_grad
-
+        self.critic_max_grad = critic_max_grad
+        self.actor_max_grad = actor_max_grad
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -127,28 +127,55 @@ class PPO_discrete:
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr    
 
+    def get_action_probs(self, state):
+        """
+        获取动作概率分布。
+        :param state: 输入状态 (tensor)
+        :return: 动作概率 (tensor)
+        """
+        logits = self.actor(state)  # 获取未经过 sigmoid 的 logits
+        probs = torch.sigmoid(logits)  # 应用 sigmoid 激活函数
+        return probs
+
     # take action
-    def take_action(self, state, explore=True):
+    def take_action(self, state, explore=True, mask=None):
+        # state -> tensor (1, state_dim)
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
-        probs = self.actor(state)
-        action_dist = torch.distributions.Categorical(probs) # 离散的输出为类别分布
+        probs = self.get_action_probs(state)  # 调用 get_action_probs 获取概率 (1,action_dim)
+
         if explore:
-            action = action_dist.sample()
+            sampled = torch.bernoulli(probs)  # (1, action_dim)
         else:
-            action = torch.argmax(probs)
-        # 返回动作索引与对应的概率分布（numpy array）
-        probs_np = probs.detach().cpu().numpy()[0].copy() # [0]是batch维度
-        return probs_np, action.item()
+            sampled = (probs >= 0.5).float()
+
+        # to numpy arrays (flatten for probs, keep action as 1-D ndarray)
+        probs_np = probs.detach().cpu().numpy().flatten()           # shape (action_dim,)
+        actions_np = sampled.detach().cpu().numpy().reshape(-1)     # shape (action_dim,)
+
+        # mask = np.array([[0,1]] * probs_np.shape[-1]) ###
+        if mask is not None:
+            actions_np = np.clip(actions_np, mask[:, 0], mask[:, 1])
+            # for i, action in enumerate(actions_np):
+            #     actions_np[i] = np.clip(action, mask[i][0], mask[i][1])
+
+        # 如果 action_dim == 1，保持返回形状为 (1,) 而不是 python int
+        return actions_np, probs_np
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        # actions 必须为 long 用于 gather 索引
-        actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.long).view(-1, 1).to(self.device)
+        # actions 必须为 float，用于计算 log_prob
+        actions = torch.tensor(transition_dict['actions'], dtype=torch.float).to(self.device)
+        # # 统一 actions 形状为 (N, action_dim)
+        # if actions.dim() == 1:
+        #     actions = actions.unsqueeze(1)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        log_probs = torch.log(self.actor(states).gather(1, actions))
+        probs = self.get_action_probs(states)  # 调用 get_action_probs 获取概率
+        log_probs = torch.log(probs) * actions + torch.log(1 - probs) * (1 - actions)
+        log_probs = log_probs.sum(dim=1, keepdim=True)  # 对所有动作维度求和
+        
         # 添加Actor NaN检查
         if torch.isnan(log_probs).any():
             raise ValueError("NaN in Actor outputs")
@@ -164,15 +191,14 @@ class PPO_discrete:
         # 优势归一化
         if adv_normed:
             adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
-            # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
-            
-            # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
         # 提前计算一次旧的 value 预测（用于 value clipping）
         v_pred_old = self.critic(states).detach()  # (N,1)
 
-        old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
+        old_probs = self.get_action_probs(states).detach()  # 调用 get_action_probs 获取概率
+        old_log_probs = torch.log(old_probs) * actions + torch.log(1 - old_probs) * (1 - actions)
+        old_log_probs = old_log_probs.sum(dim=1, keepdim=True).detach()
 
         actor_grad_list = []
         actor_loss_list = []
@@ -184,7 +210,10 @@ class PPO_discrete:
         ratio_list = []
 
         for _ in range(self.epochs):
-            log_probs = torch.log(self.actor(states).gather(1, actions))
+            probs = self.get_action_probs(states)  # 调用 get_action_probs 获取概率
+            log_probs = torch.log(probs) * actions + torch.log(1 - probs) * (1 - actions)
+            log_probs = log_probs.sum(dim=1, keepdim=True)
+
             # 添加Actor NaN检查
             if torch.isnan(log_probs).any():
                 raise ValueError("NaN in Actor outputs in loop")
@@ -197,15 +226,13 @@ class PPO_discrete:
             check_weights_bias_nan(self.actor, "actor", "update循环中")
             check_weights_bias_nan(self.critic, "critic", "update循环中")
 
-            log_probs = torch.log(self.actor(states).gather(1, actions)) # (N,1)
             ratio = torch.exp(log_probs - old_log_probs) # (N,1)
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
 
-            probs = self.actor(states)
-            action_dist = torch.distributions.Categorical(probs)
-
-            entropy_factor = action_dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            # 计算熵
+            entropy = - probs * torch.log(probs) - (1 - probs) * torch.log(1 - probs)
+            entropy_factor = entropy.sum(dim=1).mean()
 
             actor_loss = torch.mean(-torch.min(surr1, surr2)) - self.k_entropy * entropy_factor # 标量
 
@@ -241,7 +268,7 @@ class PPO_discrete:
             actor_loss_list.append(actor_loss.detach().cpu().item())
             critic_grad_list.append(model_grad_norm(self.critic))            
             critic_loss_list.append(critic_loss.detach().cpu().item())
-            entropy_list.append(action_dist.entropy().mean().detach().cpu().item())
+            entropy_list.append(entropy_factor.detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
         
         self.actor_loss = np.mean(actor_loss_list)

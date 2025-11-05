@@ -61,7 +61,7 @@ def wander_behavior():
     return alt_cmd, heading_cmd, speed_cmd
 
 
-def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_missiles, o00, R_cage, wander=0):
+def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_missiles, o00, R_cage, wander=0, set_height=7e3, set_speed=None):
     # 输出为所需的绝对高度、相对方位和绝对速度
     # 是否有导弹可用
     has_missile_in_the_air = 0
@@ -85,7 +85,7 @@ def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_miss
     ego_height = ego_pos_[1]
 
     # 默认高度指令（固定高度7000m）
-    action_n[0] = 7e3 - ego_height
+    action_n[0] = set_height - ego_height
 
     L_ = enm_pos_ - ego_pos_
     beta = atan2(L_[2], L_[0])
@@ -103,7 +103,7 @@ def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_miss
         heading_cmd, speed_cmd = track_behavior(delta_psi)
 
     action_n[1] = heading_cmd
-    action_n[2] = speed_cmd
+    action_n[2] = speed_cmd if set_speed is None else set_speed
 
     # 追踪任务的目标在散步
     if wander:

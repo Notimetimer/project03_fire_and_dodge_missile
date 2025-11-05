@@ -217,6 +217,13 @@ class ChooseStrategyEnv(Battle):
                         target.got_hit = True
                         self.UAV_hit[self.UAV_ids.index(target.id)] = True
 
+                if missile.dead == True and not hit:
+                    target.escape_once = 1
+                    # 目标逃脱
+                else:
+                    target.escape_once = 0
+
+
             # 毁伤判断
             for i, UAV in enumerate(self.UAVs):
                 # 飞机被导弹命中判断
@@ -317,50 +324,77 @@ class ChooseStrategyEnv(Battle):
         reward = 0
         event_reward = 0
         if self.win:
-            reward += 30
+            reward += 300
         if self.lose:
-            reward -= 30
+            reward -= 300
         if self.draw:
             reward -= 0
 
-        uav_obs = self.base_obs(side, pomdp=0)  ### test 部分观测的话用1
-        delta_theta = uav_obs["target_information"][2]
-        distance = uav_obs["target_information"][3] * 10e3
-        d_hor, leftright = uav_obs["border"]
+        uav_states = self.base_obs(side, pomdp=0)  ### test 部分观测的话用1
+        enm_state = self.base_obs(enm.side, pomdp=0)  ### test 部分观测的话用1
+        delta_theta = uav_states["target_information"][2]
+        distance = uav_states["target_information"][3]
+        d_hor, leftright = uav_states["border"]
         # state = self.get_state(UAV.side)
-        speed = uav_obs["ego_main"][0] * 340
-        alt = uav_obs["ego_main"][1] *5000
-        cos_delta_psi = uav_obs["target_information"][0]
-        sin_delta_psi = uav_obs["target_information"][1]
+        speed = uav_states["ego_main"][0]
+        alt = uav_states["ego_main"][1]
+        cos_delta_psi = uav_states["target_information"][0]
+        sin_delta_psi = uav_states["target_information"][1]
         delta_psi = atan2(sin_delta_psi, cos_delta_psi)
-        alpha = uav_obs["target_information"][4]
-        warning = uav_obs["warning"]
-        missile_in_mid_term = uav_obs["missile_in_mid_term"]
-        missile_time_to_hit_obs = uav_obs["weapon"]*120
+        alpha = uav_states["target_information"][4]
+        warning = uav_states["warning"]
+        missile_in_mid_term = uav_states["missile_in_mid_term"]
+        missile_time_since_shoot = uav_states["weapon"]
 
-        
-        # 密集奖励
-        # 没发射导弹时alpha越小越好
-        if len(alive_ally_missiles) == 0:
-            reward += 1 - alpha / pi
-
-        # 导弹处于中制导阶段时alpha在±pi/3之间为奖励高台， 其余随alpha线性减少
+        # 事件/密集奖励
+        # 为导弹提供制导
         if missile_in_mid_term:
-            # 高台奖励：alpha在[-pi/3, pi/3]区间奖励高，其余线性递减
-            if abs(alpha) < np.pi / 3:
-                reward += 1
-            else:
-                reward += 1 - (alpha - pi / 3) / pi
+            reward += 2
 
-        # 有warning时alpha越大越好
+        # 锁定目标
+        if uav_states["target_locked"]:
+            reward += 1.1
+
+        # 被目标锁定
+        if uav_states["locked_by_target"]:
+            reward -= 1
+
+        # 收到导弹警告
         if warning:
-            # 奖励大迎角（更利于规避来袭导弹）
-            reward += alpha / pi
+            reward -= 3
+
+        # 导弹锁定目标
+        if enm_state["warning"]:
+            reward += 3
+
+        # 逃脱导弹
+        if ego.escape_once:
+            reward += 10
+
+        # 导弹被逃脱
+        if enm.escape_once:
+            reward -= 5
 
 
+        # # 密集奖励
+        # # 没发射导弹时alpha越小越好
+        # if len(alive_ally_missiles) == 0:
+        #     reward += 1 - alpha / pi
+
+        # # 导弹处于中制导阶段时alpha在±pi/3之间为奖励高台， 其余随alpha线性减少
+        # if missile_in_mid_term:
+        #     # 高台奖励：alpha在[-pi/3, pi/3]区间奖励高，其余线性递减
+        #     if abs(alpha) < np.pi / 3:
+        #         reward += 1
+        #     else:
+        #         reward += 1 - (alpha - pi / 3) / pi
+
+        # # 有warning时alpha越大越好
+        # if warning:
+        #     # 奖励大迎角（更利于规避来袭导弹）
+        #     reward += alpha / pi
         
         # deltapsi变化率奖励 todobedontinued
-
 
         # 优势度函数 tobecontinued
 

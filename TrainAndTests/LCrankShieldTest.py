@@ -148,14 +148,14 @@ if __name__=="__main__":
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                 'psi': red_psi,
                                 'speed': 200, #200.0,
-                                'phi': pi/2, # *2/3,
-                                'theta': 10*pi/180,
+                                'phi': 0, # *2/3,
+                                'theta': 0*pi/180,
                                 }
         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                     'psi': blue_psi,
                                     'speed': 800, #200.0,
-                                    'phi': pi/2,
-                                    'theta': -10*pi/180,
+                                    'phi': 0,
+                                    'theta': 0*pi/180,
                                     }
         
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,

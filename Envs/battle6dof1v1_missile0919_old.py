@@ -439,7 +439,7 @@ class Battle(object):
         pass # todo 需要由导弹的类实例报告
 
         # 导弹预计碰撞时间 / 30s, 如果没有在飞行导弹，在get_obs中置为4(120s)
-        missile_time_to_hit_obs = 4
+        missile_time_since_shoot = 4
         pass # todo 需要由导弹的类实例报告
 
         # 目标雷达跟踪标志 bool
@@ -484,7 +484,7 @@ class Battle(object):
             cos_phi,
             target_tracked,
             missile_in_mid_term,
-            missile_time_to_hit_obs,
+            missile_time_since_shoot,
             locked_by_target,
             warning,
             threat_delta_psi,

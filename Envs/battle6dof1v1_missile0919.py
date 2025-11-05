@@ -46,7 +46,7 @@ dt_maneuver = 0.2  # 0.02 0.8 0.2
 dt_move = 0.02
 report_move_time_rate = int(round(dt_maneuver / dt_move))
 
-o00 = np.array([118, 30])  # 地理原点的经纬
+o00 = np.array([144.7, 13.4])  # 地理原点的经纬
 # t = 0
 g_ = np.array([0, -g, 0])
 # theta_limit = 85 * pi / 180
@@ -180,6 +180,7 @@ class Battle(object):
             lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
+            UAV.escape_once = 0
             self.RUAVs.append(UAV)
             self.RUAVsTable[UAV.id] = (UAV, UAV.side, UAV.dead)
         # 蓝方初始化
@@ -204,6 +205,7 @@ class Battle(object):
             lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
+            UAV.escape_once = 0
             self.BUAVs.append(UAV)
             self.BUAVsTable[UAV.id] = (UAV, UAV.side, UAV.dead)
         self.running = True
@@ -218,6 +220,35 @@ class Battle(object):
 
         # print(red_birth_state)
         # print(blue_birth_state)
+
+    def launch_missile(self, side='r'):
+        """
+        立即发射导弹
+        """
+        if side == 'r':
+            uav = self.RUAV
+            ally_missiles = self.Rmissiles
+            target = self.BUAV
+        if side == 'b':
+            uav = self.BUAV
+            ally_missiles = self.Bmissiles
+            target = self.RUAV
+        else:
+            print("请检查阵营")
+            raise ValueError
+
+        # 发射导弹
+        if uav.ammo>0 and not uav.dead:
+            new_missile = uav.launch_missile(target, self.t, missile_class)
+            uav.ammo -= 1
+            new_missile.side = 'r' if side == 'r' else 'b'
+            if side == 'r':
+                self.Rmissiles.append(new_missile)
+            else:
+                self.Bmissiles.append(new_missile)
+            self.missiles = self.Rmissiles + self.Bmissiles
+            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+
 
     def step(self, r_actions, b_actions):
         report_move_time_rate = int(round(self.dt_maneuver / dt_move))
@@ -305,6 +336,12 @@ class Battle(object):
                         target.dead = True
                         target.got_hit = True
                         self.UAV_hit[self.UAV_ids.index(target.id)] = True
+
+                if missile.dead == True and not hit:
+                    target.escape_once = 1
+                    # 目标逃脱
+                else:
+                    target.escape_once = 0
 
             # 毁伤判断
             for i, UAV in enumerate(self.UAVs):
@@ -452,19 +489,30 @@ class Battle(object):
         else:
             target_locked = 0
 
-        # 导弹中制导状态 bool 与 预计碰撞时间
+        # 导弹中制导状态 bool 与 导弹发射间隔时间
         missile_in_mid_term = 0
-        missile_time_to_hit_obs = 120
+        # 废弃，剩余命中时间
+        # missile_time_since_shoot = 120
+        # if not alive_own_missiles:  # len(alive_own_missiles) == 0
+        #     pass
+        # else:
+        #     time2hits = np.ones(len(alive_own_missiles)) * 120
+        #     for i, missile in enumerate(alive_own_missiles):
+        #         time2hits[i] = missile.time2hit
+        #         if missile.guidance_stage < 3:
+        #             missile_in_mid_term = 1
+        #             break
+        #     missile_time_since_shoot = min(time2hits)
+        missile_time_since_shoot = 120
         if not alive_own_missiles:  # len(alive_own_missiles) == 0
             pass
         else:
-            time2hits = np.ones(len(alive_own_missiles)) * 120
+            time_since_shoots = np.ones(len(alive_own_missiles)) * 120
             for i, missile in enumerate(alive_own_missiles):
-                time2hits[i] = missile.time2hit
+                time_since_shoots[i] = missile.t
                 if missile.guidance_stage < 3:
                     missile_in_mid_term = 1
-                    break
-            missile_time_to_hit_obs = min(time2hits)
+            missile_time_since_shoot = min(time_since_shoots)
 
         # 首先找到所有存活的友方导弹是否由本机发射
         # 然后判断该导弹的 .guidance_stage是否<3
@@ -602,7 +650,7 @@ class Battle(object):
                 float(beta_air)  # 6 rad
             ]),
 
-            "weapon": float(missile_time_to_hit_obs),
+            "weapon": float(missile_time_since_shoot),
 
             "threat": np.array([
                 float(cos(threat_delta_psi)),  # 0
@@ -1049,3 +1097,31 @@ def launch_missile_if_possible(env, side='r'):
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+
+
+def launch_missile_immediately(env, side='r'):
+    """
+    立即发射导弹
+    """
+    if side == 'r':
+        uav = env.RUAV
+        ally_missiles = env.Rmissiles
+        target = env.BUAV
+    else:  # side == 'b'
+        uav = env.BUAV
+        ally_missiles = env.Bmissiles
+        target = env.RUAV
+
+    # 发射导弹
+    if uav.ammo>0 and not uav.dead:
+        new_missile = uav.launch_missile(target, env.t, missile_class)
+        uav.ammo -= 1
+        new_missile.side = 'r' if side == 'r' else 'b'
+        if side == 'r':
+            env.Rmissiles.append(new_missile)
+        else:
+            env.Bmissiles.append(new_missile)
+        env.missiles = env.Rmissiles + env.Bmissiles
+        print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+
+

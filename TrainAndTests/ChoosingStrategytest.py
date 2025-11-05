@@ -3,7 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.ChoosingStrategyTraining import *
+from TrainAndTests.ChoosingStrategyTrain import *
 import re
 
 dt_maneuver = 0.2  # 0.2
@@ -96,13 +96,6 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # initial_states = np.load(save_path)
 # print("读取的数据\n", initial_states)
 
-
-def save_meta_once(path, state_dict):
-    if os.path.exists(path):
-        return
-    meta = {k: list(v.shape) for k, v in state_dict.items()}
-    with open(path, "w") as f:
-        json.dump(meta, f)
 
 def creat_initial_state():
     # 飞机出生状态指定
