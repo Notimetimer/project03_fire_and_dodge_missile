@@ -109,8 +109,13 @@ class ShootTrainEnv(Battle):
             terminate = True
             # self.lose = 1  # 还没进入范围判定为负
 
-        # 
-        if ego.ammo==0 and len(ally_missiles)==0:
+        # 被对面近身威胁了直接判负
+        if dist < 10e3 and enm_state["target_information"][4]<pi/3:
+            terminate = True
+            self.lose = 1
+
+        # 导弹打光没干掉对面直接判负
+        if ego.ammo==0 and len(ally_missiles)==0 and not enm.dead:
             terminate = True
             self.lose = 1
 
@@ -118,6 +123,9 @@ class ShootTrainEnv(Battle):
         if enm.dead:
             terminate = True
             self.win = 1
+
+        if self.win and self.lose:
+            self.draw = 1
 
         reward_base = 100 / (self.game_time_limit/dt_maneuver)  # 防自杀奖励
 
@@ -183,8 +191,8 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     at0 = at
     if distance > 80e3 or alpha > pi/3:
         at = 0
-    if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
-        at = 1
+    # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
+    #     at = 1
     if launch_interval < 5:
         at = 0
 
