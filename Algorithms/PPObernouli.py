@@ -164,7 +164,7 @@ class PPO_bernouli:
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         # actions 必须为 float，用于计算 log_prob
-        actions = torch.tensor(transition_dict['actions'], dtype=torch.float).to(self.device)
+        actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
         # # 统一 actions 形状为 (N, action_dim)
         # if actions.dim() == 1:
         #     actions = actions.unsqueeze(1)
