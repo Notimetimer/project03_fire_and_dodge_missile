@@ -60,9 +60,9 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=5*60,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=6*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=60e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -75,8 +75,8 @@ critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度
 # num_episodes = 1000 # 10000 1000
 max_steps = 65e4
 hidden_dim = [128, 128, 128]  # 128
-gamma = 0.9
-lmbda = 0.9
+gamma = 0.99 # 0.9
+lmbda = 0.97 # 0.9
 epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
@@ -317,7 +317,7 @@ if __name__ == "__main__":
                 out_range_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
-            agent.update(transition_dict)
+            agent.update(transition_dict, adv_normed=1)
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
@@ -349,7 +349,7 @@ if __name__ == "__main__":
                 print(f"episode {i_episode}, total_steps {total_steps}")
 
             # tensorboard 训练进度显示
-            logger.add("train/1 episode_return", episode_return, total_steps)
+            logger.add("train/1 episode_return", episode_return/env.t, total_steps)
             logger.add("train/2 win", env.win, total_steps)
             logger.add("train/2 lose", env.lose, total_steps)
 

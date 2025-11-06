@@ -62,7 +62,7 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=170e3,  # 8 * 60,
                     help="")
 
 args = parser.parse_args()
@@ -149,7 +149,8 @@ if __name__=="__main__":
         initial_height = data_array[1]
         initial_d = data_array[2]
         for i_D in range(len(D)):
-            ata_list = []
+            # ata_list = []
+            max_ATA = 0
             for ata in ATA:
                 # 初始化，仿真，找出ata的介入边界
 
@@ -162,6 +163,13 @@ if __name__=="__main__":
                 blue_N = red_N
                 blue_E = -35e3
 
+                DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+                                        'psi': red_psi}
+                DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+                                            'psi': blue_psi}
+                
+                env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
+                        red_init_ammo=0, blue_init_ammo=0) # 1
                 DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                         'psi': red_psi}
                 DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
@@ -194,7 +202,11 @@ if __name__=="__main__":
                     # 在这里将观测信息压入记忆
                     env.RUAV.obs_memory = r_obs_check.copy()
                     env.BUAV.obs_memory = b_obs_check.copy()
+                    # 在这里将观测信息压入记忆
+                    env.RUAV.obs_memory = r_obs_check.copy()
+                    env.BUAV.obs_memory = b_obs_check.copy()
 
+                    b_obs = np.squeeze(b_obs_n)
                     b_obs = np.squeeze(b_obs_n)
 
                     distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
@@ -209,6 +221,8 @@ if __name__=="__main__":
 
                     height_ego = env.BUAV.alt
                     delta_psi = b_obs_check["target_information"][1]
+                    height_ego = env.BUAV.alt
+                    delta_psi = b_obs_check["target_information"][1]
 
                     # 机动决策
                     r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
@@ -220,6 +234,10 @@ if __name__=="__main__":
                         print('b_obs', b_obs_check)
                         print()
 
+                    # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
+                    b_action_n = np.array([-4000, pi/2, 300])
+                    if env.BUAV.alt < 3000:
+                        b_action_n[0] = 0
                     # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
                     b_action_n = np.array([-4000, pi/2, 300])
                     if env.BUAV.alt < 3000:
@@ -244,7 +262,12 @@ if __name__=="__main__":
                         t_last = np.inf
 
                     last_alpha = alpha
+                    last_alpha = alpha
 
+                    if t_last < 2 or alpha > alpha_trigger:
+                        b_action_n[0] = 2 * delta_theta/pi*2*5000 # env.RUAV.alt - env.BUAV.alt
+                        b_action_n[1] = 2 * delta_psi
+                        print()
                     if t_last < 2 or alpha > alpha_trigger:
                         b_action_n[0] = 2 * delta_theta/pi*2*5000 # env.RUAV.alt - env.BUAV.alt
                         b_action_n[1] = 2 * delta_psi
@@ -255,7 +278,15 @@ if __name__=="__main__":
                     #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
                     # else:
                     #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
+                    # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
+                    # if delta_psi>0:
+                    #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+                    # else:
+                    #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
+                    _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                    done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
+                    next_b_obs, next_b_obs_check = env.crank_obs('b')  # 子策略的训练不要用get_obs
                     _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                     done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
                     next_b_obs, next_b_obs_check = env.crank_obs('b')  # 子策略的训练不要用get_obs
@@ -265,9 +296,18 @@ if __name__=="__main__":
                         out_angle = 1
                     else:
                         out_angle = 0
+                    
+                    if next_b_obs_check["target_information"][4]>pi/3:
+                        out_angle = 1
+                    else:
+                        out_angle = 0
 
                     done = done or fake_terminate
+                    done = done or fake_terminate
 
+                    '''显示运行轨迹'''
+                    # 可视化
+                    env.render(t_bias=t_bias)
                     '''显示运行轨迹'''
                     # 可视化
                     env.render(t_bias=t_bias)

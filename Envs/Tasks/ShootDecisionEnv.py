@@ -88,13 +88,13 @@ class ShootTrainEnv(Battle):
             ego = self.RUAV
             enm = self.BUAV
             all_ally_missiles = self.Rmissiles
-            ally_missiles = self.alive_r_missiles
+            alive_ally_missiles = self.alive_r_missiles
 
         if side == 'b':
             ego = self.BUAV
             enm = self.RUAV
             all_ally_missiles = self.Bmissiles
-            ally_missiles = self.alive_b_missiles
+            alive_ally_missiles = self.alive_b_missiles
 
         target_alt = enm.alt
         enm_state = self.get_state(enm.side)
@@ -109,15 +109,15 @@ class ShootTrainEnv(Battle):
             terminate = True
             # self.lose = 1  # 还没进入范围判定为负
 
-        # 被对面近身威胁了直接判负
+        # 被对面刀了直接判负
         if dist < 10e3 and enm_state["target_information"][4]<pi/3:
             terminate = True
             self.lose = 1
 
-        # 导弹打光没干掉对面直接判负
-        if ego.ammo==0 and len(ally_missiles)==0 and not enm.dead:
-            terminate = True
-            self.lose = 1
+        # # 导弹打光没干掉对面直接判负
+        # if ego.ammo==0 and len(alive_ally_missiles)==0 and not enm.dead:
+        #     terminate = True
+        #     self.lose = 1
 
         # 命中判断
         if enm.dead:
@@ -135,18 +135,25 @@ class ShootTrainEnv(Battle):
         # 发射惩罚，根据 missile_time_since_shoot
         reward_shoot = 0
         if ut == 1:
-            reward_shoot += (missile_time_since_shoot-120)/120
+            reward_shoot += np.clip((missile_time_since_shoot-30)/120, -1,1)  # 过30s发射就可以奖励了
+        
+        if terminate and ego.ammo==6:
+            reward_shoot -= 100 # 一发都不打必须重罚
+        if terminate and ego.ammo<6:
+            reward_shoot += 20 # 至少打了一枚
 
-        # 在中制导阶段发射导弹时惩罚
+        # 重复发射导弹时惩罚, 否则有奖励
         reward_SuoHa = 0
-        if state["missile_in_mid_term"] and ut==1:
-            reward_SuoHa -= 10
+        if len(alive_ally_missiles)>1 and ut==1: # state["missile_in_mid_term"] and ut==1:
+            reward_SuoHa -= 30
+        if len(alive_ally_missiles)>1 and ut==0: # state["missile_in_mid_term"] and ut==0:
+            reward_SuoHa += 30
 
         # 违规动作惩罚，包括没在范围硬要发射和在范围不发射
         reward_violate = 0
-        _, violate = shoot_action_shield(ut, dist, alpha, AA_hor, launch_interval)
-        if violate:
-            reward_violate -= 5
+        # _, violate = shoot_action_shield(ut, dist, alpha, AA_hor, launch_interval)
+        # if violate:
+        #     reward_violate -= 5
 
         # miss 惩罚
         reward_miss = 0
@@ -158,7 +165,7 @@ class ShootTrainEnv(Battle):
         if self.lose:
             reward_event = -300
         if self.win:
-            reward_event = 300
+            reward_event = 300 + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
 
         # 0.2? 0.02?
         reward = np.sum([
@@ -189,14 +196,42 @@ class ShootTrainEnv(Battle):
 
 def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     at0 = at
+    # if distance > 60e3:
+    #     interval_refer = 30
+    # elif distance>40e3:
+    #     interval_refer = 20
+    # elif distance>20e3:
+    #     interval_refer = 15
+    # else:
+    #     interval_refer = 8
+
+    if distance>20e3:
+        interval_refer = 16
+    else:
+        interval_refer = 8
+    
     if distance > 80e3 or alpha > pi/3:
         at = 0
     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
     #     at = 1
-    if launch_interval < 5:
+    if launch_interval < interval_refer:
         at = 0
 
     same = int(bool(at0) == bool(at))
     xor  = int(bool(at0) != bool(at))  
 
     return at, xor
+
+# def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
+#     at0 = at
+#     if distance > 80e3 or alpha > pi/3:
+#         at = 0
+#     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
+#     #     at = 1
+#     if launch_interval < 5:
+#         at = 0
+
+#     same = int(bool(at0) == bool(at))
+#     xor  = int(bool(at0) != bool(at))  
+
+#     return at, xor
