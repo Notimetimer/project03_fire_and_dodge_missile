@@ -110,7 +110,7 @@ class ShootTrainEnv(Battle):
             # self.lose = 1  # 还没进入范围判定为负
 
         # 被对面刀了直接判负
-        if dist < 10e3 and enm_state["target_information"][4]<pi/3:
+        if dist < 10e3 and enm_state["target_information"][4]<pi/6:
             terminate = True
             self.lose = 1
 
@@ -134,8 +134,20 @@ class ShootTrainEnv(Battle):
 
         # 发射惩罚，根据 missile_time_since_shoot
         reward_shoot = 0
+
+        # 11.06.15:30 test
+        interval = 30
+        if abs(AA_hor)>pi/2 and dist < 25e3:
+            interval = 5
+        if abs(AA_hor)<pi/2 and dist < 25e3:
+            interval = 10
+        if abs(AA_hor)<pi/2 and dist > 25e3:
+            interval = 20
+
+
+
         if ut == 1:
-            reward_shoot += np.clip((missile_time_since_shoot-30)/120, -1,1)  # 过30s发射就可以奖励了
+            reward_shoot += np.clip((missile_time_since_shoot-interval)/120, -1,1)  # 过30s发射就可以奖励了
             reward_shoot += abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀  新增
 
         if dist <= 20e3 and ego.ammo==6:
@@ -206,10 +218,20 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     # else:
     #     interval_refer = 8
 
+    # todo 对方在我射界内向我发射了一枚导弹，我也应该向对方来一枚
+    
+    # test
+    if abs(distance-55e3) < 1e3:
+        at = 1
+    if distance<30e3 and abs(AA_hor)>pi/2:
+        at = 1
+
     if distance>20e3:
-        interval_refer = 16
-    else:
-        interval_refer = 8
+        interval_refer = 10
+    elif distance>10e3:
+        interval_refer = 5
+    elif distance < 10e3:
+        interval_refer = 3
     
     if distance > 80e3 or alpha > pi/3:
         at = 0
@@ -239,3 +261,6 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
 #     xor  = int(bool(at0) != bool(at))  
 
 #     return at, xor
+
+
+

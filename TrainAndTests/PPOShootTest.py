@@ -64,7 +64,7 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=6*60,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=8*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
                     help="")
@@ -254,6 +254,7 @@ if __name__ == "__main__":
 
                 # Shield
                 # print(AA_hor*180/pi)
+                at = 1 if distance<20e3 else at  # test
                 at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
 
                 if at == 1:
