@@ -137,8 +137,8 @@ class ShootTrainEnv(Battle):
         if ut == 1:
             reward_shoot += np.clip((missile_time_since_shoot-30)/120, -1,1)  # 过30s发射就可以奖励了
             reward_shoot += abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀  新增
-        
-        if terminate and ego.ammo==6:
+
+        if dist <= 20e3 and ego.ammo==6:
             reward_shoot -= 100 # 一发都不打必须重罚
         if terminate and ego.ammo<6:
             reward_shoot += 20 # 至少打了一枚
@@ -166,7 +166,7 @@ class ShootTrainEnv(Battle):
         if self.lose:
             reward_event = -300
         if self.win:
-            reward_event = 300 + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
+            reward_event = 300 + dist/30e3 * 100  #  + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
 
         # 0.2? 0.02?
         reward = np.sum([
@@ -218,8 +218,8 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     if launch_interval < interval_refer:
         at = 0
 
-    # if abs(AA_hor) < pi*1/3 and distance>12e3: ## 禁止超视距完全尾追发射 新增
-    #     at=0
+    if abs(AA_hor) < pi*1/3 and distance>12e3: ## 禁止超视距完全尾追发射 新增
+        at=0
 
     same = int(bool(at0) == bool(at))
     xor  = int(bool(at0) != bool(at))  

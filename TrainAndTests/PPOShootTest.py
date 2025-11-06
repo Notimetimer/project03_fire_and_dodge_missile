@@ -253,7 +253,7 @@ if __name__ == "__main__":
                 at = ut
 
                 # Shield
-                print(AA_hor*180/pi)
+                # print(AA_hor*180/pi)
                 at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
 
                 if at == 1:
