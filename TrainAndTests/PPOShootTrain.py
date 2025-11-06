@@ -16,7 +16,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.Tasks.ShootDecisionEnv import *
+from Envs.Tasks.ShootDecisionEnv_backup import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi

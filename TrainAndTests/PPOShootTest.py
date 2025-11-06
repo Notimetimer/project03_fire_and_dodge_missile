@@ -170,7 +170,7 @@ if __name__ == "__main__":
         win_list = []
         # with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
         # for i_episode in range(int(num_episodes*(1-pre_train_rate))):
-        for i_episode in range(3):  # 10
+        for i_episode in range(4):  # 10
             i_episode += 1
             test_run = 1
             i_episode += 1
@@ -296,8 +296,11 @@ if __name__ == "__main__":
 
             
 
-            if env.lose == 1:
-                out_range_count += 1
+            if env.lose:
+                print("回合失败")
+            if env.win:
+                print("回合胜利")
+
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
 

@@ -10,12 +10,6 @@ import os
 import importlib
 import copy
 
-table = np.array([
-        [10e3, 5],
-        [20e3, 10],
-        [30e3, 25],
-        [60e3, 60]
-    ])
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -36,7 +30,7 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 from Envs.battle6dof1v1_missile0919 import *
-from Math_calculates import LinearInterpolation1d
+
 
 # 通过继承构建观测空间、奖励函数和终止条件
 
@@ -140,38 +134,21 @@ class ShootTrainEnv(Battle):
 
         # 发射惩罚，根据 missile_time_since_shoot
         reward_shoot = 0
-
-        # 11.06.15:30 test
-        interval = 30
-        # if abs(AA_hor)>pi/2 and dist < 25e3:
-        #     interval = 5
-        # if abs(AA_hor)<pi/2 and dist < 25e3:
-        #     interval = 10
-        # if abs(AA_hor)<pi/2 and dist > 25e3:
-        #     interval = 20
-        table = np.array([
-            [10e3, 3],
-            [20e3, 5],
-            [30e3, 10],
-            [60e3, 60]
-        ])
-        interval = LinearInterpolation1d.f(table, dist)
-
         if ut == 1:
-            reward_shoot += 20*np.clip((missile_time_since_shoot-interval)/60, -1,1)  # 过30s发射就可以奖励了
-            reward_shoot += 20*abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀  敌机hot时候该打，敌机cold时候该溜
+            reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
+            reward_shoot += 0.5 * abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀  新增
 
-        if dist <= 20e3 and ego.ammo==5:
+        if dist <= 20e3 and ego.ammo==6:
             reward_shoot -= 100 # 一发都不打必须重罚
-        if terminate and ego.ammo<5:
+        if terminate and ego.ammo<6:
             reward_shoot += 20 # 至少打了一枚
 
         # 重复发射导弹时惩罚, 否则有奖励
         reward_SuoHa = 0
         if len(alive_ally_missiles)>1 and ut==1: # state["missile_in_mid_term"] and ut==1:
-            reward_SuoHa -= 60
+            reward_SuoHa -= 30
         if len(alive_ally_missiles)>1 and ut==0: # state["missile_in_mid_term"] and ut==0:
-            reward_SuoHa += 10
+            reward_SuoHa += 30
 
         # 违规动作惩罚，包括没在范围硬要发射和在范围不发射
         reward_violate = 0
@@ -182,14 +159,14 @@ class ShootTrainEnv(Battle):
         # miss 惩罚
         reward_miss = 0
         if enm.escape_once:
-            reward_miss -= 40
+            reward_miss -= 10
 
         # 结果奖励
         reward_event = 0
         if self.lose:
             reward_event = -300
         if self.win:
-            reward_event = 300 + dist/30e3 * 100  #  + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
+            reward_event = 300 + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
 
         # 0.2? 0.02?
         reward = np.sum([
@@ -220,31 +197,31 @@ class ShootTrainEnv(Battle):
 
 def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     at0 = at
-    # if distance > 60e3:
-    #     interval_refer = 30
-    # elif distance>40e3:
-    #     interval_refer = 20
-    # elif distance>20e3:
-    #     interval_refer = 15
-    # else:
-    #     interval_refer = 8
+    if distance > 60e3:
+        interval_refer = 30
+    elif distance>40e3:
+        interval_refer = 20
+    elif distance>20e3:
+        interval_refer = 15
+    else:
+        interval_refer = 8
 
     # todo 对方在我射界内向我发射了一枚导弹，我也应该向对方来一枚
     
-    # test
-    if abs(distance-55e3) < 1e3:
-        at = 1
+    # # test
+    # if abs(distance-55e3) < 1e3 and alt>8000:
+    #     at = 1
+
+
     if distance<30e3 and abs(AA_hor)>pi/2:
         at = 1
-    
-    interval_refer = LinearInterpolation1d.f(table, distance)
 
     # if distance>20e3:
-    #     interval_refer = 10
+    #     interval_refer = 15
     # elif distance>10e3:
-    #     interval_refer = 5
+    #     interval_refer = 10
     # elif distance < 10e3:
-    #     interval_refer = 3
+    #     interval_refer = 5
     
     if distance > 80e3 or alpha > pi/3:
         at = 0
@@ -274,6 +251,3 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
 #     xor  = int(bool(at0) != bool(at))  
 
 #     return at, xor
-
-
-
