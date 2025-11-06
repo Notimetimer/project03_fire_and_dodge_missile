@@ -81,39 +81,6 @@ r_action = []
 b_action = []
 
 
-def launch_missile_if_possible(env, side='r'):
-    """
-    根据条件判断是否发射导弹
-    """
-    if side == 'r':
-        uav = env.RUAV
-        ally_missiles = env.Rmissiles
-        target = env.BUAV
-    else:  # side == 'b'
-        uav = env.BUAV
-        ally_missiles = env.Bmissiles
-        target = env.RUAV
-
-    waite = False
-    for missile in ally_missiles:
-        if not missile.dead:
-            waite = True
-            break
-        
-    if not waite:
-        # 判断是否可以发射导弹
-        if uav.can_launch_missile(target, env.t):
-            # 发射导弹
-            new_missile = uav.launch_missile(target, env.t, missile_class)
-            uav.ammo -= 1
-            new_missile.side = 'r' if side == 'r' else 'b'
-            if side == 'r':
-                env.Rmissiles.append(new_missile)
-            else:
-                env.Bmissiles.append(new_missile)
-            env.missiles = env.Rmissiles + env.Bmissiles
-            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
-
 start_time = time.time()
 launch_time_count = 0
 
@@ -183,8 +150,8 @@ for i in range(10):
         # 发射导弹判决
         if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
             launch_time_count = 0
-            launch_missile_if_possible(env, side='r')
-            launch_missile_if_possible(env, side='b')
+            launch_missile_immediately(env, side='r')
+            launch_missile_immediately(env, side='b')
 
         # 机动决策
         # r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,

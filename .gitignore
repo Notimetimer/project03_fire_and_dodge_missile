@@ -22,3 +22,12 @@
 /Utilities/__pycache__
 /Visualize/__pycache__
 /Math_calculates/__pycache__
+/Algorithms/__pycache__
+/Controller/__pycache__
+*.pyc
+*.pyc
+/__pycache__
+/Math_calculates/__pycache__
+/Utilities/__pycache__
+/Utilities/__pycache__
+/Visualize/__pycache__

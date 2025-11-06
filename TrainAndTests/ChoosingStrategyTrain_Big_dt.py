@@ -41,39 +41,69 @@ if matplotlib.get_backend() != 'TkAgg':
     matplotlib.use('TkAgg')
     plt.switch_backend('TkAgg')
 
+# def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
+#     at0 = at
+#     # if distance > 60e3:
+#     #     interval_refer = 30
+#     # elif distance>40e3:
+#     #     interval_refer = 20
+#     # elif distance>20e3:
+#     #     interval_refer = 15
+#     # else:
+#     #     interval_refer = 8
 
-def launch_missile_if_possible(env, side='r'):
-    """
-    根据条件判断是否发射导弹
-    """
-    if side == 'r':
-        uav = env.RUAV
-        ally_missiles = env.Rmissiles
-        target = env.BUAV
-    else:  # side == 'b'
-        uav = env.BUAV
-        ally_missiles = env.Bmissiles
-        target = env.RUAV
+#     if distance>20e3:
+#         interval_refer = 16
+#     else:
+#         interval_refer = 8
+    
+#     if distance > 80e3 or alpha > pi/3:
+#         at = 0
+#     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
+#     #     at = 1
+#     if launch_interval < interval_refer:
+#         at = 0
 
-    waite = False
-    for missile in ally_missiles:
-        if not missile.dead:
-            waite = True
-            break
+#     if abs(AA_hor) < pi*1/3 and distance>12e3: ## 禁止超视距完全尾追发射 新增
+#         at=0
+
+#     same = int(bool(at0) == bool(at))
+#     xor  = int(bool(at0) != bool(at))  
+
+#     return at, xor
+
+# def launch_missile_if_possible(env, side='r'):
+#     """
+#     根据条件判断是否发射导弹
+#     """
+#     if side == 'r':
+#         uav = env.RUAV
+#         ally_missiles = env.Rmissiles
+#         target = env.BUAV
+#     else:  # side == 'b'
+#         uav = env.BUAV
+#         ally_missiles = env.Bmissiles
+#         target = env.RUAV
+
+#     waite = False
+#     for missile in ally_missiles:
+#         if not missile.dead:
+#             waite = True
+#             break
         
-    if not waite:
-        # 判断是否可以发射导弹
-        if uav.can_launch_missile(target, env.t):
-            # 发射导弹
-            new_missile = uav.launch_missile(target, env.t, missile_class)
-            uav.ammo -= 1
-            new_missile.side = 'r' if side == 'r' else 'b'
-            if side == 'r':
-                env.Rmissiles.append(new_missile)
-            else:
-                env.Bmissiles.append(new_missile)
-            env.missiles = env.Rmissiles + env.Bmissiles
-            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+#     if not waite:
+#         # 判断是否可以发射导弹
+#         if uav.can_launch_missile(target, env.t):
+#             # 发射导弹
+#             new_missile = uav.launch_missile(target, env.t, missile_class)
+#             uav.ammo -= 1
+#             new_missile.side = 'r' if side == 'r' else 'b'
+#             if side == 'r':
+#                 env.Rmissiles.append(new_missile)
+#             else:
+#                 env.Bmissiles.append(new_missile)
+#             env.missiles = env.Rmissiles + env.Bmissiles
+#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 start_time = time.time()
 launch_time_count = 0

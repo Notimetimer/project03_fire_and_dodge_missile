@@ -484,7 +484,7 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        if ATA < own.max_radar_angle and dist < own.max_radar_range:
+        if ATA <= own.max_radar_angle and dist <= own.max_radar_range and target_alive:
             target_locked = 1
         else:
             target_locked = 0
@@ -731,6 +731,8 @@ class Battle(object):
                     state["target_observable"] = 2  # 否则除了不能发射导弹，都是可见的
             else:
                 state["target_observable"] = 2  # 10km类信息完全可见
+            # if not state["target_alive"]:
+            #     state["target_observable"] = 0
 
         uav.obs_memory = copy.deepcopy(state)  # 更新残留值
 
@@ -1112,8 +1114,11 @@ def launch_missile_immediately(env, side='r'):
         ally_missiles = env.Bmissiles
         target = env.RUAV
 
+    ego_state = env.get_state(uav.side)
+    target_locked = ego_state["target_locked"]
+
     # 发射导弹
-    if uav.ammo>0 and not uav.dead:
+    if uav.ammo>0 and not uav.dead and target_locked and ego_state["weapon"]>=3:
         new_missile = uav.launch_missile(target, env.t, missile_class)
         uav.ammo -= 1
         new_missile.side = 'r' if side == 'r' else 'b'
@@ -1125,3 +1130,53 @@ def launch_missile_immediately(env, side='r'):
         print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 
+def launch_missile_with_basic_rules(env, side='r'):
+    """
+    立即发射导弹
+    """
+    if side == 'r':
+        uav = env.RUAV
+        ally_missiles = env.Rmissiles
+        target = env.BUAV
+    else:  # side == 'b'
+        uav = env.BUAV
+        ally_missiles = env.Bmissiles
+        target = env.RUAV
+
+    ego_state = env.get_state(uav.side)
+    target_locked = ego_state["target_locked"]
+    alt = ego_state["ego_main"][1]
+    dist = ego_state["target_information"][3]
+    ATA = ego_state["target_information"][4]
+    AA_hor = ego_state["target_information"][6]
+    interval = ego_state["weapon"]
+
+    # 发射导弹
+    can_shoot = 0
+    should_shoot = 0
+    if uav.ammo>0 and not uav.dead and target_locked and interval>=3:
+        can_shoot = 1
+    
+    if can_shoot:
+        should_shoot = 0
+        if dist<=5e3:
+            should_shoot = 1
+
+        elif dist<=20e3 and abs(AA_hor)>=pi/2:
+            should_shoot = 1
+
+        # elif dist<=80e3 and interval
+        
+
+
+
+    if should_shoot:
+        new_missile = uav.launch_missile(target, env.t, missile_class)
+        uav.ammo -= 1
+        new_missile.side = 'r' if side == 'r' else 'b'
+        if side == 'r':
+            env.Rmissiles.append(new_missile)
+        else:
+            env.Bmissiles.append(new_missile)
+        env.missiles = env.Rmissiles + env.Bmissiles
+        print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
