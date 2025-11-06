@@ -36,3 +36,5 @@
 /Math_calculates/__pycache__
 /Math_calculates/__pycache__
 /TrainAndTests/__pycache__
+/Envs/__pycache__
+*.pyc

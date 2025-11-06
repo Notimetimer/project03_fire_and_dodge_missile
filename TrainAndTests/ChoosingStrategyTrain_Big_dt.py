@@ -34,7 +34,7 @@ from Algorithms.PPOdiscrete import *
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
 
-use_tacview = 0  # 是否可视化
+use_tacview = 1  # 是否可视化
 
 # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
 if matplotlib.get_backend() != 'TkAgg':
@@ -72,38 +72,6 @@ if matplotlib.get_backend() != 'TkAgg':
 
 #     return at, xor
 
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
-
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-        
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'r' if side == 'r' else 'b'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 start_time = time.time()
 launch_time_count = 0
@@ -145,8 +113,7 @@ mission_name = 'Combat'
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
-action_bound0 = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
-action_bound = copy.deepcopy(action_bound0)
+
 state_dim = 35  # len(b_obs_spaces)
 action_dim = 4  # 5 #######################
 
@@ -247,12 +214,16 @@ if __name__=="__main__":
             test_run = 0
 
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
 
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=6, blue_init_ammo=6)
+            action_cycle = 10  # 智能体每 10 步决策一次
+            last_decision_state = None
+            current_action = None
+            b_reward = None
 
             done = False
 
@@ -270,11 +241,13 @@ if __name__=="__main__":
             episode_start_time = time.time()
 
             # 环境运行一轮的情况
+            steps_of_this_eps = -1 # 没办法了
             for count in range(round(args.max_episode_len / dt_maneuver)):
                 # print(f"time: {env.t}")  # 打印当前的 count 值
                 # 回合结束判断
                 # print(env.running)
                 current_t = count * dt_maneuver
+                steps_of_this_eps += 1
                 if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
                     # print('回合结束，时间为：', env.t, 's')
                     break
@@ -282,75 +255,105 @@ if __name__=="__main__":
                 r_check_obs = env.base_obs('r')
                 b_check_obs = env.base_obs('b')
                 b_obs_n = flatten_obs(b_check_obs, env.key_order)
-
                 # 在这里将观测信息压入记忆
                 env.RUAV.obs_memory = r_check_obs.copy()
                 env.BUAV.obs_memory = b_check_obs.copy()
-
                 b_obs = np.squeeze(b_obs_n)
-
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-                
-                # 机动决策
-                if current_t % dt_action_cycle == 0: # This is the main change
+
+                # --- 智能体决策 ---
+                # 判断是否到达了决策点（每 10 步）
+                if steps_of_this_eps % action_cycle == 0:
+                    # **关键点 1: 完成并存储【上一个】动作周期的经验**
+                    # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
+                    if steps_of_this_eps > 0:
+                        transition_dict['states'].append(last_decision_state)
+                        transition_dict['actions'].append(current_action)
+                        transition_dict['rewards'].append(b_reward)
+                        transition_dict['next_states'].append(b_obs) # 当前状态是上个周期的 next_state
+                        transition_dict['dones'].append(False) # 没结束，所以是 False
+
+                    # **关键点 2: 开始【新的】一个动作周期**
+                    # 1. 记录新周期的起始状态
+                    last_decision_state = b_obs
+                    # 2. Agent 产生一个动作
                     if not test_run:
-                        b_action_label, _ = agent.take_action(b_obs, explore=True)
+                        b_action_probs, b_action_label = agent.take_action(b_obs, explore=True)
                     else:
-                        b_action_label, _ = agent.take_action(b_obs, explore=False)
+                        b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
                     
-                    # Store the state and action when the agent makes a decision
-                    if not test_run:
-                        transition_dict['states'].append(b_obs)
-                        transition_dict['actions'].append(b_action_label)
-                        transition_dict['action_bounds'].append(action_bound)
+                    b_action_options = [
+                        "attack",
+                        "escape",
+                        "left",
+                        "right",
+                    ]
+                    # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
+                    # b_action_list.append(b_action_label)
 
-                # If it's not an action cycle, simply use the last chosen action for the step
-                # (You might want a more sophisticated way to hold action, but for now, this assumes the action persists)
-                if not 'b_action_label' in locals(): # Initial action for the very first step
-                    b_action_label = 0 # Default action if not yet decided
+                    r_action_label = 0 # Red's action, assuming it's fixed or from another policy
+                    # r_action_list.append(r_action_label)
+                    
 
-                b_action_options = [
-                    "attack",
-                    "escape",
-                    "left",
-                    "right",
-                ]
-                # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
-
-                ### 发射导弹
+                ### 发射导弹，这部分不受10step约束
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 # 发射导弹判决
                 if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
                     launch_time_count = 0
                     launch_missile_if_possible(env, side='r')
                     launch_missile_if_possible(env, side='b')
-
-                r_action_label = 0 # Red's action, assuming it's fixed or from another policy
-                r_action_list.append(r_action_label)
-                # b_action_list.append(b_action_label) # Removed this here, as action is taken less frequently
-
+                
                 _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b')
-                
+                done = done or fake_terminate
+
                 # Accumulate rewards between agent decisions
                 episode_return += b_reward * env.dt_maneuver
 
-                # Only append next_state, reward, and done at the end of the action cycle
-                if (current_t + dt_maneuver) % dt_action_cycle == 0 or done: # Check if this is the end of an action cycle or episode
-                    next_b_check_obs = env.base_obs('b')
-                    next_b_obs = flatten_obs(next_b_check_obs, env.key_order)
-                    if not test_run and len(transition_dict['states']) > len(transition_dict['next_states']): # Ensure we have a corresponding state
-                        transition_dict['next_states'].append(next_b_obs)
-                        transition_dict['rewards'].append(episode_return - sum(transition_dict['rewards'])) # Reward for this action cycle
-                        transition_dict['dones'].append(done)
+                next_b_check_obs = env.base_obs('b')
+                next_b_obs = flatten_obs(next_b_check_obs, env.key_order)
 
-                done = done or fake_terminate
-                
                 steps_since_update += 1 # This counts actual env steps
 
                 '''显示运行轨迹'''
                 # 可视化
                 env.render(t_bias=t_bias)
+            
+            # --- 回合结束处理 ---
+            # **关键点 3: 存储【最后一个】不完整的动作周期的经验**
+            # 循环结束后，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
+            if last_decision_state is not None:
+                transition_dict['states'].append(last_decision_state)
+                transition_dict['actions'].append(current_action)
+                transition_dict['rewards'].append(b_reward)
+                transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
+                transition_dict['dones'].append(True)
+            
+            if len(transition_dict['next_states']) >= transition_dict_capacity:
+                '''agent.update'''
+                agent.update(transition_dict, adv_normed=False)
+                # Clear transition_dict after update
+                
+                actor_grad_norm = agent.actor_grad
+                actor_pre_clip_grad = agent.pre_clip_actor_grad
+                critic_grad_norm = agent.critic_grad
+                critic_pre_clip_grad = agent.pre_clip_critic_grad
+
+                # 梯度监控
+                logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
+                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
+                logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
+                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
+                # 损失函数监控
+                logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
+                logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
+                # 强化学习actor特殊项监控
+                logger.add("train/9 entropy", agent.entropy_mean, total_steps)
+                logger.add("train/10 ratio", agent.ratio_mean, total_steps) 
+                logger.add("train/11 episode/step", i_episode, total_steps)    
+
+                transition_dict = {'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
+
             
             episode_end_time = time.time()  # 记录结束时间
             # print(f"回合时长: {episode_end_time - episode_start_time} 秒")
@@ -368,30 +371,6 @@ if __name__=="__main__":
                 logger.add("train/2 win", env.win, total_steps)
                 logger.add("train/2 lose", env.lose, total_steps)
                 logger.add("train/2 draw", env.draw, total_steps)
-
-                # Agent update logic remains the same, but now it's triggered by collected action cycles
-                if len(transition_dict['states']) >= transition_dict_capacity or done: # Update if enough experience or episode ends
-                    agent.update(transition_dict, adv_normed=False)
-                    # Clear transition_dict after update
-                    transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
-                    
-                    actor_grad_norm = agent.actor_grad
-                    actor_pre_clip_grad = agent.pre_clip_actor_grad
-                    critic_grad_norm = agent.critic_grad
-                    critic_pre_clip_grad = agent.pre_clip_critic_grad
-
-                    # 梯度监控
-                    logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
-                    logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
-                    logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
-                    logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
-                    # 损失函数监控
-                    logger.add("train/7 actor_loss", agent.actor_loss, total_steps)
-                    logger.add("train/8 critic_loss", agent.critic_loss, total_steps)
-                    # 强化学习actor特殊项监控
-                    logger.add("train/9 entropy", agent.entropy_mean, total_steps)
-                    logger.add("train/10 ratio", agent.ratio_mean, total_steps) 
-                    logger.add("train/11 episode/step", i_episode, total_steps)    
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
