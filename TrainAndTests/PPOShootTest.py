@@ -253,6 +253,7 @@ if __name__ == "__main__":
                 at = ut
 
                 # Shield
+                print(AA_hor*180/pi)
                 at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
 
                 if at == 1:
@@ -305,6 +306,6 @@ if __name__ == "__main__":
 
 
     except KeyboardInterrupt:
-        print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
+        print("\n检测到 KeyboardInterrupt")
     
         

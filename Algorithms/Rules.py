@@ -110,10 +110,10 @@ def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_miss
         action_n[0], action_n[1], action_n[2] = wander_behavior()
 
     # 最高优先级：不许出圈
-    R_to_o00 = np.linalg.norm([ego_pos_[0], ego_pos_[2]])
-    if R_cage - R_to_o00 < 8e3:
-        beta_of_o00 = atan2(-ego_pos_[2], -ego_pos_[0])
-        action_n[1] = sub_of_radian(beta_of_o00, ego_psi)
+    # R_to_o00 = np.linalg.norm([ego_pos_[0], ego_pos_[2]])
+    # if R_cage - R_to_o00 < 8e3:
+    #     beta_of_o00 = atan2(-ego_pos_[2], -ego_pos_[0])
+    #     action_n[1] = sub_of_radian(beta_of_o00, ego_psi)
     if ego_height > 13e3:
         action_n[0] = -5000
     elif ego_height < 3e3:
