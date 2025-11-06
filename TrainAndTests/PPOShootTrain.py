@@ -317,7 +317,7 @@ if __name__ == "__main__":
                 out_range_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
-            agent.update(transition_dict)
+            agent.update(transition_dict, adv_normed=1)
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
@@ -349,7 +349,7 @@ if __name__ == "__main__":
                 print(f"episode {i_episode}, total_steps {total_steps}")
 
             # tensorboard 训练进度显示
-            logger.add("train/1 episode_return", episode_return, total_steps)
+            logger.add("train/1 episode_return", episode_return/env.t, total_steps)
             logger.add("train/2 win", env.win, total_steps)
             logger.add("train/2 lose", env.lose, total_steps)
 

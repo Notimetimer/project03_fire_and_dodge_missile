@@ -165,7 +165,7 @@ class ShootTrainEnv(Battle):
         if self.lose:
             reward_event = -300
         if self.win:
-            reward_event = 300*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
+            reward_event = 300 + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
 
         # 0.2? 0.02?
         reward = np.sum([
