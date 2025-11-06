@@ -251,4 +251,138 @@ class CrankTrainEnv(Battle):
 
         return terminate, reward, r_event
 
-    # def right_crank_terminate_and_reward(self, side): # 进攻策略训练与奖励
+    def right_crank_terminate_and_reward(self, side):
+        terminate = False
+        state = self.get_state(side)
+        speed = state["ego_main"][0]
+        alt = state["ego_main"][1]
+        cos_delta_psi = state["target_information"][0]
+        sin_delta_psi = state["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        delta_theta = state["target_information"][2]
+        dist = state["target_information"][3]
+        alpha = state["target_information"][4]
+        # alpha = abs(delta_psi) # 实际上是把alpha换掉
+
+        if side == 'r':
+            ego = self.RUAV
+            ego_missile = self.Rmissiles[0] if self.Rmissiles else None
+            enm = self.BUAV
+        if side == 'b':
+            ego = self.BUAV
+            ego_missile = self.Bmissiles[0] if self.Bmissiles else None
+            enm = self.RUAV
+        target_alt = enm.alt
+
+        # 超时结束
+        if self.t > self.game_time_limit:
+            terminate = True
+        # 雷达丢失目标判为失败 ###
+        if alpha > ego.max_radar_angle:
+            terminate = True
+            self.lose = 1
+        # 高度出界失败 ###
+        if not self.min_alt <= alt:  # <= self.max_alt:
+            terminate = True
+            self.lose = 1
+
+        # 如果取得近距杀条件，判定为成功
+        Los_ = enm.pos_ - ego.pos_
+        dist = norm(Los_)
+        # 求解hot-cold关系
+        cos_ATA_ego = np.dot(Los_, ego.point_) / (dist * norm(ego.point_))
+        # 近距杀
+        if cos_ATA_ego >= cos(pi / 3) and dist < 8e3:
+            terminate = True
+            self.win = 1
+
+        # 右crank角度奖励
+        x = delta_psi * 180 / pi
+        y = delta_theta * 180 / pi
+        # r_angle = self.L_interp(x,y) ###
+        r_angle = -1 * (x <= -50) * ((-50-x) / 10 + 10) - 4 * (x > -50) * ((x - -50) / 50) - 5 * abs(y) / 20 + 120 / 60 + 90 / 20
+
+        # 角速度惩罚
+        if self.last_delta_psi is None:
+            delta_psi_dot = 0
+        else:
+            delta_psi_dot = (delta_psi - self.last_delta_psi) / self.dt_maneuver
+        self.last_delta_psi = delta_psi
+        if abs(x) > 53:
+            r_angle -= 3 * np.sign(x) * delta_psi_dot * 180 / pi * self.dt_maneuver / 4
+
+
+        # # 垂直角度惩罚
+        # q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
+        r_angle_v = 0  # -abs(ego.theta-q_epsilon)/pi*2
+        ### 
+        r_angle_v -= abs(np.clip(ego.vu / 100, -1, 1)) * 0.5
+        # 上升下降率惩罚
+        if Los_[1] < 0:  # 目标在下面，我应该下降
+            r_angle_v -= np.clip(ego.vu / 100, -1, 1)
+        if Los_[1] > 0:  # 目标在上面，我应该上升
+            r_angle_v += np.clip(ego.vu / 100, -1, 1)
+
+        # 高度奖励
+        pre_alt_opt = target_alt - 2e3  # 比目标低1000m方便增加阻力
+        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
+        r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
+                (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
+        # if not self.min_alt<=alt<=self.max_alt:
+        #     r_alt -= 20
+        ###
+        r_alt += (alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
+
+        # 速度奖励
+        speed_opt = 0.95 * 340
+        r_speed = abs(speed - speed_opt) / (2 * 340)
+
+        # # 边界距离奖励 ###
+        obs = self.base_obs(side)
+        d_hor = obs["border"][0]
+        # # # 水平边界奖励
+        # self.dhor = d_hor
+        # if self.last_dhor is None:
+        #     d_hor_dot = 0
+        # else:
+        #     d_hor_dot = (self.dhor - self.last_dhor) / self.dt_maneuver
+        # self.last_dhor = self.dhor
+        # r_border = d_hor_dot / 340 * 10e3
+        r_border = d_hor
+
+        # 事件奖励
+        r_event = 0
+        # if ego_missile is not None:
+        #     # A-pole奖励
+        #     if ego_missile.A_pole_moment:
+        #         r_event += dist / 30e3 * 20
+        #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        #     # F-pole奖励
+        #     if ego_missile.hit:
+        #         r_event += dist / 30e3 * 40
+        #         r_event += alt
+        #         r_event += 2 * (self.max_alt-alt)/(self.max_alt-self.min_alt)
+        if self.lose:
+            r_event -= 30  # 20 100 50 70
+        if self.win:
+            r_event += 30  # 20 100 50 70
+
+        # if alpha > ego.max_radar_angle:
+        #     r_event -= 3 # 超出雷达范围惩罚
+
+        reward = np.sum([
+            1 * r_angle,
+            2 * r_angle_v,  # 3
+            1 * r_alt,
+            1 * r_speed,
+            1 * r_event,
+            0.5 * r_border,
+        ])
+
+        if terminate:
+            self.running = False
+
+        return terminate, reward, r_event
+
+

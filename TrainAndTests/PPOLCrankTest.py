@@ -50,6 +50,9 @@ log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
 # log_dir = os.path.join(pre_log_dir, "LCrank-run-20251024-112053")
 
+print("\n\n\n")
+print("logdir", log_dir)
+print("\n\n\n")
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
