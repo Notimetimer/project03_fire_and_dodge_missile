@@ -377,10 +377,10 @@ class UAVModel(object):
         new_missile.sight_angle_max = pi / 2  # 导引头视角
         new_missile.launcher_id = self.id  # 发射机id
         new_missile.target_id = target.id  # 目标机id
-        print('导弹已发射')
+        # print('导弹已发射')
         print('发射时间', current_time)
         self.missile_count += 1
-        print('累计发射数量', self.missile_count)
+        print(self.side, '已发射', self.missile_count)
         self.last_launch_time = current_time
         return new_missile
 

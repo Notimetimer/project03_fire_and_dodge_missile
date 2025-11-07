@@ -29,7 +29,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.PPOdiscrete import *
+from Algorithms.PPOdiscrete_with_t import *
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
@@ -96,7 +96,7 @@ args = parser.parse_args()
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
-action_cycle_multiplier = 30
+action_cycle_multiplier = 20
 actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
@@ -108,11 +108,11 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'Combat'
+mission_name = 'Combat_expandable_dt'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
-# env = Battle(args, tacview_show=use_tacview)
+
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 35  # len(b_obs_spaces)
@@ -216,16 +216,19 @@ if __name__=="__main__":
             test_run = 0
 
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 't_as': []}
 
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=6, blue_init_ammo=6)
-            
+            r_action_label = 0
+            b_action_label = 0
             last_decision_state = None
             current_action = None
             b_reward = None
+
+            last_decision_t = 0
 
             done = False
 
@@ -241,6 +244,9 @@ if __name__=="__main__":
             b_action_list = []
             
             episode_start_time = time.time()
+
+            steps_after_decision = action_cycle_multiplier  # 没办法了，给自己设的套
+            cycle_accumulated_reward = 0.0
 
             # 环境运行一轮的情况
             steps_of_this_eps = -1 # 没办法了
@@ -265,15 +271,17 @@ if __name__=="__main__":
 
                 # --- 智能体决策 ---
                 # 判断是否到达了决策点（每 10 步）
-                if steps_of_this_eps % action_cycle_multiplier == 0:
+                if env.is_action_complete('b', b_action_label) and steps_after_decision >= action_cycle_multiplier:
                     # **关键点 1: 完成并存储【上一个】动作周期的经验**
                     # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     if steps_of_this_eps > 0:
                         transition_dict['states'].append(last_decision_state)
                         transition_dict['actions'].append(current_action)
-                        transition_dict['rewards'].append(b_reward)
+                        transition_dict['rewards'].append(cycle_accumulated_reward)
                         transition_dict['next_states'].append(b_obs) # 当前状态是上个周期的 next_state
                         transition_dict['dones'].append(False) # 没结束，所以是 False
+                        transition_dict['t_as'].append(env.t-last_decision_t)
+
 
                     # **关键点 2: 开始【新的】一个动作周期**
                     # 1. 记录新周期的起始状态
@@ -284,12 +292,9 @@ if __name__=="__main__":
                     else:
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
                     decide_steps_after_update += 1
-                    b_action_options = [
-                        "attack",
-                        "escape",
-                        "left",
-                        "right",
-                    ]
+                    steps_after_decision = 0
+                    cycle_accumulated_reward = 0.0
+
                     # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
                     # b_action_list.append(b_action_label)
                     current_action = b_action_label
@@ -305,7 +310,7 @@ if __name__=="__main__":
                     launch_time_count = 0
                     if r_action_label==0:
                         # launch_missile_if_possible(env, side='r')
-                        launch_missile_with_basic_rules(env, side='r') # fixme 距离超过40km的时候根本就不会发射导弹，所以学不会crank
+                        launch_missile_with_basic_rules(env, side='r')
                     if b_action_label==0:
                         # launch_missile_if_possible(env, side='b')
                         launch_missile_with_basic_rules(env, side='b')
@@ -313,6 +318,9 @@ if __name__=="__main__":
                 _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
                 done = done or fake_terminate
+
+                steps_after_decision += 1
+                cycle_accumulated_reward += gamma * b_reward
 
                 # Accumulate rewards between agent decisions
                 episode_return += b_reward * env.dt_maneuver
@@ -331,9 +339,10 @@ if __name__=="__main__":
             if last_decision_state is not None:
                 transition_dict['states'].append(last_decision_state)
                 transition_dict['actions'].append(current_action)
-                transition_dict['rewards'].append(b_reward)
-                transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
+                transition_dict['rewards'].append(cycle_accumulated_reward)
+                transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态 
                 transition_dict['dones'].append(True)
+                transition_dict['t_as'].append(env.t-last_decision_t)
             
             if 1: # len(transition_dict['next_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
                 '''agent.update'''
@@ -359,7 +368,7 @@ if __name__=="__main__":
                 logger.add("train/10 ratio", agent.ratio_mean, total_steps) 
                 logger.add("train/11 episode/step", i_episode, total_steps)    
 
-                transition_dict = {'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
+                transition_dict = {'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': [], 't_as': []}
 
             
             episode_end_time = time.time()  # 记录结束时间

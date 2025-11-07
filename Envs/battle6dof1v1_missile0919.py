@@ -247,7 +247,7 @@ class Battle(object):
             else:
                 self.Bmissiles.append(new_missile)
             self.missiles = self.Rmissiles + self.Bmissiles
-            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+            # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 
     def step(self, r_actions, b_actions):
@@ -1104,7 +1104,7 @@ def launch_missile_if_possible(env, side='r'):
             else:
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
-            print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+            # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 
 def launch_missile_immediately(env, side='r'):
@@ -1133,7 +1133,7 @@ def launch_missile_immediately(env, side='r'):
         else:
             env.Bmissiles.append(new_missile)
         env.missiles = env.Rmissiles + env.Bmissiles
-        print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+        # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 
 def launch_missile_with_basic_rules(env, side='r'):
@@ -1184,4 +1184,4 @@ def launch_missile_with_basic_rules(env, side='r'):
         else:
             env.Bmissiles.append(new_missile)
         env.missiles = env.Rmissiles + env.Bmissiles
-        print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+        # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")

@@ -47,6 +47,13 @@ from Algorithms.Rules import *
 # 通过继承构建观测空间、奖励函数和终止条件
 # 通过类的组合获取各子策略的观测量裁剪
 
+action_options = [
+                    "attack",
+                    "escape",
+                    "left",
+                    "right",
+                ]
+
 class ChooseStrategyEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
@@ -346,6 +353,10 @@ class ChooseStrategyEnv(Battle):
         missile_in_mid_term = uav_states["missile_in_mid_term"]
         missile_time_since_shoot = uav_states["weapon"]
         AA_hor = uav_states["target_information"][-2]
+        
+        cos_delta_psi_threat = uav_states["threat"][0]
+        sin_delta_psi_threat = uav_states["threat"][1]
+        delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
 
         # 事件/密集奖励
         # 为导弹提供制导
@@ -396,14 +407,56 @@ class ChooseStrategyEnv(Battle):
             else:
                 reward += 1 - (alpha - pi / 3) / pi
 
-        # # 有warning时alpha越大越好
-        # if warning:
-        #     # 奖励大迎角（更利于规避来袭导弹）
-        #     reward += alpha / pi
+        # 有warning时alpha越大越好
+        if warning:
+            reward += 8 * abs(delta_psi_threat) / pi # 这里的alpha错了，应该是和导弹的threa_delta_psi有关的
         
         # deltapsi变化率奖励 todobedontinued
 
-        # 优势度函数 tobecontinued
+        # 态势优势度 tobecontinued
 
 
         return done, reward, event_reward
+
+    def is_action_complete(self, side, action_label):
+        # if side == 'r':
+        #     ego = self.RUAV
+        #     enm = self.BUAV
+        # if side == 'b':
+        #     ego = self.BUAV
+        #     enm = self.RUAV
+
+        state = self.get_state(side)
+        cos_delta_psi = state["target_information"][0]
+        sin_delta_psi = state["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        delta_theta = state["target_information"][2]
+        alpha = state["target_information"][4]
+        RWR = state["warning"]
+        cos_delta_psi_threat = state["threat"][0]
+        sin_delta_psi_threat = state["threat"][1]
+        delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
+
+        action = action_options[action_label]
+
+        action_done = False
+        if action == 'attack':
+            if alpha < pi/6:
+                action_done = True
+        
+        if action == 'escape':
+            if abs(delta_psi_threat) > pi*5/6 and RWR or\
+                  abs(alpha) > pi*5/6 and not RWR:
+                action_done = True
+        
+        if action == 'left':
+            if abs(delta_psi*180/pi - 50) < 10:
+                action_done = True
+        
+        if action == 'right':
+            if abs(delta_psi*180/pi + 50) < 10:
+                action_done = True
+            
+        return action_done
+        
+        
