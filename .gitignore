@@ -5,6 +5,7 @@ __pycache__/
 # 若你的项目有子模块或多层目录，可这样写
 **/__pycache__/
 
+
 /logs
 /logs
 /Restore
@@ -43,3 +44,5 @@ __pycache__/
 /Math_calculates/__pycache__
 /Math_calculates/__pycache__
 /TrainAndTests/__pycache__
+/Envs/__pycache__
+*.pyc

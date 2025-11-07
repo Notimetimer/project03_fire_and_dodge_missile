@@ -150,8 +150,8 @@ for i in range(10):
         # 发射导弹判决
         if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
             launch_time_count = 0
-            launch_missile_immediately(env, side='r')
-            launch_missile_immediately(env, side='b')
+            launch_missile_with_basic_rules(env, side='r')
+            launch_missile_with_basic_rules(env, side='b')
 
         # 机动决策
         # r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
