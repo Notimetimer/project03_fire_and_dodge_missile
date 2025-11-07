@@ -104,6 +104,9 @@ class missile_class:
         self.vel_ = vel0_.copy()
         self.pt0_ = pt0_.copy()
         self.vt0_ = vt0_.copy()
+        self.theta = 0.0
+        self.psi = 0.0
+        self.phi = 0.0
         self.latest_time_of_target = launch_time  # 上一次观测到目标的时间 todo 没有考虑载机转走的情况
 
         # 最高和最低高度
@@ -372,8 +375,11 @@ class missile_class:
         q_epsilon_t = np.arctan2(line_t_[1], distance_hor)  # 目标线倾角
         theta_mt = np.arctan2(vmt_[1], vm_hor)
         theta_tt = np.arctan2(vtt_[1], vt_hor)
-        theta = atan2(vmt_[1], np.linalg.norm([vmt_[0], vmt_[2]]))  # 速度倾角
-        psi = atan2(vmt_[2], vmt_[0])  # 速度航向角
+        # theta = atan2(vmt_[1], np.linalg.norm([vmt_[0], vmt_[2]]))  # 速度倾角
+        # psi = atan2(vmt_[2], vmt_[0])  # 速度航向角
+
+        self.theta = theta_mt
+        self.psi = psi_mt
 
         self.q_beta = q_beta_t
         self.q_epsilon = q_epsilon_t

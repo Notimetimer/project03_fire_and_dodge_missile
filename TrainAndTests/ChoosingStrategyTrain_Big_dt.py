@@ -207,10 +207,11 @@ if __name__=="__main__":
     launch_time_count = 0
 
     t_bias = 0
-    steps_since_update = 0
+    decide_steps_after_update = 0
     try:
         # 强化学习训练
         while total_steps < int(max_steps*(1-pre_train_rate)):
+            
             i_episode += 1
             test_run = 0
 
@@ -221,7 +222,7 @@ if __name__=="__main__":
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=6, blue_init_ammo=6)
-            action_cycle = 10  # 智能体每 10 步决策一次
+            
             last_decision_state = None
             current_action = None
             b_reward = None
@@ -264,7 +265,7 @@ if __name__=="__main__":
 
                 # --- 智能体决策 ---
                 # 判断是否到达了决策点（每 10 步）
-                if steps_of_this_eps % action_cycle == 0:
+                if steps_of_this_eps % action_cycle_multiplier == 0:
                     # **关键点 1: 完成并存储【上一个】动作周期的经验**
                     # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     if steps_of_this_eps > 0:
@@ -282,7 +283,7 @@ if __name__=="__main__":
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=True)
                     else:
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
-                    
+                    decide_steps_after_update += 1
                     b_action_options = [
                         "attack",
                         "escape",
@@ -310,7 +311,7 @@ if __name__=="__main__":
                         launch_missile_with_basic_rules(env, side='b')
                 
                 _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
-                done, b_reward, b_event_reward = env.combat_terminate_and_reward('b')
+                done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
                 done = done or fake_terminate
 
                 # Accumulate rewards between agent decisions
@@ -319,7 +320,6 @@ if __name__=="__main__":
                 next_b_check_obs = env.base_obs('b')
                 next_b_obs = flatten_obs(next_b_check_obs, env.key_order)
 
-                steps_since_update += 1 # This counts actual env steps
 
                 '''显示运行轨迹'''
                 # 可视化
@@ -335,9 +335,10 @@ if __name__=="__main__":
                 transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
                 transition_dict['dones'].append(True)
             
-            if len(transition_dict['next_states']) >= transition_dict_capacity:
+            if len(transition_dict['next_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
                 '''agent.update'''
                 agent.update(transition_dict, adv_normed=False)
+                decide_steps_after_update = 0
                 # Clear transition_dict after update
                 
                 actor_grad_norm = agent.actor_grad
@@ -372,7 +373,7 @@ if __name__=="__main__":
                 # logger.add("train/2 not lose", 1-env.lose, total_steps)
                 pass # 不专门区分训练和测试回合
             else:
-                total_steps += len(transition_dict['states']) # Update total_steps based on collected experiences
+                total_steps += steps_of_this_eps + 1
                 logger.add("train/1 episode_return", episode_return, total_steps)
                 logger.add("train/2 win", env.win, total_steps)
                 logger.add("train/2 lose", env.lose, total_steps)

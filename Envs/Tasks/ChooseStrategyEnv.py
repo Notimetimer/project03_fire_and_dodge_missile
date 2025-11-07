@@ -272,7 +272,7 @@ class ChooseStrategyEnv(Battle):
 
         return r_reward_n, b_reward_n, r_dones, b_dones, terminate
 
-    def combat_terminate_and_reward(self, side):
+    def combat_terminate_and_reward(self, side, action_label):
         terminate = self.get_terminate()
         done = terminate
 
@@ -345,6 +345,7 @@ class ChooseStrategyEnv(Battle):
         warning = uav_states["warning"]
         missile_in_mid_term = uav_states["missile_in_mid_term"]
         missile_time_since_shoot = uav_states["weapon"]
+        AA_hor = uav_states["target_information"][-2]
 
         # 事件/密集奖励
         # 为导弹提供制导
@@ -375,19 +376,25 @@ class ChooseStrategyEnv(Battle):
         if enm.escape_once:
             reward -= 5
 
-
         # # 密集奖励
-        # # 没发射导弹时alpha越小越好
-        # if len(alive_ally_missiles) == 0:
-        #     reward += 1 - alpha / pi
+        if warning and action_label != 1 and len(alive_ally_missiles)>0:
+            reward -= 5
 
-        # # 导弹处于中制导阶段时alpha在±pi/3之间为奖励高台， 其余随alpha线性减少
-        # if missile_in_mid_term:
-        #     # 高台奖励：alpha在[-pi/3, pi/3]区间奖励高，其余线性递减
-        #     if abs(alpha) < np.pi / 3:
-        #         reward += 1
-        #     else:
-        #         reward += 1 - (alpha - pi / 3) / pi
+        # 没发射导弹时alpha越小越好
+        if len(alive_ally_missiles) == 0 and not warning:
+            reward += 0.5 - alpha / pi
+        
+        # 导弹处于中制导阶段时alpha在±pi/3之间为奖励高台， 其余随alpha线性减少
+        if missile_in_mid_term:
+            # 目标没有跑，不该重复攻击
+            if action_label==0 and abs(AA_hor)>pi*2/3:
+                reward -= 5
+
+            # 高台奖励：alpha在[-pi/3, pi/3]区间奖励高，其余线性递减
+            if abs(alpha) < np.pi / 3:
+                reward += 1
+            else:
+                reward += 1 - (alpha - pi / 3) / pi
 
         # # 有warning时alpha越大越好
         # if warning:
