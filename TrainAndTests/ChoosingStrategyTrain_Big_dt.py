@@ -34,7 +34,7 @@ from Algorithms.PPOdiscrete import *
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
 
-use_tacview = 1  # 是否可视化
+use_tacview = 0  # 是否可视化
 
 # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
 if matplotlib.get_backend() != 'TkAgg':
@@ -96,6 +96,7 @@ args = parser.parse_args()
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
+action_cycle_multiplier = 30
 actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
@@ -161,7 +162,7 @@ def creat_initial_state():
 if __name__=="__main__":
     
     # Define the action cycle multiplier
-    action_cycle_multiplier = 10 
+    
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
     transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
@@ -290,6 +291,7 @@ if __name__=="__main__":
                     ]
                     # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
                     # b_action_list.append(b_action_label)
+                    current_action = b_action_label
 
                     r_action_label = 0 # Red's action, assuming it's fixed or from another policy
                     # r_action_list.append(r_action_label)
@@ -300,8 +302,12 @@ if __name__=="__main__":
                 # 发射导弹判决
                 if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
                     launch_time_count = 0
-                    launch_missile_if_possible(env, side='r')
-                    launch_missile_if_possible(env, side='b')
+                    if r_action_label==0:
+                        # launch_missile_if_possible(env, side='r')
+                        launch_missile_with_basic_rules(env, side='r')
+                    if b_action_label==0:
+                        # launch_missile_if_possible(env, side='b')
+                        launch_missile_with_basic_rules(env, side='b')
                 
                 _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b')

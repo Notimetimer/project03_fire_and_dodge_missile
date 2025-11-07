@@ -1,3 +1,11 @@
+# 忽略所有 Python 字节码缓存
+__pycache__/
+*.pyc
+
+# 若你的项目有子模块或多层目录，可这样写
+**/__pycache__/
+
+
 /logs
 /logs
 /Restore

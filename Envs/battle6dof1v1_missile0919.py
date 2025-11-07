@@ -1160,17 +1160,16 @@ def launch_missile_with_basic_rules(env, side='r'):
     if can_shoot:
         should_shoot = 0
         if dist<=5e3:
-            should_shoot = 1
+            should_shoot = (1-ATA/(pi/3))**2
 
         elif dist<=20e3 and abs(AA_hor)>=pi/2:
-            should_shoot = 1
+            should_shoot = (1-ATA/(pi/3))**2
 
-        # elif dist<=80e3 and interval
-        
+        elif dist<=80e3 and interval>=20:
+            should_shoot = (1-ATA/(pi/3))**2
 
 
-
-    if should_shoot:
+    if np.random.rand() < should_shoot: # np.random.rand() 生成的是在区间 [0, 1) 上的独立均匀分布
         new_missile = uav.launch_missile(target, env.t, missile_class)
         uav.ammo -= 1
         new_missile.side = 'r' if side == 'r' else 'b'
