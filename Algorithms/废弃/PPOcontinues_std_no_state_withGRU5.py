@@ -1,5 +1,5 @@
 '''
-共用backbone，但是gru接收critic的loss
+联合优化器，同时使用actor_loss和critic_loss
 '''
 
 import os
@@ -208,41 +208,50 @@ class ValueNetGRU(nn.Module):
 
 class PPOContinuous:
     def __init__(self, state_dim, gru_hidden_size, gru_num_layers, middle_dim,
-                 head_hidden_dims, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device,
-                 k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, batch_first=True):
+                 head_hidden_dims, action_dim, actor_lr, critic_lr, backbone_lr=None,
+                 lmbda=None, epochs=10, eps=0.2, gamma=0.99, device='cpu',
+                 k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3, critic_coef=0.5, batch_first=True):
 
         # 1. 创建 Actor，它内部包含了共享的 backbone
-        self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim, 
+        self.actor = PolicyNetContinuousGRU(state_dim, gru_hidden_size, gru_num_layers, middle_dim,
                                             head_hidden_dims, action_dim, batch_first=batch_first).to(device)
-
-
 
         # 2. 创建 Critic，并把 Actor 的 backbone 传递给它，以实现共享
         self.critic = ValueNetGRU(self.actor.backbone, middle_dim, head_hidden_dims).to(device)
 
+        # 3. 设置统一优化器，但为 backbone/actor_head/critic_head 保留独立 lr（使用 param_groups）
+        backbone_params = list(self.actor.backbone.parameters())
+        # actor head params: actor 的所有参数中排除 backbone 部分
+        actor_head_params = [p for n, p in self.actor.named_parameters() if not n.startswith("backbone.")]
+        critic_head_params = list(self.critic.head.parameters()) + list(self.critic.fc_out.parameters())
 
+        if backbone_lr is None:
+            backbone_lr = actor_lr
 
-        # 3. 设置优化器
-        # Actor 优化器只负责更新 Actor 自己的头
-        self.actor_optimizer = torch.optim.Adam(self.actor.head.parameters(), lr=actor_lr)
-        
-        # Critic 优化器负责更新 Critic 的头 + 共享的 backbone
-        # 我们需要将两个部分的参数合并到一个迭代器中
-        critic_params = list(self.critic.head.parameters()) + list(self.actor.backbone.parameters())
-        self.critic_optimizer = torch.optim.Adam(critic_params, lr=critic_lr)
+        self.total_optimizer = torch.optim.Adam([
+            {"params": backbone_params, "lr": float(backbone_lr)},
+            {"params": actor_head_params, "lr": float(actor_lr)},
+            {"params": critic_head_params, "lr": float(critic_lr)},
+        ])
 
-        self.gamma = gamma
-        self.lmbda = lmbda
-        self.epochs = epochs
-        self.eps = eps
+        # 便捷引用与参数组保留（用于裁剪/检查）
+        self._backbone_params = backbone_params
+        self._actor_head_params = actor_head_params
+        self._critic_head_params = critic_head_params
+        self.critic_coef = critic_coef
+
+        # 确保超参数为正确类型，避免被误传入非数值对象
         self.device = device
-        self.k_entropy = k_entropy
-        self.critic_max_grad = critic_max_grad
-        self.actor_max_grad = actor_max_grad
-        self.max_std = max_std
+        self.gamma = float(gamma)
+        self.lmbda = float(lmbda) if lmbda is not None else None
+        self.epochs = int(epochs)
+        self.eps = float(eps)
+        self.k_entropy = float(k_entropy)
+        self.critic_max_grad = float(critic_max_grad)
+        self.actor_max_grad = float(actor_max_grad)
+        self.max_std = float(max_std)
 
-        # 添加隐藏状态管理
+        # 隐藏态信息
         self.gru_num_layers = gru_num_layers
         self.gru_hidden_size = gru_hidden_size
         self.hidden_state = None
@@ -251,14 +260,16 @@ class PPOContinuous:
         """重置隐藏状态"""
         self.hidden_state = self.get_h0(batch_size=1)
 
-    def set_learning_rate(self, actor_lr=None, critic_lr=None):
+    def set_learning_rate(self, actor_lr=None, critic_lr=None, backbone_lr=None):
         """动态设置 actor 和 critic 的学习率"""
+        # 如果使用合并的 total_optimizer，按 param_groups 顺序更新 lr
+        if backbone_lr is not None:
+            self.total_optimizer.param_groups[0]['lr'] = float(backbone_lr)
         if actor_lr is not None:
-            for param_group in self.actor_optimizer.param_groups:
-                param_group['lr'] = actor_lr
+            self.total_optimizer.param_groups[1]['lr'] = float(actor_lr)
         if critic_lr is not None:
-            for param_group in self.critic_optimizer.param_groups:
-                param_group['lr'] = critic_lr    
+            self.total_optimizer.param_groups[2]['lr'] = float(critic_lr)
+            
 
     def _scale_action_to_exec(self, a, action_bounds):
         """把 normalized action a (in [-1,1]) 缩放到环境区间。
@@ -320,6 +331,10 @@ class PPOContinuous:
         # state 现在的形状是 (SeqLen, StateDim), e.g., (10, 35)
         # 需要增加一个 batch 维度 -> (1, 10, 35)
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
+        # 如果外部传入了以 CPU 存储的 hidden（或来自 get_current_hidden_state_*），
+        # 在送进模型前需要移动到 device
+        if h_0 is not None:
+            h_0 = self._maybe_move_h0_to_device(h_0)
         # 检查state中是否存在nan
         if torch.isnan(state).any() or torch.isinf(state).any():
             print('state', state)
@@ -362,8 +377,8 @@ class PPOContinuous:
         # 构造形状 (1,1,StateDim) 并传入 critic
         state_input = torch.tensor(state, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
         # 确保 h0 在同一 device（如果有）
-        if h0 is not None and torch.is_tensor(h0):
-            h0 = h0.to(self.device)
+        if h0 is not None:
+            h0 = self._maybe_move_h0_to_device(h0)
 
         value, h_out = self.critic(state_input, h0)
         # 返回：value 为 numpy (detached on CPU)，h_out 为 detached CPU tensor
@@ -387,56 +402,59 @@ class PPOContinuous:
         #     return self.get_h0(batch_size=1)  # 默认 batch_size 为 1
         return self.hidden_state
 
+    def _maybe_move_h0_to_device(self, h0):
+        """
+        如果 h0 是 Tensor，则把它移动到 self.device（in-place 不做，返回新 tensor）。
+        如果 h0 为 None 或非 Tensor，直接返回原值。
+        目的：外部/存储的 hidden 通常以 CPU tensor 存储，使用前要移动到模型所在 device。
+        """
+        if h0 is None:
+            return None
+        if torch.is_tensor(h0):
+            # 保证是同一 device（避免出现 input 在 cuda:0 而 hidden 在 cpu 的错误）
+            if h0.device != self.device:
+                return h0.to(self.device)
+            return h0
+        # 如果是 numpy 等，先转为 tensor 再移动
+        try:
+            return torch.as_tensor(h0, device=self.device)
+        except Exception:
+            return h0
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=0):
         # states 张量现在的形状是 (Batch, SeqLen, StateDim)
         # 在 update 方法开头添加 shuffle 功能
+        indices = np.arange(len(transition_dict['states']))
+        if shuffled:
+            np.random.shuffle(indices)
 
-        # 首先按原始顺序把数据载入（不要一开始就打乱）
-        N = len(transition_dict['states'])
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        u_s = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-        # h0s 以样本为第一维堆叠，后面按需转换到 (num_layers, B, hidden_size)
-        h0s_stack = torch.stack([transition_dict['h0s'][i] for i in range(N)]).to(self.device)  # (N, num_layers, 1, hidden)
-        # next_values 也按原顺序读取
-        next_values = torch.tensor(np.array(transition_dict['next_values']), dtype=torch.float).to(self.device)
-
-        # 为 critic 准备 h0s 的形状 (num_layers, B, hidden_size)
-        h0s_for_critic = h0s_stack.squeeze(2).permute(1, 0, 2).contiguous()
-
+        # 按打乱后的顺序重新排列数据
+        states = torch.tensor(np.array(transition_dict['states'])[indices], dtype=torch.float).to(self.device)
+        u_s = torch.tensor(np.array(transition_dict['actions'])[indices], dtype=torch.float).to(self.device)
+        rewards = torch.tensor(np.array(transition_dict['rewards'])[indices], dtype=torch.float).view(-1, 1).to(self.device)
+        # next_states = torch.tensor(np.array(transition_dict['next_states'])[indices], dtype=torch.float).to(self.device)
+        dones = torch.tensor(np.array(transition_dict['dones'])[indices], dtype=torch.float).view(-1, 1).to(self.device)
+        h0s = torch.stack([transition_dict['h0s'][i] for i in indices]).to(self.device)
+        # 修正 h0s 的形状，目标是 (num_layers, B, hidden_size)
+        
+        h0s = h0s.squeeze(2).permute(1, 0, 2).contiguous()  # 内存连续化
+        
+        # action_bounds = torch.tensor(np.array(transition_dict['action_bounds'])[indices], dtype=torch.float).to(self.device)
+        next_values = torch.tensor(np.array(transition_dict['next_values'])[indices], dtype=torch.float).to(self.device)
+        
         if 'max_stds' in transition_dict:
-            max_stds = torch.tensor(np.array(transition_dict['max_stds']), dtype=torch.float).view(-1, 1).to(self.device)
+            max_stds = torch.tensor(np.array(transition_dict['max_stds'])[indices], dtype=torch.float).view(-1, 1).to(self.device)
         else:
             max_stds = self.max_std
 
-        # 计算 td_target, advantage（在 shuffle 之前保持原始顺序）
+        # 计算 td_target, advantage
         td_target = rewards + self.gamma * next_values * (1 - dones)
-        td_delta = td_target - self.critic(states, h0s_for_critic)[0]
+        td_delta = td_target - self.critic(states, h0s)[0]
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
-
-        # 现在如果要求打乱，则统一对所有输入（包括 advantage）进行相同的 shuffle
-        indices = np.arange(N)
-        if shuffled:
-            np.random.shuffle(indices)
-            states = states[indices]
-            u_s = u_s[indices]
-            rewards = rewards[indices]
-            dones = dones[indices]
-            next_values = next_values[indices]
-            advantage = advantage[indices]
-            max_stds = max_stds[indices] if isinstance(max_stds, torch.Tensor) and max_stds.shape[0] == N else max_stds
-            # 重新整理 h0s
-            h0s_stack = h0s_stack[indices]
-            h0s = h0s_stack.squeeze(2).permute(1, 0, 2).contiguous()
-        else:
-            # 未打乱时直接使用之前为 critic 准备好的 h0s_for_critic
-            h0s = h0s_for_critic
-
+        
         # 优势归一化
         if adv_normed:
-            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False)
+            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
             # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
 
@@ -450,7 +468,7 @@ class PPOContinuous:
 
         # # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
         # actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
-
+        
         # # 反算 u = atanh(a)
         u_old = u_s
         # old_log_probs = dist.log_prob(0, u_old) # (N,1)
@@ -511,21 +529,22 @@ class PPOContinuous:
             else:
                 critic_loss = F.mse_loss(self.critic(states, h0s)[0], td_target.detach())
 
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            actor_loss.backward()
-            critic_loss.backward()
+            # 使用合并优化器：基于总损失反向传播
+            self.total_optimizer.zero_grad()
+            total_loss = actor_loss + self.critic_coef * critic_loss
+            total_loss.backward()
             
-            # 裁剪前梯度
+            # 裁剪前梯度（基于分组/模块）
             pre_clip_actor_grad.append(model_grad_norm(self.actor))
-            pre_clip_critic_grad.append(model_grad_norm(self.critic))  
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))
 
-            # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-
-            # self.actor_optimizer.step()
-            # self.critic_optimizer.step()
+            # 针对不同参数集合分别裁剪梯度（backbone/actor_head 使用 actor_max_grad，critic_head 使用 critic_max_grad）
+            if hasattr(self, "_backbone_params") and len(self._backbone_params) > 0:
+                nn.utils.clip_grad_norm_(self._backbone_params, max_norm=self.actor_max_grad)
+            if hasattr(self, "_actor_head_params") and len(self._actor_head_params) > 0:
+                nn.utils.clip_grad_norm_(self._actor_head_params, max_norm=self.actor_max_grad)
+            if hasattr(self, "_critic_head_params") and len(self._critic_head_params) > 0:
+                nn.utils.clip_grad_norm_(self._critic_head_params, max_norm=self.critic_max_grad)
 
             # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
             actor_grad_list.append(model_grad_norm(self.actor))
@@ -535,8 +554,7 @@ class PPOContinuous:
             entropy_list.append(dist.entropy().mean().detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
 
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            self.total_optimizer.step()
         
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)

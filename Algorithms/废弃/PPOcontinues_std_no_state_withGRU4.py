@@ -391,52 +391,37 @@ class PPOContinuous:
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=0):
         # states 张量现在的形状是 (Batch, SeqLen, StateDim)
         # 在 update 方法开头添加 shuffle 功能
+        indices = np.arange(len(transition_dict['states']))
+        if shuffled:
+            np.random.shuffle(indices)
 
-        # 首先按原始顺序把数据载入（不要一开始就打乱）
-        N = len(transition_dict['states'])
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        u_s = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-        # h0s 以样本为第一维堆叠，后面按需转换到 (num_layers, B, hidden_size)
-        h0s_stack = torch.stack([transition_dict['h0s'][i] for i in range(N)]).to(self.device)  # (N, num_layers, 1, hidden)
-        # next_values 也按原顺序读取
-        next_values = torch.tensor(np.array(transition_dict['next_values']), dtype=torch.float).to(self.device)
-
-        # 为 critic 准备 h0s 的形状 (num_layers, B, hidden_size)
-        h0s_for_critic = h0s_stack.squeeze(2).permute(1, 0, 2).contiguous()
-
+        # 按打乱后的顺序重新排列数据
+        states = torch.tensor(np.array(transition_dict['states'])[indices], dtype=torch.float).to(self.device)
+        u_s = torch.tensor(np.array(transition_dict['actions'])[indices], dtype=torch.float).to(self.device)
+        rewards = torch.tensor(np.array(transition_dict['rewards'])[indices], dtype=torch.float).view(-1, 1).to(self.device)
+        # next_states = torch.tensor(np.array(transition_dict['next_states'])[indices], dtype=torch.float).to(self.device)
+        dones = torch.tensor(np.array(transition_dict['dones'])[indices], dtype=torch.float).view(-1, 1).to(self.device)
+        h0s = torch.stack([transition_dict['h0s'][i] for i in indices]).to(self.device)
+        # 修正 h0s 的形状，目标是 (num_layers, B, hidden_size)
+        
+        h0s = h0s.squeeze(2).permute(1, 0, 2).contiguous()  # 内存连续化
+        
+        # action_bounds = torch.tensor(np.array(transition_dict['action_bounds'])[indices], dtype=torch.float).to(self.device)
+        next_values = torch.tensor(np.array(transition_dict['next_values'])[indices], dtype=torch.float).to(self.device)
+        
         if 'max_stds' in transition_dict:
-            max_stds = torch.tensor(np.array(transition_dict['max_stds']), dtype=torch.float).view(-1, 1).to(self.device)
+            max_stds = torch.tensor(np.array(transition_dict['max_stds'])[indices], dtype=torch.float).view(-1, 1).to(self.device)
         else:
             max_stds = self.max_std
 
-        # 计算 td_target, advantage（在 shuffle 之前保持原始顺序）
+        # 计算 td_target, advantage
         td_target = rewards + self.gamma * next_values * (1 - dones)
-        td_delta = td_target - self.critic(states, h0s_for_critic)[0]
+        td_delta = td_target - self.critic(states, h0s)[0]
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
-
-        # 现在如果要求打乱，则统一对所有输入（包括 advantage）进行相同的 shuffle
-        indices = np.arange(N)
-        if shuffled:
-            np.random.shuffle(indices)
-            states = states[indices]
-            u_s = u_s[indices]
-            rewards = rewards[indices]
-            dones = dones[indices]
-            next_values = next_values[indices]
-            advantage = advantage[indices]
-            max_stds = max_stds[indices] if isinstance(max_stds, torch.Tensor) and max_stds.shape[0] == N else max_stds
-            # 重新整理 h0s
-            h0s_stack = h0s_stack[indices]
-            h0s = h0s_stack.squeeze(2).permute(1, 0, 2).contiguous()
-        else:
-            # 未打乱时直接使用之前为 critic 准备好的 h0s_for_critic
-            h0s = h0s_for_critic
-
+        
         # 优势归一化
         if adv_normed:
-            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False)
+            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
             # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
 
@@ -450,7 +435,7 @@ class PPOContinuous:
 
         # # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
         # actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
-
+        
         # # 反算 u = atanh(a)
         u_old = u_s
         # old_log_probs = dist.log_prob(0, u_old) # (N,1)

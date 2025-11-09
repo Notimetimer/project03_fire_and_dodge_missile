@@ -271,7 +271,7 @@ if __name__=="__main__":
 
                 # --- 智能体决策 ---
                 # 判断是否到达了决策点（每 10 步）
-                if env.is_action_complete('b', b_action_label) and steps_after_decision >= action_cycle_multiplier:
+                if env.is_action_complete('b', b_action_label) or steps_after_decision >= action_cycle_multiplier:  # and
                     # **关键点 1: 完成并存储【上一个】动作周期的经验**
                     # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     if steps_of_this_eps > 0:

@@ -52,7 +52,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 pre_log_dir = os.path.join(project_root, "logs")
 
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Escape-run-20251023-105633")
+
+log_dir = os.path.join(pre_log_dir, "Shoot-run-20251105-220454")
 
 print("log目录", log_dir)
 
@@ -97,42 +98,6 @@ state_dim = 1+1+1+ 8 + 7 + 1  # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
-
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'red' if side == 'r' else 'blue'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
-
-
 
 
 if __name__ == "__main__":
