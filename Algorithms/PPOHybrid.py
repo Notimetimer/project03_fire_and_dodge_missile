@@ -185,8 +185,10 @@ class PPOHybrid:
 
     def take_action(self, state, explore=True, max_std=None):
         '''
-        输出为两项，前一项为可被裁剪的动作部分，输入环境（cat分布需要重新采样一次）
-        后一项为用于被update输入的部分，作为神经网络原始输出
+        输出为两项，先a后u
+        连续动作 a 为限幅和缩放后结果，u 为原始采样
+        分类动作 a 为动作分布，u 为采样
+        伯努利动作 a 和 u 都是采样结果
         '''
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
         max_action_std = max_std if max_std is not None else self.max_std

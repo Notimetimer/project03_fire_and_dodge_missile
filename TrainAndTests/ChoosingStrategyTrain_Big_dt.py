@@ -85,7 +85,7 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=300,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=300,  # 8 * 60, # todo 300s 太少了，改成8分钟!!!!!!!!!!!!!!!
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60, 
                     help="")
@@ -112,7 +112,7 @@ mission_name = 'Combat'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
-# env = Battle(args, tacview_show=use_tacview)
+
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 35  # len(b_obs_spaces)

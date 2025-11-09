@@ -48,7 +48,7 @@ action_dim = 4  # 5 #######################
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
-action_cycle_multiplier = 20
+action_cycle_multiplier = 30
 
 
 
@@ -179,7 +179,8 @@ if __name__=="__main__":
 
                 # --- 智能体决策 ---
                 # 判断是否到达了决策点（每 10 步）
-                if env.is_action_complete('b', b_action_label) and steps_after_decision >= action_cycle_multiplier:
+                # if steps_after_decision >= action_cycle_multiplier:
+                if env.is_action_complete('b', b_action_label):
                     # # **关键点 1: 完成并存储【上一个】动作周期的经验**
                     
                     # **关键点 2: 开始【新的】一个动作周期**

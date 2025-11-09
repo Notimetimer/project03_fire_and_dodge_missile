@@ -72,7 +72,17 @@ class ShootTrainEnv(Battle):
         return flat_obs, full_obs
 
     def attack_terminate_and_reward(self, side, u):  # 进攻策略训练与奖励
-        ut = u[0]
+        # 兼容：若 u 是一维数组或列表，则取第0个元素；若为标量则直接使用（不考虑更高维度）
+        if isinstance(u, (list, tuple, np.ndarray)):
+            arr = np.array(u)
+            if arr.ndim == 1:
+                ut = arr[0]
+            elif arr.ndim == 0:
+                ut = arr.item()
+            else:
+                ut = u
+        else:
+            ut = u
         terminate = False
         state = self.get_state(side)
         speed = state["ego_main"][0]

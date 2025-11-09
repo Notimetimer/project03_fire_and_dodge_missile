@@ -3,17 +3,11 @@
 
 红方闲庭信步
 蓝方追赶红方
+导弹发射归智能体控制
 '''
 
 '''
-训练事项：
-1、所有动作缩放统一改在action_bound里面进行
-2、随机初始化我机和目标机位置
-3、禁止发射导弹，测试进攻相关的观测、结束判读和奖励能否完整运行 √
-4、高度指令改为相对高度 √
-5、tacview 文件头命令改在env init时候加入, √
-    加入clear_render方法清空所有在可视化的实体, √
-    在render方法中使用t_bias处理多次仿真可视化的起点问题 √
+
 '''
 
 import argparse
@@ -22,7 +16,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.Tasks.AttackManeuverEnv import *
+from Envs.Tasks.ShootDecisionEnv_backup import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
@@ -37,6 +31,7 @@ from send2tacview import *
 from Algorithms.Rules import decision_rule
 from Math_calculates.CartesianOnEarth import *
 from Math_calculates.sub_of_angles import *
+from Math_calculates.AR_randoms import *
 from torch.distributions import Normal
 import numpy as np
 import torch as th
@@ -52,11 +47,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 # 常规PPO
-# from Algorithms.SquashedPPOcontinues_dual_a_out import *
 from Algorithms.PPOHybrid import *
-
-# 实验性 AMPPO
-# from Algorithms.SquashedPPOcontinues_dual_a_AM import *
 
 # from tqdm import tqdm
 
@@ -69,9 +60,9 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=120,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=6*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -84,61 +75,25 @@ critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度
 # num_episodes = 1000 # 10000 1000
 max_steps = 65e4
 hidden_dim = [128, 128, 128]  # 128
-gamma = 0.9
-lmbda = 0.9
+gamma = 0.99 # 0.9
+lmbda = 0.97 # 0.9
 epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'HybridCont'
+mission_name = 'Shoot_hybrid_AS'
 
-env = AttackTrainEnv(args, tacview_show=use_tacview)
+env = ShootTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
 # r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
 # b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
-action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
-state_dim = 8 + 7 + 2  # len(b_obs_spaces)
-# action_dim = b_action_spaces[0].shape[0]
-
-action_dims_dict = {'Cont':3, 'Cat':0, 'Bern':0}
+state_dim = 1+1+1+ 8 + 7 + 1  # len(b_obs_spaces)
+action_dims_dict = {'Cont':0, 'Cat':0, 'Bern':1}
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
-
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'red' if side == 'r' else 'blue'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 def save_meta_once(path, state_dict):
     if os.path.exists(path):
@@ -149,7 +104,7 @@ def save_meta_once(path, state_dict):
 
 
 if __name__ == "__main__":
-
+    action_bound = None
     agent = PPOHybrid(state_dim, hidden_dim, action_dims_dict, action_bound, actor_lr, critic_lr,
                           lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2)  # 2,2
 
@@ -188,11 +143,10 @@ if __name__ == "__main__":
 
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
     training_start_time = time.time()
-    launch_time_count = 0
+    
     t_bias = 0
 
     try:
-
         # 强化学习训练
         rl_steps = 0
         return_list = []
@@ -202,25 +156,29 @@ if __name__ == "__main__":
         while total_steps < int(max_steps * (1 - pre_train_rate)):
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
 
             # 飞机出生状态指定
-            red_R_ = random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
-            red_beta = random.uniform(0, 2 * pi)
-            red_psi = random.uniform(0, 2 * pi)
-            red_height = random.uniform(3e3, 10e3)
-            red_N = red_R_ * cos(red_beta)
-            red_E = red_R_ * sin(red_beta)
-            blue_height = random.uniform(3e3, 10e3)
+            red_E = 45e3 # random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
+            blue_E= -red_E
+            red_height = random.uniform(3e3, 12e3)
+            blue_height = random.uniform(3e3, 12e3)
 
-            DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                       'psi': red_psi
+            DEFAULT_RED_BIRTH_STATE = {'position': np.array([0.0, red_height, red_E]),
+                                       'psi': -pi/2
                                        }
-            DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-                                        'psi': pi
+            DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, blue_E]),
+                                        'psi': pi/2
                                         }
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                      red_init_ammo=0, blue_init_ammo=0)
+                      red_init_ammo=0, blue_init_ammo=6)
+            RUAV_set_speed = random.uniform(0.7, 1.5) * 340
+            RUAV_set_height = red_height
+            BUAV_set_speed = random.uniform(0.7, 1.5) * 340
+            
+            last_launch_time = - np.inf
+            random_theta_plus = 0
+            random_psi_plus = 0
 
             # a1 = env.BUAV.pos_  # 58000,7750,20000
             # a2 = env.RUAV.pos_  # 2000,7750,20000
@@ -259,29 +217,51 @@ if __name__ == "__main__":
 
                 b_obs = np.squeeze(b_obs_n)
 
-                distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+                cos_delta_psi = b_obs_check["target_information"][0]
+                sin_delta_psi = b_obs_check["target_information"][1]
+                delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+
+                distance = b_obs_check["target_information"][3]*10e3
+                alpha = b_obs_check["target_information"][4]
+                AA_hor = b_obs_check["target_information"][6]
+                launch_interval = b_obs_check["weapon"]*120
+                missile_in_mid_term = b_obs_check["missile_in_mid_term"]
+
+                
                 # 发射导弹判决
-                if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
-                    launch_time_count = 0
-                    launch_missile_if_possible(env, side='r')
-                    launch_missile_if_possible(env, side='b')
+                u, _ = agent.take_action(b_obs_n, explore=0) # 0 1
+                ut = u['Bern'][0]
+                at = ut
+
+                # Shield
+                at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
+
+                if at == 1:
+                    last_launch_time = env.t
+                    launch_missile_immediately(env, side='b')                  
+
 
                 # 机动决策
                 r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
                                            enm_pos_=env.BUAV.pos_, distance=distance,
                                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-                                           o00=o00, R_cage=env.R_cage, wander=1
+                                           o00=o00, R_cage=env.R_cage, wander=0,
+                                           set_height=RUAV_set_height, set_speed=RUAV_set_speed
                                            )
-                b_action_n_, u = agent.take_action(b_obs, explore=True)
 
-                # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
-                #                         enm_pos_=env.RUAV.pos_, distance=distance,
-                #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
-                #                         o00=o00, R_cage=env.R_cage, wander=0
-                #                         )
-                b_action_n = b_action_n_['Cont']
+                random_theta_plus = generate_ar1_value(random_theta_plus, 0.9, 0.1)
+                random_psi_plus = generate_ar1_value(random_psi_plus, 0.9, 0.1)
+                
+
+                b_action_n = np.array([env.RUAV.alt-env.BUAV.alt + 1000 * random_theta_plus, 
+                                       delta_psi + pi/4 * random_psi_plus, 
+                                       BUAV_set_speed])
+
+                r_action_list.append(r_action_n)
+                b_action_list.append(b_action_n)
+
                 _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                done, b_reward, _ = env.attack_terminate_and_reward('b')
+                done, b_reward, _ = env.attack_terminate_and_reward('b', ut)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1
@@ -305,7 +285,7 @@ if __name__ == "__main__":
                 out_range_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
-            agent.update(transition_dict)
+            agent.update(transition_dict, adv_normed=1)
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
@@ -337,8 +317,9 @@ if __name__ == "__main__":
                 print(f"episode {i_episode}, total_steps {total_steps}")
 
             # tensorboard 训练进度显示
-            logger.add("train/1 episode_return", episode_return, total_steps)
+            logger.add("train/1 episode_return", episode_return/env.t, total_steps)
             logger.add("train/2 win", env.win, total_steps)
+            logger.add("train/2 lose", env.lose, total_steps)
 
             actor_grad_norm = agent.actor_grad
             actor_pre_clip_grad = agent.pre_clip_actor_grad

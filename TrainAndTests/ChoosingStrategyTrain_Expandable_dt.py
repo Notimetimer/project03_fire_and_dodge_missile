@@ -85,7 +85,7 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=300,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=300,  # 8 * 60, # todo 300s 太少了，改成8分钟!!!!!!!!!!!!!!!
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60, 
                     help="")
@@ -96,7 +96,7 @@ args = parser.parse_args()
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
-action_cycle_multiplier = 20
+action_cycle_multiplier = 30
 actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
