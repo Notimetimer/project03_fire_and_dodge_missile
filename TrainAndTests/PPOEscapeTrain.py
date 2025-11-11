@@ -68,7 +68,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 1e-4  # 熵系数
-mission_name = 'Escape'
+mission_name = 'Escape_new'
 
 env = EscapeTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)

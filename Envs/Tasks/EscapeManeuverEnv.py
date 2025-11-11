@@ -225,9 +225,15 @@ class EscapeTrainEnv(Battle):
             self.last_dist2missile_dot = threat_dist_dot_avg
             r_v = np.clip(dist2m_dt2 / (9.8), -2, 2)
 
+            # 过载量加入速度奖励
+            if alpha_threat <= 160*pi/180:
+                r_v += abs(ego.Ny/6) * 2
+            else:
+                r_v -= 0 # abs(ego.Ny/6) * 1
+
             # 高度奖励
             r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
-                    (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
+                    (alt >= self.min_alt_safe + 2e3) * np.clip(-ego.vu / 100, -1, 1)
 
             # 距离奖励，和导弹之间的距离变化率
             # dist2m = state["threat"][3]

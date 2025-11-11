@@ -52,8 +52,8 @@ def creat_initial_state():
     red_height = initial_states[line_number, 0]
     blue_height = initial_states[line_number, 1]
 
-    red_height = 13e3
-    blue_height = 12e3
+    # red_height = 13e3
+    # blue_height = 12e3
 
     if blue_height <= 9e3:
         initial_dist = 30e3
@@ -82,7 +82,8 @@ def creat_initial_state():
 
 try:
     env = EscapeTrainEnv(args, tacview_show=1)  # Battle(args, tacview_show=1)
-    for i_episode in range(1):  # 10
+    success_list = []
+    for i_episode in range(20):  # 10
         r_action_list = []
         b_action_list = []
 
@@ -210,10 +211,16 @@ try:
 
             step += 1
             env.render(t_bias=t_bias)
-            time.sleep(0.01)
+            # time.sleep(0.01)
 
+        if env.win:
+            success_list.append(1)
+        else:
+            success_list.append(0)
         env.clear_render(t_bias=t_bias)
         t_bias += env.t
 
 except KeyboardInterrupt:
     print("验证已中断")
+finally:
+    print("success_rate:", sum(success_list)/len(success_list))
