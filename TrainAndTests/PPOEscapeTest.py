@@ -11,55 +11,24 @@ dt_maneuver = 0.2  # 0.2
 action_eps = 0.7  # 动作平滑度
 
 
-# 找出日期最大的目录
-def get_latest_log_dir(pre_log_dir, mission_name=None):
-    # 匹配 run-YYYYMMDD-HHMMSS 目录
-    # pattern = re.compile(r"run-(\d{8})-(\d{6})")
-    if mission_name:
-        pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
-    else:
-        pattern = re.compile(r"run-(\d{8})-(\d{6})")
-    max_dt = None
-    latest_dir = None
-    for d in os.listdir(pre_log_dir):
-        m = pattern.match(d)
-        if m:
-            dt_str = m.group(1) + m.group(2)  # 'YYYYMMDDHHMMSS'
-            if max_dt is None or dt_str > max_dt:
-                max_dt = dt_str
-                latest_dir = d
-    if latest_dir:
-        return os.path.join(pre_log_dir, latest_dir)
-    else:
-        return None
-
-
-# pre_log_dir = os.path.join("./logs")
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-pre_log_dir = os.path.join(project_root, "logs")
-
-log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-
-
-# log_dir = os.path.join(pre_log_dir, "Escape-run-20251023-105633")
-
-print("log目录", log_dir)
-
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                       lmbda, epochs, eps, gamma, device)
 
-if log_dir is None:
-    raise ValueError("No valid log directory found. Please check the `pre_log_dir` or `mission_name`.")
 
-rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
-if latest_actor_path:
-    # 直接加载权重到现有的 agent
-    sd = th.load(latest_actor_path, map_location=device)
-    agent.actor.load_state_dict(sd)  # , strict=False)  # 忽略缺失的键
-    print(f"Loaded actor for test from: {latest_actor_path}")
+from Utilities.LocateDirAndAgents import *
+pre_log_dir = os.path.join(project_root, "logs")
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+
+# 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
+actor_path = load_actor_from_log(log_dir, number=1200)
+if not actor_path:
+    print(f"No actor checkpoint found in {log_dir}")
+else:
+    sd = th.load(actor_path, map_location=device, weights_only=True)
+    agent.actor.load_state_dict(sd)
+    print(f"Loaded actor for test from: {actor_path}")
 
 t_bias = 0
 
@@ -136,33 +105,6 @@ try:
             r_obs_n, r_obs_check = env.escape_obs('r')
             b_obs_n, b_obs_check = env.escape_obs('b')
 
-            # # 反向转回字典方便排查
-            # b_obs_check = copy.deepcopy(env.state_init)
-            # key_order = env.key_order
-            # # 将扁平向量 b_obs_n 按 key_order 的顺序还原到字典 b_obs_check
-            # arr = np.atleast_1d(np.asarray(b_obs_n)).reshape(-1)
-            # idx = 0
-            # for k in key_order:
-            #     if k not in b_obs_check:
-            #         raise KeyError(f"key '{k}' not in state_init")
-            #     v0 = b_obs_check[k]
-            #     # 可迭代的按长度切片，还原为 list 或 ndarray（保留原类型）
-            #     if isinstance(v0, (list, tuple, np.ndarray)):
-            #         length = len(v0)
-            #         slice_v = arr[idx: idx + length]
-            #         if isinstance(v0, np.ndarray):
-            #             b_obs_check[k] = slice_v.copy()
-            #         else:
-            #             b_obs_check[k] = slice_v.tolist()
-            #         idx += length
-            #     else:
-            #         # 标量
-            #         b_obs_check[k] = float(arr[idx])
-            #         idx += 1
-            # if idx != arr.size:
-            #     # 长度不匹配时给出提示（便于调试）
-            #     print(f"Warning: flattened obs length mismatch: used {idx} of {arr.size}")
-
             # # 在这里将观测信息压入记忆
             # env.RUAV.obs_memory = r_obs_check.copy()
             # env.BUAV.obs_memory = b_obs_check.copy()
@@ -203,13 +145,13 @@ try:
             q_epsilon = atan2(L_v, L_h)
             delta_psi = sub_of_radian(q_beta, env.RUAV.psi)
             r_action_n_0 = np.clip(env.BUAV.pos_[1], env.min_alt_safe, env.max_alt_safe)-env.RUAV.pos_[1]
-            r_action_n_1 = delta_psi
+            r_action_n_1 = delta_psi  # + 20*pi/180*random.choice([-1,1])
             r_action_n_2 = 300
             r_action_n = [r_action_n_0, r_action_n_1, r_action_n_2]
 
             if np.isnan(b_obs_n).any() or np.isinf(b_obs_n).any():
                 print('b_obs_n', b_obs_check)
-                print()
+                # print()
 
             if not battle_control_on_line:
                 L_ = env.RUAV.pos_ - env.BUAV.pos_
@@ -222,20 +164,20 @@ try:
                 b_action_n_1 = delta_psi               + 0*pi/180
                 b_action_n_2 = 340
                 b_action_n = np.array([b_action_n_0, b_action_n_1, b_action_n_2])
-                print("prepare")
-                print(env.t)
+                # print("prepare")
+                # print(env.t)
             else:
-                print("escape")
-                print(env.t)
+                # print("escape")
+                # print(env.t)
                 # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负
                 b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=False)
 
-                # 可躲性测试
-                L_ = env.RUAV.pos_ - env.BUAV.pos_
-                q_beta = atan2(L_[2], L_[0])
-                b_action_n[0] = np.clip(-300, env.min_alt_safe-env.BUAV.pos_[1] , 5000)
-                b_action_n[1] = sub_of_radian(q_beta+pi, env.BUAV.psi)
-                b_action_n[2] = 400
+                # # 可躲性测试
+                # L_ = env.RUAV.pos_ - env.BUAV.pos_
+                # q_beta = atan2(L_[2], L_[0])
+                # b_action_n[0] = np.clip(-300, env.min_alt_safe-env.BUAV.pos_[1] , 5000)
+                # b_action_n[1] = sub_of_radian(q_beta+pi, env.BUAV.psi)
+                # b_action_n[2] = 400
 
                 # 动作裁剪
                 # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
@@ -244,19 +186,17 @@ try:
                 # else:
                 #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
-            if b_obs_check["warning"] == 1:
-                # print(b_obs_check["threat"])
-                # print(b_obs_check["border"])
-                print()
+            # if b_obs_check["warning"] == 1:
+                # print()
 
             # # 规则动作
             # delta_psi = b_obs_check["target_information"][1]
             # delta_height = b_obs_check["target_information"][0]
             # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
 
-            # # 动作平滑（实验性）
-            b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
-            hist_b_action = b_action_n
+            # # # 动作平滑（实验性）
+            # b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
+            # hist_b_action = b_action_n
 
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
@@ -265,8 +205,8 @@ try:
             done, b_reward, _ = env.escape_terminate_and_reward('b')
             done = done or fake_terminate  # debug 这里需要解决下仿真结束判断的问题
 
-            if env.RUAV.dead:
-                print()
+            # if env.RUAV.dead:
+            #     print()
 
             step += 1
             env.render(t_bias=t_bias)

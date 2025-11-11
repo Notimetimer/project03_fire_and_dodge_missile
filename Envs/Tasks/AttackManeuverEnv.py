@@ -56,6 +56,7 @@ class AttackTrainEnv(Battle):
         pre_full_obs = self.base_obs(side)
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.attack_key_order}
+        full_obs["ego_main"][6]=0
         # 先对dict的元素mask
         # 只需要 target_information 和 ego_main
         # full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])

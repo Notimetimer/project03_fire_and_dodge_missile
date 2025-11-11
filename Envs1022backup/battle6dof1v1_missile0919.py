@@ -39,7 +39,7 @@ from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
-from Utilities.flatten_dict_obs import flatten_obs2 as flatten_obs
+from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2

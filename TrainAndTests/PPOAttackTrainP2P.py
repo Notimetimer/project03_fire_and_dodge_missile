@@ -90,14 +90,14 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'Attack'
+mission_name = 'AttackP2P'
 
 env = AttackTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
 # r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
 # b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
-action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
+action_bound = np.array([[-1, 1], [-1, 1], [0, 1]])
 
 state_dim = 8 + 7 + 2  # len(b_obs_spaces)
 action_dim = b_action_spaces[0].shape[0]
@@ -105,38 +105,6 @@ action_dim = b_action_spaces[0].shape[0]
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
-
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'red' if side == 'r' else 'blue'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 def save_meta_once(path, state_dict):
     if os.path.exists(path):
@@ -213,10 +181,12 @@ if __name__ == "__main__":
             blue_height = random.uniform(3e3, 10e3)
 
             DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                       'psi': red_psi
+                                       'psi': red_psi,
+                                       'p2p': False
                                        }
             DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-                                        'psi': pi
+                                        'psi': pi,
+                                        'p2p': True
                                         }
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                       red_init_ammo=0, blue_init_ammo=0)

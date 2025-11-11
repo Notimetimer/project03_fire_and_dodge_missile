@@ -20,51 +20,25 @@ def crank_behavior(delta_psi, delta_height):
     speed_cmd = 1.1 * 340
     return delta_height, heading_cmd, speed_cmd
 
-# 找出日期最大的目录
-def get_latest_log_dir(pre_log_dir, mission_name=None):
-    # 匹配 run-YYYYMMDD-HHMMSS 目录
-    # pattern = re.compile(r"run-(\d{8})-(\d{6})")
-    if mission_name:
-        pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
-    else:
-        pattern = re.compile(r"run-(\d{8})-(\d{6})")
-    max_dt = None
-    latest_dir = None
-    for d in os.listdir(pre_log_dir):
-        m = pattern.match(d)
-        if m:
-            dt_str = m.group(1) + m.group(2)  # 'YYYYMMDDHHMMSS'
-            if max_dt is None or dt_str > max_dt:
-                max_dt = dt_str
-                latest_dir = d
-    if latest_dir:
-        return os.path.join(pre_log_dir, latest_dir)
-    else:
-        return None
-
-# pre_log_dir = os.path.join("./logs")
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-pre_log_dir = os.path.join(project_root, "logs")
-log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-
-# log_dir = os.path.join(pre_log_dir, "LCrank-run-20251024-112053")
-
-print("\n\n\n")
-print("logdir", log_dir)
-print("\n\n\n")
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                 lmbda, epochs, eps, gamma, device)
 
-rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
-if latest_actor_path:
-    # 直接加载权重到现有的 agent
-    sd = th.load(latest_actor_path, map_location=device)
-    agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
-    print(f"Loaded actor for test from: {latest_actor_path}")
+
+from Utilities.LocateDirAndAgents import *
+pre_log_dir = os.path.join(project_root, "logs")
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+
+# 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
+actor_path = load_actor_from_log(log_dir, number=None)
+if not actor_path:
+    print(f"No actor checkpoint found in {log_dir}")
+else:
+    sd = th.load(actor_path, map_location=device, weights_only=True)
+    agent.actor.load_state_dict(sd)
+    print(f"Loaded actor for test from: {actor_path}")
 
 t_bias = 0
 

@@ -39,7 +39,7 @@ from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
-from Utilities.flatten_dict_obs import flatten_obs2 as flatten_obs
+from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
@@ -68,7 +68,7 @@ def sigmoid(x):
 class Battle(object):
     def __init__(self, args, tacview_show=0):
         # super(Battle, self).__init__() 
-        self.p2p_control = False
+        # self.p2p_control = False
         self.alive_b_missiles = None
         self.alive_r_missiles = None
         self.BUAV = None
@@ -114,11 +114,13 @@ class Battle(object):
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      b_obs_n]
 
-        self.DEFAULT_RED_BIRTH_STATE = {'position': np.array([-R_birth * cos(0), 8000.0, -R_birth * sin(0)]),
-                                        'psi': 0
+        self.RED_BIRTH_STATE = {'position': np.array([-R_birth * cos(0), 8000.0, -R_birth * sin(0)]),
+                                        'psi': 0,
+                                        'p2p': False
                                         }
-        self.DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([-R_birth * cos(pi), 8000.0, -R_birth * sin(pi)]),
-                                         'psi': pi
+        self.BLUE_BIRTH_STATE = {'position': np.array([-R_birth * cos(pi), 8000.0, -R_birth * sin(pi)]),
+                                         'psi': pi,
+                                         'p2p': False
                                          }
         self.tacview_show = tacview_show
         if tacview_show:
@@ -129,9 +131,12 @@ class Battle(object):
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, ):  # 重置位置和状态
 
         if red_birth_state is None:
-            red_birth_state = self.DEFAULT_RED_BIRTH_STATE
+            red_birth_state = self.RED_BIRTH_STATE
         if blue_birth_state is None:
-            blue_birth_state = self.DEFAULT_BLUE_BIRTH_STATE
+            blue_birth_state = self.BLUE_BIRTH_STATE
+
+        self.BLUE_BIRTH_STATE = blue_birth_state
+        self.RED_BIRTH_STATE = red_birth_state
 
         self.Rmissiles = []
         self.Bmissiles = []
@@ -279,7 +284,14 @@ class Battle(object):
                     target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
                     delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
 
-                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=self.p2p_control)
+                if UAV.blue:
+                    # 如果 BLUE_BIRTH_STATE 包含 p2p 则使用其值，否则为 False
+                    p2p = self.BLUE_BIRTH_STATE.get('p2p', False)
+                if UAV.red:
+                    # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
+                    p2p = self.RED_BIRTH_STATE.get('p2p', False)
+
+                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p)
                 # 上一步动作
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
@@ -664,7 +676,7 @@ class Battle(object):
             #     float(sin(threat_delta_theta)),  # 1
             #     float(sin(threat_delta_psi) * cos(threat_delta_theta))  # 2
             #     float(threat_distance),
-            # ]),
+            # }),
 
             "border": np.array([
                 float(d_hor),  # 0
@@ -674,7 +686,24 @@ class Battle(object):
         }
 
         return one_side_states
-
+    
+    # 尺度缩放
+    def scale_state(self, state_input):
+        # 使用 deepcopy 避免修改传入对象
+        s = copy.deepcopy(state_input)
+        s["target_information"][3] /= 10e3
+        s["target_information"][5] /= 340
+        s["ego_main"][0] /= 340
+        s["ego_main"][1] /= 5e3
+        s["ego_control"][0] /= (2 * pi)  # (2 * pi) 5000
+        s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
+        s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
+        s["weapon"] /= 120
+        s["threat"][3] /= 10e3
+        s["border"][0] = min(1, s["border"][0] / 50e3)
+        s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
+        return s
+        
     def base_obs(self, side, pomdp=0):
         # 处理部分可观测、默认值问题、并尺度缩放
         # 输出保持字典的形式
@@ -736,25 +765,8 @@ class Battle(object):
 
         uav.obs_memory = copy.deepcopy(state)  # 更新残留值
 
-        # 尺度缩放
-        def scale_state(state_input):
-            # 使用 deepcopy 避免修改传入对象
-            s = copy.deepcopy(state_input)
-            s["target_information"][3] /= 10e3
-            s["target_information"][5] /= 340
-            s["ego_main"][0] /= 340
-            s["ego_main"][1] /= 5e3
-            s["ego_control"][0] /= (2 * pi)  # (2 * pi) 5000
-            s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
-            s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
-            s["weapon"] /= 120
-            s["threat"][3] /= 10e3
-            s["border"][0] = min(1, s["border"][0] / 50e3)
-            s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
-            return s
-
-        observation = scale_state(state)
-        self.obs_init = scale_state(self.state_init)
+        observation = self.scale_state(state)
+        self.obs_init = self.scale_state(self.state_init)
         return observation
 
     def get_reward(self, missiled_combat='Flase'):  # 策略选择器奖励
