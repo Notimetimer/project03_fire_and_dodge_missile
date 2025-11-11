@@ -173,7 +173,7 @@ class ChooseStrategyEnv(Battle):
         # 运动按照dt_move更新，结果合并到dt_maneuver中
         UAV_actions = {}
         for UAV, action in zip(self.UAVs, actions):
-            # action = 0
+
             if UAV.dead:
                 continue
             elif action == 0:
@@ -196,8 +196,8 @@ class ChooseStrategyEnv(Battle):
 
 
                 move_action, _ = attack_agent.take_action(obs, action_bound, explore=False)
-                print(UAV.side)
-                print(move_action)
+                # print(UAV.side)
+                # print(move_action)
                 1+1
             elif action == 1:
                 obs, check_obs = self.escape_obs(UAV.side)

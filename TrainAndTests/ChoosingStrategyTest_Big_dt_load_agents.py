@@ -83,7 +83,7 @@ def creat_initial_state():
     blue_psi = sub_of_radian(red_psi, -pi)
     # blue_beta = red_psi
     red_N = 0
-    red_E = -np.sign(red_psi) * 20e3 # 40e3
+    red_E = -np.sign(red_psi) * 40e3 # 40e3
     blue_N = red_N
     blue_E = -red_E
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
@@ -151,7 +151,7 @@ if __name__=="__main__":
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=1, blue_init_ammo=6)
+                    red_init_ammo=6, blue_init_ammo=6)
             r_action_label=0
             b_action_label=0
             last_decision_state = None
