@@ -29,7 +29,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.PPOdiscrete import *
+from Algorithms.MAPPOdiscrete import * # 显式导入
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
@@ -40,38 +40,6 @@ use_tacview = 0  # 是否可视化
 if matplotlib.get_backend() != 'TkAgg':
     matplotlib.use('TkAgg')
     plt.switch_backend('TkAgg')
-
-# def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
-#     at0 = at
-#     # if distance > 60e3:
-#     #     interval_refer = 30
-#     # elif distance>40e3:
-#     #     interval_refer = 20
-#     # elif distance>20e3:
-#     #     interval_refer = 15
-#     # else:
-#     #     interval_refer = 8
-
-#     if distance>20e3:
-#         interval_refer = 16
-#     else:
-#         interval_refer = 8
-    
-#     if distance > 80e3 or alpha > 60*pi/180:
-#         at = 0
-#     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
-#     #     at = 1
-#     if launch_interval < interval_refer:
-#         at = 0
-
-#     if abs(AA_hor) < pi*1/3 and distance>12e3: ## 禁止超视距完全尾追发射 新增
-#         at=0
-
-#     same = int(bool(at0) == bool(at))
-#     xor  = int(bool(at0) != bool(at))  
-
-#     return at, xor
-
 
 start_time = time.time()
 launch_time_count = 0
@@ -108,7 +76,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'Combat'
+mission_name = 'CombatMAPPO'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
@@ -170,6 +138,9 @@ if __name__=="__main__":
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
 
+    # 为FSP实例化一个红方策略网络
+    red_actor = PolicyNetDiscrete(state_dim, hidden_dim, action_dim).to(device)
+
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
     from datetime import datetime
@@ -215,8 +186,27 @@ if __name__=="__main__":
             i_episode += 1
             test_run = 0
 
+            # --- FSP核心：为红方加载一个历史策略 ---
+            # 查找所有已保存的 actor 模型
+            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+            if not actor_files:
+                # 如果没有历史模型，红方使用固定策略（例如总是进攻）
+                red_actor_loaded = False
+            else:
+                # 随机选择一个历史模型
+                opponent_path = random.choice(actor_files)
+                try:
+                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
+                    red_actor.eval() # 设置为评估模式
+                    red_actor_loaded = True
+                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
+                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)}")
+                except Exception as e:
+                    print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
+                    red_actor_loaded = False
+
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
+            transition_dict = {'obs': [], 'global_states': [], 'actions': [], 'next_global_states': [], 'rewards': [], 'dones': [], 'agent_ids':[]}
 
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
@@ -269,10 +259,10 @@ if __name__=="__main__":
                     # **关键点 1: 完成并存储【上一个】动作周期的经验**
                     # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     if steps_of_this_eps > 0:
-                        transition_dict['states'].append(last_decision_state)
+                        transition_dict['obs'].append(last_decision_state)
                         transition_dict['actions'].append(current_action)
                         transition_dict['rewards'].append(b_reward)
-                        transition_dict['next_states'].append(b_obs) # 当前状态是上个周期的 next_state
+                        transition_dict['next_global_states'].append(b_obs) # 当前状态是上个周期的 next_state
                         transition_dict['dones'].append(False) # 没结束，所以是 False
 
                     # **关键点 2: 开始【新的】一个动作周期**
@@ -294,8 +284,13 @@ if __name__=="__main__":
                     # b_action_list.append(b_action_label)
                     current_action = b_action_label
 
-                    r_action_label = 0 # Red's action, assuming it's fixed or from another policy
-                    # r_action_list.append(r_action_label)
+                    # --- 红方决策 ---
+                    if not red_actor_loaded:
+                        r_action_label = 0 # 如果没有加载模型，则执行默认动作
+                    else:
+                        r_obs_n = flatten_obs(r_check_obs, env.key_order)
+                        r_obs = np.squeeze(r_obs_n)
+                        r_action_label = take_action_from_policy_discrete(red_actor, r_obs, device, explore=False)
                     
 
                 ### 发射导弹，这部分不受10step约束
@@ -329,13 +324,13 @@ if __name__=="__main__":
             # **关键点 3: 存储【最后一个】不完整的动作周期的经验**
             # 循环结束后，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
             if last_decision_state is not None:
-                transition_dict['states'].append(last_decision_state)
+                transition_dict['obs'].append(last_decision_state)
                 transition_dict['actions'].append(current_action)
                 transition_dict['rewards'].append(b_reward)
-                transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
+                transition_dict['next_global_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
                 transition_dict['dones'].append(True)
             
-            if 1: # len(transition_dict['next_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
+            if 1: # len(transition_dict['next_global_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
                 '''agent.update'''
                 agent.update(transition_dict, adv_normed=False)
                 decide_steps_after_update = 0
@@ -359,7 +354,7 @@ if __name__=="__main__":
                 logger.add("train/10 ratio", agent.ratio_mean, total_steps) 
                 logger.add("train/11 episode/step", i_episode, total_steps)    
 
-                transition_dict = {'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
+                transition_dict = {'obs': [], 'actions': [], 'rewards': [], 'next_global_states': [], 'dones': []}
 
             
             episode_end_time = time.time()  # 记录结束时间

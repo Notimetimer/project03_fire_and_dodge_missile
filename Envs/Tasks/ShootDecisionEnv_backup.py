@@ -233,7 +233,7 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     # elif distance < 10e3:
     #     interval_refer = 5
     
-    if distance > 80e3 or alpha > pi/3:
+    if distance > 80e3 or alpha > 60*pi/180:
         at = 0
     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
     #     at = 1
@@ -250,7 +250,7 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
 
 # def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
 #     at0 = at
-#     if distance > 80e3 or alpha > pi/3:
+#     if distance > 80e3 or alpha > 60*pi/180:
 #         at = 0
 #     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
 #     #     at = 1

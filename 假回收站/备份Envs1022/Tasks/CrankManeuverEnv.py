@@ -120,7 +120,7 @@ class CrankTrainEnv(Battle):
         # 求解hot-cold关系
         cos_ATA_ego = np.dot(Los_, ego.point_)/(dist*norm(ego.point_))
         # 近距杀
-        if cos_ATA_ego>=cos(pi/3) and dist<8e3:
+        if cos_ATA_ego>=cos(60*pi/180) and dist<8e3:
             terminate = True
             self.win = 1
         

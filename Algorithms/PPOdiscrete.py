@@ -256,3 +256,26 @@ class PPO_discrete:
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
+
+
+def take_action_from_policy_discrete(policy_net, state, device, explore=False):
+    """
+    独立的离散策略推理函数。
+    输入:
+      policy_net: PolicyNetDiscrete 实例
+      state: 可被 np.array 接受的状态（标量或一维特征向量）
+      device: torch.device
+      explore: True 则从分布采样，False 则选择 argmax（确定性）
+    返回:
+      action: int 动作索引
+    """
+    policy_net.eval()
+    state_t = torch.tensor(np.array([state]), dtype=torch.float).to(device)
+    with torch.no_grad():
+        probs = policy_net(state_t)  # (1, action_dim)
+        if explore:
+            dist = torch.distributions.Categorical(probs)
+            action = int(dist.sample().item())
+        else:
+            action = int(torch.argmax(probs, dim=1).item())
+    return action

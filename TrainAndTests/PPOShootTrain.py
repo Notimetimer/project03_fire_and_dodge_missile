@@ -16,7 +16,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.Tasks.ShootDecisionEnv_backup import *
+from Envs.Tasks.ShootDecisionEnv import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
@@ -62,7 +62,7 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=6*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -80,7 +80,7 @@ lmbda = 0.97 # 0.9
 epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
-k_entropy = 0.01  # 熵系数
+k_entropy = 0.05  # 熵系数 0.01
 mission_name = 'Shoot'
 
 env = ShootTrainEnv(args, tacview_show=use_tacview)
@@ -188,7 +188,7 @@ if __name__ == "__main__":
         while total_steps < int(max_steps * (1 - pre_train_rate)):
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 't': []}
 
             # 飞机出生状态指定
             red_E = 45e3 # random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
@@ -227,6 +227,8 @@ if __name__ == "__main__":
 
             r_action_list = []
             b_action_list = []
+
+            missiles_launch_information = {}
 
             episode_start_time = time.time()
 
@@ -267,10 +269,12 @@ if __name__ == "__main__":
 
                 # Shield
                 at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
-
+                missile_id = None
                 if at == 1:
                     last_launch_time = env.t
-                    launch_missile_immediately(env, side='b')                  
+                    missile_id = launch_missile_immediately(env, side='b')                  
+                    if missile_id is not None:
+                        missiles_launch_information[missile_id] = env.t
 
 
                 # 机动决策
@@ -292,19 +296,25 @@ if __name__ == "__main__":
                 r_action_list.append(r_action_n)
                 b_action_list.append(b_action_n)
 
-                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                done, b_reward, _ = env.attack_terminate_and_reward('b', u)
+                _, _, _, _, fake_terminate, hitter = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                done, b_reward, end_reward = env.attack_terminate_and_reward('b', u, missile_id)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1
+
+                hitter_birth_time = None
+                if hitter is not None:
+                    hitter_birth_time = missiles_launch_information[hitter]
+                    hit_time = env.t
 
                 transition_dict['states'].append(b_obs)
                 transition_dict['actions'].append(u)
                 transition_dict['next_states'].append(next_b_obs)
                 transition_dict['rewards'].append(b_reward)
                 transition_dict['dones'].append(done)
+                transition_dict['t'].append(env.t)
                 # state = next_state
-                episode_return += b_reward * env.dt_maneuver
+                episode_return += b_reward # * env.dt_maneuver
 
                 '''显示运行轨迹'''
                 # 可视化
@@ -317,6 +327,24 @@ if __name__ == "__main__":
                 out_range_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
+
+            # transition_dict重构，奖励回溯
+            if hitter_birth_time is not None:
+                # 遍历 transition_dict['t']，找到与 hitter_birth_time 相等的编号
+                launch_number = None
+                hit_number = None
+
+                for idx, t in enumerate(transition_dict['t']):
+                    if t == hitter_birth_time:
+                        launch_number = idx
+                    if t == env.t:
+                        hit_number = idx
+
+                # 如果找到了 launch_number 和 hit_number，更新对应的 reward
+                if launch_number is not None and hit_number is not None:
+                    transition_dict['rewards'][launch_number] += end_reward
+                    transition_dict['rewards'][hit_number] -= end_reward
+
             agent.update(transition_dict, adv_normed=1)
 
             # print(t_bias)
@@ -346,12 +374,14 @@ if __name__ == "__main__":
                 print(
                     f"episode {i_episode}, 进度: {total_steps / max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
             else:
-                print(f"episode {i_episode}, total_steps {total_steps}")
+                print(f"episode {i_episode}, total_steps {total_steps}, return:{(episode_return):.3f}")
 
             # tensorboard 训练进度显示
-            logger.add("train/1 episode_return", episode_return/env.t, total_steps)
+            logger.add("train/1 episode_return", episode_return, total_steps)
             logger.add("train/2 win", env.win, total_steps)
             logger.add("train/2 lose", env.lose, total_steps)
+            logger.add("train/2 hit", env.target_hit, total_steps)
+            logger.add("train/2 drive out", env.target_out, total_steps)
 
             actor_grad_norm = agent.actor_grad
             actor_pre_clip_grad = agent.pre_clip_actor_grad
@@ -368,6 +398,7 @@ if __name__ == "__main__":
             # 强化学习actor特殊项监控
             logger.add("train/9 entropy", agent.entropy_mean, total_steps)
             logger.add("train/10 ratio", agent.ratio_mean, total_steps)
+            logger.add("train/11 ratio", i_episode, total_steps)
 
         training_end_time = time.time()  # 记录结束时间
         elapsed = training_end_time - training_start_time

@@ -53,9 +53,9 @@ pre_log_dir = os.path.join(project_root, "logs")
 
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
-log_dir = os.path.join(pre_log_dir, "Shoot-run-20251105-220454")
+log_dir = os.path.join(pre_log_dir, "Shoot-run-20251114-164752")
 
-print("log目录", log_dir)
+# print("log目录", log_dir)
 
 
 # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
@@ -67,7 +67,7 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=8*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -218,8 +218,6 @@ if __name__ == "__main__":
                 at = ut
 
                 # Shield
-                # print(AA_hor*180/pi)
-                at = 1 if distance<20e3 else at  # test
                 at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
 
                 if at == 1:
@@ -246,7 +244,7 @@ if __name__ == "__main__":
                 r_action_list.append(r_action_n)
                 b_action_list.append(b_action_n)
 
-                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                _, _, _, _, fake_terminate, _ = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, _ = env.attack_terminate_and_reward('b', u)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作

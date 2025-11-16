@@ -239,14 +239,40 @@ class PPOHybrid:
         
         return actions_exec, actions_raw
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
+    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=0):
+        N = len(transition_dict['states'])
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-
         # 从字典中提取动作
         actions_from_buffer = transition_dict['actions']
+
+        # 计算 TD-target 和 advantage
+        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+        td_delta = td_target - self.critic(states)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        
+        # 首先按原始顺序把数据载入（不要一开始就打乱）
+
+        indices = np.arange(N)
+        if shuffled:
+            np.random.shuffle(indices)
+            states = states[indices]
+            actions_from_buffer = actions_from_buffer[indices]
+            rewards = rewards[indices]
+            dones = dones[indices]
+            next_states = next_states[indices]
+            advantage = advantage[indices]
+            # max_stds = max_stds[indices] if isinstance(max_stds, torch.Tensor) and max_stds.shape[0] == N else max_stds
+            # # 重新整理 h0s
+            # h0s_stack = h0s_stack[indices]
+            # h0s = h0s_stack.squeeze(2).permute(1, 0, 2).contiguous()
+        else:
+            # # 未打乱时直接使用之前为 critic 准备好的 h0s_for_critic
+            # h0s = h0s_for_critic
+            pass
+
 
         # actions_from_buffer 是 list[dict]，需要按 key 聚合
         actions_on_device = {}
@@ -259,11 +285,7 @@ class PPOHybrid:
             else:
                 actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
         
-        # 计算 TD-target 和 advantage
-        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
-        td_delta = td_target - self.critic(states)
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
-        
+        # 优势归一化
         if adv_normed:
             adv_mean = advantage.detach().mean()
             adv_std = advantage.detach().std(unbiased=False)

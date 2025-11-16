@@ -31,7 +31,7 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 
-from Envs.MissileModel0910 import *  # test
+from Envs.MissileModel1112 import *  # test
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
@@ -71,6 +71,7 @@ class Battle(object):
         # self.p2p_control = False
         self.alive_b_missiles = None
         self.alive_r_missiles = None
+        self.alive_missiles = None
         self.BUAV = None
         self.RUAV = None
         self.dt_maneuver = dt_maneuver
@@ -87,9 +88,9 @@ class Battle(object):
         self.RUAVsTable = None
         self.BUAVsTable = None
         self.UAVsTable = None
-        self.RmissilesTable = None
-        self.BmissilesTable = None
-        self.missilesTable = None
+        # self.RmissilesTable = None
+        # self.BmissilesTable = None
+        # self.missilesTable = None
         self.t = None
         self.game_time_limit = self.args.max_episode_len  # None
         self.running = None
@@ -143,6 +144,7 @@ class Battle(object):
         self.missiles = []
         self.alive_r_missiles = []
         self.alive_b_missiles = []
+        self.alive_missiles = []
         self.dt_maneuver = dt_maneuver  # simulation interval，1 second
         self.t = 0
         # self.game_time_limit = self.args.max_episode_len
@@ -154,9 +156,9 @@ class Battle(object):
         self.RUAVsTable = {}
         self.BUAVsTable = {}
         self.UAVsTable = {}
-        self.RmissilesTable = {}
-        self.BmissilesTable = {}
-        self.missilesTable = {}
+        # self.RmissilesTable = {}
+        # self.BmissilesTable = {}
+        # self.missilesTable = {}
         self.win = 0
         self.lose = 0
         self.draw = 0
@@ -265,6 +267,13 @@ class Battle(object):
         self.r_actions = r_actions.copy()
         self.b_actions = b_actions.copy()
 
+        # # 记录 step 开始时的“已存在”导弹 id（用于判断导弹是否为在本 step 开始时就已存在）
+        # initial_alive_ids = {m.id for m in (self.Rmissiles + self.Bmissiles) if not m.dead}
+
+        # 在整个 maneuver step 开始时只重置一次 escape_once（不要在内层子步或导弹循环中再次重置）
+        for UAV in self.UAVs:
+            UAV.escape_once = 0
+
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
 
@@ -296,14 +305,15 @@ class Battle(object):
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
-            self.missiles = self.Rmissiles + self.Bmissiles
-            for missile in self.missiles[:]:  # 使用切片创建副本以允许删除
+            self.get_missile_state() # 先把存活的导弹找出来
+            # self.missiles = self.Rmissiles + self.Bmissiles
+            for missile in self.alive_missiles[:]:  # 使用切片创建副本以允许删除
                 target = self.get_target_by_id(missile.target_id)
                 if target is None:  # 目标不存在, 不更换目标而是击毁导弹
                     missile.dead = True
                     continue
-                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹, 在飞机1V1的时候可以节省一点计算量，不用费事处理多目标的问题
-                    missile.dead = True
+                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹
+                    missile.dead = True # todo 改成missile.target = None, 并在missile类里改成丢失目标飞直线，并且无法触发hit
                     continue
                 else:
                     missile.target = target
@@ -314,19 +324,18 @@ class Battle(object):
                 last_vmt_ = missile.vel_
                 last_ptt_ = target.pos_
                 last_vtt_ = target.vel_
-                if not missile.dead:
-                    # 获取目标信息
-                    target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
-                    # 更新导弹制导阶段
-                    has_datalink = False
-                    for uav in self.UAVs:
-                        # 找到载机，判断载机能否为导弹提供中制导
-                        if uav.id == missile.launcher_id:
-                            if uav.can_offer_guidance(missile, self.UAVs):
-                                has_datalink = True
-                    last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-                        missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
-
+                # 获取目标信息
+                target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
+                # 更新导弹制导阶段
+                has_datalink = False
+                for uav in self.UAVs:
+                    # 找到载机，判断载机能否为导弹提供中制导
+                    if uav.id == missile.launcher_id:
+                        if uav.can_offer_guidance(missile, self.UAVs):
+                            has_datalink = True
+                last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
+                    missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
+                # 毁伤判别
                 vmt1 = norm(last_vmt_)
                 if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
                     missile.dead = True
@@ -352,10 +361,10 @@ class Battle(object):
                 if missile.dead == True and not hit:
                     target.escape_once = 1
                     # 目标逃脱
-                else:
-                    target.escape_once = 0
+                # else:
+                #     target.escape_once = 0
 
-            # 毁伤判断
+            # 飞机接收毁伤判别信息
             for i, UAV in enumerate(self.UAVs):
                 # 飞机被导弹命中判断
                 if UAV.red:
@@ -404,17 +413,12 @@ class Battle(object):
         return r_reward_n, b_reward_n, r_dones, b_dones, terminate
 
     def get_missile_state(self):
-        alive_red_missiles = self.Rmissiles.copy()
-        alive_blue_missiles = self.Bmissiles.copy()
-        for missile in alive_red_missiles[:]:  # 遍历
-            if missile.dead:
-                alive_red_missiles.remove(missile)
-        for missile in alive_blue_missiles[:]:  # 遍历
-            if missile.dead:
-                alive_blue_missiles.remove(missile)
-        self.alive_r_missiles = alive_red_missiles
-        self.alive_b_missiles = alive_blue_missiles
-        return alive_red_missiles, alive_blue_missiles
+        alive_r_missiles = [m for m in self.Rmissiles if not m.dead]
+        alive_b_missiles = [m for m in self.Bmissiles if not m.dead]
+
+        self.alive_r_missiles = alive_r_missiles
+        self.alive_b_missiles = alive_b_missiles
+        self.alive_missiles = alive_r_missiles + alive_b_missiles
 
     def get_state(self, side):
         '''
@@ -426,36 +430,19 @@ class Battle(object):
         if side == 'r':
             own = self.RUAV
             adv = self.BUAV
-            # own_missiles = self.Rmissiles
-            # enm_missiles = self.Bmissiles
+
         else:  # if side=='b':
             own = self.BUAV
             adv = self.RUAV
-            # own_missiles = self.Bmissiles
-            # enm_missiles = self.Rmissiles
 
-        # alive_own_missiles = own_missiles.copy()
-        # for missile in alive_own_missiles[:]:  # 遍历
-        #     if missile.dead:
-        #         alive_own_missiles.remove(missile)
-        # alive_enm_missiles = enm_missiles.copy()
-        # for missile in alive_enm_missiles[:]:  # 遍历
-        #     if missile.dead:
-        #         alive_enm_missiles.remove(missile)
-        # if side == 'r':
-        #     self.alive_r_missiles = alive_own_missiles
-        #     self.alive_b_missiles = alive_enm_missiles
-        # else:
-        #     self.alive_r_missiles = alive_enm_missiles
-        #     self.alive_b_missiles = alive_own_missiles
 
-        alive_red_missiles, alive_blue_missiles = self.get_missile_state()
+        alive_r_missiles, alive_b_missiles = self.alive_r_missiles, self.alive_b_missiles
         if side == 'r':
-            alive_own_missiles = alive_red_missiles
-            alive_enm_missiles = alive_blue_missiles
+            alive_own_missiles = alive_r_missiles
+            alive_enm_missiles = alive_b_missiles
         if side == 'b':
-            alive_own_missiles = alive_blue_missiles
-            alive_enm_missiles = alive_red_missiles
+            alive_own_missiles = alive_b_missiles
+            alive_enm_missiles = alive_r_missiles
 
         # 目标存活标志
         target_alive = not adv.dead
@@ -1123,6 +1110,7 @@ def launch_missile_immediately(env, side='r'):
     """
     立即发射导弹
     """
+    new_missile_id = None
     if side == 'r':
         uav = env.RUAV
         ally_missiles = env.Rmissiles
@@ -1136,16 +1124,19 @@ def launch_missile_immediately(env, side='r'):
     target_locked = ego_state["target_locked"]
 
     # 发射导弹
-    if uav.ammo>0 and not uav.dead and target_locked and ego_state["weapon"]>=3:
+    if uav.ammo>0 and not uav.dead and target_locked and ego_state["weapon"]>=0.1: # 3
         new_missile = uav.launch_missile(target, env.t, missile_class)
         uav.ammo -= 1
         new_missile.side = 'r' if side == 'r' else 'b'
+        new_missile_id = new_missile.id
         if side == 'r':
             env.Rmissiles.append(new_missile)
         else:
             env.Bmissiles.append(new_missile)
         env.missiles = env.Rmissiles + env.Bmissiles
         # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+    
+    return new_missile_id
 
 
 def launch_missile_with_basic_rules(env, side='r'):
@@ -1178,13 +1169,13 @@ def launch_missile_with_basic_rules(env, side='r'):
     if can_shoot:
         should_shoot = 0
         if dist<=5e3:
-            should_shoot = (1-ATA/(pi/3))**2
+            should_shoot = (1-ATA/(60*pi/180))**2
 
         elif dist<=20e3 and abs(AA_hor)>=pi/2:
-            should_shoot = (1-ATA/(pi/3))**2
+            should_shoot = (1-ATA/(60*pi/180))**2
 
         elif dist<=80e3 and interval>=20:
-            should_shoot = (1-ATA/(pi/3))**2
+            should_shoot = (1-ATA/(60*pi/180))**2
 
 
     if np.random.rand() < should_shoot: # np.random.rand() 生成的是在区间 [0, 1) 上的独立均匀分布

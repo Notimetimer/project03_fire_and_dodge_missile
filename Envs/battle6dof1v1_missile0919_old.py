@@ -27,7 +27,7 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 
-from Envs.MissileModel0910 import *  # test
+from Envs.MissileModel1112 import *  # test
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
@@ -544,7 +544,7 @@ class Battle(object):
             # 跟踪距离到探测距离
             elif dist > 120e3: # 不能跟踪目标，
                 state[12] = 0
-                if alpha > pi/3 and state[20]==0:  # 夹角>3/pi时观测不到目标
+                if alpha > 60*pi/180 and state[20]==0:  # 夹角>3/pi时观测不到目标
                     state[0] = 0
                     state[1:5+1] = memory[1:5+1]
                 elif state[20] == 0: # 被目标探测后有对目标的角度信息
@@ -553,7 +553,7 @@ class Battle(object):
                     pass # 否则除了不能发射导弹，都是可见的
             # 跟踪距离内超出角度
             elif dist > 10e3:
-                if alpha > pi/3 and state[20]==0: # 看不到对面
+                if alpha > 60*pi/180 and state[20]==0: # 看不到对面
                     state[0] = 0
                     state[1:5+1] = memory[1:5+1]
                 elif state[20] == 0: # 被目标探测后有对目标的角度信息
@@ -650,7 +650,7 @@ class Battle(object):
             self.train_side_win = 1
 
         # 角度奖励
-        r_angle = 1-alpha/(pi/3)  # 超出雷达范围就惩罚狠一点
+        r_angle = 1-alpha/(60*pi/180)  # 超出雷达范围就惩罚狠一点
 
         # 高度奖励
         pre_alt_opt = target_alt + np.clip((dist-10e3)/(40e3-10e3)*5e3, 0, 5e3)

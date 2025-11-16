@@ -28,14 +28,14 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 
 # from MissileModel2_2 import *  # from MissileModel2 import missile_class
-# from Envs.MissileModel0910 import missile_class, hit_target, calc_mach, earlist, latest, g  # test
+# from Envs.MissileModel1112 import missile_class, hit_target, calc_mach, earlist, latest, g  # test
 # from controller.Controller_function import *
 
 # # 清除缓存
-# import Envs.MissileModel0910
-# importlib.reload(Envs.MissileModel0910)
+# import Envs.MissileModel1112
+# importlib.reload(Envs.MissileModel1112)
 
-from Envs.MissileModel0910 import *  # test
+from Envs.MissileModel1112 import *  # test
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *

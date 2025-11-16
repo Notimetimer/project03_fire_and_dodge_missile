@@ -57,7 +57,7 @@ if matplotlib.get_backend() != 'TkAgg':
 #     else:
 #         interval_refer = 8
     
-#     if distance > 80e3 or alpha > pi/3:
+#     if distance > 80e3 or alpha > 60*pi/180:
 #         at = 0
 #     # if distance < 10e3 and alpha < pi/12 and abs(AA_hor) > pi*3/4 and launch_interval>30:
 #     #     at = 1

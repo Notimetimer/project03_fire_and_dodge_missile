@@ -57,7 +57,6 @@ class EscapeTrainEnv(Battle):
         self.last_dist2missile_dot = None
         self.last_delta_psi = None
         self.last_threat_delta_psi = None
-        self.last_missile_speed_avg = None
 
     def escape_obs(self, side):
         pre_full_obs = self.base_obs(side)
@@ -234,20 +233,7 @@ class EscapeTrainEnv(Battle):
 
             # 高度奖励
             r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
-                    (alt >= self.max_alt) * np.clip(-ego.vu / 100, -1, 1)
-            # 导弹减速越快，奖励越大
-            missile_speed_avg = 0
-            for missile in alive_enm_missiles:
-                missile_speed_avg += norm(missile.vel_)
-            missile_speed_avg /= len(alive_enm_missiles)
-
-            missile_speed_avg_dot = 0 if self.last_missile_speed_avg is None else\
-                (missile_speed_avg-self.last_missile_speed_avg)/dt_maneuver
-
-            self.last_missile_speed_avg = missile_speed_avg
-
-            r_alt -= missile_speed_avg_dot/g /2 # 根据导弹平均减速度给奖励
-
+                    (alt >= self.min_alt_safe + 2e3) * np.clip(-ego.vu / 100, -1, 1)
 
             # 距离奖励，和导弹之间的距离变化率
             # dist2m = state["threat"][3]
@@ -296,8 +282,8 @@ class EscapeTrainEnv(Battle):
             r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
                     (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
             
-            # 躲飞机时不要有太大的高度变化
-            r_alt -= np.clip(abs(ego.vu) / 100, -1, 1)*1.5
+            # # 躲飞机时不要有太大的高度变化
+            # r_alt -= np.clip(abs(ego.vu) / 100, -1, 1)*1.5
 
 
             # 距离奖励，和目标机之间的距离 变化率

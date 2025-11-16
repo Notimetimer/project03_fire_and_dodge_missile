@@ -47,7 +47,7 @@ def in_or_out_alpha(theta, alpha_threshold):
     return dots_list
 
 # 生成三个数据集
-alpha_threshold = pi/3
+alpha_threshold = 60*pi/180
 Dots1 = in_or_out_alpha(0, alpha_threshold)      # theta1 = 0
 Dots2 = in_or_out_alpha(0.8, alpha_threshold)    # theta1 = 0.8
 Dots3 = in_or_out_alpha(1.56, alpha_threshold)   # theta1 = 1.56 (接近 pi/2)

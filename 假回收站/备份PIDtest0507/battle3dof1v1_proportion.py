@@ -704,7 +704,7 @@ class Battle(object):
         # rewards[1] += BUAV.speed
 
         # # test theta保持
-        # rewards[0] = (1-np.linalg.norm((RUAV.theta+pi/30)/pi*2)) * 100
+        # rewards[0] = (1-np.linalg.norm((RUAV.theta+60*pi/1800)/pi*2)) * 100
         # rewards[1] = (1-np.linalg.norm(BUAV.theta/pi*2)) * 100
         #
         # # test psi保持

@@ -36,7 +36,7 @@ def calc_mach(v, height):
     return v / sound_speed, sound_speed
 
 
-from Envs.MissileModel0910 import missile_class, hit_target  # test
+from Envs.MissileModel1112 import missile_class, hit_target  # test
 
 if __name__ == '__main__':
     from Envs.tacview_visualize import Tacview

@@ -59,7 +59,7 @@ class UAVModel(object):
         self.set_height = None
         self.set_speed = None
         # 雷达性能约束
-        self.max_radar_angle = pi/3
+        self.max_radar_angle = 60*pi/180
         self.max_radar_range = 120e3
 
         # 导弹相关属性
@@ -182,7 +182,7 @@ class UAVModel(object):
             cd = 0.2
         return cd / 10
 
-    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False, p2p=False):
+    def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False, p2p=False, rudder=0.0):
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
             self.set_height = target_height
@@ -252,7 +252,7 @@ class UAVModel(object):
                 obs_jsbsim[0] = np.clip(target_height, -pi/2, pi/2)  # 高度接口当俯仰角接口用, 输入介于[-1,1]之间
                 norm_act = self.PIDController.att_output(obs_jsbsim, dt=self.dt)
         else: # 直接输出舵偏角
-            norm_act = np.array([delta_heading, target_height, 0, target_speed]) # 端到端控制，不使用方向舵,拿前三个当舵偏角来输入
+            norm_act = np.array([delta_heading, target_height, rudder, target_speed]) # 端到端控制，不使用方向舵,拿前三个当舵偏角来输入
         # print(obs_jsbsim)
 
         self.alpha_air = self.sim["aero/alpha-deg"] * pi / 180  # 当前迎角

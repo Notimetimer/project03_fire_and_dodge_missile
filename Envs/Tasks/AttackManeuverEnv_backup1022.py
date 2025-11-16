@@ -83,7 +83,7 @@ class AttackTrainEnv(Battle):
             self.win = 1
 
         # 角度奖励
-        r_angle = 1-alpha/(pi/3)  # 超出雷达范围就惩罚狠一点
+        r_angle = 1-alpha/(60*pi/180)  # 超出雷达范围就惩罚狠一点
 
         # 高度奖励
         pre_alt_opt = target_alt + np.clip((dist-10e3)/(40e3-10e3)*5e3, 0, 5e3)

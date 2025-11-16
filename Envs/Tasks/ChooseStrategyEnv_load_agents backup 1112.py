@@ -42,10 +42,7 @@ from Envs.Tasks.AttackManeuverEnv import *
 from Envs.Tasks.CrankManeuverEnv import *
 from Envs.Tasks.EscapeManeuverEnv import *
 from Algorithms.Rules import *
-# from Algorithms.PPOcontinues_std_no_state import *
-# 更改导入，只导入需要的类和函数
-from Algorithms.PPOcontinues_std_no_state import PolicyNetContinuous, take_action_from_policy
-
+from Algorithms.PPOcontinues_std_no_state import *
 
 from Utilities.LocateDirAndAgents import *
 
@@ -57,20 +54,21 @@ crank_obs_dim = 1+8+7+4+2
 escape_obs_dim = 1 * 2 + 8 + 7 + 4 + 2
 hidden_dim = [128, 128, 128]  # 128
 action_dim = 3
-# 由于不再实例化PPO，以下参数仅为参考，不再直接使用
-# gamma = 0.95 # 0.9
-# lmbda = 0.95 # 0.9
-# epochs = 10
-# eps = 0.2
-# actor_lr=0
-# critic_lr=0
+gamma = 0.95 # 0.9
+lmbda = 0.95 # 0.9
+epochs = 10
+eps = 0.2
+actor_lr=0
+critic_lr=0
 
-# 仅实例化策略网络 (PolicyNetContinuous)
-attack_actor = PolicyNetContinuous(attack_obs_dim, hidden_dim, action_dim).to(device)
-Lcrank_actor = PolicyNetContinuous(crank_obs_dim, hidden_dim, action_dim).to(device)
-Rcrank_actor = PolicyNetContinuous(crank_obs_dim, hidden_dim, action_dim).to(device)
-escape_actor = PolicyNetContinuous(escape_obs_dim, hidden_dim, action_dim).to(device)
-
+attack_agent = PPOContinuous(attack_obs_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2)
+Lcrank_agent = PPOContinuous(crank_obs_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2)
+Rcrank_agent = PPOContinuous(crank_obs_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2)
+escape_agent = PPOContinuous(escape_obs_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                        lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2)
 
 # 规范化 agents 目录路径并确保目录存在（避免 './' 出现在路径中）
 actors_dir = os.path.abspath(os.path.join(current_dir, "Tasks", "Current_Agents"))
@@ -82,11 +80,10 @@ escape_actor_dir = os.path.abspath(os.path.join(actors_dir, "EscapeActor.pt"))
 Lcrank_actor_dir = os.path.abspath(os.path.join(actors_dir, "LCrankActor.pt"))
 Rcrank_actor_dir = os.path.abspath(os.path.join(actors_dir, "RCrankActor.pt"))
 
-# 加载模型参数
-attack_actor.load_state_dict(torch.load(attack_actor_dir, map_location=device, weights_only=True))
-escape_actor.load_state_dict(torch.load(escape_actor_dir, map_location=device, weights_only=True))
-Lcrank_actor.load_state_dict(torch.load(Lcrank_actor_dir, map_location=device, weights_only=True))
-Rcrank_actor.load_state_dict(torch.load(Rcrank_actor_dir, map_location=device, weights_only=True))
+attack_agent.actor.load_state_dict(torch.load(attack_actor_dir, map_location=device, weights_only=True))
+escape_agent.actor.load_state_dict(torch.load(escape_actor_dir, map_location=device, weights_only=True))
+Lcrank_agent.actor.load_state_dict(torch.load(Lcrank_actor_dir, map_location=device, weights_only=True))
+Rcrank_agent.actor.load_state_dict(torch.load(Rcrank_actor_dir, map_location=device, weights_only=True))
 
 
 # 通过继承构建观测空间、奖励函数和终止条件
@@ -198,19 +195,19 @@ class ChooseStrategyEnv(Battle):
                     print('信息获取错误')
 
 
-                move_action = take_action_from_policy(attack_actor, obs, action_bound, device)
+                move_action, _ = attack_agent.take_action(obs, action_bound, explore=False)
                 # print(UAV.side)
                 # print(move_action)
                 1+1
             elif action == 1:
                 obs, check_obs = self.escape_obs(UAV.side)
-                move_action = take_action_from_policy(escape_actor, obs, action_bound, device)
+                move_action, _ = escape_agent.take_action(obs, action_bound, explore=False)
             elif action == 2:
                 obs, check_obs = self.crank_obs(UAV.side)
-                move_action = take_action_from_policy(Lcrank_actor, obs, action_bound, device)
+                move_action, _ = Lcrank_agent.take_action(obs, action_bound, explore=False)
             elif action == 3:
                 obs, check_obs = self.crank_obs(UAV.side)
-                move_action = take_action_from_policy(Rcrank_actor, obs, action_bound, device)
+                move_action, _ = Rcrank_agent.take_action(obs, action_bound, explore=False)
             else:
                 move_action = np.zeros(3)
             UAV_actions[UAV.id] = move_action

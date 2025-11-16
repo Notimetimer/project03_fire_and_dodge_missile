@@ -395,13 +395,13 @@ class ChooseStrategyEnv(Battle):
         if len(alive_ally_missiles) == 0 and not warning:
             reward += 0.5 - alpha / pi
         
-        # 导弹处于中制导阶段时alpha在±pi/3之间为奖励高台， 其余随alpha线性减少
+        # 导弹处于中制导阶段时alpha在±60*pi/180之间为奖励高台， 其余随alpha线性减少
         if missile_in_mid_term:
             # 目标没有跑，不该重复攻击
             if action_label==0 and abs(AA_hor)>pi*2/3:
                 reward -= 5
 
-            # 高台奖励：alpha在[-pi/3, pi/3]区间奖励高，其余线性递减
+            # 高台奖励：alpha在[-60*pi/180, 60*pi/180]区间奖励高，其余线性递减
             if abs(alpha) < np.pi / 3:
                 reward += 1
             else:

@@ -82,7 +82,7 @@ def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_miss
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import pandas as pd
-from Envs.MissileModel0910 import missile_class
+from Envs.MissileModel1112 import missile_class
 
 visualize_needed = 1  # 是否可视化
 

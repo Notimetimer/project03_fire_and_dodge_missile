@@ -292,12 +292,12 @@ if __name__=="__main__":
                     next_b_obs, next_b_obs_check = env.crank_obs('b')  # 子策略的训练不要用get_obs
 
                     
-                    if next_b_obs_check["target_information"][4]>pi/3:
+                    if next_b_obs_check["target_information"][4]>60*pi/180:
                         out_angle = 1
                     else:
                         out_angle = 0
                     
-                    if next_b_obs_check["target_information"][4]>pi/3:
+                    if next_b_obs_check["target_information"][4]>60*pi/180:
                         out_angle = 1
                     else:
                         out_angle = 0

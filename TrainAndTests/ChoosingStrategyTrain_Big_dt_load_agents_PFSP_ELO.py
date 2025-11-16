@@ -30,6 +30,7 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 from Algorithms.PPOdiscrete import *
+from Algorithms.PPOdiscrete import PolicyNetDiscrete, take_action_from_policy_discrete # 显式导入
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
@@ -108,7 +109,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'Combat'
+mission_name = 'CombatFSP'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
@@ -159,16 +160,42 @@ def creat_initial_state():
                                 }
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
+# --- ELO Rating System ---
+K_FACTOR = 32
+INITIAL_ELO = 1200
+
+def calculate_expected_score(player_elo, opponent_elo):
+    """计算期望得分"""
+    return 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
+
+def update_elo(player_elo, opponent_elo, score):
+    """更新ELO分数. score: 1 for win, 0 for loss, 0.5 for draw."""
+    expected = calculate_expected_score(player_elo, opponent_elo)
+    new_player_elo = player_elo + K_FACTOR * (score - expected)
+    return new_player_elo
+
+def get_opponent_probabilities(elo_ratings):
+    """根据ELO分数计算选择概率 (使用softmax)"""
+    elos = np.array(list(elo_ratings.values()), dtype=np.float64)
+    # 温度参数 T, T越大，概率分布越平滑; T越小, 高分者被选中的概率越大
+    temperature = 100 
+    exp_elos = np.exp(elos / temperature)
+    probabilities = exp_elos / np.sum(exp_elos)
+    return probabilities
+# --- End ELO System ---
+
 if __name__=="__main__":
     
     # Define the action cycle multiplier
-    
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
     transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
+
+    # 为FSP实例化一个红方策略网络
+    red_actor = PolicyNetDiscrete(state_dim, hidden_dim, action_dim).to(device)
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
@@ -194,6 +221,22 @@ if __name__=="__main__":
 
     from Visualize.tensorboard_visualize import TensorBoardLogger
 
+    # --- ELO 初始化 ---
+    main_agent_elo = INITIAL_ELO
+    # try to load existing elo json if present, otherwise start empty dict
+    elo_json_path = os.path.join(log_dir, "elo_ratings.json")
+    if os.path.isfile(elo_json_path):
+        try:
+            with open(elo_json_path, "r", encoding="utf-8") as f:
+                elo_ratings = json.load(f)
+            elo_ratings = {str(k): float(v) for k, v in elo_ratings.items()}
+        except Exception as e:
+            print(f"Warning: failed to load elo json '{elo_json_path}': {e}")
+            elo_ratings = {}
+    else:
+        elo_ratings = {}
+    # --- ELO 初始化结束 ---
+
     return_list = []
     win_list = []
     steps_count = 0
@@ -214,6 +257,35 @@ if __name__=="__main__":
             
             i_episode += 1
             test_run = 0
+
+            # --- FSP核心：为红方加载一个历史策略 ---
+            # 查找所有已保存的 actor 模型
+            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+            if not actor_files:
+                # 如果没有历史模型，红方使用固定策略（例如总是进攻）
+                red_actor_loaded = False
+                opponent_path = None
+            else:
+                # 动态更新ELO字典，为新模型添加初始分
+                for f in actor_files:
+                    if f not in elo_ratings:
+                        elo_ratings[f] = INITIAL_ELO
+                
+                # 根据ELO分数计算概率并选择对手
+                opponent_paths = list(elo_ratings.keys())
+                probabilities = get_opponent_probabilities(elo_ratings)
+                opponent_path = np.random.choice(opponent_paths, p=probabilities)
+
+                try:
+                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
+                    red_actor.eval() # 设置为评估模式
+                    red_actor_loaded = True
+                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
+                        opponent_elo = elo_ratings.get(opponent_path, "N/A")
+                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)} (ELO: {opponent_elo:.0f})")
+                except Exception as e:
+                    print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
+                    red_actor_loaded = False
 
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
@@ -244,6 +316,12 @@ if __name__=="__main__":
 
             # 环境运行一轮的情况
             steps_of_this_eps = -1 # 没办法了
+            # Initialize variables to track the last actions and crank flags
+            last_r_action_label = None
+            last_b_action_label = None
+            crank_after_attack_red = 0
+            crank_after_attack_blue = 0
+
             for count in range(round(args.max_episode_len / dt_maneuver)):
                 # print(f"time: {env.t}")  # 打印当前的 count 值
                 # 回合结束判断
@@ -294,14 +372,18 @@ if __name__=="__main__":
                     # b_action_list.append(b_action_label)
                     current_action = b_action_label
 
-                    r_action_label = 0 # Red's action, assuming it's fixed or from another policy
-                    # r_action_list.append(r_action_label)
-                    
+                    # --- 红方决策 ---
+                    if not red_actor_loaded:
+                        r_action_label = 0  # 如果没有加载模型，则执行默认动作
+                    else:
+                        r_obs_n = flatten_obs(r_check_obs, env.key_order)
+                        r_obs = np.squeeze(r_obs_n)
+                        r_action_label = take_action_from_policy_discrete(red_actor, r_obs, device, explore=False)
 
                 ### 发射导弹，这部分不受10step约束
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 # 发射导弹判决
-                if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
+                if distance <= 40e3 and distance >= 5e3: # and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
                     launch_time_count = 0
                     if r_action_label==0:
                         # launch_missile_if_possible(env, side='r')
@@ -310,6 +392,28 @@ if __name__=="__main__":
                         # launch_missile_if_possible(env, side='b')
                         launch_missile_with_basic_rules(env, side='b')
                 
+                # --- Update crank flags based on action transitions ---
+                if last_r_action_label is not None and last_r_action_label == 0 and r_action_label in [2, 3]:
+                    crank_after_attack_red = 1
+                else:
+                    crank_after_attack_red = 0
+
+                if last_b_action_label is not None and last_b_action_label == 0 and b_action_label in [2, 3]:
+                    crank_after_attack_blue = 1
+                else:
+                    crank_after_attack_blue = 0
+
+                # Update last action labels
+                last_r_action_label = r_action_label
+                last_b_action_label = b_action_label
+
+                # --- 发射导弹逻辑 ---
+                distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+                if distance > 40e3 and crank_after_attack_red:
+                    launch_missile_immediately(env, side='r')
+                if distance > 40e3 and crank_after_attack_blue:
+                    launch_missile_immediately(env, side='b')
+
                 _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
                 done = done or fake_terminate
@@ -335,6 +439,26 @@ if __name__=="__main__":
                 transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
                 transition_dict['dones'].append(True)
             
+            # --- ELO 更新 ---
+            if red_actor_loaded and opponent_path in elo_ratings:
+                opponent_elo = elo_ratings[opponent_path]
+                if env.win: # 蓝方(主智能体)胜利
+                    score_for_main = 1.0
+                    score_for_opponent = 0.0
+                elif env.lose: # 蓝方失败
+                    score_for_main = 0.0
+                    score_for_opponent = 1.0
+                else: # 平局
+                    score_for_main = 0.5
+                    score_for_opponent = 0.5
+                
+                new_main_elo = update_elo(main_agent_elo, opponent_elo, score_for_main)
+                new_opponent_elo = update_elo(opponent_elo, main_agent_elo, score_for_opponent)
+                
+                main_agent_elo = new_main_elo
+                elo_ratings[opponent_path] = new_opponent_elo
+            # --- ELO 更新结束 ---
+
             if 1: # len(transition_dict['next_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
                 '''agent.update'''
                 agent.update(transition_dict, adv_normed=False)
@@ -378,10 +502,10 @@ if __name__=="__main__":
                 logger.add("train/2 win", env.win, total_steps)
                 logger.add("train/2 lose", env.lose, total_steps)
                 logger.add("train/2 draw", env.draw, total_steps)
+                
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
-            t_bias += env.t
             r_action_list = np.array(r_action_list)
             # b_action_list is no longer appended every dt_maneuver, need to rethink if you need this for logging
 
@@ -395,6 +519,15 @@ if __name__=="__main__":
                 actor_name = f"actor_rein{i_episode}.pt"
                 actor_path = os.path.join(log_dir, actor_name)
                 th.save(agent.actor.state_dict(), actor_path)
+
+                # save elo ratings to json (atomic write)
+                try:
+                    tmp_path = elo_json_path + ".tmp"
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp_path, elo_json_path)
+                except Exception as e:
+                    print(f"Warning: failed to save elo json '{elo_json_path}': {e}")
             
             # 训练进度显示
             if (i_episode) >= 10:
@@ -416,6 +549,23 @@ if __name__=="__main__":
     except KeyboardInterrupt:
         print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
     finally:
+        # 保存最终 elo 到 json
+        try:
+            tmp_path = elo_json_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, elo_json_path)
+        except Exception as e:
+            print(f"Warning: failed to save final elo json '{elo_json_path}': {e}")
+
+        # 打印最终的ELO排名
+        if elo_ratings:
+            print("\n--- Final ELO Rankings ---")
+            sorted_elos = sorted(elo_ratings.items(), key=lambda item: item[1], reverse=True)
+            for path, elo in sorted_elos:
+                print(f"ELO: {elo:.0f} - {os.path.basename(path)}")
+            print(f"Main Agent Final ELO: {main_agent_elo:.0f}")
+            print("------------------------\n")
         logger.close()
         print(f"日志已保存到：{logger.run_dir}")
 

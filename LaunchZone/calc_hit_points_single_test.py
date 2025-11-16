@@ -26,7 +26,7 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from Envs.MissileModel0910 import * # MissileModel1
+from Envs.MissileModel1112 import * # MissileModel1
 
 g = 9.81
 

@@ -67,13 +67,6 @@ class ShootTrainEnv(Battle):
         self.r_actions = r_actions.copy()
         self.b_actions = b_actions.copy()
 
-        # # 记录 step 开始时的“已存在”导弹 id（用于判断导弹是否为在本 step 开始时就已存在）
-        # initial_alive_ids = {m.id for m in (self.Rmissiles + self.Bmissiles) if not m.dead}
-
-        # 在整个 maneuver step 开始时只重置一次 escape_once（不要在内层子步或导弹循环中再次重置）
-        for UAV in self.UAVs:
-            UAV.escape_once = 0
-
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
 
@@ -103,18 +96,18 @@ class ShootTrainEnv(Battle):
                 UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p)
                 # 上一步动作
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
+
             hitter = None
+
             # 导弹移动
-            self.get_missile_state() # 先把存活的导弹找出来
-            # self.missiles = self.Rmissiles + self.Bmissiles
-            
-            for missile in self.alive_missiles[:]:  # 使用切片创建副本以允许删除
+            self.missiles = self.Rmissiles + self.Bmissiles
+            for missile in self.missiles[:]:  # 使用切片创建副本以允许删除
                 target = self.get_target_by_id(missile.target_id)
                 if target is None:  # 目标不存在, 不更换目标而是击毁导弹
                     missile.dead = True
                     continue
-                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹
-                    missile.dead = True # todo 改成missile.target = None, 并在missile类里改成丢失目标飞直线，并且无法触发hit
+                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹, 在飞机1V1的时候可以节省一点计算量，不用费事处理多目标的问题
+                    missile.dead = True
                     continue
                 else:
                     missile.target = target
@@ -125,18 +118,19 @@ class ShootTrainEnv(Battle):
                 last_vmt_ = missile.vel_
                 last_ptt_ = target.pos_
                 last_vtt_ = target.vel_
-                # 获取目标信息
-                target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
-                # 更新导弹制导阶段
-                has_datalink = False
-                for uav in self.UAVs:
-                    # 找到载机，判断载机能否为导弹提供中制导
-                    if uav.id == missile.launcher_id:
-                        if uav.can_offer_guidance(missile, self.UAVs):
-                            has_datalink = True
-                last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-                    missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
-                # 毁伤判别
+                if not missile.dead:
+                    # 获取目标信息
+                    target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
+                    # 更新导弹制导阶段
+                    has_datalink = False
+                    for uav in self.UAVs:
+                        # 找到载机，判断载机能否为导弹提供中制导
+                        if uav.id == missile.launcher_id:
+                            if uav.can_offer_guidance(missile, self.UAVs):
+                                has_datalink = True
+                    last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
+                        missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
+
                 vmt1 = norm(last_vmt_)
                 if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
                     missile.dead = True
@@ -164,10 +158,10 @@ class ShootTrainEnv(Battle):
                 if missile.dead == True and not hit:
                     target.escape_once = 1
                     # 目标逃脱
-                # else:
-                #     target.escape_once = 0
+                else:
+                    target.escape_once = 0
 
-            # 飞机接收毁伤判别信息
+            # 毁伤判断
             for i, UAV in enumerate(self.UAVs):
                 # 飞机被导弹命中判断
                 if UAV.red:
@@ -232,7 +226,7 @@ class ShootTrainEnv(Battle):
         flat_obs = flatten_obs(full_obs, self.attack_key_order)
         return flat_obs, full_obs
 
-    def attack_terminate_and_reward(self, side, u, missile_id=None):  # 进攻策略训练与奖励
+    def attack_terminate_and_reward(self, side, u):  # 进攻策略训练与奖励
         # 兼容：若 u 是一维数组或列表，则取第0个元素；若为标量则直接使用（不考虑更高维度）
         if isinstance(u, (list, tuple, np.ndarray)):
             arr = np.array(u)
@@ -305,28 +299,27 @@ class ShootTrainEnv(Battle):
 
         # reward_base = 100 / (self.game_time_limit/dt_maneuver)  # 防自杀奖励
 
+        # # 目标进入角奖励，当目标从进攻转逃逸时就给奖励
+        # reward_AA = enm_state["target_information"][4]/pi * 1
 
-        # # 发射惩罚，根据 missile_time_since_shoot
+        # 发射惩罚，根据 missile_time_since_shoot
         reward_shoot = 0
-        if missile_id is not None:
-            reward_shoot -= 30
+        if ut == 1:
+            reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
+            reward_shoot += 0.5 * abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀， 进入角为负的时候可以暂缓射击
+            reward_shoot -= np.clip(dist/40e3, 0, 1)
 
-        # if ut == 1:
-        #     # reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
-        #     reward_shoot += 0.5 * abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀， 进入角为负的时候可以暂缓射击
-        #     reward_shoot -= np.clip(dist/40e3, 0, 1) * 3
-
-        if terminate and ego.ammo==6:
-            reward_shoot -= 600 # 一发都不打必须重罚 100
+        if dist <= 20e3 and ego.ammo==6:
+            reward_shoot -= 100 # 一发都不打必须重罚
         if terminate and ego.ammo<6:
             reward_shoot += 20 # 至少打了一枚
 
-        # # 重复发射导弹时惩罚, 否则有奖励
-        # reward_SuoHa = 0
-        # if len(alive_ally_missiles)>1 and ut==1:
-        #     reward_SuoHa -= 30
-        # if len(alive_ally_missiles)>1 and ut==0:
-        #     reward_SuoHa += 30
+        # 重复发射导弹时惩罚, 否则有奖励
+        reward_SuoHa = 0
+        if len(alive_ally_missiles)>1 and ut==1: # state["missile_in_mid_term"] and ut==1:
+            reward_SuoHa -= 30
+        if len(alive_ally_missiles)>1 and ut==0: # state["missile_in_mid_term"] and ut==0:
+            reward_SuoHa += 30
 
         # miss 惩罚
         reward_miss = 0
@@ -347,10 +340,8 @@ class ShootTrainEnv(Battle):
         reward = np.sum([
             # 1 * reward_base,
             # 1 * reward_AA,
-
             1 * reward_shoot,
-            # 1 * reward_SuoHa,
-            
+            1 * reward_SuoHa,
             # 1 * reward_violate,
             1 * reward_miss,
             1 * reward_event,
@@ -358,7 +349,7 @@ class ShootTrainEnv(Battle):
 
         if terminate:
             self.running = False
-    
+
         return terminate, reward, end_reward
 
 
@@ -373,7 +364,7 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     # else:
     #     interval_refer = 8
 
-    interval_refer = 8  # 8
+    interval_refer = 0.1  # 8
 
     # todo 对方在我射界内向我发射了一枚导弹，我也应该向对方来一枚
     
@@ -404,9 +395,5 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
 
     same = int(bool(at0) == bool(at))
     xor  = int(bool(at0) != bool(at))  
-
-    # # debug
-    # at = 1
-
 
     return at, xor

@@ -163,6 +163,33 @@ class ValueNet(torch.nn.Module):
         return self.fc_out(y)
 
 
+def _scale_action_to_exec_standalone(a, action_bounds, device):
+    """(独立函数) 把 normalized action a (in [-1,1]) 缩放到环境区间。"""
+    action_bounds = torch.as_tensor(action_bounds, dtype=a.dtype, device=device)
+    if action_bounds.dim() == 2:
+        amin = action_bounds[:, 0]
+        amax = action_bounds[:, 1]
+    elif action_bounds.dim() == 3:
+        amin = action_bounds[:, :, 0]
+        amax = action_bounds[:, :, 1]
+    else:
+        raise ValueError("action_bounds 的维度必须是 2 或 3")
+    return amin + (a + 1.0) * 0.5 * (amax - amin)
+
+def take_action_from_policy(policy_net, state, action_bounds, device, max_std=0.3):
+    """独立于PPO类的推理函数，仅使用策略网络。"""
+    state = torch.tensor(np.array([state]), dtype=torch.float).to(device)
+    # 确保网络处于评估模式
+    policy_net.eval()
+    with torch.no_grad():
+        mu, _ = policy_net(state, min_std=1e-6, max_std=max_std)
+        # 确定性动作：使用 mu 的 tanh 作为标准化动作
+        a_norm = torch.tanh(mu)
+        # 缩放到实际动作区间
+        a_exec = _scale_action_to_exec_standalone(a_norm, action_bounds, device)
+    return a_exec[0].cpu().numpy().flatten()
+
+
 class PPOContinuous:
     ''' 处理连续动作的PPO算法，支持时变动作区间（每步 amin/amax 不同）。
 
