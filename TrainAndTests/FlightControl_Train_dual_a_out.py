@@ -1,4 +1,4 @@
-use_tacview = 1
+use_tacview = 0
 
 import sys
 import os
@@ -59,9 +59,12 @@ class track_env():
                                'psi': 0
                                }
         
-        self.time_limit = 180 # 300 t_last
+        self.time_limit = 120 # 300 t_last
         self.min_alt = 1e3
         self.min_alt_safe = 3e3
+
+        self.max_alt_safe = 13e3
+        self.max_alt = 15e3
 
         self.flight_key_order = [
             "ego_main",  # 7
@@ -81,6 +84,7 @@ class track_env():
         self.draw = 0
         if o00 == None:
             o00 = np.array([118, 30])  # 地理原点的经纬
+            self.o00 = o00
         if birth_state == None:
             birth_state = self.DEFAULT_RED_BIRTH_STATE
         self.dt_report = dt_report
@@ -183,7 +187,7 @@ class track_env():
 
             "flight_cmd":  np.array([
                 self.height_req - self.RUAV.alt,
-                sub_of_radian(psi_req, self.RUAV.psi),
+                sub_of_radian(self.psi_req, self.RUAV.psi),
                 self.v_req - self.RUAV.speed,
             ])
         }
@@ -255,21 +259,112 @@ class track_env():
     def get_done(self,):
         done = 0
         ruav_state = self.get_state()
-        h_current = ruav_state["ego_main"][1]
+        alt = ruav_state["ego_main"][1]
         alpha_air = ruav_state["ego_control"][5]*180/pi
         beta_air = ruav_state["ego_control"][6]*180/pi
         # 失败条件：失速、高度过低
         self.fail = 0
-        if h_current < self.min_alt or alpha_air < -10 or alpha_air > 21 or abs(beta_air) > 15:
+        if alt < self.min_alt: # or alpha_air < -10 or alpha_air > 21 or abs(beta_air) > 15:
             self.fail = 1
             done = 1
             self.RUAV.dead = 1
         return done
 
+    # def get_reward(self, ):
+    #     ruav_state = self.get_state()
+    #     v = ruav_state["ego_main"][0]
+    #     alt = ruav_state["ego_main"][1]
+    #     sin_theta = ruav_state["ego_main"][2]
+    #     cos_theta = ruav_state["ego_main"][3]
+    #     sin_phi = ruav_state["ego_main"][4]
+    #     cos_phi = ruav_state["ego_main"][5]
+    #     p = ruav_state["ego_control"][0]
+    #     q = ruav_state["ego_control"][1]
+    #     r = ruav_state["ego_control"][2]
+    #     theta_v = ruav_state["ego_control"][3]
+    #     psi_v = ruav_state["ego_control"][4]
+    #     alpha_air = ruav_state["ego_control"][5]*180/pi
+    #     beta_air = ruav_state["ego_control"][6]*180/pi
+    #     climb_rate = self.RUAV.vu
+
+    #     self.get_done()
+
+    #     # 存活奖励
+    #     reward_alive = 0 # 10
+
+    #     # 失败惩罚
+    #     reward_end = 0
+    #     if self.fail:
+    #         reward_end -= 100
+
+    #     # 高度奖励（高度变化率惩罚与高度限制惩罚）
+    #     reward_height = 0
+    #     height_error = np.clip(self.height_req-alt, -5000, 5000)
+    #     theta_v_req = height_error/5000*pi/2
+        
+    #     self.theta_v_req = theta_v_req
+    #     reward_height += 1-abs(theta_v-theta_v_req)/pi
+
+    #     # if abs(height_error) < 500:
+    #     #     reward_height += 1-abs(climb_rate)/100
+
+    #     if alt<self.min_alt_safe:
+    #         reward_height += climb_rate/100 + (alt-self.min_alt)/(self.min_alt_safe-self.min_alt)
+        
+    #     # 航向奖励（误差惩罚）
+    #     # psi_error = sub_of_radian(self.psi_req, psi_v)
+    #     # reward_psi_error = 1-abs(psi_error)/pi
+
+    #     # 角度奖励
+    #     L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
+    #     ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
+    #     reward_psi_error = 1 - ATA/pi
+
+    #     # 速度奖励（速度误差惩罚）
+    #     reward_v = 1-abs(self.v_req-v)/340
+
+    #     # 滚转角奖励
+    #     reward_phi = min(cos_phi, 0)
+
+    #     # pqr奖励(快到位时候pqr越小越好)
+    #     reward_pqr = 0
+    #     reward_pqr = -abs(p/(2*pi))-abs(q/(20*pi/180))-abs(r/(20*pi/180))
+    #     if abs(alpha_air) > 15:
+    #         reward_pqr -= abs(p/(90*pi/180))
+
+    #     # 迎角过载奖励(惩罚负迎角和过大的正迎角)
+    #     reward_alpha = 0.5
+    #     if alpha_air >= 15:
+    #         reward_alpha -= alpha_air/15
+    #     if alpha_air < 0:
+    #         reward_alpha += alpha_air/2       
+    #     ny = self.RUAV.Ny
+    #     if ny<=-1 or ny > 9:
+    #         reward_alpha -= 2
+            
+
+    #     # 侧滑角奖励（尽量少侧滑）
+    #     reward_beta = 0.5-abs(beta_air/5)
+
+    #     reward = np.sum([
+    #         1 * reward_alive,
+    #         1 * reward_end,
+    #         2 * reward_height,
+    #         2 * reward_psi_error,
+    #         1 * reward_v,
+    #         0.3 * reward_phi,
+    #         0.1 * reward_pqr,
+    #         1 * reward_alpha,
+    #         1 * reward_beta,
+    #     ])
+
+    #     return reward
+    
+
     def get_reward(self, ):
         ruav_state = self.get_state()
-        v = ruav_state["ego_main"][0]
-        h_current = ruav_state["ego_main"][1]
+        speed = ruav_state["ego_main"][0]
+        alt = ruav_state["ego_main"][1]
         sin_theta = ruav_state["ego_main"][2]
         cos_theta = ruav_state["ego_main"][3]
         sin_phi = ruav_state["ego_main"][4]
@@ -286,63 +381,60 @@ class track_env():
         self.get_done()
 
         # 存活奖励
-        reward_alive = 10
+        reward_alive = 0 # 10
 
         # 失败惩罚
         reward_end = 0
         if self.fail:
             reward_end -= 100
 
-        # 高度奖励（高度变化率惩罚与高度限制惩罚）
-        reward_height = 0
-
-        height_error = np.clip(self.height_req-h_current, -5000, 5000)
-        reward_height -= theta_v/(pi/2) * height_error/5000
-        if abs(height_error) < 500:
-            reward_height -= abs(climb_rate)/100
-        if h_current<self.min_alt_safe:
-            reward_height += (h_current-self.min_alt)/(self.min_alt_safe-self.min_alt)-1
+        height_error = np.clip(self.height_req-alt, -5000, 5000)
+        theta_v_req = height_error/5000*pi/2
+        
+        self.theta_v_req = theta_v_req
         
         # 航向奖励（误差惩罚）
-        psi_error = sub_of_radian(self.psi_req, psi_v)
-        reward_psi_error = -abs(psi_error)/pi
+        # psi_error = sub_of_radian(self.psi_req, psi_v)
+        # reward_psi_error = 1-abs(psi_error)/pi
 
-        # 速度奖励（速度误差惩罚）
-        reward_v = -abs(v_req-v)/340
-
-        # 滚转角奖励(快到位时abs越小越好)
-        point_ = np.array([cos_theta, sin_theta, 0])
-        target_point_ = np.array([cos_theta*cos(psi_error), sin_theta, cos_theta*sin(psi_error)])
-        alpha = acos(np.dot(target_point_, point_) * 0.99999)*180/pi
-        reward_phi = 0
-        if alpha < 20:
-            reward_phi = cos_phi
-
-        # pqr奖励(快到位时候pqr越小越好)
-        reward_pqr = 0
-        if alpha < 15:
-            reward_pqr = -abs(p/(2*pi))-abs(q/(20*pi/180))-abs(r/(20*pi/180))
-        if abs(alpha_air) > 15:
-            reward_pqr -= abs(p/(90*pi/180))
-
-        # 迎角奖励(惩罚负迎角和过大的正迎角)
-        if alpha_air >= 0:
-            reward_alpha = -alpha_air/15
-        else:
-            reward_alpha = alpha_air/2       
+        L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
+        ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
         
+        # 角度奖励
+        r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
 
+        # 高度奖励
+        pre_alt_opt = self.height_req
+        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
+
+        r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
+                (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
+        # 高度限制奖励/惩罚
+        r_alt += (alt <= self.min_alt_safe + 1e3) * np.clip(self.RUAV.vu / 100, -1, 1) + \
+                (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
+
+        # 速度奖励
+        r_speed = abs(self.v_req-speed) / (340)
+
+        # 迎角过载奖励(惩罚负迎角和过大的正迎角)
+        reward_alpha = 0.5
+        if alpha_air >= 15:
+            reward_alpha -= alpha_air/15
+        if alpha_air < 0:
+            reward_alpha += alpha_air/2       
+        ny = self.RUAV.Ny
+        if ny<=-1 or ny > 9:
+            reward_alpha -= 2
+            
         # 侧滑角奖励（尽量少侧滑）
-        reward_beta = -abs(beta_air/5)
+        reward_beta = 0.5-abs(beta_air/5)
 
         reward = np.sum([
             1 * reward_alive,
             1 * reward_end,
-            1 * reward_height,
-            1 * reward_psi_error,
-            1 * reward_v,
-            1 * reward_phi,
-            1 * reward_pqr,
+            2 * r_angle,
+            2 * r_alt,
+            1 * r_speed,
             1 * reward_alpha,
             1 * reward_beta,
         ])
@@ -365,8 +457,23 @@ class track_env():
                             f"{self.RUAV.phi * 180 / pi:.6f}|{self.RUAV.theta * 180 / pi:.6f}|{self.RUAV.psi * 180 / pi:.6f},"
                             f"Name=F16,Pilot={pilot},Color={color}\n"
                         )
+                # 绘制目标
+                delta_N = 5e3*cos(self.theta_v_req)*cos(self.psi_req)
+                delta_U = 5e3*sin(self.theta_v_req)
+                delta_E = 5e3*cos(self.theta_v_req)*sin(self.psi_req)
+                N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=self.o00[0], lat_o=self.o00[1])
+                delta_H = self.height_req
+                lon_T, lat_T, _ = NUE2LLH(N+delta_N,U+delta_U,E+delta_E,lon_o=self.o00[0], lat_o=self.o00[1])
+                
+                data_to_send += (
+                            f"#{send_t:.2f}\n"
+                            f"{self.RUAV.id+1},T={(lon_T):.6f}|{(lat_T):.6f}|{delta_H:.6f},"
+                            f"Name=Target,Color=Blue\n"
+                        )
+
             else:
                 data_to_send += f"#{send_t:.2f}\n-{self.RUAV.id}\n"
+                data_to_send += f"#{send_t:.2f}\n-{self.RUAV.id+1}\n"
 
             # loc_r = [self.RUAV.lon, self.RUAV.lat, self.RUAV.alt]
             # if self.tacview_show:
@@ -382,6 +489,7 @@ class track_env():
             send_t = self.t + t_bias
             data_to_send = ''
             data_to_send += f"#{send_t:.2f}\n-{self.RUAV.id}\n"
+            data_to_send += f"#{send_t:.2f}\n-{self.RUAV.id+1}\n"
             self.tacview.send_data_to_client(data_to_send)
 
 
@@ -389,26 +497,26 @@ class track_env():
 # 超参数
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-max_steps = 65e4
-hidden_dim = [128, 128]  # 128
+max_steps = 10 * 65e4
+hidden_dim = [128,128,128]  # 128, 128
 gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
-dt_decide = 0.2
+dt_decide = 0.1 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 17 # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
 action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-env_name = 'FlightControl'
+mission_name = 'FlightControl'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # --- 仅保存一次网络形状（meta json），如果已存在则跳过
 # log_dir = "./logs"
 from datetime import datetime
-log_dir = os.path.join("./logs", env_name + "-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+log_dir = os.path.join("./logs", mission_name + "-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 if __name__=='__main__':
     env = track_env(tacview_show=use_tacview)
@@ -513,21 +621,21 @@ if __name__=='__main__':
                 print(f"episode {i_episode+1}, 进度: {rl_steps / max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
 
             # tensorboard 训练进度显示
-            logger.add("train/0 episode_return", episode_return, i_episode + 1)
-            logger.add("train/0 survive", 1-env.fail, i_episode + 1)
+            logger.add("train/0 episode_return", episode_return, rl_steps)
+            logger.add("train/0 survive", 1-env.fail, rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)
             # 梯度监控
-            logger.add("train/1 actor_grad_norm", actor_grad_norm, i_episode + 1)
-            logger.add("train/2 critic_grad_norm", critic_grad_norm, i_episode + 1)
+            logger.add("train/1 actor_grad_norm", actor_grad_norm, rl_steps)
+            logger.add("train/2 critic_grad_norm", critic_grad_norm, rl_steps)
             # 损失函数监控
-            logger.add("train/3 actor_loss", agent.actor_loss, i_episode + 1)
-            logger.add("train/4 critic_loss", agent.critic_loss, i_episode + 1)
+            logger.add("train/3 actor_loss", agent.actor_loss, rl_steps)
+            logger.add("train/4 critic_loss", agent.critic_loss, rl_steps)
             # 强化学习actor特殊项监控
-            logger.add("train/5 entropy", agent.entropy_mean, i_episode + 1)
-            logger.add("train/6 ratio", agent.ratio_mean, i_episode + 1)
-            logger.add("train/7 steps", rl_steps, i_episode + 1)
+            logger.add("train/5 entropy", agent.entropy_mean, rl_steps)
+            logger.add("train/6 ratio", agent.ratio_mean, rl_steps)
+            logger.add("train/7 steps", i_episode + 1, rl_steps)
 
 
     except KeyboardInterrupt:
