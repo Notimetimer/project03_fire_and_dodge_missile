@@ -22,7 +22,7 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from TrainAndTests.FlightControl_Train_dual_a_out import *
+from Trains.FlightControl_Train_dual_a_out import *
 
 dt_maneuver= 0.2
 action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度

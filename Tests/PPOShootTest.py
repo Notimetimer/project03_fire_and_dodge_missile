@@ -16,7 +16,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from TrainAndTests.PPOShootTrain_Hybrid import *
+from Trains.PPOShootTrain import *
 import re
 
 # from tqdm import tqdm
@@ -52,9 +52,10 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 pre_log_dir = os.path.join(project_root, "logs")
 
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Escape-run-20251023-105633")
 
-print("log目录", log_dir)
+log_dir = os.path.join(pre_log_dir, "Shoot-run-20251114-164752")
+
+# print("log目录", log_dir)
 
 
 # matplotlib.use('TkAgg')  # 'TkAgg' 或 'Qt5Agg'
@@ -66,14 +67,26 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=8*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
 # parser.add_argument("--num-BUAVs", type=int, default=1, help="number of blue UAVs")
 args = parser.parse_args()
 
-
+# 超参数
+actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
+critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
+# num_episodes = 1000 # 10000 1000
+max_steps = 65e4
+hidden_dim = [128, 128, 128]  # 128
+gamma = 0.9
+lmbda = 0.9
+epochs = 10  # 10
+eps = 0.2
+pre_train_rate = 0  # 0.05 # 0.25 # 0.25
+k_entropy = 0.01  # 熵系数
+mission_name = 'Shoot'
 
 env = ShootTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
@@ -82,52 +95,14 @@ env = ShootTrainEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 1+1+1+ 8 + 7 + 1  # len(b_obs_spaces)
-action_dims_dict = {'Cont':0, 'Cat':0, 'Bern':1}
+action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
-
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'red' if side == 'r' else 'blue'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
-
-
-
-
 if __name__ == "__main__":
-    action_bound = None
-    agent = PPOHybrid(state_dim, hidden_dim, action_dims_dict, action_bound, actor_lr, critic_lr,
-                          lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2)  # 2,2
-
+    agent = PPO_bernouli(state_dim, hidden_dim, 1, actor_lr, critic_lr, lmbda,
+                     epochs, eps, gamma, device)
     
     if log_dir is None:
         raise ValueError("No valid log directory found. Please check the `pre_log_dir` or `mission_name`.")
@@ -239,12 +214,10 @@ if __name__ == "__main__":
                 
                 # 发射导弹判决
                 u, _ = agent.take_action(b_obs_n, explore=0) # 0 1
-                ut = u['Bern'][0]
+                ut = u[0]
                 at = ut
 
                 # Shield
-                # print(AA_hor*180/pi)
-                at = 1 if distance<20e3 else at  # test
                 at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
 
                 if at == 1:
@@ -271,8 +244,8 @@ if __name__ == "__main__":
                 r_action_list.append(r_action_n)
                 b_action_list.append(b_action_n)
 
-                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                done, b_reward, _ = env.attack_terminate_and_reward('b', ut)
+                _, _, _, _, fake_terminate, _ = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                done, b_reward, _ = env.attack_terminate_and_reward('b', u)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1

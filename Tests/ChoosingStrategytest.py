@@ -3,7 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.ChoosingStrategyTrain import *
+from Trains.ChoosingStrategyTrain import *
 import re
 
 dt_maneuver = 0.2  # 0.2

@@ -1,65 +1,45 @@
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
-from TrainAndTests.PPOAttackTrain import *
+from Trains.PPOAttackTrainP2P import *
 import re
+import glob
 
-dt_maneuver= 0.2 
+dt_maneuver= 0.2
 action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
 
-# 找出日期最大的目录
-def get_latest_log_dir(pre_log_dir, mission_name=None):
-    # 匹配 run-YYYYMMDD-HHMMSS 目录
-    # pattern = re.compile(r"run-(\d{8})-(\d{6})")
-    if mission_name:
-        pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
-    else:
-        pattern = re.compile(r"run-(\d{8})-(\d{6})")
-    max_dt = None
-    latest_dir = None
-    for d in os.listdir(pre_log_dir):
-        m = pattern.match(d)
-        if m:
-            dt_str = m.group(1) + m.group(2)  # 'YYYYMMDDHHMMSS'
-            if max_dt is None or dt_str > max_dt:
-                max_dt = dt_str
-                latest_dir = d
-    if latest_dir:
-        return os.path.join(pre_log_dir, latest_dir)
-    else:
-        return None
-
-# pre_log_dir = os.path.join("./logs")
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-pre_log_dir = os.path.join(project_root, "logs")
-log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-
-#
-log_dir_shoot = os.path.join(pre_log_dir, "Shoot-run-20251106-174339")
+from Utilities.LocateDirAndAgents import *
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                 lmbda, epochs, eps, gamma, device)
 
-rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
-if latest_actor_path:
-    # 直接加载权重到现有的 agent
-    sd = th.load(latest_actor_path, map_location=device)
-    agent.actor.load_state_dict(sd) # , strict=False)  # 忽略缺失的键
-    print(f"Loaded actor for test from: {latest_actor_path}")
+# pre_log_dir = os.path.join("./logs")
+pre_log_dir = os.path.join(project_root, "logs")
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+
+# 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
+actor_path = load_actor_from_log(log_dir, number=None)
+if not actor_path:
+    print(f"No actor checkpoint found in {log_dir}")
+else:
+    sd = th.load(actor_path, map_location=device, weights_only=True)
+    agent.actor.load_state_dict(sd)
+    print(f"Loaded actor for test from: {actor_path}")
 
 t_bias = 0
 
 try:
+    r_action_list=[]
+    b_action_list=[]
     env = AttackTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
-    for i_episode in range(3):  # 10
-        r_action_list=[]
-        b_action_list=[]
+    for i_episode in range(1):  # 10
+        
         # 飞机出生状态指定
-        red_R_ = random.uniform(20e3, 60e3)
+        red_R_ = random.uniform(20e3, 30e3) # 60
         red_beta = random.uniform(0, 2*pi)
         red_psi = random.uniform(0, 2*pi)
         red_height = random.uniform(3e3, 10e3)
@@ -68,10 +48,12 @@ try:
         blue_height = random.uniform(3e3, 10e3)
 
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                                'psi': red_psi
+                                'psi': red_psi,
+                                'p2p': False
                                 }
         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
-                                    'psi': pi
+                                    'psi': pi,
+                                    'p2p': True
                                     }
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=0, blue_init_ammo=0)
@@ -81,7 +63,7 @@ try:
         hist_b_action = np.zeros(3)
 
         while not done:
-            print(env.t)
+            # print(env.t)
             r_obs_n, r_obs_check = env.attack_obs('r')
             b_obs_n, b_obs_check = env.attack_obs('b')
             # 在这里将观测信息压入记忆
@@ -108,10 +90,36 @@ try:
 
             step += 1
             env.render(t_bias=t_bias)
-            time.sleep(0.01)
+            # time.sleep(0.01)
         
         env.clear_render(t_bias=t_bias)
         t_bias += env.t
 
 except KeyboardInterrupt:
     print("验证已中断")
+
+finally:
+    episode_len = len(b_action_list)
+    # 时间轴从 1 到 episode_len，每步乘以 env.dt_maneuver
+    episode_ts = env.dt_maneuver * np.arange(1, episode_len + 1)
+
+    try:
+        import matplotlib.pyplot as plt
+
+        actions = np.array(b_action_list)  # shape (n, 3)
+        if actions.size == 0:
+            print("没有动作数据可绘制。")
+        else:
+            fig, axes = plt.subplots(3, 1, sharex=True, figsize=(10, 6))
+            labels = ['elevator', 'aileron', 'throttle']
+            for i, ax in enumerate(axes):
+                ax.plot(episode_ts, actions[:, i], marker='o', markersize=3, linestyle='-')
+                ax.set_ylabel(labels[i])
+                ax.grid(True)
+            axes[-1].set_xlabel('time (s)')
+            axes[-1].set_xlim(episode_ts[0], episode_ts[-1])
+            plt.tight_layout()
+            plt.show()
+
+    except Exception as e:
+        print("绘图失败:", e)

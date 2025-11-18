@@ -84,7 +84,7 @@ def load_actor_from_log(log_dir, number=None, rein_prefix="actor_rein", sup_pref
 if __name__ =='__main__':
     import torch as th
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from TrainAndTests.PPOAttackTrain import *
+    from Trains.PPOAttackTrain import *
 
     # 测试训练效果
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,

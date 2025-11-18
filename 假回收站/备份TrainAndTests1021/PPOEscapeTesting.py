@@ -3,7 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# from TrainAndTests.PPOEscapeTraining import *
+# from Trains.PPOEscapeTraining import *
 from Envs1022backup.PPOPlaneEscapeTraining import *
 import re
 

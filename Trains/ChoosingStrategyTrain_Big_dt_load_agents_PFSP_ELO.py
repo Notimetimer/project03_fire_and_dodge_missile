@@ -20,6 +20,7 @@ from Math_calculates.sub_of_angles import *
 from torch.distributions import Normal
 import numpy as np
 import torch as th
+import re   # <-- 新增
 from torch import nn
 import torch.nn.functional as F
 matplotlib.use('TkAgg')
@@ -182,6 +183,15 @@ def get_opponent_probabilities(elo_ratings):
     exp_elos = np.exp(elos / temperature)
     probabilities = exp_elos / np.sum(exp_elos)
     return probabilities
+
+# 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
+def shorten_actor_key(path_or_name):
+    base = os.path.basename(path_or_name)
+    name, _ = os.path.splitext(base)
+    m = re.search(r'(actor_[A-Za-z]*\d+)', name)
+    if m:
+        return m.group(1)
+    return name
 # --- End ELO System ---
 
 if __name__=="__main__":
@@ -228,8 +238,9 @@ if __name__=="__main__":
     if os.path.isfile(elo_json_path):
         try:
             with open(elo_json_path, "r", encoding="utf-8") as f:
-                elo_ratings = json.load(f)
-            elo_ratings = {str(k): float(v) for k, v in elo_ratings.items()}
+                raw = json.load(f)
+            # 将任意 key 归一化为短 key（actor_reinXXX）
+            elo_ratings = {shorten_actor_key(k): float(v) for k, v in raw.items()}
         except Exception as e:
             print(f"Warning: failed to load elo json '{elo_json_path}': {e}")
             elo_ratings = {}
@@ -265,24 +276,34 @@ if __name__=="__main__":
                 # 如果没有历史模型，红方使用固定策略（例如总是进攻）
                 red_actor_loaded = False
                 opponent_path = None
+                opponent_key = None
             else:
-                # 动态更新ELO字典，为新模型添加初始分
+                # 为每个短 key 选择一个路径（使用最新修改时间覆盖）
+                path_map = {}
                 for f in actor_files:
-                    if f not in elo_ratings:
-                        elo_ratings[f] = INITIAL_ELO
+                    key = shorten_actor_key(f)
+                    # 选择最新的文件作为该 key 的路径
+                    if key not in path_map or os.path.getmtime(f) > os.path.getmtime(path_map[key]):
+                        path_map[key] = f
+                    if key not in elo_ratings:
+                        elo_ratings[key] = INITIAL_ELO
                 
-                # 根据ELO分数计算概率并选择对手
-                opponent_paths = list(elo_ratings.keys())
+                # 根据ELO分数计算概率并选择对手（使用短 key）
+                opponent_keys = list(elo_ratings.keys())
                 probabilities = get_opponent_probabilities(elo_ratings)
-                opponent_path = np.random.choice(opponent_paths, p=probabilities)
+                opponent_key = np.random.choice(opponent_keys, p=probabilities)
+                opponent_path = path_map.get(opponent_key, None)
 
                 try:
-                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
-                    red_actor.eval() # 设置为评估模式
-                    red_actor_loaded = True
-                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
-                        opponent_elo = elo_ratings.get(opponent_path, "N/A")
-                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)} (ELO: {opponent_elo:.0f})")
+                    if opponent_path is not None:
+                        red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
+                        red_actor.eval() # 设置为评估模式
+                        red_actor_loaded = True
+                        if i_episode % 20 == 0: # 每20回合打印一次对手信息
+                            opponent_elo = elo_ratings.get(opponent_key, "N/A")
+                            print(f"Episode {i_episode}: Red opponent is {opponent_key} (ELO: {opponent_elo:.0f})")
+                    else:
+                        raise FileNotFoundError("No actor file found for selected opponent key.")
                 except Exception as e:
                     print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
                     red_actor_loaded = False
@@ -440,8 +461,8 @@ if __name__=="__main__":
                 transition_dict['dones'].append(True)
             
             # --- ELO 更新 ---
-            if red_actor_loaded and opponent_path in elo_ratings:
-                opponent_elo = elo_ratings[opponent_path]
+            if red_actor_loaded and opponent_key in elo_ratings:
+                opponent_elo = elo_ratings[opponent_key]
                 if env.win: # 蓝方(主智能体)胜利
                     score_for_main = 1.0
                     score_for_opponent = 0.0
@@ -456,7 +477,7 @@ if __name__=="__main__":
                 new_opponent_elo = update_elo(opponent_elo, main_agent_elo, score_for_opponent)
                 
                 main_agent_elo = new_main_elo
-                elo_ratings[opponent_path] = new_opponent_elo
+                elo_ratings[opponent_key] = new_opponent_elo
             # --- ELO 更新结束 ---
 
             if 1: # len(transition_dict['next_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
@@ -524,6 +545,7 @@ if __name__=="__main__":
                 try:
                     tmp_path = elo_json_path + ".tmp"
                     with open(tmp_path, "w", encoding="utf-8") as f:
+                        # elo_ratings 已为短 key，直接保存即可
                         json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
                     os.replace(tmp_path, elo_json_path)
                 except Exception as e:
@@ -562,8 +584,8 @@ if __name__=="__main__":
         if elo_ratings:
             print("\n--- Final ELO Rankings ---")
             sorted_elos = sorted(elo_ratings.items(), key=lambda item: item[1], reverse=True)
-            for path, elo in sorted_elos:
-                print(f"ELO: {elo:.0f} - {os.path.basename(path)}")
+            for key, elo in sorted_elos:
+                print(f"ELO: {elo:.0f} - {key}")
             print(f"Main Agent Final ELO: {main_agent_elo:.0f}")
             print("------------------------\n")
         logger.close()

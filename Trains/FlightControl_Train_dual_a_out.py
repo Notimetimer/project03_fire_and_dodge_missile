@@ -156,12 +156,17 @@ class track_env():
         alpha_air = own.alpha_air
         beta_air = own.beta_air
 
+        delta_psi_control = sub_of_radian(self.psi_req, self.RUAV.psi)
+        cos_delta_psi = cos(delta_psi_control)
+        sin_delta_psi = sin(delta_psi_control)
+        delta_theta_control = np.clip((self.height_req-self.RUAV.alt)/5000, -1, 1)*pi/2
+
 
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [
             "ego_main",  # 7
             "ego_control",  # 7
-            "flight_cmd", # 3
+            "flight_cmd", # 4
         ]
 
         one_side_states = {
@@ -186,8 +191,9 @@ class track_env():
             ]),
 
             "flight_cmd":  np.array([
-                self.height_req - self.RUAV.alt,
-                sub_of_radian(self.psi_req, self.RUAV.psi),
+                cos_delta_psi,
+                sin_delta_psi,
+                delta_theta_control - self.RUAV.theta_v,
                 self.v_req - self.RUAV.speed,
             ])
         }
@@ -202,9 +208,9 @@ class track_env():
         s["ego_control"][0] /= (2 * pi)  # (2 * pi) 5000
         s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
         s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
-        s["flight_cmd"][0] /= 5000
-        s["flight_cmd"][1] /= (pi)
-        s["flight_cmd"][2] /= 340
+
+        s["flight_cmd"][2] /= pi*2
+        s["flight_cmd"][3] /= 340
         return s
         
     def base_obs(self, side='r', pomdp=0):
@@ -222,7 +228,7 @@ class track_env():
         self.state_init["ego_main"] = np.array([300, 5000, 0, 1, 0, 1, 0])
         self.state_init["ego_control"] = np.array(
             [0, 0, 0, 0, 0, 0, 0])  # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
-        self.state_init["flight_cmd"] = np.array([0, 0, 0])
+        self.state_init["flight_cmd"] = np.array([0, 0, 0, 0])
 
         observation = self.scale_state(state)
         self.obs_init = self.scale_state(self.state_init)
@@ -498,15 +504,15 @@ class track_env():
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 max_steps = 10 * 65e4
-hidden_dim = [128,128,128]  # 128, 128
+hidden_dim = [128, 128]  # 128, 128
 gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
-dt_decide = 0.1 # 0.2
+dt_decide = 0.2 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 
-state_dim = 17 # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
+state_dim = 18 # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
 action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 mission_name = 'FlightControl'

@@ -1,10 +1,21 @@
-from Trains.PPOTrackTraining_old import *
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from Trains.PPOAttackTrain import *
 import re
 
+dt_maneuver= 0.2 
+action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
+
 # 找出日期最大的目录
-def get_latest_log_dir(pre_log_dir):
+def get_latest_log_dir(pre_log_dir, mission_name=None):
     # 匹配 run-YYYYMMDD-HHMMSS 目录
-    pattern = re.compile(r"run-(\d{8})-(\d{6})")
+    # pattern = re.compile(r"run-(\d{8})-(\d{6})")
+    if mission_name:
+        pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
+    else:
+        pattern = re.compile(r"run-(\d{8})-(\d{6})")
     max_dt = None
     latest_dir = None
     for d in os.listdir(pre_log_dir):
@@ -22,9 +33,10 @@ def get_latest_log_dir(pre_log_dir):
 # pre_log_dir = os.path.join("./logs")
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 pre_log_dir = os.path.join(project_root, "logs")
-log_dir = get_latest_log_dir(pre_log_dir)
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
-
+#
+log_dir_shoot = os.path.join(pre_log_dir, "Shoot-run-20251106-174339")
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
@@ -42,7 +54,7 @@ if latest_actor_path:
 t_bias = 0
 
 try:
-    env = Battle(args, tacview_show=1)
+    env = AttackTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
     for i_episode in range(3):  # 10
         r_action_list=[]
         b_action_list=[]
@@ -63,14 +75,18 @@ try:
                                     }
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=0, blue_init_ammo=0)
+        env.dt_maneuver = dt_maneuver
         step = 0
         done = False
+        hist_b_action = np.zeros(3)
+
         while not done:
-            r_obs_n = env.get_obs('r')
-            b_obs_n = env.get_obs('b')
+            print(env.t)
+            r_obs_n, r_obs_check = env.attack_obs('r')
+            b_obs_n, b_obs_check = env.attack_obs('b')
             # 在这里将观测信息压入记忆
-            env.RUAV.obs_memory = r_obs_n.copy()
-            env.BUAV.obs_memory = b_obs_n.copy()
+            env.RUAV.obs_memory = r_obs_check.copy()
+            env.BUAV.obs_memory = b_obs_check.copy()
             state = np.squeeze(b_obs_n)
             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
             r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
@@ -78,8 +94,12 @@ try:
                                     ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                     o00=o00, R_cage=env.R_cage, wander=1
                                     )
-            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=False)
             
+            # 动作平滑（实验性）
+            b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
+            hist_b_action = b_action_n
+
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
 

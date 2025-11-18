@@ -2,13 +2,12 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from TrainAndTests.PPOLCrankTrain import *
-# from TrainAndTests.PPOLCrankTraining_std_clipping import *
+from Trains.PPORCrankTrain_std_clip import *
+
 import re
 
-dt_maneuver= 0.2  # 0.2
-action_eps = 0  # 动作平滑度
-use_tacview = 1  # 可视化仿真
+dt_maneuver= 0.2 # 0.2 
+action_eps = 0 # 动作平滑度
 
 # 作为参考的规则动作
 def crank_behavior(delta_psi, delta_height):
@@ -16,10 +15,30 @@ def crank_behavior(delta_psi, delta_height):
     crank 行为：返回 (heading_cmd, speed_cmd)
     """
     delta_psi_angle = delta_psi*180/pi
-    temp = delta_psi_angle - 40
+    temp = delta_psi_angle - 55
     heading_cmd = temp*pi/180
     speed_cmd = 1.1 * 340
-    return np.array([delta_height, heading_cmd, speed_cmd])
+    return delta_height, heading_cmd, speed_cmd
+
+
+# 测试训练效果
+agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                lmbda, epochs, eps, gamma, device)
+
+
+from Utilities.LocateDirAndAgents import *
+pre_log_dir = os.path.join(project_root, "logs")
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+
+# 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
+actor_path = load_actor_from_log(log_dir, number=None)
+if not actor_path:
+    print(f"No actor checkpoint found in {log_dir}")
+else:
+    sd = th.load(actor_path, map_location=device, weights_only=True)
+    agent.actor.load_state_dict(sd)
+    print(f"Loaded actor for test from: {actor_path}")
 
 t_bias = 0
 
@@ -27,15 +46,17 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=180,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=170e3,  # 8 * 60,
                     help="")
+
+# parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
+# parser.add_argument("--num-BUAVs", type=int, default=1, help="number of blue UAVs")
 args = parser.parse_args()
 
 try:
-    env = CrankTrainEnv(args, tacview_show=use_tacview) # Battle(args, tacview_show=1)
-    win_list = []
-    return_list = []
-    for i_episode in range(100):  # 10
+    env = CrankTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
+
+    for i_episode in range(3):  # 10
         r_action_list=[]
         b_action_list=[]
         # 
@@ -44,7 +65,7 @@ try:
 
         blue_psi = pi/2
         red_psi = -pi/2
-        red_N = 0  # 54e3  # random.choice([-54e3, 54e3])
+        red_N = 54e3  # random.choice([-54e3, 54e3])
         red_E = 35e3
         blue_N = red_N
         blue_E = -35e3
@@ -59,7 +80,7 @@ try:
         
 
         done = False
-        episode_return = 0
+        
         env.dt_maneuver = dt_maneuver
         step = 0
         hist_b_action = np.zeros(3)
@@ -92,16 +113,25 @@ try:
                 print('b_obs_n', b_obs_check)
                 print()
             
+            # 神经网络输出动作
+            b_action_n, u = agent.take_action(state, action_bounds=action_bound, explore=0) 
+
             # # 规则动作
-            cos_delta_psi = b_obs_check["target_information"][0]
-            sin_delta_psi = b_obs_check["target_information"][1]
-            delta_psi = atan2(sin_delta_psi, cos_delta_psi)
-            delta_theta = b_obs_check["target_information"][2]
-            dist = b_obs_check["target_information"][3]
-            delta_height = env.RUAV.alt - env.BUAV.alt
-            b_action_n = crank_behavior(delta_psi, delta_height)
+            delta_psi = b_obs_check["target_information"][1]
+            # delta_height = b_check_obs["target_information"][0]
+            # b_action_n = crank_behavior(delta_psi, delta_height*5000-2000)
             height_ego = env.BUAV.alt
 
+            # # # 动作裁剪
+            # b_action_n[0] = np.clip(b_action_n[0], env.min_alt_safe-height_ego, env.max_alt_safe-height_ego)
+            # if delta_psi>0:
+            #     b_action_n[1] = max(sub_of_radian(delta_psi-50*pi/180, 0), b_action_n[1])
+            # else:
+            #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
+
+
+            # # 动作平滑（实验性）
+            # b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n
             hist_b_action = b_action_n
 
             r_action_list.append(r_action_n)
@@ -115,11 +145,9 @@ try:
                 print()
 
             step += 1
-            episode_return += b_reward
             env.render(t_bias=t_bias)
-            if use_tacview:
-                time.sleep(0.01)
-
+            time.sleep(0.01)
+        
         env.clear_render(t_bias=t_bias)
         t_bias += env.t
 
@@ -130,35 +158,6 @@ try:
         
         win = not lose
         print("本回合结果", win)
-        win_list.append(win)
-        return_list.append(episode_return)
-
 
 except KeyboardInterrupt:
     print("验证已中断")
-
-
-finally:
-    # 绘制胜利次数和回合奖励曲线
-    import matplotlib.pyplot as plt
-
-    # 创建图形和子图
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-
-    # 绘制胜率曲线
-    ax1.plot(range(len(win_list)), win_list)  # , 'b-o')
-    ax1.set_title('Win/Loss per Episode')
-    ax1.set_xlabel('Episode')
-    ax1.set_ylabel('Win (1) / Loss (0)')
-    ax1.grid(True)
-
-    # 绘制累积奖励曲线
-    ax2.plot(range(len(return_list)), return_list)  # , 'r-o')
-    ax2.set_title('Episode Return')
-    ax2.set_xlabel('Episode')
-    ax2.set_ylabel('Return')
-    ax2.grid(True)
-
-    # 调整布局并显示
-    plt.tight_layout()
-    plt.show()

@@ -3,9 +3,11 @@ import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from TrainAndTests.ChoosingStrategyTrain_Big_dt_load_agents_PFSP_ELO import *
+from Trains.ChoosingStrategyTrain_Big_dt_load_agents_PFSP_ELO import *
 import re
 from Envs.Tasks.ChooseStrategyEnv_load_agents import *
+import glob
+import json
 
 use_tacview = 1  # 是否可视化
 
@@ -118,6 +120,15 @@ def get_opponent_probabilities(elo_ratings):
     return probabilities
 # --- End ELO System ---
 
+def shorten_actor_key(path_or_name):
+    """将完整路径或文件名缩短为 actor_*<数字> 形式的 key（优先匹配 actor_ 开头带数字的）"""
+    base = os.path.basename(path_or_name)
+    name, _ = os.path.splitext(base)
+    m = re.search(r'(actor_[A-Za-z]*\d+)', name)
+    if m:
+        return m.group(1)
+    return name
+
 if __name__=="__main__":
     
     # Define the action cycle multiplier
@@ -134,13 +145,21 @@ if __name__=="__main__":
 
     # --- ELO 初始化 ---
     main_agent_elo = INITIAL_ELO
-    actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+
+    # 查找所有 actor 文件并用短 key 建立 path_map 与 elo_ratings（短 key -> latest path）
+    actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt")) + glob.glob(os.path.join(log_dir, "actor_sup*.pt"))
+    path_map = {}
     if not actor_files:
         print("Warning: No opponent actor files found for ELO rating.")
         elo_ratings = {}
     else:
-        # 为每个对手初始化ELO分数
-        elo_ratings = {path: INITIAL_ELO for path in actor_files}
+        for f in actor_files:
+            key = shorten_actor_key(f)
+            # 对于同一 key 保留最新文件
+            if key not in path_map or os.path.getmtime(f) > os.path.getmtime(path_map[key]):
+                path_map[key] = f
+        # 初始化短 key 的 ELO
+        elo_ratings = {k: INITIAL_ELO for k in path_map.keys()}
     # --- ELO 初始化结束 ---
 
     if log_dir is None:
@@ -188,19 +207,24 @@ if __name__=="__main__":
                 # 如果没有历史模型，红方使用固定策略（例如总是进攻）
                 red_actor_loaded = False
                 opponent_path = None
+                opponent_key = None
             else:
-                # 根据ELO分数计算概率并选择对手
-                opponent_paths = list(elo_ratings.keys())
+                # 根据短 key 的 ELO 分数计算概率并选择对手
+                opponent_keys = list(elo_ratings.keys())
                 probabilities = get_opponent_probabilities(elo_ratings)
-                opponent_path = np.random.choice(opponent_paths, p=probabilities)
+                opponent_key = np.random.choice(opponent_keys, p=probabilities)
+                opponent_path = path_map.get(opponent_key, None)
                 
                 try:
-                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
-                    red_actor.eval() # 设置为评估模式
-                    red_actor_loaded = True
-                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
-                        opponent_elo = elo_ratings.get(opponent_path, "N/A")
-                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)} (ELO: {opponent_elo:.0f})")
+                    if opponent_path is not None:
+                        red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
+                        red_actor.eval() # 设置为评估模式
+                        red_actor_loaded = True
+                        if i_episode % 20 == 0: # 每20回合打印一次对手信息
+                            opponent_elo = elo_ratings.get(opponent_key, "N/A")
+                            print(f"Episode {i_episode}: Red opponent is {opponent_key} (ELO: {opponent_elo:.0f})")
+                    else:
+                        raise FileNotFoundError("No actor file found for selected opponent key.")
                 except Exception as e:
                     print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
                     red_actor_loaded = False
@@ -314,12 +338,12 @@ if __name__=="__main__":
                 env.render(t_bias=t_bias)
             
             # --- ELO 更新 ---
-            if red_actor_loaded and opponent_path in elo_ratings:
-                opponent_elo = elo_ratings[opponent_path]
-                if 'win' in locals() and env.win: # 蓝方胜利
+            if red_actor_loaded and opponent_key in elo_ratings:
+                opponent_elo = elo_ratings[opponent_key]
+                if env.win: # 蓝方(主智能体)胜利
                     score_for_main = 1.0
                     score_for_opponent = 0.0
-                elif 'lose' in locals() and env.lose: # 蓝方失败
+                elif env.lose: # 蓝方失败
                     score_for_main = 0.0
                     score_for_opponent = 1.0
                 else: # 平局或无胜负结果
@@ -330,7 +354,7 @@ if __name__=="__main__":
                 new_opponent_elo = update_elo(opponent_elo, main_agent_elo, score_for_opponent)
                 
                 main_agent_elo = new_main_elo
-                elo_ratings[opponent_path] = new_opponent_elo
+                elo_ratings[opponent_key] = new_opponent_elo
             # --- ELO 更新结束 ---
             
             episode_end_time = time.time()  # 记录结束时间
@@ -357,10 +381,21 @@ if __name__=="__main__":
         if elo_ratings:
             print("\n--- Final ELO Rankings ---")
             sorted_elos = sorted(elo_ratings.items(), key=lambda item: item[1], reverse=True)
-            for path, elo in sorted_elos:
-                print(f"ELO: {elo:.0f} - {os.path.basename(path)}")
+            for key, elo in sorted_elos:
+                print(f"ELO: {elo:.0f} - {key}")
             print(f"Main Agent Final ELO: {main_agent_elo:.0f}")
             print("------------------------\n")
+
+            # 尝试保存短 key 的 elo json 到 log_dir
+            try:
+                elo_json_path = os.path.join(log_dir, "elo_ratings.json")
+                tmp_path = elo_json_path + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, elo_json_path)
+                print(f"Saved ELO ratings (short keys) to: {elo_json_path}")
+            except Exception as e:
+                print(f"Warning: failed to save elo_ratings.json: {e}")
 
         b_action_arrays = np.array(b_action_list)
 
