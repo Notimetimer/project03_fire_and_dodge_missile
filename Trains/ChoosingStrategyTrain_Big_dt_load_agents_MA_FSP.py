@@ -29,7 +29,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.MAPPOdiscrete2_fix import * # 显式导入
+from Algorithms.MAPPOdiscrete_fix import * # 显式导入
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
@@ -399,8 +399,8 @@ if __name__=="__main__":
                 transition_dict['active_masks'].append(1-env.BUAV.dead)
             
             if 1: # len(transition_dict['next_global_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
-                '''agent.update'''
-                agent.update(transition_dict, adv_normed=False)
+                '''更新智能体'''
+                agent.update(transition_dict, adv_normed=True, shuffled=True, mini_batches=1)
                 decide_steps_after_update = 0
                 # Clear transition_dict after update
                 

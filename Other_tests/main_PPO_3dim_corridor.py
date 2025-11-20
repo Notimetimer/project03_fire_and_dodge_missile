@@ -278,7 +278,7 @@ class PPOContinuous:
 
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
 
         # # 添加优势函数缩放
         # advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)

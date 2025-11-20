@@ -23,13 +23,20 @@ def moving_average(a, window_size):
     return np.concatenate((begin, middle, end))
 
 
-def compute_advantage(gamma, lmbda, td_delta):
+def compute_advantage(gamma, lmbda, td_delta, dones):
     td_delta = td_delta.detach().cpu().numpy()
+    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
     advantage_list = []
     advantage = 0.0
-    for delta in td_delta[::-1]:
-        advantage = gamma * lmbda * advantage + delta
+    
+    # [修改] 同时遍历 delta 和 done
+    for delta, done in zip(td_delta[::-1], dones[::-1]):
+        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
+        # 此时不应该加上一步（时间上的未来）的 advantage。
+        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
+        advantage = delta + gamma * lmbda * advantage * (1 - done)
         advantage_list.append(advantage)
+        
     advantage_list.reverse()
     return torch.tensor(np.array(advantage_list), dtype=torch.float)
 

@@ -286,7 +286,7 @@ class PPOContinuous:
         # 计算 td_target, advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
         
         # 优势归一化（目前只发现了阻碍）
         if adv_normed:

@@ -1,11 +1,11 @@
-from torch.distributions import Normal
+from torch.distributions import Normal, Categorical
 import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
 
 # ================================================================= #
-#                         辅助函数 (未修改)                           #
+#                         辅助函数                                   #
 # ================================================================= #
 
 # 计算并记录 actor / critic 的梯度范数（L2）
@@ -34,25 +34,30 @@ def check_weights_bias_nan(model, model_name="model", place=None):
                 loc = f" at {place}" if place else ""
                 raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
 
-def compute_advantage(gamma, lmbda, td_delta):
+def compute_advantage(gamma, lmbda, td_delta, dones):
     td_delta = td_delta.detach().cpu().numpy()
+    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
     advantage_list = []
     advantage = 0.0
-    for delta in td_delta[::-1]:
-        advantage = gamma * lmbda * advantage + delta
+    
+    # [修改] 同时遍历 delta 和 done
+    for delta, done in zip(td_delta[::-1], dones[::-1]):
+        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
+        # 此时不应该加上一步（时间上的未来）的 advantage。
+        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
+        advantage = delta + gamma * lmbda * advantage * (1 - done)
         advantage_list.append(advantage)
+        
     advantage_list.reverse()
     return torch.tensor(np.array(advantage_list), dtype=torch.float)
 
 # ================================================================= #
-#                         网络结构定义 (未修改)                        #
+#                         网络结构定义                                #
 # ================================================================= #
 
 class PolicyNetDiscrete(torch.nn.Module):
     """
-    个体 Actor 网络 (策略网络)
-    输入：单个智能体的观测 obs
-    输出：该智能体的动作概率分布
+    [修改] 输出 Logits 而不是 Probabilities
     """
     def __init__(self, obs_dim, hidden_dims, action_dim):
         super(PolicyNetDiscrete, self).__init__()
@@ -67,7 +72,9 @@ class PolicyNetDiscrete(torch.nn.Module):
 
     def forward(self, x):
         x = self.net(x)
-        return F.softmax(self.fc_out(x), dim=1)
+        # [重要修改] 这里直接返回 logits (未经过 softmax)
+        # 这样结合 Categorical(logits=...) 使用时数值更稳定，避免 log(0)=-inf
+        return self.fc_out(x)
 
 
 class CentralizedValueNet(torch.nn.Module):
@@ -148,8 +155,8 @@ class MAPPO:
         self.eps = eps
         self.device = device
         self.k_entropy = k_entropy
-        self.actor_max_grad=actor_max_grad
-        self.critic_max_grad=critic_max_grad
+        self.actor_max_grad = actor_max_grad
+        self.critic_max_grad = critic_max_grad
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -163,12 +170,18 @@ class MAPPO:
     def take_action(self, obs, explore=True):
         """根据单个智能体的观测 obs 采取行动"""
         state = torch.tensor(np.array([obs]), dtype=torch.float).to(self.device)
-        probs = self.actor(state)
-        action_dist = torch.distributions.Categorical(probs) # 离散的输出为类别分布
+        # [修改] actor 返回的是 logits
+        logits = self.actor(state)
+        
         if explore:
+            # Categorical 内部会处理 softmax，数值更稳定
+            action_dist = Categorical(logits=logits)
             action = action_dist.sample()
+            # 为了返回概率分布给外部（如果需要），手动做 softmax
+            probs = F.softmax(logits, dim=1)
         else:
-            action = torch.argmax(probs)
+            action = torch.argmax(logits)
+            probs = F.softmax(logits, dim=1)
         # 返回动作索引与对应的概率分布（numpy array）
         probs_np = probs.detach().cpu().numpy()[0].copy() # [0]是batch维度
         return probs_np, action.item()
@@ -184,20 +197,44 @@ class MAPPO:
         agent_ids = torch.tensor(np.array(transition_dict['agent_ids']), dtype=torch.long).view(-1, 1).to(self.device)
         agent_ids_one_hot = F.one_hot(agent_ids.squeeze(), num_classes=self.num_agents).float().to(self.device)
         
-        # --- 计算优势函数 (在整个 batch 上计算) ---
-        v_current = self.critic(global_states, agent_ids_one_hot)
-        v_next = self.critic(next_global_states, agent_ids_one_hot)
-        td_target = rewards + self.gamma * v_next * (1 - dones)
-        td_delta = td_target - v_current
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
-        
-        if adv_normed:
-            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
-            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+        # [新增] 提取 active_masks
+        active_masks = torch.tensor(np.array(transition_dict['active_masks']), dtype=torch.float).view(-1, 1).to(self.device)
 
-        # --- 提前计算旧策略的对数概率和旧的价值预测 (在整个 batch 上计算) ---
-        old_log_probs = torch.log(self.actor(obs).gather(1, actions)).detach()
-        v_pred_old = self.critic(global_states, agent_ids_one_hot).detach()
+        # --- 计算优势函数 ---
+        with torch.no_grad(): # 显式关闭梯度计算
+            v_current = self.critic(global_states, agent_ids_one_hot)
+            v_next = self.critic(next_global_states, agent_ids_one_hot)
+            td_target = rewards + self.gamma * v_next * (1 - dones)
+            td_delta = td_target - v_current
+            
+            # [修改] 传入 dones 以处理跨 episode 截断
+            advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+            
+
+        if adv_normed:
+            # 归一化时只考虑有效数据的均值和标准差，以获得更准确的缩放
+            active_advantage = advantage[active_masks.squeeze(-1).bool()]
+            # [安全措施] 防止 active_advantage 为空导致 std 为 NaN
+            if active_advantage.numel() > 1:
+                adv_mean = active_advantage.mean()
+                adv_std = active_advantage.std()
+                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+            else:
+                # 如果数据太少，不归一化或仅中心化
+                pass 
+
+        # --- 提前计算旧策略的对数概率 ---
+        # [修改] 使用 logits 计算 log_prob，避免 log(0) = -inf
+        with torch.no_grad():
+            old_logits = self.actor(obs)
+            old_dist = Categorical(logits=old_logits)
+            old_log_probs = old_dist.log_prob(actions.squeeze()).view(-1, 1) # 注意 squeeze 配合 Categorical
+            v_pred_old = self.critic(global_states, agent_ids_one_hot)
+
+        if torch.isnan(old_log_probs).any():
+            # 如果这里出现 NaN，说明网络权重已经损坏或者输入 obs 有 NaN
+            raise ValueError("Error: NaN detected in old_log_probs calculation.")
+
 
         # --- 初始化日志列表 ---
         actor_grad_list, critic_grad_list = [], []
@@ -213,18 +250,15 @@ class MAPPO:
         
         # --- 开始多轮 Epoch 训练 ---
         for _ in range(self.epochs):
-            # 1. 数据打乱 (如果启用)
             if shuffled:
                 indices = torch.randperm(batch_size)
             else:
                 indices = torch.arange(batch_size)
             
-            # 2. 在 Mini-batch 上进行更新
             for i in range(0, batch_size, mini_batch_size):
-                # 获取 mini-batch 的索引
                 mb_indices = indices[i:i + mini_batch_size]
                 
-                # --- 从整个 batch 中切分出 mini-batch 数据 ---
+                # --- 从整个 batch 中切分出 mini-batch 数据 (包括 active_mask) ---
                 mb_obs = obs[mb_indices]
                 mb_global_states = global_states[mb_indices]
                 mb_actions = actions[mb_indices]
@@ -233,41 +267,69 @@ class MAPPO:
                 mb_old_log_probs = old_log_probs[mb_indices]
                 mb_td_target = td_target[mb_indices]
                 mb_v_pred_old = v_pred_old[mb_indices]
+                mb_active_masks = active_masks[mb_indices] # [新增]
 
                 # --- Actor 更新 ---
-                log_probs = torch.log(self.actor(mb_obs).gather(1, mb_actions))
+                # [修改] 再次获取 logits，构建分布
+                logits = self.actor(mb_obs)
+                
+                # [重要安全检查] 如果输入是垃圾数据，logits 可能是极大的数值
+                # 我们可以简单地检查一下 logits 是否包含 NaN
+                if torch.isnan(logits).any():
+                     raise ValueError("Actor logits contain NaN in loop (likely due to invalid inputs for dead agents)")
+
+                action_dist = Categorical(logits=logits)
+                log_probs = action_dist.log_prob(mb_actions.squeeze()).view(-1, 1)
+                
+                # 计算 ratio
+                # log_probs 和 mb_old_log_probs 现在是稳定的，不会有 -inf
                 ratio = torch.exp(log_probs - mb_old_log_probs)
                 surr1 = ratio * mb_advantage
                 surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * mb_advantage
                 
-                probs = self.actor(mb_obs)
-                action_dist = torch.distributions.Categorical(probs)
-                entropy_factor = action_dist.entropy().mean()
+                # [修改] 计算每个样本的损失，然后使用 mask 进行加权平均
+                surrogate_loss_per_sample = -torch.min(surr1, surr2)
+                
+                # [修改] 确保分母不为0，使用小常数避免除零（保持 tensor 类型）
+                eps = 1e-5
+                active_sum = mb_active_masks.sum()  # tensor on device
+                actor_loss = (surrogate_loss_per_sample * mb_active_masks).sum() / (active_sum + eps)
+ 
+                entropy_per_sample = action_dist.entropy().view(-1, 1)
+                entropy_factor = (entropy_per_sample * mb_active_masks).sum() / (active_sum + eps)
 
-                actor_loss = torch.mean(-torch.min(surr1, surr2)) - self.k_entropy * entropy_factor
+                actor_loss = actor_loss - self.k_entropy * entropy_factor
 
                 # --- Critic 更新 ---
                 current_values = self.critic(mb_global_states, mb_agent_ids_one_hot)
+                if torch.isnan(current_values).any():
+                    raise ValueError("Critic在循环里Nan")
 
                 if clip_vf:
                     v_pred_clipped = torch.clamp(current_values, mb_v_pred_old - clip_range, mb_v_pred_old + clip_range)
                     vf_loss1 = (current_values - mb_td_target.detach()).pow(2)
                     vf_loss2 = (v_pred_clipped - mb_td_target.detach()).pow(2)
-                    critic_loss = torch.max(vf_loss1, vf_loss2).mean()
+                    critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
                 else:
-                    critic_loss = torch.mean(F.mse_loss(current_values, mb_td_target.detach()))
+                    critic_loss_per_sample = F.mse_loss(current_values, mb_td_target.detach(), reduction='none')
+                
+                # [修改] 使用 mask 对 critic loss 进行加权平均
+                critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + eps)
                 
                 # --- 优化器步骤 ---
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
-                actor_loss.backward()
-                critic_loss.backward()
+
+                # 处理 loss 可能是 tensor(0.0) 的情况
+                if isinstance(actor_loss, torch.Tensor):
+                    actor_loss.backward()
+                if isinstance(critic_loss, torch.Tensor):
+                    critic_loss.backward()
                 
-                # 裁剪前梯度
+                # 记录梯度前的 norm，用于调试
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
                 pre_clip_critic_grad.append(model_grad_norm(self.critic))  
-
-                # 梯度裁剪
+                # Clip Grad
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
@@ -276,11 +338,11 @@ class MAPPO:
 
                 # --- 记录日志 ---
                 actor_grad_list.append(model_grad_norm(self.actor))
-                actor_loss_list.append(actor_loss.detach().cpu().item())
+                actor_loss_list.append(actor_loss.item() if isinstance(actor_loss, torch.Tensor) else actor_loss)
                 critic_grad_list.append(model_grad_norm(self.critic))            
-                critic_loss_list.append(critic_loss.detach().cpu().item())
-                entropy_list.append(entropy_factor.detach().cpu().item())
-                ratio_list.append(ratio.mean().detach().cpu().item())
+                critic_loss_list.append(critic_loss.item() if isinstance(critic_loss, torch.Tensor) else critic_loss)
+                entropy_list.append(entropy_factor.item() if isinstance(entropy_factor, torch.Tensor) else entropy_factor)
+                ratio_list.append(ratio.mean().item())
         
         # --- 保存平均指标 ---
         self.actor_loss = np.mean(actor_loss_list)
@@ -291,8 +353,14 @@ class MAPPO:
         self.ratio_mean = np.mean(ratio_list)
         self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
         self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
-        self.advantage = advantage.abs().mean().detach().cpu().item()
         
+        # [修改] 日志记录的优势函数也使用 mask
+        active_sum_total = active_masks.sum().item()
+        if active_sum_total > 0:
+            self.advantage = (advantage.abs() * active_masks).sum().item() / active_sum_total
+        else:
+            self.advantage = 0
+
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
@@ -311,37 +379,10 @@ def take_action_from_policy_discrete(policy_net, obs, device, explore=False):
     policy_net.eval()
     state_t = torch.tensor(np.array([obs]), dtype=torch.float).to(device)
     with torch.no_grad():
-        probs = policy_net(state_t)  # (1, action_dim)
+        logits = policy_net(state_t)  # (1, action_dim)
         if explore:
-            dist = torch.distributions.Categorical(probs)
+            dist = Categorical(logits=logits)
             action = int(dist.sample().item())
         else:
-            action = int(torch.argmax(probs, dim=1).item())
+            action = int(torch.argmax(logits, dim=1).item())
     return action
-
-# ### 主要改动说明：
-
-# 1.  **`update` 方法签名**：
-#     *   `def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=True, mini_batches=4):`
-#     *   新增了 `shuffled` 和 `mini_batches` 参数，并设置了常用的默认值。
-
-# 2.  **数据计算范围**:
-#     *   **优势函数 `advantage`**、**旧的对数概率 `old_log_probs`** 和 **旧的价值预测 `v_pred_old`** 依然在整个 batch 上计算一次。这是 PPO 的标准做法，它们在整个 epoch 期间保持不变。
-
-# 3.  **Epoch 和 Mini-batch 循环**:
-#     *   在 `for _ in range(self.epochs):` 循环的**内部**，我们添加了 mini-batch 的逻辑。
-#     *   `indices = torch.randperm(batch_size)`：在每个 epoch 开始时，都会生成一组新的随机索引，以确保每个 epoch 的 mini-batch 组成都不同。如果 `shuffled=False`，则使用顺序索引。
-#     *   `for i in range(0, batch_size, mini_batch_size):`: 这是一个新的内层循环，它遍历整个 batch，每次切分出一个大小为 `mini_batch_size` 的数据块。
-#     *   所有的损失计算、反向传播和优化器更新 (`.step()`) 现在都在这个最内层的 mini-batch 循环中完成。
-
-# 4.  **日志记录**:
-#     *   日志列表（如 `actor_loss_list`）现在会记录**每个 mini-batch** 的损失值。因此，在训练结束后计算的 `np.mean()` 将是所有 mini-batch 更新的平均值，这能更精细地反映训练过程。
-
-# ### 如何在您的 `train_spread.py` 中使用？
-
-# 您之前的 `train_spread.py` 文件无需做任何修改即可兼容。`agent.update(transition_dict, adv_normed=True)` 这行代码会自动使用 `update` 方法中 `shuffled=True` 和 `mini_batches=4` 的默认值。
-
-# 如果您想调整这些参数，可以像这样调用：
-# ```python
-# # 例如，使用 8 个 mini-batch 并且不打乱数据（不推荐）
-# agent.update(transition_dict, adv_normed=True, shuffled=False, mini_batches=8)

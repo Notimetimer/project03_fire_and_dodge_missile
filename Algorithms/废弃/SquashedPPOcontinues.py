@@ -229,7 +229,7 @@ class PPOContinuous:
         # 计算 td_target, advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
 
         # 策略输出（未压缩的 mu,std）
         mu, std = self.actor(states)

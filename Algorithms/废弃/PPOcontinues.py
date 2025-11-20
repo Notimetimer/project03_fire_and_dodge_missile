@@ -147,7 +147,7 @@ class PPOContinuous:
 
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)  # 时序差分回报值
         td_delta = td_target - self.critic(states)  # 优势函数用时序差分回报与Critic网络输出作差表示
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu()).to(self.device)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
 
         action_dists = torch.distributions.Normal(mu.detach(), std.detach())
         # 动作是正态分布
