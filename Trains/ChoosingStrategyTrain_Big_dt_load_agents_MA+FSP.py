@@ -29,7 +29,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.MAPPOdiscrete import * # 显式导入
+from Algorithms.MAPPOdiscrete2_fix import * # 显式导入
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
 from Math_calculates.one_hot import *
@@ -69,7 +69,7 @@ actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
 max_steps = 120e4  # 120e4 65e4
-hidden_dim = [128, 128, 128]  # 128
+action_hidden_dims = [128, 128, 128]  # 128
 gamma = 0.95  # 0.9
 lmbda = 0.95  # 0.9
 epochs = 10  # 10
@@ -83,8 +83,9 @@ env = ChooseStrategyEnv(args, tacview_show=use_tacview)
 
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
-state_dim = 35  # len(b_obs_spaces)
+obs_dim = 35  # len(b_obs_spaces)
 action_dim = 4  # 5 #######################
+POMDP = 0 # 是否部分可观测
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -135,11 +136,44 @@ if __name__=="__main__":
 
     transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
-    agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                        lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
+    agent = MAPPO(
+        obs_dim=obs_dim,
+        action_dim=action_dim,
+        num_agents=2,
+        actor_hidden_dims=action_hidden_dims,
+        critic_hidden_dims_back=[128, 128],
+        critic_hidden_dims_front=[128, 128],
+        actor_lr=actor_lr,
+        critic_lr=critic_lr,
+        lmbda=lmbda,
+        epochs=epochs,
+        eps=eps,
+        gamma=gamma,
+        device=device,
+        k_entropy=0.01, actor_max_grad=2, critic_max_grad=2,
+    )
+    
+    # 提前reset一次以获取id列表
+    DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+    env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
+                    red_init_ammo=6, blue_init_ammo=6)
+    
+    uav_ids = env.UAV_ids # list
+    uav_sides = {}
+    for id in env.UAV_ids: # id 和 side的表格，用来弥补get_state和step需要side而拼接globalstate需要id的问题
+        uav_sides[id] = env.UAVsTable[id]['side']
+    # --- 新增：建立系统 id <-> 算法内部 id 的双向映射（按系统 id 升序映射到 0..num_agents-1）
+    sys_ids_sorted = sorted(uav_ids)
+    sys_to_algo_id = {sys_id: idx for idx, sys_id in enumerate(sys_ids_sorted)}
+    algo_to_sys_id = {idx: sys_id for sys_id, idx in sys_to_algo_id.items()}
+    num_agents = len(sys_ids_sorted)
+    # 若需要在 agent 对象中访问映射，可以保存进去
+    agent.sys_to_algo_id = sys_to_algo_id
+    agent.algo_to_sys_id = algo_to_sys_id
+
 
     # 为FSP实例化一个红方策略网络
-    red_actor = PolicyNetDiscrete(state_dim, hidden_dim, action_dim).to(device)
+    red_actor = PolicyNetDiscrete(obs_dim, action_hidden_dims, action_dim).to(device)
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
@@ -206,14 +240,15 @@ if __name__=="__main__":
                     red_actor_loaded = False
 
             episode_return = 0
-            transition_dict = {'obs': [], 'global_states': [], 'actions': [], 'next_global_states': [], 'rewards': [], 'dones': [], 'agent_ids':[]}
+            transition_dict = {'obs': [], 'global_states': [], 'actions': [], 'next_global_states': [], 'rewards': [], 'dones': [], 'agent_ids':[], "active_masks":[]}
 
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=6, blue_init_ammo=6)
             
-            last_decision_state = None
+            last_b_dec_obs = None
+            last_global_state = None
             current_action = None
             b_reward = None
 
@@ -243,31 +278,49 @@ if __name__=="__main__":
                 if env.running == False or done: # count == round(args.max_episode_len / dt_maneuver) - 1:
                     # print('回合结束，时间为：', env.t, 's')
                     break
-                # 获取观测信息
-                r_check_obs = env.base_obs('r')
-                b_check_obs = env.base_obs('b')
+
+                # 构建全局状态和部分观测
+                r_check_obs = env.base_obs('r', pomdp=POMDP)
+                b_check_obs = env.base_obs('b', pomdp=POMDP)
                 b_obs_n = flatten_obs(b_check_obs, env.key_order)
+                r_obs_n = flatten_obs(r_check_obs, env.key_order)
                 # 在这里将观测信息压入记忆
                 env.RUAV.obs_memory = r_check_obs.copy()
                 env.BUAV.obs_memory = b_check_obs.copy()
                 b_obs = np.squeeze(b_obs_n)
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
 
+                # --- 全局状态拼接（按 agent 顺序 r + b），若某一方已死则用全0替代该方的观测）
+                r_part = np.squeeze(r_obs_n)
+                b_part = np.squeeze(b_obs_n)
+                r_part = np.asarray(r_part).copy()
+                b_part = np.asarray(b_part).copy()
+                if env.RUAV.dead:
+                    r_part = np.zeros_like(r_part)
+                if env.BUAV.dead:
+                    b_part = np.zeros_like(b_part)
+                global_state = np.concatenate([r_part, b_part])
                 # --- 智能体决策 ---
                 # 判断是否到达了决策点（每 10 步）
                 if steps_of_this_eps % action_cycle_multiplier == 0:
                     # **关键点 1: 完成并存储【上一个】动作周期的经验**
                     # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     if steps_of_this_eps > 0:
-                        transition_dict['obs'].append(last_decision_state)
+                        # 只能存蓝方的经验，因为红方的行为策略包含规则和很旧的策略
+                        transition_dict['obs'].append(last_b_dec_obs)
+                        transition_dict['global_states'].append(last_global_state)
                         transition_dict['actions'].append(current_action)
                         transition_dict['rewards'].append(b_reward)
-                        transition_dict['next_global_states'].append(b_obs) # 当前状态是上个周期的 next_state
+                        transition_dict['next_global_states'].append(global_state) # 当前状态是上个周期的 next_state
                         transition_dict['dones'].append(False) # 没结束，所以是 False
+                        transition_dict['agent_ids'].append(sys_to_algo_id[env.BUAV.id])
+                        transition_dict['active_masks'].append(1-env.BUAV.dead)
 
                     # **关键点 2: 开始【新的】一个动作周期**
                     # 1. 记录新周期的起始状态
-                    last_decision_state = b_obs
+                    last_b_dec_obs = b_obs
+                    last_global_state = global_state.copy()
+
                     # 2. Agent 产生一个动作
                     if not test_run:
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=True)
@@ -312,8 +365,20 @@ if __name__=="__main__":
                 # Accumulate rewards between agent decisions
                 episode_return += b_reward * env.dt_maneuver
 
+                # 构建全局状态和部分观测
                 next_b_check_obs = env.base_obs('b')
                 next_b_obs = flatten_obs(next_b_check_obs, env.key_order)
+                next_r_obs = flatten_obs(env.base_obs('r'), env.key_order)
+                # --- 全局状态拼接（按 agent 顺序 r + b），若某一方已死则用全0替代该方的观测）
+                r_part = np.squeeze(next_r_obs)
+                b_part = np.squeeze(next_b_obs)
+                r_part = np.asarray(r_part).copy()
+                b_part = np.asarray(b_part).copy()
+                if env.RUAV.dead:
+                    r_part = np.zeros_like(r_part)
+                if env.BUAV.dead:
+                    b_part = np.zeros_like(b_part)
+                next_global_state = np.concatenate([r_part, b_part])
 
 
                 '''显示运行轨迹'''
@@ -323,12 +388,15 @@ if __name__=="__main__":
             # --- 回合结束处理 ---
             # **关键点 3: 存储【最后一个】不完整的动作周期的经验**
             # 循环结束后，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
-            if last_decision_state is not None:
-                transition_dict['obs'].append(last_decision_state)
+            if last_b_dec_obs is not None:
+                transition_dict['obs'].append(last_b_dec_obs)
+                transition_dict['global_states'].append(last_global_state)
                 transition_dict['actions'].append(current_action)
                 transition_dict['rewards'].append(b_reward)
-                transition_dict['next_global_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
+                transition_dict['next_global_states'].append(next_global_state) # 最后的 next_state 是环境的最终状态
                 transition_dict['dones'].append(True)
+                transition_dict['agent_ids'].append(sys_to_algo_id[env.BUAV.id])
+                transition_dict['active_masks'].append(1-env.BUAV.dead)
             
             if 1: # len(transition_dict['next_global_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
                 '''agent.update'''
@@ -376,7 +444,6 @@ if __name__=="__main__":
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
-            t_bias += env.t
             r_action_list = np.array(r_action_list)
             # b_action_list is no longer appended every dt_maneuver, need to rethink if you need this for logging
 

@@ -189,7 +189,7 @@ class Battle(object):
                       theta0=UAV.theta, o00=o00)
             UAV.escape_once = 0
             self.RUAVs.append(UAV)
-            self.RUAVsTable[UAV.id] = (UAV, UAV.side, UAV.dead)
+            self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=dt_move)
@@ -214,7 +214,7 @@ class Battle(object):
                       theta0=UAV.theta, o00=o00)
             UAV.escape_once = 0
             self.BUAVs.append(UAV)
-            self.BUAVsTable[UAV.id] = (UAV, UAV.side, UAV.dead)
+            self.BUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
         self.UAVsTable = {**self.RUAVsTable, **self.BUAVsTable}
@@ -691,7 +691,7 @@ class Battle(object):
         s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
         return s
         
-    def base_obs(self, side, pomdp=0):
+    def base_obs(self, side, pomdp=0):  # 默认为完全可观测，设置pomdp后为部分可观测
         # 处理部分可观测、默认值问题、并尺度缩放
         # 输出保持字典的形式
         if side == 'r':

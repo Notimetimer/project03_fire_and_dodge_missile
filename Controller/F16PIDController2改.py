@@ -134,7 +134,7 @@ class F16PIDController:
         error_h = np.clip(target_height_devided - current_height_devided, -1, 1)
 
         if error_h >= 0:
-            kh = pi / 3
+            kh = pi / 2 # 3
         else:
             kh = pi / 2 # + pi/8
 

@@ -495,22 +495,6 @@ class ChooseStrategyEnv(Battle):
         sin_delta_psi_threat = uav_states["threat"][1]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
 
-        # 事件/密集奖励
-        # 为导弹提供制导
-        if missile_in_mid_term:
-            reward += 2
-
-        # 锁定目标
-        if uav_states["target_locked"]:
-            reward += 1.1
-
-        # 被目标锁定
-        if uav_states["locked_by_target"]:
-            reward -= 1
-
-        # 收到导弹警告
-        if warning:
-            reward -= 3
 
         # 导弹锁定目标
         if enm_state["warning"]:
@@ -524,33 +508,51 @@ class ChooseStrategyEnv(Battle):
         if enm.escape_once:
             reward -= 5
 
-        # # 密集奖励
-        if warning and action_label != 1 and len(alive_ally_missiles)>0:
-            reward -= 5
+        if not ego.dead: # 以下是存活才能获取的奖励
+            # 事件/密集奖励
+            # 为导弹提供制导
+            if missile_in_mid_term:
+                reward += 2
 
-        # 没发射导弹时alpha越小越好
-        if len(alive_ally_missiles) == 0 and not warning:
-            reward += 0.5 - alpha / pi
-        
-        # 导弹处于中制导阶段时alpha在±60*pi/180之间为奖励高台， 其余随alpha线性减少
-        if missile_in_mid_term:
-            # 目标没有跑，不该重复攻击
-            if action_label==0 and abs(AA_hor)>pi*2/3:
+            # 锁定目标
+            if uav_states["target_locked"]:
+                reward += 1.1
+
+            # 被目标锁定
+            if uav_states["locked_by_target"]:
+                reward -= 1
+
+            # 收到导弹警告
+            if warning:
+                reward -= 3
+
+            # # 密集奖励
+            if warning and action_label != 1 and len(alive_ally_missiles)>0:
                 reward -= 5
 
-            # 高台奖励：alpha在[-60*pi/180, 60*pi/180]区间奖励高，其余线性递减
-            if abs(alpha) < np.pi / 3:
-                reward += 1
-            else:
-                reward += 1 - (alpha - pi / 3) / pi
+            # 没发射导弹时alpha越小越好
+            if len(alive_ally_missiles) == 0 and not warning:
+                reward += 0.5 - alpha / pi
+            
+            # 导弹处于中制导阶段时alpha在±60*pi/180之间为奖励高台， 其余随alpha线性减少
+            if missile_in_mid_term:
+                # 目标没有跑，不该重复攻击
+                if action_label==0 and abs(AA_hor)>pi*2/3:
+                    reward -= 5
 
-        # 有warning时alpha越大越好
-        if warning:
-            reward += 8 * abs(delta_psi_threat) / pi # 这里的alpha错了，应该是和导弹的threa_delta_psi有关的
-        
-        # deltapsi变化率奖励 todobedontinued
+                # 高台奖励：alpha在[-60*pi/180, 60*pi/180]区间奖励高，其余线性递减
+                if abs(alpha) < np.pi / 3:
+                    reward += 1
+                else:
+                    reward += 1 - (alpha - pi / 3) / pi
 
-        # 态势优势度 tobecontinued
+            # 有warning时alpha越大越好
+            if warning:
+                reward += 8 * abs(delta_psi_threat) / pi # 这里的alpha错了，应该是和导弹的threa_delta_psi有关的
+            
+            # deltapsi变化率奖励 todobedontinued
+
+            # 态势优势度 tobecontinued
 
 
         return done, reward, event_reward
