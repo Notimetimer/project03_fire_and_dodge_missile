@@ -22,7 +22,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Envs.Tasks.AttackManeuverEnv import *
+from Envs.Tasks.AttackManeuverEnv_p2p import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
@@ -97,10 +97,10 @@ env = AttackTrainEnv(args, tacview_show=use_tacview)
 # r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
 # b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
-action_bound = np.array([[-1, 1], [-1, 1], [0, 1]])
+action_bound = np.array([[-1, 1], [-1, 1], [0, 1], [-1, 1]])
 
 state_dim = 8 + 7 + 2  # len(b_obs_spaces)
-action_dim = b_action_spaces[0].shape[0]
+action_dim = 4  # b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -163,13 +163,15 @@ if __name__ == "__main__":
         rl_steps = 0
         return_list = []
         win_list = []
+        transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],
+                               'action_bounds': []}
         # with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
         # for i_episode in range(int(num_episodes*(1-pre_train_rate))):
         while total_steps < int(max_steps * (1 - pre_train_rate)):
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],
-                               'action_bounds': []}
+            # transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],
+            #                    'action_bounds': []}
 
             # 飞机出生状态指定
             red_R_ = random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
@@ -278,7 +280,11 @@ if __name__ == "__main__":
                 out_range_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
-            agent.update(transition_dict)
+
+            if i_episode % 2 == 1:  # test
+                agent.update(transition_dict, adv_normed=1, shuffled=1)
+                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],
+                                'action_bounds': []}
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)

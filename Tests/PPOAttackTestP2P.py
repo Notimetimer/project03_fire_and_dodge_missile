@@ -36,10 +36,10 @@ try:
     r_action_list=[]
     b_action_list=[]
     env = AttackTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
-    for i_episode in range(1):  # 10
+    for i_episode in range(3):  # 10
         
         # 飞机出生状态指定
-        red_R_ = random.uniform(20e3, 30e3) # 60
+        red_R_ = random.uniform(50e3, 60e3) # 60
         red_beta = random.uniform(0, 2*pi)
         red_psi = random.uniform(0, 2*pi)
         red_height = random.uniform(3e3, 10e3)
@@ -60,7 +60,7 @@ try:
         env.dt_maneuver = dt_maneuver
         step = 0
         done = False
-        hist_b_action = np.zeros(3)
+        hist_b_action = np.zeros(4)
 
         while not done:
             # print(env.t)
@@ -90,10 +90,11 @@ try:
 
             step += 1
             env.render(t_bias=t_bias)
-            # time.sleep(0.01)
+            time.sleep(0.01)
         
         env.clear_render(t_bias=t_bias)
         t_bias += env.t
+        1+1
 
 except KeyboardInterrupt:
     print("验证已中断")

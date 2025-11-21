@@ -326,7 +326,7 @@ class PPOContinuous:
         return a_exec[0].cpu().detach().numpy().flatten(), u[0].cpu().detach().numpy().flatten()
     
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
+    def update(self, transition_dict, adv_normed=False, shuffled=0, clip_vf=False, clip_range=0.2):
         """更新函数兼容以下几种调用方式：
         - 如果 action_bounds 是 None: 期望 transition_dict 中包含 'action_bounds'，其形状为 (N,2) 或每步 (amin,amax)
         - 如果 action_bounds 是标量/二元元组/数组：作为全局固定区间使用
@@ -355,6 +355,26 @@ class PPOContinuous:
             adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
             # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
+
+        # 可选2：按 episode 打乱顺序（shuffle episodes, 保持每个 episode 内部顺序）
+        # shuffled=0/1 控制（默认 0）
+        if shuffled:
+            N = len(transition_dict['dones'])
+            if N > 1:
+                idx = torch.randperm(N, device=states.device)
+                # 统一按随机索引重排所有相关张量，保证对应关系不变
+                states = states[idx]
+                u_s = u_s[idx]
+                rewards = rewards[idx]
+                next_states = next_states[idx]
+                dones = dones[idx]
+                action_bounds = action_bounds[idx]
+                if 'max_stds' in transition_dict:
+                    max_stds = max_stds[idx]
+                # 也把 td_target / td_delta / advantage 一并打乱
+                td_target = td_target[idx]
+                td_delta = td_delta[idx]
+                advantage = advantage[idx]
 
         # 提前计算一次旧的 value 预测（用于 value clipping）
         v_pred_old = self.critic(states).detach()  # (N,1)

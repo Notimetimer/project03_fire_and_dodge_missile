@@ -287,6 +287,10 @@ class Battle(object):
                 target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
                 delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
+                if len(action)==4:
+                    rudder = action[3]
+                else:
+                    rudder = None
                 # print('target_height',target_height)
                 # 出界强制按回
                 if self.out_range(UAV):
@@ -300,7 +304,7 @@ class Battle(object):
                     # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
                     p2p = self.RED_BIRTH_STATE.get('p2p', False)
 
-                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p)
+                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p, rudder=rudder)
                 # 上一步动作
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
@@ -556,8 +560,6 @@ class Battle(object):
         q = own.q
         r = own.r
 
-        # 上一步动作
-        act1_last, act2_last, act3_last = own.act_memory
 
         theta_v = own.theta_v
         psi_v = own.psi_v

@@ -107,6 +107,19 @@ class AttackTrainEnv(Battle):
 
         # 角度奖励
         r_angle = 1 - alpha / (pi / 3)  # 超出雷达范围就惩罚狠一点
+        sin_phi = state["ego_main"][4]
+        cos_phi = state["ego_main"][5]
+        phi = atan2(sin_phi, cos_phi)
+        # 滚转角惩罚
+        r_angle -= 0.1 * abs(phi / pi)
+        # 负过载惩罚
+        if ego.Ny<0:
+            r_angle -= 0.1 * abs(ego.Ny) / 2
+        # 侧滑角惩罚
+        r_angle -= 0.05 * np.clip(abs(ego.beta_air*180/pi / 5), 0, 1)
+        # 迎角惩罚
+        r_angle -= 0.01 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
+                           (ego.alpha_air*180/pi< -5)*(-5 - ego.alpha_air*180/pi))
 
         # 高度奖励
         pre_alt_opt = target_alt + np.clip((dist - 10e3) / (40e3 - 10e3) * 5e3, 0, 5e3)
@@ -121,7 +134,7 @@ class AttackTrainEnv(Battle):
 
 
         # 速度奖励
-        speed_opt = 1.5 * 340
+        speed_opt = 2.5 * 340
         r_speed = 1 - abs(speed - speed_opt) / (2 * 340)
 
         # 距离奖励
