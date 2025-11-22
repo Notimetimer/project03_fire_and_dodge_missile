@@ -1,4 +1,5 @@
 '''
+GRU 被actor和critic共享
 联合优化器，同时使用actor_loss和critic_loss
 '''
 

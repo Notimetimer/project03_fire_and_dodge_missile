@@ -19,6 +19,16 @@ def model_grad_norm(model):
             found = True
     return float(total_sq ** 0.5) if found else float('nan')
 
+
+def moving_average(a, window_size):
+    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
+    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
+    r = np.arange(1, window_size - 1, 2)
+    begin = np.cumsum(a[:window_size - 1])[::2] / r
+    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
+    return np.concatenate((begin, middle, end))
+
+
 def check_weights_bias_nan(model, model_name="model", place=None):
     """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
     参数:

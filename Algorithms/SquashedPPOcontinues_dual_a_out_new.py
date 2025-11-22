@@ -30,6 +30,21 @@ def moving_average(a, window_size):
     return np.concatenate((begin, middle, end))
 
 
+def check_weights_bias_nan(model, model_name="model", place=None):
+    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
+    参数:
+      model: torch.nn.Module
+      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
+      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
+    """
+    for name, param in model.named_parameters():
+        if ("weight" in name) or ("bias" in name):
+            if param is None:
+                continue
+            if torch.isnan(param).any():
+                loc = f" at {place}" if place else ""
+                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
+
 # --- 保持 compute_advantage 函数，但根据传入参数数量切换逻辑 ---
 def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncateds 默认为 None
     # 确保输入转为 numpy
