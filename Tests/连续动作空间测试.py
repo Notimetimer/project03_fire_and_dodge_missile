@@ -102,7 +102,7 @@ action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 state_dim = 8 + 7 + 2  # len(b_obs_spaces)
 # action_dim = b_action_spaces[0].shape[0]
 
-action_dims_dict = {'Cont':3, 'Cat':0, 'Bern':0}
+action_dims_dict = {'cont':3, 'cat':0, 'bern':0}
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -279,7 +279,7 @@ if __name__ == "__main__":
                 #                         ally_missiles=env.Bmissiles, enm_missiles=env.Rmissiles,
                 #                         o00=o00, R_cage=env.R_cage, wander=0
                 #                         )
-                b_action_n = b_action_n_['Cont']
+                b_action_n = b_action_n_['cont']
                 _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, _ = env.attack_terminate_and_reward('b')
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs

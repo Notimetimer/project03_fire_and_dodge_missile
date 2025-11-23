@@ -104,44 +104,44 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # 2. 动态创建输出头
         # 连续动作头
-        if self.action_dims.get('Cont', 0) > 0:
-            cont_dim = self.action_dims['Cont']
+        if self.action_dims.get('cont', 0) > 0:
+            cont_dim = self.action_dims['cont']
             self.fc_mu = nn.Linear(prev_size, cont_dim)
             self.log_std_param = nn.Parameter(torch.log(torch.ones(cont_dim, dtype=torch.float) * init_std))
 
         # 分类/离散动作头
-        if self.action_dims.get('Cat', 0) > 0:
-            cat_dim = self.action_dims['Cat']
+        if self.action_dims.get('cat', 0) > 0:
+            cat_dim = self.action_dims['cat']
             self.fc_cat = nn.Linear(prev_size, cat_dim)
 
         # 伯努利动作头
-        if self.action_dims.get('Bern', 0) > 0:
-            bern_dim = self.action_dims['Bern']
+        if self.action_dims.get('bern', 0) > 0:
+            bern_dim = self.action_dims['bern']
             self.fc_bern = nn.Linear(prev_size, bern_dim)
 
     def forward(self, x, min_std=1e-6, max_std=0.4):
         # 通过共享网络
         shared_features = self.net(x)
         
-        outputs = {'Cont': None, 'Cat': None, 'Bern': None}
+        outputs = {'cont': None, 'cat': None, 'bern': None}
 
         # 计算每个头的输出
-        if self.action_dims.get('Cont', 0) > 0:
+        if self.action_dims.get('cont', 0) > 0:
             mu = self.fc_mu(shared_features)
             std = torch.exp(self.log_std_param)
             std = torch.clamp(std, min=min_std, max=max_std)
             # 广播到 batch
             if mu.dim() > 1:
                 std = std.unsqueeze(0).expand_as(mu)
-            outputs['Cont'] = (mu, std)
+            outputs['cont'] = (mu, std)
 
-        if self.action_dims.get('Cat', 0) > 0:
+        if self.action_dims.get('cat', 0) > 0:
             cat_logits = self.fc_cat(shared_features)
-            outputs['Cat'] = F.softmax(cat_logits, dim=-1) # 输出现在是概率
+            outputs['cat'] = F.softmax(cat_logits, dim=-1) # 输出现在是概率
 
-        if self.action_dims.get('Bern', 0) > 0:
+        if self.action_dims.get('bern', 0) > 0:
             bern_logits = self.fc_bern(shared_features)
-            outputs['Bern'] = bern_logits
+            outputs['bern'] = bern_logits
 
         return outputs
 
@@ -168,11 +168,11 @@ class PPOHybrid:
         self.max_std = max_std
 
         # 将 action_bounds 作为常量存储在 device 上
-        if self.action_dims.get('Cont', 0) > 0:
+        if self.action_dims.get('cont', 0) > 0:
             assert action_bounds is not None, "action_bounds must be provided for continuous actions"
             self.action_bounds = torch.tensor(action_bounds, dtype=torch.float, device=self.device)
-            if self.action_bounds.dim() != 2 or self.action_bounds.shape[0] != self.action_dims['Cont']:
-                 raise ValueError(f"action_bounds shape must be ({self.action_dims['Cont']}, 2)")
+            if self.action_bounds.dim() != 2 or self.action_bounds.shape[0] != self.action_dims['cont']:
+                 raise ValueError(f"action_bounds shape must be ({self.action_dims['cont']}, 2)")
             self.amin = self.action_bounds[:, 0]
             self.amax = self.action_bounds[:, 1]
             self.action_span = self.amax - self.amin
@@ -206,9 +206,9 @@ class PPOHybrid:
         actions_exec = {} # 用于环境执行 (numpy)
         actions_raw = {}  # 用于存储和训练 (torch tensor on device)
 
-        # --- 处理连续动作 ---
-        if actor_outputs['Cont'] is not None:
-            mu, std = actor_outputs['Cont']
+        # --- 处理连续动作 --- a考虑action_bound，u不考虑
+        if actor_outputs['cont'] is not None:
+            mu, std = actor_outputs['cont']
             dist = SquashedNormal(mu, std)
             if explore:
                 a_norm, u = dist.sample()
@@ -217,32 +217,32 @@ class PPOHybrid:
                 a_norm = torch.tanh(u)
             
             a_exec = self._scale_action_to_exec(a_norm)
-            actions_exec['Cont'] = a_exec[0].cpu().detach().numpy().flatten()
-            actions_raw['Cont'] = u[0].cpu().detach().numpy().flatten() # 存储 pre-tanh 的 u
+            actions_exec['cont'] = a_exec[0].cpu().detach().numpy().flatten()
+            actions_raw['cont'] = u[0].cpu().detach().numpy().flatten() # 存储 pre-tanh 的 u
 
-        # --- 处理分类动作 ---
-        if actor_outputs['Cat'] is not None:
-            cat_probs = actor_outputs['Cat']
+        # --- 处理分类动作 --- a是动作概率，u是编号
+        if actor_outputs['cat'] is not None:
+            cat_probs = actor_outputs['cat']
             dist = Categorical(probs=cat_probs)
             if explore:
                 cat_action_idx = dist.sample()
             else:
                 cat_action_idx = torch.argmax(dist.probs, dim=-1)
             # probs_np = cat_probs.cpu().detach().numpy()[0].copy() # [0]是batch维度
-            actions_exec['Cat'] = cat_probs.cpu().detach().numpy()[0].copy() # 返回概率向量
-            actions_raw['Cat'] = cat_action_idx.cpu().detach().numpy().flatten() # 存储采样索引
+            actions_exec['cat'] = cat_probs.cpu().detach().numpy()[0].copy() # 返回概率向量
+            actions_raw['cat'] = cat_action_idx.cpu().detach().numpy().flatten() # 存储采样索引
 
-        # --- 处理伯努利动作 ---
-        if actor_outputs['Bern'] is not None:
-            bern_logits = actor_outputs['Bern']
+        # --- 处理伯努利动作 --- 不区分a和u
+        if actor_outputs['bern'] is not None:
+            bern_logits = actor_outputs['bern']
             dist = Bernoulli(logits=bern_logits)
             if explore:
                 bern_action = dist.sample()
             else:
                 bern_action = (dist.probs > 0.5).float() # 确定性动作
 
-            actions_exec['Bern'] = bern_action[0].cpu().detach().numpy().flatten()
-            actions_raw['Bern'] = actions_exec['Bern'] # 存储采样结果 (0. or 1.)
+            actions_exec['bern'] = bern_action[0].cpu().detach().numpy().flatten()
+            actions_raw['bern'] = actions_exec['bern'] # 存储采样结果 (0. or 1.)
         
         return actions_exec, actions_raw
 
@@ -286,7 +286,7 @@ class PPOHybrid:
         all_keys = actions_from_buffer[0].keys()
         for key in all_keys:
             vals = [d[key] for d in actions_from_buffer]
-            if key == 'Cat':
+            if key == 'cat':
                 # 分类动作的索引需要是 LongTensor
                 actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
             else:
@@ -307,22 +307,22 @@ class PPOHybrid:
             old_log_probs = torch.zeros(states.size(0), 1).to(self.device)
 
             # Cont
-            if self.action_dims['Cont'] > 0:
-                mu_old, std_old = old_actor_outputs['Cont']
+            if self.action_dims['cont'] > 0:
+                mu_old, std_old = old_actor_outputs['cont']
                 dist_old = SquashedNormal(mu_old, std_old)
-                u_old = actions_on_device['Cont']
+                u_old = actions_on_device['cont']
                 old_log_probs += dist_old.log_prob(0, u_old).sum(-1, keepdim=True)
             # Cat
-            if self.action_dims.get('Cat', 0) > 0:
-                cat_probs_old = old_actor_outputs['Cat'] # 现在直接是概率
-                cat_action_old = actions_on_device['Cat']
+            if self.action_dims.get('cat', 0) > 0:
+                cat_probs_old = old_actor_outputs['cat'] # 现在直接是概率
+                cat_action_old = actions_on_device['cat']
                 # 与 PPOdiscrete 保持一致，使用 gather 方法
                 old_log_probs += torch.log(cat_probs_old.gather(1, cat_action_old))  #.detach()
             # Bern
-            if self.action_dims['Bern'] > 0:
-                bern_logits_old = old_actor_outputs['Bern']
+            if self.action_dims['bern'] > 0:
+                bern_logits_old = old_actor_outputs['bern']
                 dist_old = Bernoulli(logits=bern_logits_old)
-                bern_action_old = actions_on_device['Bern']
+                bern_action_old = actions_on_device['bern']
                 old_log_probs += dist_old.log_prob(bern_action_old).sum(-1, keepdim=True)
         
         # 日志记录列表
@@ -341,24 +341,24 @@ class PPOHybrid:
             entropy = torch.zeros(states.size(0), 1).to(self.device)
 
             # Cont
-            if self.action_dims['Cont'] > 0:
-                mu, std = actor_outputs['Cont']
+            if self.action_dims['cont'] > 0:
+                mu, std = actor_outputs['cont']
                 dist = SquashedNormal(mu, std)
-                u = actions_on_device['Cont']
+                u = actions_on_device['cont']
                 log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
                 entropy += dist.entropy().unsqueeze(-1)
             # Cat
-            if self.action_dims.get('Cat', 0) > 0:
-                cat_probs = actor_outputs['Cat']
-                cat_action = actions_on_device['Cat'].long() # 确保是 long 类型
+            if self.action_dims.get('cat', 0) > 0:
+                cat_probs = actor_outputs['cat']
+                cat_action = actions_on_device['cat'].long() # 确保是 long 类型
                 log_probs += torch.log(cat_probs.gather(1, cat_action))
                 dist = Categorical(probs=cat_probs)
                 entropy += dist.entropy().unsqueeze(-1)
             # Bern
-            if self.action_dims['Bern'] > 0:
-                bern_logits = actor_outputs['Bern']
+            if self.action_dims['bern'] > 0:
+                bern_logits = actor_outputs['bern']
                 dist = Bernoulli(logits=bern_logits)
-                bern_action = actions_on_device['Bern']
+                bern_action = actions_on_device['bern']
                 log_probs += dist.log_prob(bern_action).sum(-1, keepdim=True)
                 entropy += dist.entropy().sum(-1, keepdim=True)
             

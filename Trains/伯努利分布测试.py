@@ -264,7 +264,7 @@ if __name__ == '__main__':
     # 使用随机动作策略来运行环境并观察效果
     env = ArcherEnv(render_mode="other")
     state_dim = env.observation_space.shape[0]  # 应为4
-    action_dims_dict = {'Cont':0, 'Cat':0, 'Bern':1}
+    action_dims_dict = {'cont':0, 'cat':0, 'bern':1}
     action_bound = None
 
     agent = PPOHybrid(state_dim, hidden_dim, action_dims_dict, action_bound, actor_lr, critic_lr,
@@ -286,7 +286,7 @@ if __name__ == '__main__':
         
         while not terminated:
             obs = env.get_obs()
-            # mask = np.array([[0,1]] * action_dims_dict['Bern'])
+            # mask = np.array([[0,1]] * action_dims_dict['bern'])
             # dist = obs[0] * 10
             # if dist > 80:
             #     mask = np.array([[0,0]])
@@ -294,7 +294,7 @@ if __name__ == '__main__':
             #     mask = np.array([[1,1]])
 
             action, u = agent.take_action(obs, explore=1)
-            action = action['Bern']
+            action = action['bern']
 
             next_obs, reward, terminated, truncated, info = env.step(action)
             transition_dict['states'].append(obs)
@@ -362,7 +362,7 @@ if __name__ == '__main__':
             mask = np.array([[1,1]])
 
         action, u = agent.take_action(obs, explore=0)
-        action = action['Bern']
+        action = action['bern']
 
         next_obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward

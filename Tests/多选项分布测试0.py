@@ -138,7 +138,7 @@ env.seed(0)
 torch.manual_seed(0)
 state_dim = env.observation_space.shape[0]  # 应为4
 action_dim = env.action_space.n  # 应为3
-action_dims_dict = {'Cont':0, 'Cat':3, 'Bern':0}
+action_dims_dict = {'cont':0, 'cat':3, 'bern':0}
 action_bound = None
 
 agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr, lmbda,
@@ -155,7 +155,7 @@ for i in range(10):
             while not done:
                 
                 _, u = agent.take_action(state, explore=1)
-                action = u # ['Cat'][0]
+                action = u # ['cat'][0]
 
                 next_state, reward, done, _ = env.step(action)
                 transition_dict['states'].append(state)
@@ -194,7 +194,7 @@ steps = 0
 while not done:
     steps += 1
     action, _ = agent.take_action(state, explore=0)
-    action = action['Cat']
+    action = action['cat']
     next_state, reward, done, _ = env.step(action)
     # 拆分 next_state：前3维为 one-hot（对手动作），第4维为上一步胜负标量
     onehot = np.asarray(next_state[:3], dtype=np.float32)

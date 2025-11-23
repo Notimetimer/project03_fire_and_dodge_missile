@@ -19,7 +19,7 @@ agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+log_dir = os.path.join(pre_log_dir, "Attack-run-20251030-230000")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
 actor_path = load_actor_from_log(log_dir, number=None)
@@ -52,7 +52,7 @@ try:
                                 'psi': red_psi
                                 }
         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_R_, blue_height, 0.0]),
-                                    'psi': pi
+                                    'psi': np.random.choice([pi/2, -pi/2])
                                     }
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=6, blue_init_ammo=6)
@@ -85,13 +85,13 @@ try:
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
 
-            ### 发射导弹，这部分不受10step约束
-            distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-            # 发射导弹判决
-            if distance <= 80e3 and distance >= 5e3:  # 在合适的距离范围内每0.2s判决一次导弹发射
-                launch_time_count = 0
-                launch_missile_with_basic_rules(env, side='r')
-                launch_missile_with_basic_rules(env, side='b')
+            # ### 发射导弹，这部分不受10step约束
+            # distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
+            # # 发射导弹判决
+            # if distance <= 80e3 and distance >= 5e3:  # 在合适的距离范围内每0.2s判决一次导弹发射
+            #     launch_time_count = 0
+            #     launch_missile_with_basic_rules(env, side='r')
+            #     launch_missile_with_basic_rules(env, side='b')
 
             _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
             done, b_reward, _ = env.attack_terminate_and_reward('b')

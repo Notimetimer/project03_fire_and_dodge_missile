@@ -292,10 +292,6 @@ class Battle(object):
                 else:
                     rudder = None
                 # print('target_height',target_height)
-                # 出界强制按回
-                if self.out_range(UAV):
-                    target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
-                    delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
 
                 if UAV.blue:
                     # 如果 BLUE_BIRTH_STATE 包含 p2p 则使用其值，否则为 False
@@ -303,6 +299,13 @@ class Battle(object):
                 if UAV.red:
                     # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
                     p2p = self.RED_BIRTH_STATE.get('p2p', False)
+
+                # 出界强制按回
+                if self.out_range(UAV):
+                    target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
+                    delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
+                    p2p = False # 只能用PID来按回
+
 
                 UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p, rudder=rudder)
                 # 上一步动作

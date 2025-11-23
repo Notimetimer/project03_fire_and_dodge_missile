@@ -34,7 +34,7 @@ from Envs.battle6dof1v1_missile0919 import *
 
 # 通过继承构建观测空间、奖励函数和终止条件
 
-class ShootTrainEnv(Battle):
+class AttackShootTrainEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
         self.attack_key_order = [
@@ -98,7 +98,7 @@ class ShootTrainEnv(Battle):
 
                 # 出界强制按回
                 if self.out_range(UAV):
-                    target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
+                    target_direction_ = horizontal_center - np.array([UAV.pos_[0], UAV.pos_[2]])
                     delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
                     p2p = False # 只能用PID来按回
 
@@ -294,7 +294,7 @@ class ShootTrainEnv(Battle):
         #     self.lose = 1
 
         # 命中判断
-        if enm.dead or self.out_range(enm): # 驱赶也行， 新增
+        if enm.dead: # or self.out_range(enm): # 驱赶也行， 新增
             terminate = True
             self.win = 1
 
@@ -303,10 +303,46 @@ class ShootTrainEnv(Battle):
         if self.out_range(enm):
             self.target_out = 1
 
+        if self.out_range(ego) or ego.dead:
+            terminate = True
+            self.lose = 1
+
         if self.win and self.lose:
             self.draw = 1
 
         # reward_base = 100 / (self.game_time_limit/dt_maneuver)  # 防自杀奖励
+
+        # 角度奖励
+        r_angle = 1 - alpha / (pi / 3)  # 超出雷达范围就惩罚狠一点
+
+        # 高度奖励
+        pre_alt_opt = target_alt + np.clip((dist - 10e3) / (40e3 - 10e3) * 5e3, 0, 5e3)
+        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
+
+        r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
+                (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
+
+        # 高度限制奖励/惩罚
+        r_alt += (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
+                (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
+
+
+        # 速度奖励
+        speed_opt = 2 * 340
+        r_speed = 1 - abs(speed - speed_opt) / (2 * 340)
+
+
+        # 距离奖励
+        # r_dist = (dist <= 10e3) * (dist - 0) / (10e3 - 0) + \
+        #          (dist > 10e3) * (1 - (dist - 10e3) / (50e3 - 10e3))
+        L_ = enm.pos_ - ego.pos_
+        # delta_v_ = enm.vel_ - ego.vel_
+        # dist_dot = np.dot(delta_v_, L_) / dist
+        # self.last_dist_dot = dist_dot
+        # r_dist = -dist_dot/340  # 接近率越高奖励越高
+
+        r_dist = np.dot(ego.vel_, L_) / dist /340  # 我机速度在目标线上的投影越大越好
+
 
 
         # # 发射惩罚，根据 missile_time_since_shoot
@@ -349,12 +385,14 @@ class ShootTrainEnv(Battle):
         # 0.2? 0.02?
         reward = np.sum([
             # 1 * reward_base,
-            # 1 * reward_AA,
-
+            # fly
+            2 * r_angle,
+            1 * r_alt,
+            2 * r_speed,
+            1 * r_dist,
+            # shoot
             1 * reward_shoot,
             1 * reward_SuoHa,
-            
-            # 1 * reward_violate,
             1 * reward_miss,
             1 * reward_event,
         ])

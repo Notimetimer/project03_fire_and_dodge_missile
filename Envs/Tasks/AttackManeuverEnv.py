@@ -87,6 +87,8 @@ class AttackTrainEnv(Battle):
 
         target_alt = enm.alt
 
+
+        # # 锁定时间达到就判为胜利，用于提高训练效率
         # if alpha < 10*pi/180:
         #     self.lock_time_count += dt_maneuver
         # if alpha > 30*pi/180:

@@ -96,7 +96,7 @@ def decision_rule(ego_pos_, ego_psi, enm_pos_, distance, ally_missiles, enm_miss
         heading_cmd, speed_cmd = track_behavior(delta_psi)
     elif not should_escape and has_missile_in_the_air:
         heading_cmd, speed_cmd = crank_behavior(delta_psi)
-    elif should_escape:
+    if should_escape:
         # rel_psi_m 在 should_escape 时应已被设置
         heading_cmd, speed_cmd = escape_behavior(rel_psi_m if rel_psi_m is not None else 0.0)
     else:
