@@ -111,7 +111,7 @@ from datetime import datetime
 # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-logs_dir = os.path.join(project_root, "logs")
+logs_dir = os.path.join(project_root, "logs/lcrank")
 log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 
@@ -136,7 +136,7 @@ if __name__=="__main__":
     # # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     # # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
+    
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)

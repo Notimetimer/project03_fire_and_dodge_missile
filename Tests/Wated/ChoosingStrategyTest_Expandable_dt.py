@@ -3,9 +3,8 @@ import time
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Trains.ChoosingStrategyTrain_Big_dt import *
+from Trains.ChoosingStrategyTrain_Expandable_dt import *
 import re
-from Envs.Tasks.ChooseStrategyEnv_load_agents import *
 
 use_tacview = 1  # 是否可视化
 
@@ -48,26 +47,17 @@ state_dim = 35  # len(b_obs_spaces)
 action_dim = 4  # 5 #######################
 
 # 超参数
-dt_maneuver = 0.2  # 0.2  # 0.2 2
-action_cycle_multiplier = 30 # 30
-actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
-critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-# max_episodes = 1000 # 1000
-max_steps = 120e4  # 120e4 65e4
-hidden_dim = [128, 128, 128]  # 128
-gamma = 0.95  # 0.9
-lmbda = 0.95  # 0.9
-epochs = 10  # 10
-eps = 0.2
-pre_train_rate = 0  # 0.25 # 0.25
-k_entropy = 0.01  # 熵系数
-mission_name = 'Combat'
+dt_maneuver = 0.2  # 0.2 2
+action_cycle_multiplier = 30
+
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
 
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
+state_dim = 35  # len(b_obs_spaces)
+action_dim = 4  # 5 #######################
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -83,7 +73,7 @@ def creat_initial_state():
     blue_psi = sub_of_radian(red_psi, -pi)
     # blue_beta = red_psi
     red_N = 0
-    red_E = -np.sign(red_psi) * 40e3 # 40e3
+    red_E = -np.sign(red_psi) * 40e3
     blue_N = red_N
     blue_E = -red_E
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
@@ -105,15 +95,25 @@ if __name__=="__main__":
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
 
-    # 为FSP实例化一个红方策略网络
-    red_actor = PolicyNetDiscrete(state_dim, hidden_dim, action_dim).to(device)
-
     if log_dir is None:
         raise ValueError("No valid log directory found. Please check the `pre_log_dir` or `mission_name`.")
 
-    rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-    sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-    latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
+    def latest_actor_by_index(paths):
+        best = None
+        best_idx = -1
+        for p in paths:
+            m = re.search(r'actor_rein.*?(\d+)\.pt$', os.path.basename(p))
+            if m:
+                idx = int(m.group(1))
+                if idx > best_idx:
+                    best_idx = idx
+                    best = p
+        # fallback to most-recent-modified if no numeric match
+        if best is None and paths:
+            best = max(paths, key=os.path.getmtime)
+        return best
+    rein_list = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+    latest_actor_path = latest_actor_by_index(rein_list)
     if latest_actor_path:
         # 直接加载权重到现有的 agent
         sd = th.load(latest_actor_path, map_location=device)
@@ -144,28 +144,9 @@ if __name__=="__main__":
         b_action_list = []
         
         # 强化学习训练
-        for i_episode in range(1):
+        for i_episode in range(3):
 
             test_run = 1
-
-            # --- FSP核心：为红方加载一个历史策略 ---
-            # 查找所有已保存的 actor 模型
-            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
-            if not actor_files:
-                # 如果没有历史模型，红方使用固定策略（例如总是进攻）
-                red_actor_loaded = False
-            else:
-                # 随机选择一个历史模型
-                opponent_path = random.choice(actor_files)
-                try:
-                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
-                    red_actor.eval() # 设置为评估模式
-                    red_actor_loaded = True
-                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
-                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)}")
-                except Exception as e:
-                    print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
-                    red_actor_loaded = False
 
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
@@ -185,6 +166,8 @@ if __name__=="__main__":
             env.dt_maneuver = dt_maneuver
             
             episode_start_time = time.time()
+
+            steps_after_decision = 0
 
             # 环境运行一轮的情况
             steps_of_this_eps = -1 # 没办法了
@@ -209,17 +192,10 @@ if __name__=="__main__":
 
                 # --- 智能体决策 ---
                 # 判断是否到达了决策点（每 10 步）
-                if steps_of_this_eps % action_cycle_multiplier == 0:
-                # if env.is_action_complete('b', b_action_label):
+                # if steps_after_decision >= action_cycle_multiplier:
+                if env.is_action_complete('b', b_action_label):
                     # # **关键点 1: 完成并存储【上一个】动作周期的经验**
-                    # # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
-                    # if steps_of_this_eps > 0:
-                    #     transition_dict['states'].append(last_decision_state)
-                    #     transition_dict['actions'].append(current_action)
-                    #     transition_dict['rewards'].append(b_reward)
-                    #     transition_dict['next_states'].append(b_obs) # 当前状态是上个周期的 next_state
-                    #     transition_dict['dones'].append(False) # 没结束，所以是 False
-
+                    
                     # **关键点 2: 开始【新的】一个动作周期**
                     # 1. 记录新周期的起始状态
                     last_decision_state = b_obs
@@ -229,6 +205,7 @@ if __name__=="__main__":
                     else:
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
                     decide_steps_after_update += 1
+                    steps_after_decision = 0
                     b_action_options = [
                         "attack",
                         "escape",
@@ -239,13 +216,8 @@ if __name__=="__main__":
                     b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                     current_action = b_action_label
 
-                    # --- 红方决策 ---
-                    if not red_actor_loaded:
-                        r_action_label = 0 # 如果没有加载模型，则执行默认动作
-                    else:
-                        r_obs_n = flatten_obs(r_check_obs, env.key_order)
-                        r_obs = np.squeeze(r_obs_n)
-                        r_action_label = take_action_from_policy_discrete(red_actor, r_obs, device, explore=False)
+                    r_action_label = 0 # Red's action, assuming it's fixed or from another policy
+                    # r_action_list.append(r_action_label)
                     
 
                 ### 发射导弹，这部分不受10step约束
@@ -264,6 +236,8 @@ if __name__=="__main__":
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
                 done = done or fake_terminate
 
+                steps_after_decision += 1
+
                 # Accumulate rewards between agent decisions
                 episode_return += b_reward * env.dt_maneuver
 
@@ -277,14 +251,6 @@ if __name__=="__main__":
             
             # # --- 回合结束处理 ---
             # # **关键点 3: 存储【最后一个】不完整的动作周期的经验**
-            # # 循环结束后，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
-            # if last_decision_state is not None:
-            #     transition_dict['states'].append(last_decision_state)
-            #     transition_dict['actions'].append(current_action)
-            #     transition_dict['rewards'].append(b_reward)
-            #     transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
-            #     transition_dict['dones'].append(True)
-            
             
             
             episode_end_time = time.time()  # 记录结束时间

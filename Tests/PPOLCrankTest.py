@@ -45,7 +45,7 @@ def crank_behavior(delta_psi, delta_height):
 
 # # pre_log_dir = os.path.join("./logs")
 # project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# pre_log_dir = os.path.join(project_root, "logs")
+
 # log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
 # # log_dir = os.path.join(pre_log_dir, "LCrank-run-20251024-112053")
@@ -68,9 +68,9 @@ agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
 #     print(f"Loaded actor for test from: {latest_actor_path}")
 
 from Utilities.LocateDirAndAgents import *
-pre_log_dir = os.path.join(project_root, "logs")
+pre_log_dir = os.path.join(project_root, "logs/lcrank")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+log_dir = os.path.join(pre_log_dir, "LCrank_with_std_clipping-run-20251025-180743")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
 actor_path = load_actor_from_log(log_dir, number=None)

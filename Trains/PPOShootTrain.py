@@ -60,7 +60,7 @@ if matplotlib.get_backend() != 'TkAgg':
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
-parser.add_argument("--max-episode-len", type=float, default=6*60,  # 8 * 60,
+parser.add_argument("--max-episode-len", type=float, default=8*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
                     help="")
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
+    logs_dir = os.path.join(project_root, "logs/shoot")
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)
@@ -328,22 +328,22 @@ if __name__ == "__main__":
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
 
-            # transition_dict重构，奖励回溯
-            if hitter_birth_time is not None:
-                # 遍历 transition_dict['t']，找到与 hitter_birth_time 相等的编号
-                launch_number = None
-                hit_number = None
+            # # transition_dict重构，奖励回溯
+            # if hitter_birth_time is not None:
+            #     # 遍历 transition_dict['t']，找到与 hitter_birth_time 相等的编号
+            #     launch_number = None
+            #     hit_number = None
 
-                for idx, t in enumerate(transition_dict['t']):
-                    if t == hitter_birth_time:
-                        launch_number = idx
-                    if t == env.t:
-                        hit_number = idx
+            #     for idx, t in enumerate(transition_dict['t']):
+            #         if t == hitter_birth_time:
+            #             launch_number = idx
+            #         if t == env.t:
+            #             hit_number = idx
 
-                # 如果找到了 launch_number 和 hit_number，更新对应的 reward
-                if launch_number is not None and hit_number is not None:
-                    transition_dict['rewards'][launch_number] += end_reward
-                    transition_dict['rewards'][hit_number] -= end_reward
+            #     # 如果找到了 launch_number 和 hit_number，更新对应的 reward
+            #     if launch_number is not None and hit_number is not None:
+            #         transition_dict['rewards'][launch_number] += end_reward
+            #         transition_dict['rewards'][hit_number] -= end_reward
 
             agent.update(transition_dict, adv_normed=1)
 

@@ -165,6 +165,7 @@ class Battle(object):
         # 红方初始化
         for i in range(self.Rnum):
             UAV = UAVModel(dt=dt_move)
+            UAV.init_ammo = red_init_ammo
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
             UAV.red = True
@@ -193,6 +194,7 @@ class Battle(object):
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=dt_move)
+            UAV.init_ammo = blue_init_ammo
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
             UAV.red = False
@@ -937,9 +939,14 @@ class Battle(object):
             for missile in self.missiles:
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
             self.tacview.send_data_to_client(data_to_send)
+        else:
+            pass
 
     def end_render(self,):
-        self.tacview.end_render()
+        if self.tacview_show:
+            self.tacview.end_render()
+        else:
+            pass
 
     def visualize_cage(self, ):
         # 航路点画法

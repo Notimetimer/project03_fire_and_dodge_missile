@@ -36,7 +36,7 @@ pre_log_dir = os.path.join(project_root, "logs")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
 #
-# log_dir = os.path.join(pre_log_dir, "Attack-run-20251001-150929")
+log_dir = os.path.join(pre_log_dir, "AttackWithGRU5-run-20251030-104807")
 
 # 测试训练效果
 agent = PPOContinuous(state_dim, gru_hidden_size, gru_num_layers, middle_dim,
@@ -45,9 +45,22 @@ agent = PPOContinuous(state_dim, gru_hidden_size, gru_num_layers, middle_dim,
                           critic_max_grad=2, actor_max_grad=2) # 2,2
 
 
-rein_list = sorted(glob.glob(os.path.join(log_dir, "actor_rein*.pt")))
-sup_list = sorted(glob.glob(os.path.join(log_dir, "actor_sup*.pt")))
-latest_actor_path = rein_list[-1] if rein_list else (sup_list[-1] if sup_list else None)
+def latest_actor_by_index(paths):
+        best = None
+        best_idx = -1
+        for p in paths:
+            m = re.search(r'actor_rein.*?(\d+)\.pt$', os.path.basename(p))
+            if m:
+                idx = int(m.group(1))
+                if idx > best_idx:
+                    best_idx = idx
+                    best = p
+        # fallback to most-recent-modified if no numeric match
+        if best is None and paths:
+            best = max(paths, key=os.path.getmtime)
+        return best
+rein_list = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+latest_actor_path = latest_actor_by_index(rein_list)
 if latest_actor_path:
     # 直接加载权重到现有的 agent
     sd = th.load(latest_actor_path, map_location=device)

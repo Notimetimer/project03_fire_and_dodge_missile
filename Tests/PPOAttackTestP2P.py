@@ -17,7 +17,7 @@ agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                 lmbda, epochs, eps, gamma, device)
 
 # pre_log_dir = os.path.join("./logs")
-pre_log_dir = os.path.join(project_root, "logs")
+pre_log_dir = os.path.join(project_root, "logs/attack")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
 

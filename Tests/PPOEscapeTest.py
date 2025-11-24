@@ -17,12 +17,12 @@ agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
 
 
 from Utilities.LocateDirAndAgents import *
-pre_log_dir = os.path.join(project_root, "logs")
+pre_log_dir = os.path.join(project_root, "logs/escape")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+log_dir = os.path.join(pre_log_dir, "Escape_new-run-20251112-094740")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
-actor_path = load_actor_from_log(log_dir, number=1140) # 1200 1140
+actor_path = load_actor_from_log(log_dir, number=None) # 1200 1140
 if not actor_path:
     print(f"No actor checkpoint found in {log_dir}")
 else:

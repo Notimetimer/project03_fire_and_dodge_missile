@@ -98,7 +98,7 @@ class ShootTrainEnv(Battle):
 
                 # 出界强制按回
                 if self.out_range(UAV):
-                    target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
+                    target_direction_ = horizontal_center - np.array([UAV.pos_[0], UAV.pos_[2]])
                     delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
                     p2p = False # 只能用PID来按回
 
@@ -281,7 +281,7 @@ class ShootTrainEnv(Battle):
         # 结束判断
         if self.t > self.game_time_limit:
             terminate = True
-            # self.lose = 1  # 还没进入范围判定为负
+            self.lose = 1  # 还没进入范围判定为负
 
         # 被对面刀了直接判负
         if dist < 10e3 and enm_state["target_information"][4]<pi/6:
@@ -294,7 +294,7 @@ class ShootTrainEnv(Battle):
         #     self.lose = 1
 
         # 命中判断
-        if enm.dead or self.out_range(enm): # 驱赶也行， 新增
+        if enm.dead: # or self.out_range(enm): # 驱赶也行， 新增
             terminate = True
             self.win = 1
 
@@ -302,6 +302,10 @@ class ShootTrainEnv(Battle):
             self.target_hit = 1
         if self.out_range(enm):
             self.target_out = 1
+
+        if self.out_range(ego) or ego.dead:
+            terminate = True
+            self.lose = 1
 
         if self.win and self.lose:
             self.draw = 1
@@ -311,17 +315,19 @@ class ShootTrainEnv(Battle):
 
         # # 发射惩罚，根据 missile_time_since_shoot
         reward_shoot = 0
-        if missile_id is not None:
-            reward_shoot -= 10
+        # if missile_id is not None:
+        #     reward_shoot -= 10
+        if ut == 1:
+            reward_shoot -= 30
 
         if ut == 1:
             reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
-            reward_shoot += 0.5 * abs(AA_hor)/pi-0.5  # 要把敌人骗进来杀， 进入角为负的时候可以暂缓射击
+            reward_shoot += 0.5 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
             reward_shoot -= np.clip(dist/40e3, 0, 1)
 
-        if terminate and ego.ammo==6:
+        if terminate and ego.ammo == ego.init_ammo:
             reward_shoot -= 600 # 一发都不打必须重罚 100
-        if terminate and ego.ammo<6:
+        if terminate and ego.ammo < ego.init_ammo:
             reward_shoot += 20 # 至少打了一枚
 
         # 重复发射导弹时惩罚, 否则有奖励
@@ -343,7 +349,7 @@ class ShootTrainEnv(Battle):
             reward_event = -300
             
         if self.win:
-            reward_event = 300 # + 200*(6-ego.ammo)/6  ## 赢了，导弹省得越多奖励越高 test 300
+            reward_event = 300 + 200*(ego.init_ammo-ego.ammo)/ego.init_ammo  ## 赢了，导弹省得越多奖励越高 test 300
             end_reward = 300
 
         # 0.2? 0.02?
@@ -376,7 +382,7 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     # else:
     #     interval_refer = 8
 
-    interval_refer = 8  # 8
+    interval_refer = 5  # 8
 
     # todo 对方在我射界内向我发射了一枚导弹，我也应该向对方来一枚
     

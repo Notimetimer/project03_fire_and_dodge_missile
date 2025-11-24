@@ -27,7 +27,7 @@ agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
 
 
 from Utilities.LocateDirAndAgents import *
-pre_log_dir = os.path.join(project_root, "logs")
+pre_log_dir = os.path.join(project_root, "logs/rcrank")
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
 
