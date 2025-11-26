@@ -66,7 +66,7 @@ parser = argparse.ArgumentParser("UAV swarm confrontation")
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=8*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=50e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")

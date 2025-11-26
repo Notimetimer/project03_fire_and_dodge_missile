@@ -57,178 +57,28 @@ class ShootTrainEnv(Battle):
         self.target_hit = 0
         self.target_out = 0
 
-    def step(self, r_actions, b_actions):
-        report_move_time_rate = int(round(self.dt_maneuver / dt_move))
-        # 输入动作（范围为[-1,1]
-        self.t += self.dt_maneuver
-        self.t = round(self.t, 2)  # 保留两位小数
-
-        actions = [r_actions] + [b_actions]
-        self.r_actions = r_actions.copy()
-        self.b_actions = b_actions.copy()
-
-        # # 记录 step 开始时的“已存在”导弹 id（用于判断导弹是否为在本 step 开始时就已存在）
-        # initial_alive_ids = {m.id for m in (self.Rmissiles + self.Bmissiles) if not m.dead}
-
-        # 在整个 maneuver step 开始时只重置一次 escape_once（不要在内层子步或导弹循环中再次重置）
-        for UAV in self.UAVs:
-            UAV.escape_once = 0
-
-        # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
-        # 运动按照dt_move更新，结果合并到dt_maneuver中
-
-        for j1 in range(int(report_move_time_rate)):
-            # 飞机移动
-            for UAV, action in zip(self.UAVs, actions):
-                if UAV.dead:
-                    continue
-                # 输入动作与动力运动学状态
-                # print(action)
-                target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
-                delta_heading = action[1]  # 相对方位(弧度)
-                target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
-                # print('target_height',target_height)
-
-                if UAV.blue:
-                    # 如果 BLUE_BIRTH_STATE 包含 p2p 则使用其值，否则为 False
-                    p2p = self.BLUE_BIRTH_STATE.get('p2p', False)
-                if UAV.red:
-                    # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
-                    p2p = self.RED_BIRTH_STATE.get('p2p', False)
-
-                # 出界强制按回
-                if self.out_range(UAV):
-                    target_direction_ = horizontal_center - np.array([UAV.pos_[0], UAV.pos_[2]])
-                    delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
-                    p2p = False # 只能用PID来按回
-
-
-                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p)
-                # 上一步动作
-                # UAV.act_memory = np.array([action[0],action[1],action[2]])
-            hitter = None
-            # 导弹移动
-            self.get_missile_state() # 先把存活的导弹找出来
-            # self.missiles = self.Rmissiles + self.Bmissiles
-            
-            for missile in self.alive_missiles[:]:  # 使用切片创建副本以允许删除
-                target = self.get_target_by_id(missile.target_id)
-                if target is None:  # 目标不存在, 不更换目标而是击毁导弹
-                    missile.dead = True
-                    continue
-                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹
-                    missile.dead = True # todo 改成missile.target = None, 并在missile类里改成丢失目标飞直线，并且无法触发hit
-                    continue
-                else:
-                    missile.target = target
-                # if not missile.dead:
-                # print('目标位置', target.pos_)
-                # 计算前导弹和目标位速
-                last_pmt_ = missile.pos_
-                last_vmt_ = missile.vel_
-                last_ptt_ = target.pos_
-                last_vtt_ = target.vel_
-                # 获取目标信息
-                target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
-                # 更新导弹制导阶段
-                has_datalink = False
-                for uav in self.UAVs:
-                    # 找到载机，判断载机能否为导弹提供中制导
-                    if uav.id == missile.launcher_id:
-                        if uav.can_offer_guidance(missile, self.UAVs):
-                            has_datalink = True
-                last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-                    missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
-                # 毁伤判别
-                vmt1 = norm(last_vmt_)
-                if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
-                    missile.dead = True
-                if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
-                    missile.dead = True
-                if missile.t > missile.t_max:  # 超时自爆
-                    missile.dead = True
-                if missile.t >= 0 + self.dt_move and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
-                    hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
-                                                       dt=self.dt_move)
-                    if hit:
-                        print(target.side, 'is hit')
-                        missile.dead = True
-                        missile.hit = True
-                        missile.pos_ = point_m
-                        missile.vel_ = last_vmt_
-                        target.pos_ = point_t
-                        target.vel_ = last_vtt_
-                        target.dead = True
-                        target.got_hit = True
-                        self.UAV_hit[self.UAV_ids.index(target.id)] = True
-
-                        hitter = missile.id if hitter is None else min(hitter, missile.id)                    
-
-                if missile.dead == True and not hit:
-                    target.escape_once = 1
-                    # 目标逃脱
-                # else:
-                #     target.escape_once = 0
-
-            # 飞机接收毁伤判别信息
-            for i, UAV in enumerate(self.UAVs):
-                # 飞机被导弹命中判断
-                if UAV.red:
-                    adv = self.BUAV
-                if UAV.blue:
-                    adv = self.RUAV
-                if self.UAV_hit[i]:
-                    UAV.dead = True
-                    UAV.got_hit = True
-                # 其他毁伤判断
-                adv = self.UAVs[1 - i]
-                pt_ = adv.pos_
-                L_ = pt_ - UAV.pos_
-                distance = np.linalg.norm(L_)
-                # 近距杀
-                #     short_range_killed = UAV.short_range_kill(adv)
-                #     if short_range_killed:
-                #         # self.running = False
-                #         adv.got_hit = True
-                # 出界判别
-                if self.crash(UAV):
-                    UAV.dead = True
-                # self.running = False
-
-        r_reward_n, b_reward_n = self.get_reward()
-        terminate = self.get_terminate()
-
-        for UAV in self.UAVs:
-            if UAV.got_hit or UAV.crash:  # or self.out_range(UAV): ###
-                UAV.dead = True
-                # self.running = False
-
-        r_dones = False
-        b_dones = False
-        if self.RUAV.dead:
-            r_dones = True
-        if self.BUAV.dead:
-            b_dones = True
-
-        self.RUAV = self.UAVs[0]
-        self.BUAV = self.UAVs[1]
-
-        if terminate:
-            self.running = False
-
-        return r_reward_n, b_reward_n, r_dones, b_dones, terminate, hitter
     
     # 进攻策略观测量
     def attack_obs(self, side):
         pre_full_obs = self.base_obs(side)
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.attack_key_order}
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        # full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        # full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
-        # full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        # full_obs["border"] = copy.deepcopy(self.obs_init["border"])
+        
+        '''
+        todo:
+        原始观测输入需要转为如下量，否则难以训练：
+        1、目标进入角（水平）
+        2、目标高度
+        3、目标速度
+        4、目标距离
+        5、我机速度
+        6、我机高度
+        7、ATA_h
+        8、我机速度倾角
+        9、上一枚导弹射出计时
+        10、目标存活与否
+        10、剩余弹量
+        '''
 
         # 将观测按顺序拉成一维数组
         # flat_obs = flatten_obs(full_obs, self.key_order)
@@ -273,11 +123,6 @@ class ShootTrainEnv(Battle):
         target_alt = enm.alt
         enm_state = self.get_state(enm.side)
 
-        # if alpha < 10*pi/180:
-        #     self.lock_time_count += dt_maneuver
-        # if alpha > 30*pi/180:
-        #     self.lock_time_count = 0
-
         # 结束判断
         if self.t > self.game_time_limit:
             terminate = True
@@ -288,11 +133,6 @@ class ShootTrainEnv(Battle):
             terminate = True
             self.lose = 1
 
-        # # 导弹打光没干掉对面直接判负
-        # if ego.ammo==0 and len(alive_ally_missiles)==0 and not enm.dead:
-        #     terminate = True
-        #     self.lose = 1
-
         # 命中判断
         if enm.dead: # or self.out_range(enm): # 驱赶也行， 新增
             terminate = True
@@ -300,8 +140,10 @@ class ShootTrainEnv(Battle):
 
         if enm.dead:
             self.target_hit = 1
-        if self.out_range(enm):
-            self.target_out = 1
+        # if self.out_range(enm):
+        #     self.target_out = 1
+        #     terminate = True
+        #     self.win = 1
 
         if self.out_range(ego) or ego.dead:
             terminate = True
@@ -319,11 +161,13 @@ class ShootTrainEnv(Battle):
         #     reward_shoot -= 10
         if ut == 1:
             reward_shoot -= 30
-
         if ut == 1:
             reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
             reward_shoot += 0.5 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
             reward_shoot -= np.clip(dist/40e3, 0, 1)
+
+        if len(alive_ally_missiles)>0 and dist>40e3:
+            reward_shoot = reward_shoot-30 if ut==1 else reward_shoot+10
 
         if terminate and ego.ammo == ego.init_ammo:
             reward_shoot -= 600 # 一发都不打必须重罚 100
@@ -365,24 +209,36 @@ class ShootTrainEnv(Battle):
             1 * reward_event,
         ])
 
+        event_rewards = np.sum([
+            1 * reward_miss,
+            1 * reward_event,
+        ])
+
+        # guide_rewards = np.sum([
+        #     1 * reward_shoot,
+        #     1 * reward_SuoHa,
+        # ])
+
+        
         if terminate:
             self.running = False
     
-        return terminate, reward, end_reward
+        return terminate, reward, event_rewards
 
 
 def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     at0 = at
-    # if distance > 60e3:
-    #     interval_refer = 30
+    interval_refer = 5  # 8
+
+    if distance > 40e3:
+        interval_refer = 30
+
     # elif distance>40e3:
     #     interval_refer = 20
     # elif distance>20e3:
     #     interval_refer = 15
     # else:
     #     interval_refer = 8
-
-    interval_refer = 5  # 8
 
     # todo 对方在我射界内向我发射了一枚导弹，我也应该向对方来一枚
     
@@ -408,8 +264,8 @@ def shoot_action_shield(at, distance, alpha, AA_hor, launch_interval):
     if launch_interval <= interval_refer:
         at = 0
 
-    # if abs(AA_hor) < pi*1/3 and distance>12e3: ## 禁止超视距完全尾追发射 新增
-    #     at=0
+    if abs(AA_hor) < pi*1/3 and distance>12e3: ## 禁止超视距完全尾追发射 新增
+        at=0
 
     same = int(bool(at0) == bool(at))
     xor  = int(bool(at0) != bool(at))  

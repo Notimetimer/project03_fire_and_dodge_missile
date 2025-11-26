@@ -1,6 +1,6 @@
 '''
-注意：take_action 有两个输出，即actor原始输出u和tanh和scale后的action_exec
-有监督预训练时经验池存 action_exec, 强化学习训练时经验池存 u
+经验池接受truncs作为额外输入，计算GAE时区分环境正常终止和因为截断而终止两种情况
+
 '''
 
 from torch.distributions import Normal

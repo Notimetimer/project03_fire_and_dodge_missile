@@ -96,10 +96,18 @@ class PolicyNetBernouli(torch.nn.Module):
             layers.append(nn.ReLU())
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
+
+        # ---- 新增：对隐藏层做合理初始化（ReLU -> Kaiming/He） ----
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                torch.nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                torch.nn.init.zeros_(m.bias)
+
         self.fc_out = torch.nn.Linear(prev_size, action_dim)  # 输出 action_dim 个概率值
 
-        # # 固定神经网络初始化参数
-        # torch.nn.init.xavier_normal_(self.fc_out.weight, gain=0.01)
+        # ---- 使输出 logits 接近 0，从而 sigmoid 输出接近 0.5 ----
+        torch.nn.init.normal_(self.fc_out.weight, mean=0.0, std=1e-3)
+        torch.nn.init.zeros_(self.fc_out.bias)
 
     def forward(self, x):
         x = self.net(x)

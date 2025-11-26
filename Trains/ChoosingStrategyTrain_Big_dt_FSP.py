@@ -96,7 +96,7 @@ args = parser.parse_args()
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
-action_cycle_multiplier = 20 # 30
+action_cycle_multiplier = 30 # 30
 actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
@@ -108,7 +108,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'Combat'
+mission_name = 'CombatFSP_14'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
@@ -116,7 +116,7 @@ env = ChooseStrategyEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 35  # len(b_obs_spaces)
-action_dim = 4  # 5 #######################
+action_dim = 14  # 5 #######################
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -170,13 +170,16 @@ if __name__=="__main__":
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
 
+    # 为FSP实例化一个红方策略网络
+    red_actor = PolicyNetDiscrete(state_dim, hidden_dim, action_dim).to(device)
+
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
     from datetime import datetime
     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
+    logs_dir = os.path.join(project_root, "logs/combat")
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)
@@ -214,6 +217,25 @@ if __name__=="__main__":
             
             i_episode += 1
             test_run = 0
+
+            # --- FSP核心：为红方加载一个历史策略 ---
+            # 查找所有已保存的 actor 模型
+            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+            if not actor_files:
+                # 如果没有历史模型，红方使用固定策略（例如总是进攻）
+                red_actor_loaded = False
+            else:
+                # 随机选择一个历史模型
+                opponent_path = random.choice(actor_files)
+                try:
+                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
+                    red_actor.eval() # 设置为评估模式
+                    red_actor_loaded = True
+                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
+                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)}")
+                except Exception as e:
+                    print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
+                    red_actor_loaded = False
 
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
@@ -284,19 +306,18 @@ if __name__=="__main__":
                     else:
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
                     decide_steps_after_update += 1
-                    b_action_options = [
-                        "attack",
-                        "escape",
-                        "left",
-                        "right",
-                    ]
+                    b_action_options = action_options
                     # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
                     # b_action_list.append(b_action_label)
                     current_action = b_action_label
 
-                    r_action_label = 0 # Red's action, assuming it's fixed or from another policy
-                    # r_action_list.append(r_action_label)
-                    
+                    # --- 红方决策 ---
+                    if not red_actor_loaded:
+                        r_action_label = 0  # 如果没有加载模型，则执行默认动作
+                    else:
+                        r_obs_n = flatten_obs(r_check_obs, env.key_order)
+                        r_obs = np.squeeze(r_obs_n)
+                        r_action_label = take_action_from_policy_discrete(red_actor, r_obs, device, explore=False)
 
                 ### 发射导弹，这部分不受10step约束
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
@@ -309,8 +330,12 @@ if __name__=="__main__":
                     if b_action_label==0:
                         # launch_missile_if_possible(env, side='b')
                         launch_missile_with_basic_rules(env, side='b')
-                
-                _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
+
+
+                r_action = env.maneuver14(env.RUAV, r_action_label)
+                b_action = env.maneuver14(env.BUAV, b_action_label)
+
+                _, _, _, _, fake_terminate = env.step(r_action, b_action) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
                 done = done or fake_terminate
 
@@ -378,6 +403,7 @@ if __name__=="__main__":
                 logger.add("train/2 win", env.win, total_steps)
                 logger.add("train/2 lose", env.lose, total_steps)
                 logger.add("train/2 draw", env.draw, total_steps)
+                
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)

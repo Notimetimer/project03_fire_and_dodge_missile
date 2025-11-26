@@ -53,8 +53,8 @@ g_ = np.array([0, -g, 0])
 
 R_cage = 100e3
 
-min_height = 0
-max_height = 15e3
+# min_height = 0
+# max_height = 15e3
 
 R_birth = 40e3
 
@@ -69,6 +69,7 @@ class Battle(object):
     def __init__(self, args, tacview_show=0):
         # super(Battle, self).__init__() 
         # self.p2p_control = False
+        self.shielded = False
         self.alive_b_missiles = None
         self.alive_r_missiles = None
         self.alive_missiles = None
@@ -302,12 +303,34 @@ class Battle(object):
                     # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
                     p2p = self.RED_BIRTH_STATE.get('p2p', False)
 
-                # 出界强制按回
-                if self.out_range(UAV):
-                    target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
-                    delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
-                    p2p = False # 只能用PID来按回
+                # 防撞地系统
+                if self.shielded:
+                    # 临近撞地强制拉起
+                    if UAV.alt < self.min_alt_safe:
+                        target_height = max(self.min_alt_safe - UAV.alt, target_height)
+                        # delta_heading = 0
+                        p2p = False
 
+                    # 不许超过限高
+                    if UAV.alt > self.max_alt_safe:
+                        target_height = min(self.max_alt_safe - UAV.alt, target_height)
+                        p2p = False
+
+                    # 速度过低强制加油门
+                    if UAV.speed/340 < 0.5:
+                        if p2p:
+                            UAV.target_speed = 1
+                        else:
+                            UAV.target_speed = max(340, target_speed)
+
+                # 出界就炸
+                if self.out_range(UAV):
+                    UAV.dead = 1
+                    # target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
+                    # delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
+                    # target_speed = 340
+                    # # target_height = 0
+                    # p2p = False # 只能用PID来按回
 
                 UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p, rudder=rudder)
                 # 上一步动作
@@ -402,7 +425,7 @@ class Battle(object):
         terminate = self.get_terminate()
 
         for UAV in self.UAVs:
-            if UAV.got_hit or UAV.crash:  # or self.out_range(UAV): ###
+            if UAV.got_hit or self.crash(UAV):  # or self.out_range(UAV): ###
                 UAV.dead = True
                 # self.running = False
 
@@ -818,15 +841,13 @@ class Battle(object):
         return False
 
     def crash(self, UAV):
-        position = UAV.pos_
-        if position[1] < self.min_alt:
+        if UAV.alt < self.min_alt:
             return True
         else:
             return False
 
     def too_high(self, UAV):
-        position = UAV.pos_
-        if position[1] > self.max_alt:
+        if UAV.alt > self.max_alt:
             return True
         else:
             return False

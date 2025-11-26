@@ -68,9 +68,14 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 1e-4  # 熵系数
+# k_guided = 200 / np.log(0.01)  # 200 个回合之后辅助奖励的权重退火到0.01
 mission_name = 'Escape_new'
 
 env = EscapeTrainEnv(args, tacview_show=use_tacview)
+
+env.shielded = 1
+
+
 # env = Battle(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound0 = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
@@ -344,7 +349,7 @@ if __name__ == "__main__":
 
                 # state = next_state
                 if battle_control_on_line:
-                    episode_return += b_reward * env.dt_maneuver
+                    episode_return += b_reward # * env.dt_maneuver
                     steps_since_update += 1
 
                 # 可视化

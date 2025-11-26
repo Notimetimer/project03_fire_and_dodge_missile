@@ -64,10 +64,11 @@ if matplotlib.get_backend() != 'TkAgg':
     plt.switch_backend('TkAgg')
 
 parser = argparse.ArgumentParser("UAV swarm confrontation")
+
 # Environment
 parser.add_argument("--max-episode-len", type=float, default=8*60,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=100e3,  # 8 * 60,
+parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
                     help="")
 
 # parser.add_argument("--num-RUAVs", type=int, default=1, help="number of red UAVs")
@@ -262,7 +263,7 @@ if __name__ == "__main__":
                 r_action_list.append(r_action_n)
                 b_action_list.append(b_action_n)
 
-                _, _, _, _, fake_terminate, _ = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, _ = env.attack_terminate_and_reward('b', u)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作

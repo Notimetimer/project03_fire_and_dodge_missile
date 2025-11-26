@@ -48,236 +48,149 @@ from Algorithms.Rules import *
 # 通过类的组合获取各子策略的观测量裁剪
 
 action_options = [
-                    "attack",
-                    "escape",
-                    "left",
-                    "right",
+                    "水平追踪",
+                    "30追踪",
+                    "60追踪",
+                    "-30追踪",
+                    "-60追踪",
+                    "±30crank",
+                    "±60crank",
+                    "蛇形机动",
+                    "破S",
+                    "三九线",
+                    "慢回转",
+                    "快回转",
+                    "-30回转",
+                    "-60回转",
                 ]
 
 class ChooseStrategyEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=0):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
         super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
         # # 初始化红蓝远离速度
         # self.last_dist_dot = None
         # self.last_dhor = None
         self.last_obs = None
+        self.pomdp = pomdp     
 
-    # def attack_obs(self, side):
-    # def escape_obs(self, side):
-    # def crank_obs(self, side, pomdp=0):
-        
+    def maneuver14(self, UAV, action):
+        # 输入动作与动力运动学状态
+        uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        delta_theta = uav_obs["target_information"][2]
+        distance = uav_obs["target_information"][3] * 10e3
+        d_hor, leftright = uav_obs["border"]
+        # state = self.get_state(UAV.side)
+        speed = uav_obs["ego_main"][0]
+        alt = uav_obs["ego_main"][1]
+        cos_delta_psi = uav_obs["target_information"][0]
+        sin_delta_psi = uav_obs["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        delta_psi_threat = atan2(uav_obs["threat"][1], uav_obs["threat"][0])
 
-    def step(self, r_actions, b_actions):
-        # 这一层的action是离散的动作类型
+        move_action = np.zeros(3)
 
-        # 对每个动作类型，调用子策略产生连续动作指令值
-        report_move_time_rate = int(round(self.dt_maneuver / dt_move))
-        # 输入动作（范围为[-1,1]
-        self.t += self.dt_maneuver
-        self.t = round(self.t, 2)  # 保留两位小数
+        # 水平跟踪
+        if action == 0:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = 0
+            speed_cmd = 400
 
-        actions = [r_actions] + [b_actions]
-        self.r_actions = r_actions  # .copy()
-        self.b_actions = b_actions  # .copy()
+        # 30°爬升加速
+        if action == 1:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = 2500
+            speed_cmd = 400
 
-        # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
-        # 运动按照dt_move更新，结果合并到dt_maneuver中
+        # 60°爬升加速
+        if action == 2:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = 5000
+            speed_cmd = 400
 
-        for j1 in range(int(report_move_time_rate)):
-            # 飞机移动
-            for UAV, action in zip(self.UAVs, actions):
-                if UAV.dead:
-                    continue
-                # 输入动作与动力运动学状态
-                uav_obs = self.base_obs(UAV.side, pomdp=0)  ### test 部分观测的话用1
-                delta_theta = uav_obs["target_information"][2]
-                distance = uav_obs["target_information"][3] * 10e3
-                d_hor, leftright = uav_obs["border"]
-                # state = self.get_state(UAV.side)
-                speed = uav_obs["ego_main"][0]
-                alt = uav_obs["ego_main"][1]
-                cos_delta_psi = uav_obs["target_information"][0]
-                sin_delta_psi = uav_obs["target_information"][1]
-                delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        # -30°俯冲跟踪
+        if action == 3:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = -5000/3
+            speed_cmd = 400
 
-                move_action = np.zeros(3)
+        # -60°俯冲跟踪
+        if action == 4:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 400
 
-                # 进攻机动
-                if action == 0:
-                    pass  # 调用进攻策略
-                    # 规则智能体
-                    move_action = self.track_behavior(UAV.alt, delta_psi)
+        # ±30°水平偏移
+        if action == 5:
+            delta_psi_cmd = delta_psi - np.sign(delta_psi)*pi/6
+            delta_height_cmd = 0
+            speed_cmd = 350
 
-                    # 训练出的智能体
-                    pass
+        # ±60°水平偏移
+        if action == 6:
+            delta_psi_cmd = delta_psi - np.sign(delta_psi) * 55 * pi/180
+            delta_height_cmd = 0
+            speed_cmd = 350
 
-                    # 武器发射决策
-                    pass
+        # 水平蛇形机动
+        if action == 7:
+            if delta_psi > 50 * pi/180:
+                delta_psi_cmd = sub_of_radian(delta_psi, 0)
+            if delta_psi < -50 * pi/180:
+                delta_psi_cmd = sub_of_radian(delta_psi, 0)
+            elif UAV.phi>=0:
+                delta_psi_cmd = sub_of_radian(delta_psi+pi/3, 0)
+            else:
+                delta_psi_cmd = sub_of_radian(delta_psi-pi/3, 0)
+            delta_height_cmd = 0
+            speed_cmd = 350
 
-                if action == 1:
-                    pass  # 调用escape策略
-                    # 规则智能体
-                    cos_threat_psi = uav_obs["threat"][0]
-                    sin_threat_psi = uav_obs["threat"][1]
-                    threat_psi = atan2(sin_threat_psi, cos_threat_psi)
-                    move_action = self.escape_behavior(UAV.alt, delta_psi, uav_obs["warning"], threat_psi)
+        # 破s
+        if action == 8:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi, pi)
+            delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
+            speed_cmd = 300
 
-                    # 训练出的智能体
-                    pass
+        # 水平三九线机动
+        if action == 9:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = delta_psi_temp - np.sign(delta_psi)*pi/2
+            delta_height_cmd = 0
+            speed_cmd = 400
 
-                if action == 2:
-                    pass  # 调用Lcrank策略
-                    # 规则智能体
-                    move_action = self.left_crank_behavior(UAV.alt, delta_psi)
+        # 水平慢置尾
+        if action == 10:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = -np.sign(delta_psi)*np.clip((1-abs(delta_psi_temp)/pi) * 2, 0, 1) * 10*pi/180
+            delta_height_cmd = 0
+            speed_cmd = 600
 
-                    # 训练出的智能体
-                    pass
+        # 水平快置尾
+        if action == 11:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_height_cmd = -500 if abs(delta_psi_temp)<pi/2 else 0
+            speed_cmd = 400
 
-                if action == 3:
-                    pass  # 调用Rcrank策略
-                    # 规则智能体
-                    move_action = self.right_crank_behavior(UAV.alt, delta_psi)
+        # 水平快置尾后-30°俯冲
+        if action == 12:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_height_cmd = -5000/3
+            speed_cmd = 400
 
-                    # 训练出的智能体
-                    pass
-
-                if action == 4:
-                    # 转圈搜索目标
-                    # 该部分不训练智能体，改为使用规则智能体
-                    move_action[0] = np.clip(8000 - UAV.alt, self.min_alt_safe - UAV.alt,
-                                             self.max_alt_safe - UAV.alt) * 5000
-
-                    if leftright >= 0:
-                        move_action[1] = pi
-                    else:
-                        move_action[1] = -pi
-                    move_action[2] = 1.0 * 340
-
-                # # 避让水平边界动作修正：
-                # # print(UAV.side)
-                # state = self.get_state(UAV.side)
-                # dist_2_hor = state["border"][0]
-                # move_action = self.back_in_cage(move_action, UAV.pos_, UAV.psi)
-
-                # # if UAV.side == 'r':
-                # #     print(move_action)
-                # #     print()
-                # pass
-
-                UAV.move(move_action[0], move_action[1], move_action[2], relevant_height=True)
-
-            # 导弹移动
-            self.missiles = self.Rmissiles + self.Bmissiles
-            for missile in self.missiles[:]:  # 使用切片创建副本以允许删除
-                target = self.get_target_by_id(missile.target_id)
-                if target is None:  # 目标不存在, 不更换目标而是击毁导弹
-                    missile.dead = True
-                    continue
-                elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹, 在飞机1V1的时候可以节省一点计算量，不用费事处理多目标的问题
-                    missile.dead = True
-                    continue
-                else:
-                    missile.target = target
-                # if not missile.dead:
-                # print('目标位置', target.pos_)
-                # 计算前导弹和目标位速
-                last_pmt_ = missile.pos_
-                last_vmt_ = missile.vel_
-                last_ptt_ = target.pos_
-                last_vtt_ = target.vel_
-                if not missile.dead:
-                    # 获取目标信息
-                    target_info = missile.observe(last_vmt_, last_vtt_, last_pmt_, last_ptt_)
-                    # 更新导弹制导阶段
-                    has_datalink = False
-                    for uav in self.UAVs:
-                        # 找到载机，判断载机能否为导弹提供中制导
-                        if uav.id == missile.launcher_id:
-                            if uav.can_offer_guidance(missile, self.UAVs):
-                                has_datalink = True
-                    last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
-                        missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
-
-                vmt1 = norm(last_vmt_)
-                if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
-                    missile.dead = True
-                if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
-                    missile.dead = True
-                if missile.t > missile.t_max:  # 超时自爆
-                    missile.dead = True
-                if missile.t >= 0 + self.dt_move and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
-                    hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
-                                                       dt=self.dt_move)
-                    if hit:
-                        print(target.side, 'is hit')
-                        missile.dead = True
-                        missile.hit = True
-                        missile.pos_ = point_m
-                        missile.vel_ = last_vmt_
-                        target.pos_ = point_t
-                        target.vel_ = last_vtt_
-                        target.dead = True
-                        target.got_hit = True
-                        self.UAV_hit[self.UAV_ids.index(target.id)] = True
-
-                if missile.dead == True and not hit:
-                    target.escape_once = 1
-                    # 目标逃脱
-                else:
-                    target.escape_once = 0
-
-
-            # 毁伤判断
-            for i, UAV in enumerate(self.UAVs):
-                # 飞机被导弹命中判断
-                if UAV.red:
-                    adv = self.BUAV
-                if UAV.blue:
-                    adv = self.RUAV
-                if self.UAV_hit[i]:
-                    UAV.dead = True
-                    UAV.got_hit = True
-                # 其他毁伤判断
-                adv = self.UAVs[1 - i]
-                pt_ = adv.pos_
-                L_ = pt_ - UAV.pos_
-                distance = np.linalg.norm(L_)
-                # 近距杀
-                #     short_range_killed = UAV.short_range_kill(adv)
-                #     if short_range_killed:
-                #         # self.running = False
-                #         adv.got_hit = True
-                # 出界判别
-                if self.out_range(UAV):
-                    UAV.dead = True
-                    # self.running = False
-
-        r_reward_n, b_reward_n = self.get_reward()
-        terminate = self.get_terminate()
-
-        for UAV in self.UAVs:
-            if UAV.got_hit or UAV.crash or self.out_range(UAV):
-                UAV.dead = True
-                # self.running = False
-
-        r_dones = False
-        b_dones = False
-        if self.RUAV.dead:
-            r_dones = True
-        if self.BUAV.dead:
-            b_dones = True
-
-        self.RUAV = self.UAVs[0]
-        self.BUAV = self.UAVs[1]
-
-        if terminate:
-            self.running = False
-
-        return r_reward_n, b_reward_n, r_dones, b_dones, terminate
+        # 水平快置尾后-60°俯冲
+        if action == 13:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 400
+        return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
+    
 
     def combat_terminate_and_reward(self, side, action_label):
         terminate = self.get_terminate()
@@ -329,7 +242,6 @@ class ChooseStrategyEnv(Battle):
                 self.draw = 1
 
         reward = 0
-        event_reward = 0
         if self.win:
             reward += 300
         if self.lose:
@@ -337,8 +249,8 @@ class ChooseStrategyEnv(Battle):
         if self.draw:
             reward -= 0
 
-        uav_states = self.base_obs(side, pomdp=0)  ### test 部分观测的话用1
-        enm_state = self.base_obs(enm.side, pomdp=0)  ### test 部分观测的话用1
+        uav_states = self.base_obs(side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        enm_state = self.base_obs(enm.side, pomdp=self.pomdp)  ### test 部分观测的话用1
         delta_theta = uav_states["target_information"][2]
         distance = uav_states["target_information"][3]
         d_hor, leftright = uav_states["border"]
@@ -387,6 +299,8 @@ class ChooseStrategyEnv(Battle):
         if enm.escape_once:
             reward -= 5
 
+        event_reward = reward
+
         # # 密集奖励
         if warning and action_label != 1 and len(alive_ally_missiles)>0:
             reward -= 5
@@ -410,6 +324,21 @@ class ChooseStrategyEnv(Battle):
         # 有warning时alpha越大越好
         if warning:
             reward += 8 * abs(delta_psi_threat) / pi # 这里的alpha错了，应该是和导弹的threa_delta_psi有关的
+        
+
+        # 角度奖励
+        r_angle = 0
+        # 侧滑角惩罚
+        r_angle -= 0.05 * np.clip(abs(ego.beta_air*180/pi / 5), 0, 1)
+        # 迎角惩罚
+        r_angle -= 0.01 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
+                           (ego.alpha_air*180/pi< -5)*(-5 - ego.alpha_air*180/pi))
+
+        # 高度限制奖励/惩罚
+        r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
+                (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
+
+        reward = reward + r_angle + r_alt
         
         # deltapsi变化率奖励 todobedontinued
 

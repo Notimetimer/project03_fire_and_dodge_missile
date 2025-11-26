@@ -87,7 +87,7 @@ class ValueNet(torch.nn.Module):
 class PolicyNetDiscrete(torch.nn.Module):
     def __init__(self, state_dim, hidden_dims, action_dim):
         super(PolicyNetDiscrete, self).__init__()
-        self.prelu = torch.nn.PReLU()
+        # self.prelu = torch.nn.PReLU()
         layers = []
         prev_size = state_dim
         for layer_size in hidden_dims:

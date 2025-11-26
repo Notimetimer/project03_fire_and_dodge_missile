@@ -48,7 +48,7 @@ action_dim = 4  # 5 #######################
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
-action_cycle_multiplier = 30
+action_cycle_multiplier = 20 # 30
 actor_lr = 1e-4  # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 # max_episodes = 1000 # 1000
@@ -64,6 +64,8 @@ mission_name = 'Combat'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
+
+env.shielded = 1
 
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
@@ -106,30 +108,30 @@ if __name__=="__main__":
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
 
-    if log_dir is None:
-        raise ValueError("No valid log directory found. Please check the `pre_log_dir` or `mission_name`.")
+    # if log_dir is None:
+    #     raise ValueError("No valid log directory found. Please check the `pre_log_dir` or `mission_name`.")
 
-    def latest_actor_by_index(paths):
-        best = None
-        best_idx = -1
-        for p in paths:
-            m = re.search(r'actor_rein.*?(\d+)\.pt$', os.path.basename(p))
-            if m:
-                idx = int(m.group(1))
-                if idx > best_idx:
-                    best_idx = idx
-                    best = p
-        # fallback to most-recent-modified if no numeric match
-        if best is None and paths:
-            best = max(paths, key=os.path.getmtime)
-        return best
-    rein_list = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
-    latest_actor_path = latest_actor_by_index(rein_list)
-    if latest_actor_path:
-        # 直接加载权重到现有的 agent
-        sd = th.load(latest_actor_path, map_location=device)
-        agent.actor.load_state_dict(sd)  # , strict=False)  # 忽略缺失的键
-        print(f"Loaded actor for test from: {latest_actor_path}")
+    # def latest_actor_by_index(paths):
+    #     best = None
+    #     best_idx = -1
+    #     for p in paths:
+    #         m = re.search(r'actor_rein.*?(\d+)\.pt$', os.path.basename(p))
+    #         if m:
+    #             idx = int(m.group(1))
+    #             if idx > best_idx:
+    #                 best_idx = idx
+    #                 best = p
+    #     # fallback to most-recent-modified if no numeric match
+    #     if best is None and paths:
+    #         best = max(paths, key=os.path.getmtime)
+    #     return best
+    # rein_list = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+    # latest_actor_path = latest_actor_by_index(rein_list)
+    # if latest_actor_path:
+    #     # 直接加载权重到现有的 agent
+    #     sd = th.load(latest_actor_path, map_location=device)
+    #     agent.actor.load_state_dict(sd)  # , strict=False)  # 忽略缺失的键
+    #     print(f"Loaded actor for test from: {latest_actor_path}")
 
 
     steps_count = 0
@@ -207,10 +209,6 @@ if __name__=="__main__":
                     # # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     # if steps_of_this_eps > 0:
                     #     transition_dict['states'].append(last_decision_state)
-                    #     transition_dict['actions'].append(current_action)
-                    #     transition_dict['rewards'].append(b_reward)
-                    #     transition_dict['next_states'].append(b_obs) # 当前状态是上个周期的 next_state
-                    #     transition_dict['dones'].append(False) # 没结束，所以是 False
 
                     # **关键点 2: 开始【新的】一个动作周期**
                     # 1. 记录新周期的起始状态
@@ -220,34 +218,39 @@ if __name__=="__main__":
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=True)
                     else:
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
+
+
+                    # # debug
+                    # r_action_label = 13
+                    # b_action_label = 0
+
                     decide_steps_after_update += 1
-                    b_action_options = [
-                        "attack",
-                        "escape",
-                        "left",
-                        "right",
-                    ]
+                    r_action_options = action_options
+                    b_action_options = action_options
                     # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
                     b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                     current_action = b_action_label
-
-                    r_action_label = 0 # Red's action, assuming it's fixed or from another policy
-                    # r_action_list.append(r_action_label)
                     
 
                 ### 发射导弹，这部分不受10step约束
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 # 发射导弹判决
+                # from Envs.Tasks.ShootDecisionEnv import shoot_action_shield
+                # (at, distance, alpha, AA_hor, launch_interval)
+                # from 
                 if distance <= 40e3 and distance >= 5e3 and count % 1 == 0:  # 在合适的距离范围内每0.2s判决一次导弹发射
                     launch_time_count = 0
-                    if r_action_label==0:
+                    # if r_action_label==0:
                         # launch_missile_if_possible(env, side='r')
-                        launch_missile_with_basic_rules(env, side='r')
-                    if b_action_label==0:
+                    launch_missile_with_basic_rules(env, side='r')
+                    # if b_action_label==0:
                         # launch_missile_if_possible(env, side='b')
-                        launch_missile_with_basic_rules(env, side='b')
-                
-                _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
+                    launch_missile_with_basic_rules(env, side='b')
+
+                r_action = env.maneuver14(env.RUAV, r_action_label)
+                b_action = env.maneuver14(env.BUAV, b_action_label)
+
+                _, _, _, _, fake_terminate = env.step(r_action, b_action) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
                 done = done or fake_terminate
 

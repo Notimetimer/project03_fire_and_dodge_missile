@@ -172,28 +172,19 @@ class EscapeTrainEnv(Battle):
 
             ### todo 远离导弹就交给距离的二阶导奖励，角度奖励只用来惩罚低高度俯冲行为
 
-            # cos_threat_delta_psi = state["threat"][0]
-            # r_angle = acos(cos_threat_delta_psi)/pi
-            r_angle = alpha_threat / pi
+            cos_threat_delta_psi = state["threat"][0]
+            acos(cos_threat_delta_psi)/pi
+            r_angle = acos(cos_threat_delta_psi)/pi  # alpha_threat / pi
             if alpha >= 160 * pi / 180:  # abs(delta_psi) >= 3/4 * pi:
                 r_angle -= alpha_air * 180 / pi / 5  # 10 ###
                 r_angle -= abs(p) / (2 * pi / 2) * 2
                 r_angle -= abs(delta_psi_threat_dot) / (2 * pi / 2) * 2
 
             # # # 垂直角度奖励，导弹相对飞机俯仰角>-30°时越低越好，否则应该水平规避
-            # if ego.alt > (self.min_alt_safe + self.max_alt_safe)/2 and -threat_delta_theta>-pi/6:
-            #     r_angle_v = -sin(ego.theta)
-            # elif ego.alt > self.min_alt_safe:
-            #     theta_opt = (ego.alt-self.min_alt_safe)/((self.max_alt_safe-self.min_alt_safe)/2)*-pi/2
-            #     r_angle_v = cos(ego.theta-theta_opt)
-            # else:
-            #     r_angle_v = cos(ego.theta)
-            # r_angle_v = 0
-            r_angle_v = 1 - abs((theta_v + 3 * pi / 180) / pi * 2)
-            # if ego.alt <= self.min_alt_safe + 2e3 and ego.theta < 0:
-            #     r_angle_v -= abs(ego.theta / pi * 2)
-            # if ego.alt >= self.max_alt_safe and ego.theta > 0:
-            #     r_angle_v -= abs(ego.theta / pi * 2)
+            
+            r_angle_v = 0
+            r_angle_v = 1 - abs((theta_v + 15 * pi / 180) / pi * 2)  # 3
+            
             r_angle_v += 1  ###
             if alt > self.min_alt_safe + 1e3 and theta_v >= 0:
                 r_angle_v -= theta_v / pi * 2 * 3
@@ -213,8 +204,10 @@ class EscapeTrainEnv(Battle):
 
             # 速度奖励，奖励和导弹之间距离的二阶导
             threat_dist_dot_avg = 0  # 没有考虑到多枚导弹的情况，只能想到用平均了
+            L_threat_avg_ = np.zeros(3)
             for missile in alive_enm_missiles:
                 L_m_ego_ = ego.pos_ - missile.pos_
+                L_threat_avg_ += L_m_ego_/len(alive_enm_missiles) # 平均逃跑方向
                 v_rel_as_m_ = ego.vel_ - missile.vel_
                 dist2missile_dot = np.dot(L_m_ego_, v_rel_as_m_) / norm(L_m_ego_)
                 threat_dist_dot_avg += dist2missile_dot / len(alive_enm_missiles)
@@ -222,13 +215,17 @@ class EscapeTrainEnv(Battle):
             if self.last_dist2missile_dot is None:
                 dist2m_dt2 = 0
             else:
-                dist2m_dt2 = (threat_dist_dot_avg - self.last_dist2missile_dot) / self.dt_maneuver
+                # dist2m_dt2 = (threat_dist_dot_avg - self.last_dist2missile_dot) / self.dt_maneuver # 距离变化率
+                dist2m_dt2 = np.dot(ego.vel_, L_threat_avg_)/norm(L_threat_avg_) # 飞机自身速度对距离变化率的贡献
             self.last_dist2missile_dot = threat_dist_dot_avg
             r_v = np.clip(dist2m_dt2 / (9.8), -2, 2)
 
             # 过载量加入速度奖励
             if alpha_threat <= 160*pi/180:
-                r_v += abs(ego.Ny/6) * 2
+                n_h = ego.Ny*sin(ego.phi)
+                n_v = ego.Ny*cos(ego.phi)
+                r_v += abs(n_h/6) * 2
+                r_v -= max(n_v, -3)/6
             else:
                 r_v -= 0 # abs(ego.Ny/6) * 1
 
@@ -255,14 +252,6 @@ class EscapeTrainEnv(Battle):
             r_dist = -threat_dist_dot_avg / (340*2)
 
         else:  # 躲飞机
-            ###
-            # cos_delta_psi = state["target_information"][0]
-            # r_angle = acos(cos_delta_psi)/pi
-            # r_angle_v = 0
-            # if ego.alt <= self.min_alt_safe + 2e3 and ego.theta < 0:
-            #     r_angle_v -= abs(ego.theta / pi * 2)
-            # if ego.alt >= self.max_alt_safe and ego.theta > 0:
-            #     r_angle_v -= abs(ego.theta / pi * 2)
 
             # 水平角度奖励， 奖励和敌机在同一高度层的置尾机动(√)
 
@@ -312,12 +301,6 @@ class EscapeTrainEnv(Battle):
             d_hor_dot = (self.dhor - self.last_dhor) / self.dt_maneuver
         self.last_dhor = self.dhor
         r_border = d_hor_dot / 340 * 10e3 if d_hor*10e3 < 15e3 else 0
-        # r_border = d_hor_dot /340 * 50e3
-
-        # if d_hor <= 10e3:
-        #     r_border -= 20
-        # elif d_hor <= 15e3:
-        #     r_border -= 10
 
         # 稀疏奖励
         # 失败惩罚
@@ -340,10 +323,6 @@ class EscapeTrainEnv(Battle):
             w_border * r_border,  # 10
             0.5 * r_dist,
         ])
-
-        # reward = np.sum(\
-        #     np.array([1, 0.5, 1, 1, 1, 2, 0.5])*\
-        #     np.array([r_angle_h, r_angle_v, r_v, r_alt, r_event, r_border, r_dist]))
 
         if terminate:
             self.running = False

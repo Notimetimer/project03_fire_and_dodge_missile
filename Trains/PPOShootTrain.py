@@ -81,6 +81,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.05  # 熵系数 0.01
+k_guided = 200 / np.log(0.01)  # 200 个回合之后辅助奖励的权重退火到0.01
 mission_name = 'Shoot'
 
 env = ShootTrainEnv(args, tacview_show=use_tacview)
@@ -263,18 +264,19 @@ if __name__ == "__main__":
 
                 
                 # 发射导弹判决
-                u, _ = agent.take_action(b_obs_n, explore=0) # 0 1
-                ut = u[0]
-                at = ut
+                if env.t % 4 == 0:
+                    u, _ = agent.take_action(b_obs_n, explore=0) # 0 1
+                    ut = u[0]
+                    at = ut
 
-                # Shield
-                at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
-                missile_id = None
-                if at == 1:
-                    last_launch_time = env.t
-                    missile_id = launch_missile_immediately(env, side='b')                  
-                    if missile_id is not None:
-                        missiles_launch_information[missile_id] = env.t
+                    # Shield
+                    at, _ = shoot_action_shield(at, distance, alpha, AA_hor, launch_interval)
+                    missile_id = None
+                    if at == 1:
+                        last_launch_time = env.t
+                        missile_id = launch_missile_immediately(env, side='b')                  
+                        if missile_id is not None:
+                            missiles_launch_information[missile_id] = env.t
 
 
                 # 机动决策
@@ -296,25 +298,25 @@ if __name__ == "__main__":
                 r_action_list.append(r_action_n)
                 b_action_list.append(b_action_n)
 
-                _, _, _, _, fake_terminate, hitter = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                done, b_reward, end_reward = env.attack_terminate_and_reward('b', u, missile_id)
+                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                done, b_reward, b_event_reward = env.attack_terminate_and_reward('b', u, missile_id)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1
 
-                hitter_birth_time = None
-                if hitter is not None:
-                    hitter_birth_time = missiles_launch_information[hitter]
-                    hit_time = env.t
+                # # 退火奖励塑形
+                # guided_reward = b_reward - b_event_reward
+                # b_reward = b_event_reward + np.exp(i_episode/k_guided)*guided_reward
 
-                transition_dict['states'].append(b_obs)
-                transition_dict['actions'].append(u)
-                transition_dict['next_states'].append(next_b_obs)
-                transition_dict['rewards'].append(b_reward)
-                transition_dict['dones'].append(done)
-                transition_dict['t'].append(env.t)
+                if env.t % 4 == 0:
+                    transition_dict['states'].append(b_obs)
+                    transition_dict['actions'].append(u)
+                    transition_dict['next_states'].append(next_b_obs)
+                    transition_dict['rewards'].append(b_reward)
+                    transition_dict['dones'].append(done)
+                    transition_dict['t'].append(env.t)
                 # state = next_state
-                episode_return += b_reward # * env.dt_maneuver
+                episode_return += b_event_reward # * env.dt_maneuver
 
                 '''显示运行轨迹'''
                 # 可视化
@@ -327,23 +329,6 @@ if __name__ == "__main__":
                 out_range_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
-
-            # # transition_dict重构，奖励回溯
-            # if hitter_birth_time is not None:
-            #     # 遍历 transition_dict['t']，找到与 hitter_birth_time 相等的编号
-            #     launch_number = None
-            #     hit_number = None
-
-            #     for idx, t in enumerate(transition_dict['t']):
-            #         if t == hitter_birth_time:
-            #             launch_number = idx
-            #         if t == env.t:
-            #             hit_number = idx
-
-            #     # 如果找到了 launch_number 和 hit_number，更新对应的 reward
-            #     if launch_number is not None and hit_number is not None:
-            #         transition_dict['rewards'][launch_number] += end_reward
-            #         transition_dict['rewards'][hit_number] -= end_reward
 
             agent.update(transition_dict, adv_normed=1)
 

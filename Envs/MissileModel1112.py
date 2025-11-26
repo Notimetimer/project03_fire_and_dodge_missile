@@ -173,7 +173,7 @@ class missile_class:
             cd = 0.45 - 0.25 * (mach - 1.1) / 1.9
         else:
             cd = 0.2
-        return cd * 0.23  # 调整这个系数
+        return cd * 0.23  # 调整这个系数 0.23
 
     # 计算推力和质量
     def calc_burn(self):
