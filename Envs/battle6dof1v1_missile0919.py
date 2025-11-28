@@ -1137,6 +1137,9 @@ def launch_missile_if_possible(env, side='r'):
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
             # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+        return 1
+    else:
+        return 0
 
 
 def launch_missile_immediately(env, side='r'):
@@ -1209,6 +1212,14 @@ def launch_missile_with_basic_rules(env, side='r'):
 
         elif dist<=80e3 and interval>=20:
             should_shoot = (1-ATA/(60*pi/180))**2
+    
+    if dist > 10e3 and AA_hor<pi/6:
+        should_shoot = 0
+    if interval <= 30 and dist > 40e3:
+        should_shoot = 0
+    
+    if dist > 45e3:
+        should_shoot = 0
 
 
     if np.random.rand() < should_shoot: # np.random.rand() 生成的是在区间 [0, 1) 上的独立均匀分布
@@ -1221,3 +1232,7 @@ def launch_missile_with_basic_rules(env, side='r'):
             env.Bmissiles.append(new_missile)
         env.missiles = env.Rmissiles + env.Bmissiles
         # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+
+        return 1
+    else:
+        return 0

@@ -118,7 +118,8 @@ class PolicyNetBernouli(torch.nn.Module):
 class PPO_bernouli:
     ''' PPO算法,采用截断方式 '''
     def __init__(self, state_dim, hidden_dims, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, 
+                 beta=1.0): # [新增] beta 参数
         self.actor = PolicyNetBernouli(state_dim, hidden_dims, action_dim).to(device)  # 使用 PolicyNetBernouli
         self.critic = ValueNet(state_dim, hidden_dims).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -132,6 +133,7 @@ class PPO_bernouli:
         self.k_entropy = k_entropy
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
+        self.beta = beta # [新增] 初始化 beta
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -176,7 +178,7 @@ class PPO_bernouli:
         # 如果 action_dim == 1，保持返回形状为 (1,) 而不是 python int
         return actions_np, probs_np
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
+    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=False):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
         # # 统一 actions 形状为 (N, action_dim)
@@ -214,6 +216,19 @@ class PPO_bernouli:
         old_probs = self.get_action_probs(states).detach()  # 调用 get_action_probs 获取概率
         old_log_probs = torch.log(old_probs) * actions + torch.log(1 - old_probs) * (1 - actions)
         old_log_probs = old_log_probs.sum(dim=1, keepdim=True).detach()
+
+        # [新增] 打乱顺序 (Shuffling)
+        if shuffled:
+            # 生成随机索引
+            perm_indices = torch.randperm(states.size(0)).to(self.device)
+            states = states[perm_indices]
+            actions = actions[perm_indices]
+            advantage = advantage[perm_indices]
+            td_target = td_target[perm_indices]
+            old_log_probs = old_log_probs[perm_indices]
+            v_pred_old = v_pred_old[perm_indices]
+            # rewards, next_states, dones 在 update 循环内部不直接使用（只用了计算出的 adv 和 target），
+            # 但为了保持一致性也可以打乱，不过这里关键变量已全部打乱。
 
         actor_grad_list = []
         actor_loss_list = []
@@ -298,7 +313,7 @@ class PPO_bernouli:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
-    def MARWIL_update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
+    def MARWIL_update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=False):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
@@ -313,6 +328,7 @@ class PPO_bernouli:
         critic_values = self.critic(states)
         if torch.isnan(critic_values).any(): raise ValueError("NaN in Critic outputs")
 
+        # 2. 计算优势函数 Advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
@@ -324,11 +340,40 @@ class PPO_bernouli:
 
         # 提前计算一次旧的 value 预测（用于 value clipping）
         v_pred_old = self.critic(states).detach()  # (N,1)
+
+        # [新增] 打乱顺序 (Shuffling)
+        if shuffled:
+            perm_indices = torch.randperm(states.size(0)).to(self.device)
+            states = states[perm_indices]
+            actions = actions[perm_indices]
+            advantage = advantage[perm_indices]
+            td_target = td_target[perm_indices]
+            v_pred_old = v_pred_old[perm_indices]
+
+        # 记录用的列表
+        actor_grad_list = []
+        actor_loss_list = []
+        critic_grad_list = []
+        critic_loss_list = []
+        pre_clip_actor_grad = []
+        pre_clip_critic_grad = []
+        
         for _ in range(self.epochs):
+            # 重新计算当前策略下的 log_probs
             probs = self.get_action_probs(states)  # 调用 get_action_probs 获取概率
             log_probs = torch.log(probs) * actions + torch.log(1 - probs) * (1 - actions)
-            # log_probs = log_probs.sum(dim=1, keepdim=True)
-            actor_loss = -torch.mean(torch.exp(self.beta * advantage * log_probs))
+            log_probs = log_probs.sum(dim=1, keepdim=True)
+            
+            # [新增] MARWIL Loss 计算
+            # 公式: maximize E [ exp(beta * A) * log_pi ]
+            # 等价于: minimize E [ - exp(beta * A) * log_pi ]
+            # 注意: 权重项 w = exp(beta * A) 必须 detach，不参与梯度计算
+            
+            # 计算权重 w
+            weights = torch.exp(self.beta * advantage).detach()
+            
+            # 计算 Actor Loss
+            actor_loss = -torch.mean(weights * log_probs)
 
             # 计算 critic_loss：支持可选的 value clipping（PPO 风格）
             if clip_vf:
@@ -338,5 +383,44 @@ class PPO_bernouli:
                 vf_loss2 = (v_pred_clipped - td_target.detach()).pow(2)       # (N,1)
                 critic_loss = torch.max(vf_loss1, vf_loss2).mean()
             else:
-                # critic_loss = F.mse_loss(self.critic(states), td_target.detach()) # 原有
                 critic_loss = torch.mean(F.mse_loss(self.critic(states), td_target.detach()))
+            
+            # 反向传播与优化
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            # 记录裁剪前梯度
+            pre_clip_actor_grad.append(model_grad_norm(self.actor))
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))
+
+            # 梯度裁剪
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            # 记录数据
+            actor_grad_list.append(model_grad_norm(self.actor))
+            actor_loss_list.append(actor_loss.detach().cpu().item())
+            critic_grad_list.append(model_grad_norm(self.critic))
+            critic_loss_list.append(critic_loss.detach().cpu().item())
+
+        # 记录平均值用于外部监控
+        self.actor_loss = np.mean(actor_loss_list)
+        self.actor_grad = np.mean(actor_grad_list)
+        self.critic_loss = np.mean(critic_loss_list)
+        self.critic_grad = np.mean(critic_grad_list)
+        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
+        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
+        self.advantage = advantage.abs().mean().detach().cpu().item()
+        
+        # 权重检查
+        check_weights_bias_nan(self.actor, "actor", "MARWIL update后")
+        check_weights_bias_nan(self.critic, "critic", "MARWIL update后")
+    
+    '''todo: 构建过渡阶段的 update，经验池里面既有实际执行的action，也有teacher_action'''
+    

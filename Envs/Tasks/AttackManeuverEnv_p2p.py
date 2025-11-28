@@ -57,13 +57,7 @@ class AttackTrainEnv(Battle):
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.attack_key_order}
         full_obs["ego_main"][6]=0
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        # full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        # full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
-        # full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        # full_obs["border"] = copy.deepcopy(self.obs_init["border"])
-
+        
         # 将观测按顺序拉成一维数组
         # flat_obs = flatten_obs(full_obs, self.key_order)
         flat_obs = flatten_obs(full_obs, self.attack_key_order)
