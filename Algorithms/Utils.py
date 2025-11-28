@@ -103,6 +103,63 @@ def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncat
         advantage_list.reverse()
         return torch.tensor(np.array(advantage_list), dtype=torch.float)
 
+def compute_monte_carlo_returns(gamma, rewards, dones, truncateds=None):
+    """
+    计算蒙特卡洛回报 (Discounted Returns / Rt)。
+    公式: G_t = r_t + gamma * G_{t+1} * (1 - done_t)
+    
+    参数:
+        gamma (float): 折扣因子
+        rewards (tensor/array): 奖励列表
+        dones (tensor/array): 终止信号 (terminateds)
+        truncateds (tensor/array, optional): 截断信号。默认为 None。
+    
+    返回:
+        torch.Tensor: 计算好的 Returns (G_t)
+    """
+    
+    # --- 1. 数据类型处理 (Tensor -> Numpy) ---
+    if isinstance(rewards, torch.Tensor):
+        rewards = rewards.detach().cpu().numpy()
+    if isinstance(dones, torch.Tensor):
+        dones = dones.detach().cpu().numpy()
+    if truncateds is not None and isinstance(truncateds, torch.Tensor):
+        truncateds = truncateds.detach().cpu().numpy()
+        
+    # --- 2. 核心计算逻辑 ---
+    if truncateds is None:
+        # --- 旧式/简单模式：dones 代表所有结束情况 ---
+        returns_list = []
+        G = 0.0
+        
+        # 逆序遍历
+        for r, done in zip(rewards[::-1], dones[::-1]):
+            # 如果当前步 done=True，说明这是序列终点，G_next 归零
+            G = r + gamma * G * (1.0 - done)
+            returns_list.append(G)
+            
+        returns_list.reverse()
+        return torch.tensor(np.array(returns_list), dtype=torch.float)
+    
+    else:
+        # --- 新式模式：区分 Terminated (正常结束) 和 Truncated (截断/超时) ---
+        returns_list = []
+        G = 0.0
+        
+        # 逆序遍历
+        for r, term, trunc in zip(rewards[::-1], dones[::-1], truncateds[::-1]):
+            # 逻辑说明：
+            # 1. G 是上一轮循环计算的 G_{t+1}
+            # 2. 如果当前时刻 t 是 truncated (截断) 或者 terminated (终止)，
+            #    则不能从 t+1 时刻继承价值 (因为 t 和 t+1 不在同一个逻辑轨迹内，或者 t 已经是终点)。
+            #    因此乘以 (1-term) 和 (1-trunc) 进行屏蔽。
+            
+            mask = (1.0 - term) * (1.0 - trunc)
+            G = r + gamma * G * mask
+            returns_list.append(G)
+            
+        returns_list.reverse()
+        return torch.tensor(np.array(returns_list), dtype=torch.float)
 
 class SquashedNormal:
     """带 tanh 压缩的高斯分布。
