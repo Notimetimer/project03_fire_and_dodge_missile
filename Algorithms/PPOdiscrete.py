@@ -4,107 +4,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-# 计算并记录 actor / critic 的梯度范数（L2）
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
-def check_weights_bias_nan(model, model_name="model", place=None):
-    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
-    参数:
-      model: torch.nn.Module
-      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
-      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
-    """
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
-
-def compute_advantage(gamma, lmbda, td_delta, dones):
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-    advantage_list = []
-    advantage = 0.0
-    
-    # [修改] 同时遍历 delta 和 done
-    for delta, done in zip(td_delta[::-1], dones[::-1]):
-        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-        # 此时不应该加上一步（时间上的未来）的 advantage。
-        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-        advantage = delta + gamma * lmbda * advantage * (1 - done)
-        advantage_list.append(advantage)
-        
-    advantage_list.reverse()
-    return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-
-class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dims):
-        super(ValueNet, self).__init__()
-        # self.prelu = torch.nn.PReLU()
-
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dims:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            # layers.append(self.prelu)
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
-
-        # # 添加参数初始化
-        # for layer in self.net:
-        #     if isinstance(layer, nn.Linear):
-        #         torch.nn.init.xavier_normal_(layer.weight, gain=0.01)
-        # torch.nn.init.xavier_normal_(self.fc_out.weight, gain=0.01)
-
-    def forward(self, x):
-        y = self.net(x)
-        return self.fc_out(y)
-
-
-class PolicyNetDiscrete(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dims, action_dim):
-        super(PolicyNetDiscrete, self).__init__()
-        # self.prelu = torch.nn.PReLU()
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dims:
-            layers.append(nn.Linear(prev_size, layer_size))
-            # layers.append(self.prelu)
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, action_dim)
-
-        # # 固定神经网络初始化参数
-        # torch.nn.init.xavier_normal_(self.fc_out.weight, gain=0.01)
-
-    def forward(self, x):
-        x = self.net(x)
-        return F.softmax(self.fc_out(x), dim=1)
-
+from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.MLP_heads import ValueNet, PolicyNetDiscrete
 
 class PPO_discrete:
     ''' PPO算法,采用截断方式 '''

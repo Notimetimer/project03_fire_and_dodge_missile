@@ -45,7 +45,7 @@ plt.rcParams['axes.unicode_minus'] = False
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.PPOcontinues_dual_a_out import *
+from Algorithms.Wasted.PPOcontinues_dual_a_out import *
 from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *

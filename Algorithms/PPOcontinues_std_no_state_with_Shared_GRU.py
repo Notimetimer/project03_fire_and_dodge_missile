@@ -3,214 +3,65 @@ GRU 被actor和critic共享
 联合优化器，同时使用actor_loss和critic_loss
 '''
 
-import os
-import sys
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Normal
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
 from Algorithms.SharedLayers import GruMlp
-
-
-# 计算并记录 actor / critic 的梯度范数（L2）
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
-
-def check_weights_bias_nan(model, model_name="model", place=None):
-    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
-    参数:
-      model: torch.nn.Module
-      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
-      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
-    """
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
-
-def compute_advantage(gamma, lmbda, td_delta, dones):
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-    advantage_list = []
-    advantage = 0.0
-    
-    # [修改] 同时遍历 delta 和 done
-    for delta, done in zip(td_delta[::-1], dones[::-1]):
-        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-        # 此时不应该加上一步（时间上的未来）的 advantage。
-        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-        advantage = delta + gamma * lmbda * advantage * (1 - done)
-        advantage_list.append(advantage)
-        
-    advantage_list.reverse()
-    return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-
-# --- 新的共享 GRU-MLP 架构 ---
-class SharedGruBackbone(nn.Module):
-    """共享的 GRU 特征提取器"""
-    def __init__(self, state_dim, gru_hidden_size=128, gru_num_layers=1, output_dim=35, batch_first=True):
-        super(SharedGruBackbone, self).__init__()
-        
-        # 使用您新版 SharedLayers 中的 GruMlp
-        # 我们只使用它的 GRU 部分，所以 output_dim 可以设为 gru_hidden_size
-        self.feature_extractor = GruMlp(
-            input_dim=state_dim,
-            gru_hidden_size=gru_hidden_size,
-            gru_num_layers=gru_num_layers,
-            output_dim=output_dim,
-            batch_first=batch_first
-        )
-
-
-    def forward(self, x, h_0=None):
-        # 如果输入维度为2 (B, D)，增加序列维度S=1
-        if x.dim() == 2:
-            x = x.unsqueeze(1)
-        
-        
-        # 输入 x 的形状: (Batch, SeqLen, StateDim), e.g., (B, 10, 35)
-        # h_0: (num_layers, B, gru_hidden_size) 或 None
-        # GruMlp 输出形状: (B, SeqLen, gru_hidden_size)
-        features_per_step, h_n = self.feature_extractor(x, h_0)
-        # 返回每个时间步的特征（B, SeqLen, gru_hidden_size）和隐藏状态，由上层决定如何聚合
-        return features_per_step, h_n
-
-class SquashedNormal:
-    """带 tanh 压缩的高斯分布。
-
-    采样：u ~ N(mu, std)（使用 rsample 支持 reparam），a = tanh(u)
-    log_prob：基于 u 的 normal.log_prob(u) 并加上 tanh 的 Jacobian 修正项：-sum log(1 - tanh(u)^2)
-    注意：外部需要把动作缩放到环境动作空间（仿射变换）。
-    """
-
-    def __init__(self, mu, std, eps=1e-6):
-        self.mu = mu
-        if not torch.is_tensor(std):
-            std = torch.as_tensor(std, device=mu.device, dtype=mu.dtype)
-        self.std = torch.clamp(std, min=float(eps))
-        self.normal = Normal(mu, std)
-        self.eps = eps
-        self.mean = mu
-
-    def sample(self):
-        # rsample 以支持 reparameterization 重参数化采样, 结果是可导的
-        u = self.normal.rsample()
-        a = torch.tanh(u)
-        return a, u
-
-    def log_prob(self, a, u):
-        # 为数值稳定性添加小量
-        log_prob_u = self.normal.log_prob(u)
-        jacobian = 0  # 保存u的话就不需要该修正项
-        return log_prob_u - jacobian  # 返回形状为 (batch_size, action_dim)
-
-    def entropy(self):
-        # 近似：使用 base normal 的熵之和（不考虑 tanh 的修正）
-        # 这在实践中通常足够，若需精确熵可用采样估计
-        ent = self.normal.entropy().sum(-1)
-        return ent
-
+from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.SharedLayers import SharedGruBackbone
+from Algorithms.MLP_heads import PolicyNetContinuous, ValueNet
 
 class PolicyNetContinuousGRU(nn.Module):
-    """新的 Actor 网络，包含共享 backbone 和一个策略头"""
-
+    """Actor: 组合形式 — SharedGruBackbone (GRU) + PolicyNetContinuous head (复用已有实现)。"""
     def __init__(self, state_dim, gru_hidden_size, gru_num_layers=1, middle_dim=35,
-                  head_hidden_dims=[128], action_dim=3, init_std=0.5, batch_first=True):
+                 head_hidden_dims=[128], action_dim=3, init_std=0.5, batch_first=True):
         super(PolicyNetContinuousGRU, self).__init__()
-
-        # 1. 共享的 GRU 特征提取器
-        self.backbone = SharedGruBackbone(state_dim, gru_hidden_size, gru_num_layers, middle_dim, 
-                                          batch_first=batch_first)
-
-
-
-        # 2. Actor 头 (一个独立的MLP)
-        # 输入维度是 GRU 的输出维度
-        layers = []
-        prev_size = middle_dim
-        for layer_size in head_hidden_dims:
-            layers.append(nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.head = nn.Sequential(*layers)
-        self.fc_mu = torch.nn.Linear(prev_size, action_dim)
-
-        # std 参数与之前保持一致
-        self.log_std_param = nn.Parameter(torch.log(torch.ones(action_dim, dtype=torch.float) * init_std))
+        # 共享 GRU 特征提取器（可被外部共享或单独实例化）
+        self.backbone = SharedGruBackbone(state_dim, gru_hidden_size, gru_num_layers,
+                                          output_dim=middle_dim, batch_first=batch_first)
+        # 复用已有的 PolicyNetContinuous 作为 head（输入维度 = middle_dim）
+        self.head_net = PolicyNetContinuous(state_dim=middle_dim,
+                                            hidden_dim=head_hidden_dims,
+                                            action_dim=action_dim,
+                                            init_std=init_std)
 
     def forward(self, x, h_0=None, min_std=1e-6, max_std=0.4):
-                
-        # 如果输入维度为2 (B, D)，增加序列维度S=1
+        # 支持 (B, D) -> (B,1,D) 以及 (B, S, D)
         if x.dim() == 2:
             x = x.unsqueeze(1)
-        # backbone 返回每个时间步的特征 (B, SeqLen, gru_hidden_size) 和 h_n
-        features_per_step, h_n = self.backbone(x, h_0)
-        # 在 Actor 里取序列最后一步的特征作为聚合表示 (B, gru_hidden_size)
-        features = features_per_step[:, -1, :]
-
-        head_output = self.head(features)
-        mu = self.fc_mu(head_output)
-
-        std = torch.exp(self.log_std_param)
-        std = torch.clamp(std, min=min_std, max=max_std)
-
-        # 修正 std 的广播逻辑
-        if mu.dim() == 2:  # (B, action_dim)
-            std = std.unsqueeze(0).expand(mu.size(0), -1)  # 广播到 (B, action_dim)
-
+        # backbone 返回每步特征与最后隐藏态
+        features_seq, h_n = self.backbone(x, h_0)
+        # 取序列最后一步特征作为聚合表示 (B, middle_dim)
+        features = features_seq[:, -1, :]
+        # head_net 负责 mu/std 的计算与 clamp/broadcast
+        mu, std = self.head_net(features, min_std=min_std, max_std=max_std)
         return mu, std, h_n
 
 
 class ValueNetGRU(nn.Module):
-    """新的 Critic 网络，与 Actor 共享同一个 backbone 实例"""
-
+    """Critic: SharedGruBackbone (GRU) + ValueNet head（组合形式）。"""
     def __init__(self, shared_backbone, middle_dim, head_hidden_dims):
         super(ValueNetGRU, self).__init__()
-
-        # 1. 引用来自 Actor 的共享 backbone
+        # 引用外部传入的共享 backbone（在共享场景下由 actor 提供）
         self.backbone = shared_backbone
-
-        # 2. Critic 头 (一个独立的MLP)
-        layers = []
-        prev_size = middle_dim
-        for layer_size in head_hidden_dims:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.head = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
+        # 使用已有的 ValueNet 作为 head（输入维度 = middle_dim）
+        self.head_net = ValueNet(state_dim=middle_dim, hidden_dim=head_hidden_dims)
 
     def forward(self, x, h_0=None):
-        # x 的形状: (B, SeqLen, StateDim)
-        # GRU 特征提取 (梯度会从这里流回共享的 backbone)
-        features, h_n = self.backbone(x, h_0)
-        features = features[:, -1, :] # 不要多余的seq_len维度 (B, gru_hidden_size)
-
-        temp = self.head(features)
-        value = self.fc_out(temp)
+        # 支持 (B, D) -> (B,1,D) 以及 (B, S, D)
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+        features_seq, h_n = self.backbone(x, h_0)
+        features = features_seq[:, -1, :]
+        value = self.head_net(features)
         return value, h_n
 
 

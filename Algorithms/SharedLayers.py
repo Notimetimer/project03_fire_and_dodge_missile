@@ -2,6 +2,34 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# 单GRU
+class SharedGruBackbone(nn.Module):
+    """共享的 GRU 特征提取器"""
+    def __init__(self, state_dim, gru_hidden_size=128, gru_num_layers=1, output_dim=35, batch_first=True):
+        super(SharedGruBackbone, self).__init__()
+        
+        # 使用您新版 SharedLayers 中的 GruMlp
+        # 我们只使用它的 GRU 部分，所以 output_dim 可以设为 gru_hidden_size
+        self.feature_extractor = GruMlp(
+            input_dim=state_dim,
+            gru_hidden_size=gru_hidden_size,
+            gru_num_layers=gru_num_layers,
+            output_dim=output_dim,
+            batch_first=batch_first
+        )
+
+    def forward(self, x, h_0=None):
+        # 如果输入维度为2 (B, D)，增加序列维度S=1
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+
+        # 输入 x 的形状: (Batch, SeqLen, StateDim), e.g., (B, 10, 35)
+        # h_0: (num_layers, B, gru_hidden_size) 或 None
+        # GruMlp 输出形状: (B, SeqLen, gru_hidden_size)
+        features_per_step, h_n = self.feature_extractor(x, h_0)
+        # 返回每个时间步的特征（B, SeqLen, gru_hidden_size）和隐藏状态，由上层决定如何聚合
+        return features_per_step, h_n
+
 # 通道注意力
 class ChannelAttention(nn.Module):
     def __init__(self, feature_dim, reduction_ratio=16):

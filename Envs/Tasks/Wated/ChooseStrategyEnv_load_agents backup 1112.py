@@ -42,7 +42,7 @@ from Envs.Tasks.AttackManeuverEnv import *
 from Envs.Tasks.CrankManeuverEnv import *
 from Envs.Tasks.EscapeManeuverEnv import *
 from Algorithms.Rules import *
-from Algorithms.PPOcontinues_std_no_state import *
+from Algorithms.PPOcontinues_std_no_state_with_truncs import *
 
 from Utilities.LocateDirAndAgents import *
 

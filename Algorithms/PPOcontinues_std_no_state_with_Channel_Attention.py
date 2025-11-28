@@ -8,172 +8,49 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
+
 import os, sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
 from Algorithms.SharedLayers import ChannelAttention
+from Algorithms.Utils import SquashedNormal, moving_average, check_weights_bias_nan, model_grad_norm, compute_advantage
+from Algorithms.MLP_heads import PolicyNetContinuous, ValueNet
 
-# 计算并记录 actor / critic 的梯度范数（L2）
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
-
-def check_weights_bias_nan(model, model_name="model", place=None):
-    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
-    参数:
-      model: torch.nn.Module
-      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
-      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
+class PolicyNetContinuousCA(torch.nn.Module):
+    """输出未压缩（pre-squash）的 mu，std 为与状态无关的可训练参数（每个动作维度一小段）。
+    使用组合：ChannelAttention 作为前处理，PolicyNetContinuous 作为 head（复用已有实现）。
     """
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
-
-def compute_advantage(gamma, lmbda, td_delta, dones):
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-    advantage_list = []
-    advantage = 0.0
-    
-    # [修改] 同时遍历 delta 和 done
-    for delta, done in zip(td_delta[::-1], dones[::-1]):
-        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-        # 此时不应该加上一步（时间上的未来）的 advantage。
-        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-        advantage = delta + gamma * lmbda * advantage * (1 - done)
-        advantage_list.append(advantage)
-        
-    advantage_list.reverse()
-    return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-
-class SquashedNormal:
-    """带 tanh 压缩的高斯分布。
-
-    采样：u ~ N(mu, std)（使用 rsample 支持 reparam），a = tanh(u)
-    log_prob：基于 u 的 normal.log_prob(u) 并加上 tanh 的 Jacobian 修正项：-sum log(1 - tanh(u)^2)
-    注意：外部需要把动作缩放到环境动作空间（仿射变换）。
-    """
-
-    def __init__(self, mu, std, eps=1e-6):
-        self.mu = mu
-        if not torch.is_tensor(std):
-            std = torch.as_tensor(std, device=mu.device, dtype=mu.dtype)
-        self.std = torch.clamp(std, min=float(eps))
-        self.normal = Normal(mu, std)
-        self.eps = eps
-        self.mean = mu
-
-    def sample(self):
-        # rsample 以支持 reparameterization 重参数化采样, 结果是可导的
-        u = self.normal.rsample()
-        a = torch.tanh(u)
-        return a, u
-
-    def log_prob(self, a, u):
-        # a: tanh(u)
-        # log_prob(u) - sum log(1 - tanh(u)^2)
-        # normal.log_prob 返回每个维度的 log_prob，需要 sum
-        # 为数值稳定性添加小量
-        log_prob_u = self.normal.log_prob(u)
-        # jacobian term
-        jacobian = 0 # 保存u的话就不需要该修正项
-        # jacobian = 2*(np.log(2.0)-u-F.softplus(-2*u))
-        # jacobian = torch.log(1 - a.pow(2) + self.eps)
-        # sum over action dim, keep dims consistent: return (N, 1)
-        # 取消提前求和 # return (log_prob_u - jacobian).sum(-1, keepdim=True)
-        return log_prob_u - jacobian  # 返回形状为 (batch_size, action_dim)
-
-    def entropy(self):
-        # 近似：使用 base normal 的熵之和（不考虑 tanh 的修正）
-        # 这在实践中通常足够，若需精确熵可用采样估计
-        ent = self.normal.entropy().sum(-1)
-        return ent
-
-
-class PolicyNetContinuous(torch.nn.Module):
-    """输出未压缩（pre-squash）的 mu，std 为与状态无关的可训练参数（每个动作维度一小段）。"""
     def __init__(self, state_dim, reduction_ratio, hidden_dim, action_dim, init_std=0.5):
-        super(PolicyNetContinuous, self).__init__()
+        super(PolicyNetContinuousCA, self).__init__()
+        # 保留 ChannelAttention 前处理模块
         self.channel_attention = ChannelAttention(state_dim, reduction_ratio)
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_mu = torch.nn.Linear(prev_size, action_dim)
-        # state-independent std parameter: store as log(std) for numerical stability
-        init_std = float(init_std)
-        # one parameter per action dim (unconstrained), optimizer will update this
-        self.log_std_param = nn.Parameter(torch.log(torch.ones(action_dim, dtype=torch.float) * init_std))
+        # 复用已有的 PolicyNetContinuous 作为 head（负责 net, fc_mu, log_std_param 等）
+        self.head_net = PolicyNetContinuous(state_dim=state_dim,
+                                            hidden_dim=hidden_dim,
+                                            action_dim=action_dim,
+                                            init_std=init_std)
 
     def forward(self, x, min_std=1e-6, max_std=0.4):
-        # ChannelAttention处理
+        # ChannelAttention 先处理输入特征
         x, _ = self.channel_attention(x)
-        x = self.net(x)
-        mu = self.fc_mu(x)
-        # 获取正的 std，使用 exp(log_std) 并进行 clamp
-        std = torch.exp(self.log_std_param)
-        # 手动方差裁剪
-        # std = torch.clamp(std, min=min_std, max=max_std)
-        min_t = torch.full_like(std, float(min_std))
-        if isinstance(max_std, torch.Tensor):
-            max_t = max_std.to(std.device).type_as(std)
-            # # 如果需要，可 expand 到与 std 完全相同形状
-            # if max_t.shape != std.shape:
-            #     max_t = max_t.expand_as(std)
-        else:
-            max_t = torch.full_like(std, float(max_std))
-        std = torch.clamp(std, min=min_t, max=max_t)
-
-        # broadcast to batch: shape (batch_size, action_dim)
-        if mu.dim() == 2:
-            pass
-            # std = std.unsqueeze(0).expand(mu.size(0), -1)
-        else:
-            std = std.expand_as(mu)
-
+        # head_net 返回 mu, std（PolicyNetContinuous 负责 clamp / broadcast）
+        mu, std = self.head_net(x, min_std=min_std, max_std=max_std)
         return mu, std
 
 
-class ValueNet(torch.nn.Module):
+class ValueNetCA(torch.nn.Module):
+    """ValueNet with ChannelAttention 前处理 + ValueNet head（组合形式）。"""
     def __init__(self, state_dim, reduction_ratio, hidden_dim):
-        super(ValueNet, self).__init__()
+        super(ValueNetCA, self).__init__()
+        # ChannelAttention 前处理
         self.channel_attention = ChannelAttention(state_dim, reduction_ratio)
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
+        # 复用已有的 ValueNet 作为 head
+        self.head_net = ValueNet(state_dim=state_dim, hidden_dim=hidden_dim)
 
     def forward(self, x):
         x, _ = self.channel_attention(x)
-        y = self.net(x)
-        return self.fc_out(y)
+        return self.head_net(x)
 
 
 class PPOContinuous:
@@ -192,8 +69,8 @@ class PPOContinuous:
 
     def __init__(self, state_dim, reduction_ratio, hidden_dim, action_dim, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
-        self.actor = PolicyNetContinuous(state_dim, reduction_ratio, hidden_dim, action_dim).to(device)
-        self.critic = ValueNet(state_dim, reduction_ratio, hidden_dim).to(device)
+        self.actor = PolicyNetContinuousCA(state_dim, reduction_ratio, hidden_dim, action_dim).to(device)
+        self.critic = ValueNetCA(state_dim, reduction_ratio, hidden_dim).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
 

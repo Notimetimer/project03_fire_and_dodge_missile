@@ -42,9 +42,9 @@ from Envs.Tasks.AttackManeuverEnv import *
 from Envs.Tasks.CrankManeuverEnv import *
 from Envs.Tasks.EscapeManeuverEnv import *
 from Algorithms.Rules import *
-# from Algorithms.PPOcontinues_std_no_state import *
+# from Algorithms.PPOcontinues_std_no_state_with_truncs import *
 # 更改导入，只导入需要的类和函数
-from Algorithms.PPOcontinues_std_no_state import PolicyNetContinuous, take_action_from_policy
+from Algorithms.PPOcontinues_std_no_state_with_truncs import PolicyNetContinuous, take_action_from_policy
 
 
 from Utilities.LocateDirAndAgents import *

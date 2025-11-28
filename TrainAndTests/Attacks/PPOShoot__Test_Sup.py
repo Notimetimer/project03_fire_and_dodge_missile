@@ -16,7 +16,7 @@ import sys
 import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-from PPOShoot__Train_Supervised import *
+from TrainAndTests.Attacks.PPOShoot__Train_Sup import *
 import re
 
 # from tqdm import tqdm

@@ -4,85 +4,14 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical, Bernoulli
 
-# --- 复用已有的辅助函数和类 ---
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
-
-def check_weights_bias_nan(model, model_name="model", place=None):
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-def compute_advantage(gamma, lmbda, td_delta, dones):
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-    advantage_list = []
-    advantage = 0.0
-    
-    # [修改] 同时遍历 delta 和 done
-    for delta, done in zip(td_delta[::-1], dones[::-1]):
-        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-        # 此时不应该加上一步（时间上的未来）的 advantage。
-        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-        advantage = delta + gamma * lmbda * advantage * (1 - done)
-        advantage_list.append(advantage)
-        
-    advantage_list.reverse()
-    return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-class SquashedNormal:
-    def __init__(self, mu, std, eps=1e-6):
-        self.mu = mu
-        if not torch.is_tensor(std):
-            std = torch.as_tensor(std, device=mu.device, dtype=mu.dtype)
-        self.std = torch.clamp(std, min=float(eps))
-        self.normal = Normal(mu, self.std)
-        self.eps = eps
-        self.mean = mu
-
-    def sample(self):
-        u = self.normal.rsample()
-        a = torch.tanh(u)
-        return a, u
-
-    def log_prob(self, a, u):
-        log_prob_u = self.normal.log_prob(u)
-        jacobian = 0 # 保存u则不需要修正项
-        return log_prob_u - jacobian
-
-    def entropy(self):
-        return self.normal.entropy().sum(-1)
-
-class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim):
-        super(ValueNet, self).__init__()
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
-
-    def forward(self, x):
-        y = self.net(x)
-        return self.fc_out(y)
+from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.MLP_heads import ValueNet
 
 # --- 新的混合动作空间 Actor ---
-
 class PolicyNetHybrid(torch.nn.Module):
     """
     支持混合动作空间的策略网络。

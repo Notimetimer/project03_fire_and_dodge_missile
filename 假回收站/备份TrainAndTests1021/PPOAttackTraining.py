@@ -51,7 +51,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 # 常规PPO
-from Algorithms.PPOcontinues_dual_a_out import *
+from Algorithms.Wasted.PPOcontinues_dual_a_out import *
 # 实验性 AMPPO
 # from Algorithms.SquashedPPOcontinues_dual_a_AM import *
 

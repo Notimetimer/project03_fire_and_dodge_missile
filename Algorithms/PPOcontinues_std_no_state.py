@@ -9,166 +9,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-# 计算并记录 actor / critic 的梯度范数（L2）
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
-def check_weights_bias_nan(model, model_name="model", place=None):
-    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
-    参数:
-      model: torch.nn.Module
-      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
-      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
-    """
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
-
-def compute_advantage(gamma, lmbda, td_delta, dones):
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-    advantage_list = []
-    advantage = 0.0
-    
-    # [修改] 同时遍历 delta 和 done
-    for delta, done in zip(td_delta[::-1], dones[::-1]):
-        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-        # 此时不应该加上一步（时间上的未来）的 advantage。
-        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-        advantage = delta + gamma * lmbda * advantage * (1 - done)
-        advantage_list.append(advantage)
-        
-    advantage_list.reverse()
-    return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-
-class SquashedNormal:
-    """带 tanh 压缩的高斯分布。
-
-    采样：u ~ N(mu, std)（使用 rsample 支持 reparam），a = tanh(u)
-    log_prob：基于 u 的 normal.log_prob(u) 并加上 tanh 的 Jacobian 修正项：-sum log(1 - tanh(u)^2)
-    注意：外部需要把动作缩放到环境动作空间（仿射变换）。
-    """
-
-    def __init__(self, mu, std, eps=1e-6):
-        self.mu = mu
-        if not torch.is_tensor(std):
-            std = torch.as_tensor(std, device=mu.device, dtype=mu.dtype)
-        self.std = torch.clamp(std, min=float(eps))
-        self.normal = Normal(mu, std)
-        self.eps = eps
-        self.mean = mu
-
-    def sample(self):
-        # rsample 以支持 reparameterization 重参数化采样, 结果是可导的
-        u = self.normal.rsample()
-        a = torch.tanh(u)
-        return a, u
-
-    def log_prob(self, a, u):
-        # a: tanh(u)
-        # log_prob(u) - sum log(1 - tanh(u)^2)
-        # normal.log_prob 返回每个维度的 log_prob，需要 sum
-        # 为数值稳定性添加小量
-        log_prob_u = self.normal.log_prob(u)
-        # jacobian term
-        jacobian = 0 # 保存u的话就不需要该修正项
-        # jacobian = 2*(np.log(2.0)-u-F.softplus(-2*u))
-        # jacobian = torch.log(1 - a.pow(2) + self.eps)
-        # sum over action dim, keep dims consistent: return (N, 1)
-        # 取消提前求和 # return (log_prob_u - jacobian).sum(-1, keepdim=True)
-        return log_prob_u - jacobian  # 返回形状为 (batch_size, action_dim)
-
-    def entropy(self):
-        # 近似：使用 base normal 的熵之和（不考虑 tanh 的修正）
-        # 这在实践中通常足够，若需精确熵可用采样估计
-        ent = self.normal.entropy().sum(-1)
-        return ent
-
-
-class PolicyNetContinuous(torch.nn.Module):
-    """输出未压缩（pre-squash）的 mu，std 为与状态无关的可训练参数（每个动作维度一小段）。"""
-    def __init__(self, state_dim, hidden_dim, action_dim, init_std=0.5):
-        super(PolicyNetContinuous, self).__init__()
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_mu = torch.nn.Linear(prev_size, action_dim)
-        # state-independent std parameter: store as log(std) for numerical stability
-        init_std = float(init_std)
-        # one parameter per action dim (unconstrained), optimizer will update this
-        self.log_std_param = nn.Parameter(torch.log(torch.ones(action_dim, dtype=torch.float) * init_std))
-
-    def forward(self, x, min_std=1e-6, max_std=0.4):
-        # mu 仍由网络输出；std 由全局参数确定并广播到 batch
-        x = self.net(x)
-        mu = self.fc_mu(x)
-        # 获取正的 std，使用 exp(log_std) 并进行 clamp
-        std = torch.exp(self.log_std_param)
-        # 手动方差裁剪
-        # std = torch.clamp(std, min=min_std, max=max_std)
-        min_t = torch.full_like(std, float(min_std))
-        if isinstance(max_std, torch.Tensor):
-            max_t = max_std.to(std.device).type_as(std)
-            # # 如果需要，可 expand 到与 std 完全相同形状
-            # if max_t.shape != std.shape:
-            #     max_t = max_t.expand_as(std)
-        else:
-            max_t = torch.full_like(std, float(max_std))
-        std = torch.clamp(std, min=min_t, max=max_t)
-
-        # broadcast to batch: shape (batch_size, action_dim)
-        if mu.dim() == 2:
-            pass
-            # std = std.unsqueeze(0).expand(mu.size(0), -1)
-        else:
-            std = std.expand_as(mu)
-
-        return mu, std
-
-
-class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim):
-        super(ValueNet, self).__init__()
-
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
-
-    def forward(self, x):
-        y = self.net(x)
-        return self.fc_out(y)
-
+from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.MLP_heads import PolicyNetContinuous, ValueNet
 
 def _scale_action_to_exec_standalone(a, action_bounds, device):
     """(独立函数) 把 normalized action a (in [-1,1]) 缩放到环境区间。"""
@@ -290,7 +136,7 @@ class PPOContinuous:
         action_bounds_t = torch.as_tensor(action_bounds, dtype=torch.float, device=self.device)
         a_norm_t = self._unscale_exec_to_normalized(a_exec_t, action_bounds_t)
         return a_norm_t.cpu().numpy()
-    
+
     # take action
     def take_action(self, state, action_bounds, explore=True, max_std=None):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
@@ -348,13 +194,12 @@ class PPOContinuous:
         # 计算 td_target, advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+        advantage = compute_advantage(self.gamma, self.lmbda, td_delta, dones).to(self.device)
         
         # 优势归一化
         if adv_normed:
             adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
-            # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
 
         # 可选2：按 episode 打乱顺序（shuffle episodes, 保持每个 episode 内部顺序）
         # shuffled=0/1 控制（默认 0）
@@ -373,7 +218,7 @@ class PPOContinuous:
                     max_stds = max_stds[idx]
                 # 也把 td_target / td_delta / advantage 一并打乱
                 td_target = td_target[idx]
-                td_delta = td_delta[idx]
+                # td_delta = td_delta[idx] # td_delta 没用到backward，可以不shuffle
                 advantage = advantage[idx]
 
         # 提前计算一次旧的 value 预测（用于 value clipping）
@@ -486,98 +331,6 @@ class PPOContinuous:
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
-
-
-
-
-
-
-
-    # 特殊用法
-    def update_actor_supervised(self, supervisor_dict):
-        """
-        Supervised update:
-        - Actor: 通过监督学习克隆经验池中的行为策略。具体地，用执行动作反归一化得到的 u_old = atanh(a_normalized)
-                 作为目标，最小化 actor 输出 mu 与 u_old 之间的 MSE（即拟合 pre-squash 均值）。
-        """
-        # 转换为 tensor（先用 np.array 以避免警告/性能问题）
-        states = torch.tensor(np.array(supervisor_dict['states']), dtype=torch.float).to(self.device)
-        actions_exec = torch.tensor(np.array(supervisor_dict['actions']), dtype=torch.float).to(self.device)
-        action_bounds = torch.tensor(np.array(supervisor_dict['action_bounds']), dtype=torch.float).to(self.device)
-
-        # 将执行动作反向归一化到 [-1,1] 并计算 u_old = atanh(a)
-        actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
-        # u_old 作为监督目标（detach）
-        u_old = torch.atanh(actions_normalized).detach()
-
-        actor_grad_list = []
-        actor_loss_list = []
-        pre_clip_actor_grad = []
-        # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
-        # 超参：目标 std 与权重（可改成 self.attr 并由构造函数传入）
-        target_std_value = 0.5
-        std_loss_weight = 1.0
-
-        for _ in range(self.epochs):
-            # Actor 监督学习：拟合 mu -> u_old，同时把 std 拉向目标值
-            mu, std = self.actor(states)
-            mse_mu = F.mse_loss(mu, u_old)  # 拟合 mu
-            # 为 std 构造目标张量并计算 MSE（std 已由网络经过 softplus/clamp）
-            std_target = torch.full_like(std, fill_value=target_std_value)
-            mse_std = F.mse_loss(std, std_target)
-            actor_loss = mse_mu + std_loss_weight * mse_std
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            pre_clip_actor_grad.append(model_grad_norm(self.actor))
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=100)
-            self.actor_optimizer.step()
-
-            actor_grad_list.append(model_grad_norm(self.actor))
-            actor_loss_list.append(actor_loss.detach().cpu().item())
-
-        self.actor_loss = np.mean(actor_loss_list)
-        self.actor_grad = np.mean(actor_grad_list)
-        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
-    
-    def update_critic_only(self, transition_dict):
-        """
-        - Critic: 与 update() 中相同，使用 TD target 做回归。
-        """
-        # 转换为 tensor（先用 np.array 以避免警告/性能问题）
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        # actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-        # action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
-
-        # 计算 td_target（与 update() 相同）
-        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
-
-        critic_grad_list = []
-        critic_loss_list = []
-        pre_clip_critic_grad = []
-
-        # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
-        for _ in range(self.epochs):
-            # Critic 更新（同 update）
-            critic_loss = F.mse_loss(self.critic(states), td_target.detach())
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-
-            # 裁剪前梯度
-            pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
-            # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=100)
-            self.critic_optimizer.step()
-
-            critic_grad_list.append(model_grad_norm(self.critic))            
-            critic_loss_list.append(critic_loss.detach().cpu().item())
-
-        self.critic_loss = np.mean(critic_loss_list)
-        self.critic_grad = np.mean(critic_grad_list)
-        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
-
 
 
 

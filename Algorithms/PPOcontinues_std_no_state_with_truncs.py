@@ -9,151 +9,56 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-# 计算并记录 actor / critic 的梯度范数（L2）
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
+from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.MLP_heads import PolicyNetContinuous, ValueNet
 
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
-
-def check_weights_bias_nan(model, model_name="model", place=None):
-    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
-    参数:
-      model: torch.nn.Module
-      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
-      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
-    """
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-# --- 保持 compute_advantage 函数，但根据传入参数数量切换逻辑 ---
-def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncateds 默认为 None
-    # 确保输入转为 numpy
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # 假设这里的 dones 是 terminateds (term)
-
-    if truncateds is None:
-        # --- 旧式/兼容模式：dones = term OR trunc ---
-        # 此时，dones 就是 $\text{done}_t$
-        advantage_list = []
-        advantage = 0.0
-        
-        for delta, done in zip(td_delta[::-1], dones[::-1]):
-            mask = 1.0 - done # $\text{Mask}_t = 1 - \text{done}_t$
-            advantage = delta + gamma * lmbda * advantage * mask
-            advantage_list.append(advantage)
-        
-        advantage_list.reverse()
-        return torch.tensor(np.array(advantage_list), dtype=torch.float)
-    
+def _scale_action_to_exec_standalone(a, action_bounds, device):
+    """(独立函数) 把 normalized action a (in [-1,1]) 缩放到环境区间。"""
+    action_bounds = torch.as_tensor(action_bounds, dtype=a.dtype, device=device)
+    if action_bounds.dim() == 2:
+        amin = action_bounds[:, 0]
+        amax = action_bounds[:, 1]
+    elif action_bounds.dim() == 3:
+        amin = action_bounds[:, :, 0]
+        amax = action_bounds[:, :, 1]
     else:
-        # --- 新式模式：需要 term (dones) 和 trunc (truncateds) ---
-        truncateds = truncateds.detach().cpu().numpy()
-        terminateds = dones # $\text{term}_t$
-        
-        advantage_list = []
-        advantage = 0.0
-        
-        for delta, term, trunc in zip(td_delta[::-1], terminateds[::-1], truncateds[::-1]):
-            # 1. GAE 传递项的修正因子: $\gamma \lambda (1 - \text{term}_t) A_{t+1}$
-            next_advantage_term = gamma * lmbda * advantage * (1.0 - term)
-            
-            # 2. 预估 A_t: $A'_t = \delta_t + \text{next\_advantage\_term}$
-            advantage = delta + next_advantage_term
-            
-            # 3. 最终 A_t 屏蔽: $A_t = (1 - \text{trunc}_t) \cdot A'_t$
-            advantage = advantage * (1.0 - trunc)
-            
-            advantage_list.append(advantage)
-        
-        advantage_list.reverse()
-        return torch.tensor(np.array(advantage_list), dtype=torch.float)
+        raise ValueError("action_bounds 的维度必须是 2 或 3")
+    return amin + (a + 1.0) * 0.5 * (amax - amin)
 
-class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim):
-        super(ValueNet, self).__init__()
-
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
-
-    def forward(self, x):
-        y = self.net(x)
-        return self.fc_out(y)
-
-
-class SquashedNormal:
-    """带 tanh 压缩的高斯分布。"""
-    def __init__(self, mu, std, eps=1e-6):
-        self.mu = mu
-        self.std = std
-        self.normal = Normal(mu, std)
-        self.eps = eps
-        self.mean = mu
-
-    def sample(self):
-        u = self.normal.rsample()
-        a = torch.tanh(u)
-        return a, u
-
-    def log_prob(self, a, u):
-        log_prob_u = self.normal.log_prob(u)
-        jacobian = 0 
-        return log_prob_u - jacobian
-
-    def entropy(self):
-        ent = self.normal.entropy().sum(-1)
-        return ent
-
-
-class PolicyNetContinuous(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim, action_dim):
-        super(PolicyNetContinuous, self).__init__()
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_mu = torch.nn.Linear(prev_size, action_dim)
-        self.fc_std = torch.nn.Linear(prev_size, action_dim)
-
-    def forward(self, x, min_std=1e-7, max_std=5):
-        x = self.net(x)
-        mu = self.fc_mu(x)
-        std = F.softplus(self.fc_std(x))
-        std = torch.clamp(std, min=min_std, max=max_std)
-        return mu, std
+def take_action_from_policy(policy_net, state, action_bounds, device, max_std=0.3):
+    """独立于PPO类的推理函数，仅使用策略网络。"""
+    state = torch.tensor(np.array([state]), dtype=torch.float).to(device)
+    # 确保网络处于评估模式
+    policy_net.eval()
+    with torch.no_grad():
+        mu, _ = policy_net(state, min_std=1e-6, max_std=max_std)
+        # 确定性动作：使用 mu 的 tanh 作为标准化动作
+        a_norm = torch.tanh(mu)
+        # 缩放到实际动作区间
+        a_exec = _scale_action_to_exec_standalone(a_norm, action_bounds, device)
+    return a_exec[0].cpu().numpy().flatten()
 
 
 class PPOContinuous:
+    ''' 处理连续动作的PPO算法，支持时变动作区间（每步 amin/amax 不同）。
+
+    设计说明（必须注意）：
+    - 如果环境的动作约束随状态变化（amin/amax 为时变），则经验回放需保存当时的
+      amin/amax（请把它放到 transition_dict['action_bounds']，形状为 (N, 2) 或每步的 (amin, amax)）。
+    - 如果 action_bounds 在训练时始终恒定（标量或单个区间），也可以直接把 action_bound
+      作为常数传入 update()。
+    - 在本实现中，策略内部输出的是标准化前的 mu 和 std（即对 u 的分布参数）。
+      对应的执行动作为：a = tanh(u)  -> normalized in (-1,1)
+      最后缩放到真实区间： a_exec = amin + (a+1)/2 * (amax-amin)
+    - update() 中会把存储的 a_exec "反归一化" 回 normalized a（[-1,1]），以便计算 log_prob。
+    '''
+
     def __init__(self, state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
         self.actor = PolicyNetContinuous(state_dim, hidden_dim, action_dim).to(device)
         self.critic = ValueNet(state_dim, hidden_dim).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -165,8 +70,12 @@ class PPOContinuous:
         self.eps = eps
         self.device = device
         self.k_entropy = k_entropy
+        self.critic_max_grad=critic_max_grad
+        self.actor_max_grad=actor_max_grad
+        self.max_std = max_std
     
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
+        """动态设置 actor 和 critic 的学习率"""
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
                 param_group['lr'] = actor_lr
@@ -175,45 +84,94 @@ class PPOContinuous:
                 param_group['lr'] = critic_lr    
 
     def _scale_action_to_exec(self, a, action_bounds):
+        """把 normalized action a (in [-1,1]) 缩放到环境区间。
+
+        action_bounds: 形状为 (action_dim, 2) 的二维 NumPy 数组，
+                       每行对应 amin 和 amax。
+        """
         action_bounds = torch.as_tensor(action_bounds, dtype=a.dtype, device=a.device)
         if action_bounds.dim() == 2:
+            # 处理二维张量 (action_dim, 2)
             amin = action_bounds[:, 0]
             amax = action_bounds[:, 1]
         elif action_bounds.dim() == 3:
+            # 处理三维张量 (batch, action_dim, 2)
             amin = action_bounds[:, :, 0]
             amax = action_bounds[:, :, 1]
         else:
             raise ValueError("action_bounds 的维度必须是 2 或 3")
+        
+        # a in (-1,1) -> scale to [amin, amax]
         return amin + (a + 1.0) * 0.5 * (amax - amin)
 
     def _unscale_exec_to_normalized(self, a_exec, action_bounds):
+        """把执行动作 a_exec 反向归一化到 [-1,1]。
+
+        action_bounds: 形状为 (action_dim, 2) 的二维 NumPy 数组，
+                       每行对应 amin 和 amax。
+        """
         action_bounds = torch.as_tensor(action_bounds, dtype=a_exec.dtype, device=a_exec.device)
         if action_bounds.dim() == 2:
+            # 处理二维张量 (action_dim, 2)
             amin = action_bounds[:, 0]
             amax = action_bounds[:, 1]
         elif action_bounds.dim() == 3:
+            # 处理三维张量 (batch, action_dim, 2)
             amin = action_bounds[:, :, 0]
             amax = action_bounds[:, :, 1]
         else:
             raise ValueError("action_bounds 的维度必须是 2 或 3")
+        
+        # 防止除以零
         span = (amax - amin)
         span = torch.where(span == 0, torch.tensor(1e-6, device=span.device, dtype=span.dtype), span)
         a = 2.0 * (a_exec - amin) / span - 1.0
+        # numerical stability
         return a.clamp(-0.999999, 0.999999)
+    
+    # 对外接口（保证numpy输入和numpy输出）
+    def unscale_exec_to_normalized(self, a_exec, action_bounds):
+        """Public wrapper: accepts numpy or torch, returns numpy on CPU."""
+        a_exec_t = torch.as_tensor(a_exec, dtype=torch.float, device=self.device)
+        action_bounds_t = torch.as_tensor(action_bounds, dtype=torch.float, device=self.device)
+        a_norm_t = self._unscale_exec_to_normalized(a_exec_t, action_bounds_t)
+        return a_norm_t.cpu().numpy()
 
-    def take_action(self, state, action_bounds, explore=True):
+    # take action
+    def take_action(self, state, action_bounds, explore=True, max_std=None):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
-        mu, std = self.actor(state)
+        # 检查state中是否存在nan
+        if torch.isnan(state).any() or torch.isinf(state).any():
+            print('state', state)
+        # 检查actor参数中是否存在nan
+        check_weights_bias_nan(self.actor, "actor", "take action中")
+        if max_std is None:
+            max_action_std = self.max_std
+        else:
+            max_action_std = max_std
+        mu, std = self.actor(state, min_std=1e-6, max_std=max_action_std)
+        # 检查mu, std是否含有nan
+        if torch.isnan(mu).any() or torch.isnan(std).any() or torch.isinf(mu).any() or torch.isinf(std).any():
+            print('mu', mu)
+            print('std', std)
+            raise ValueError(
+                f"NaN/Inf detected in actor outputs: mu_nan={torch.isnan(mu).any().item()}, "
+                f"std_nan={torch.isnan(std).any().item()}, mu_inf={torch.isinf(mu).any().item()}, "
+                f"std_inf={torch.isinf(std).any().item()}"
+            ) 
+
         dist = SquashedNormal(mu, std)
         if explore:
             a_norm, u = dist.sample()
         else:
+            # use mean action: tanh(mu)
             u = mu
             a_norm = torch.tanh(u)
 
         a_exec = self._scale_action_to_exec(a_norm, action_bounds)
         return a_exec[0].cpu().detach().numpy().flatten(), u[0].cpu().detach().numpy().flatten()
     
+    # 给并行训练使用，当前做法并不完美但凑合用
     def compute_gae_for_buffer(self, transition_dict):
         """
         [新增方法] 专门为单个子环境的 buffer 计算 GAE。
@@ -228,14 +186,13 @@ class PPOContinuous:
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-        
-        use_new_gae = 'truncs' in transition_dict and len(transition_dict['truncs']) > 0
+        use_truncs = 'truncs' in transition_dict and len(transition_dict['truncs']) > 0
 
         with torch.no_grad():
             next_vals = self.critic(next_states)
             curr_vals = self.critic(states)
 
-        if use_new_gae:
+        if use_truncs:
             # 新逻辑：区分 terminated (dones) 和 truncated (truncs)
             terminateds = dones
             truncateds = torch.tensor(np.array(transition_dict['truncs']), dtype=torch.float).view(-1, 1).to(self.device)
@@ -261,8 +218,9 @@ class PPOContinuous:
         transition_dict['td_targets'] = td_target.cpu().numpy().flatten().tolist()
         
         return transition_dict
+    
 
-    def update(self, transition_dict, advantage_norm=0, shuffled=0):
+    def update(self, transition_dict, adv_normed=False, shuffled=0, clip_vf=False, clip_range=0.2):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         u_s = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
@@ -271,10 +229,15 @@ class PPOContinuous:
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
 
+        if 'max_stds' in transition_dict:
+            max_stds = torch.tensor(np.array(transition_dict['max_stds']), dtype=torch.float).view(-1, 1).to(self.device)
+        else:
+            max_stds = self.max_std
+            
         # --- 检查是否需要新式 GAE 计算 ---
-        use_new_gae = 'truncs' in transition_dict and len(transition_dict['truncs']) > 0
+        use_truncs = 'truncs' in transition_dict and len(transition_dict['truncs']) > 0
         
-        if use_new_gae: # 区分截断和终止
+        if use_truncs: # 区分截断和终止
             if 'advantages' in transition_dict and 'td_targets' in transition_dict:
                 # 使用预计算的值（适用于并行环境已做好拼接）
                 advantage = torch.tensor(np.array(transition_dict['advantages']), dtype=torch.float).view(-1, 1).to(self.device)
@@ -308,9 +271,8 @@ class PPOContinuous:
                 advantage = compute_advantage(self.gamma, self.lmbda, td_delta, dones).to(self.device)
 
         # 可选1：对 advantage 做归一化（默认关闭）
-        if advantage_norm:
-            adv_mean = advantage.mean()
-            adv_std = advantage.std(unbiased=False)
+        if adv_normed:
+            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
         # 可选2：按 episode 打乱顺序（shuffle episodes, 保持每个 episode 内部顺序）
@@ -319,23 +281,37 @@ class PPOContinuous:
             N = len(transition_dict['dones'])
             if N > 1:
                 idx = torch.randperm(N, device=states.device)
+                # 统一按随机索引重排所有相关张量，保证对应关系不变
                 states = states[idx]
                 u_s = u_s[idx]
                 rewards = rewards[idx]
                 next_states = next_states[idx]
                 dones = dones[idx]
                 action_bounds = action_bounds[idx]
+                if 'max_stds' in transition_dict:
+                    max_stds = max_stds[idx]
+                # 也把 td_target / td_delta / advantage 一并打乱
                 td_target = td_target[idx]
                 # td_delta = td_delta[idx] # td_delta 没用到backward，可以不shuffle
                 advantage = advantage[idx]
 
+        # 提前计算一次旧的 value 预测（用于 value clipping）
+        v_pred_old = self.critic(states).detach()  # (N,1)
+
         # 策略输出（未压缩的 mu,std）
-        mu, std = self.actor(states)
+        mu, std = self.actor(states, min_std=1e-6, max_std=max_stds) # self.max_std
+        # 构造 SquashedNormal 并计算 old_log_probs
         dist = SquashedNormal(mu.detach(), std.detach())
+
+        # # 将执行动作反向归一化到 [-1,1]，以便计算 log_prob
+        # actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
         
-        # 反算 u = atanh(a)
+        # # 反算 u = atanh(a)
         u_old = u_s
-        old_log_probs = dist.log_prob(0, u_old)
+        # old_log_probs = dist.log_prob(0, u_old) # (N,1)
+
+        # 提前在action_dim维度求和
+        old_log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)    # -> (N,1)
 
         if torch.isnan(old_log_probs).any():
             raise ValueError("old_log_probs 包含 NaN，检查 action_bounds 或 actions 的合法性")
@@ -343,49 +319,79 @@ class PPOContinuous:
         actor_grad_list = []
         actor_loss_list = []
         critic_grad_list = []
+        pre_clip_actor_grad = []
+        pre_clip_critic_grad = []
         critic_loss_list = []
         entropy_list = []
         ratio_list = []
 
         for _ in range(self.epochs):
-            mu, std = self.actor(states)
+            mu, std = self.actor(states, min_std=1e-6, max_std=self.max_std)
             if torch.isnan(mu).any() or torch.isnan(std).any():
                 raise ValueError("NaN in Actor outputs in loop")
             critic_values = self.critic(states)
             if torch.isnan(critic_values).any():
                 raise ValueError("NaN in Critic outputs in loop")
 
+            # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
+            check_weights_bias_nan(self.actor, "actor", "update循环中")
+            check_weights_bias_nan(self.critic, "critic", "update循环中")
+
             dist = SquashedNormal(mu, std)
             # 计算当前策略对历史执行动作的 log_prob（使用同一个 u_old）
-            log_probs = dist.log_prob(0, u_old)
+            # log_probs = dist.log_prob(0, u_old) # (N,1)
 
-            ratio = torch.exp(log_probs - old_log_probs)
-            surr1 = ratio * advantage
+            # 提前在action_dim维度求和
+            log_probs = dist.log_prob(0, u_old).sum(-1, keepdim=True)   # -> (N,1)
+
+            ratio = torch.exp(log_probs - old_log_probs) # (N,1)
+            # surr1 = ratio * advantage
+            # clamp surr1
+            surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
+            # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
+            entropy_factor = dist.entropy().mean()  # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            actor_loss_reward_term = -torch.min(surr1, surr2).sum(-1).mean()
+            actor_loss = actor_loss_reward_term - self.k_entropy * entropy_factor
 
-            entropy_factor = torch.clamp(dist.entropy().mean(), -20, 7)
-            actor_loss = -torch.min(surr1, surr2).sum(-1).mean() - self.k_entropy * entropy_factor
+            # ↑如果求和之和还要保留原先的张量维度，用torch.sum(torch.min(surr1,surr2),dim=-1,keepdim=True)
 
-            critic_loss = F.mse_loss(self.critic(states), td_target.detach())
-            
+            # 计算 critic_loss：支持可选的 value clipping（PPO 风格）
+            if clip_vf:
+                v_pred = self.critic(states)                                  # 当前预测 (N,1)
+                v_pred_clipped = torch.clamp(v_pred, v_pred_old - clip_range, v_pred_old + clip_range)
+                vf_loss1 = (v_pred - td_target.detach()).pow(2)               # (N,1)
+                vf_loss2 = (v_pred_clipped - td_target.detach()).pow(2)       # (N,1)
+                critic_loss = torch.max(vf_loss1, vf_loss2).mean()
+            else:
+                critic_loss = F.mse_loss(self.critic(states), td_target.detach())
+
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
             actor_loss.backward()
             critic_loss.backward()
+            
+            # 裁剪前梯度
+            pre_clip_actor_grad.append(model_grad_norm(self.actor))
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))  
 
             # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=2)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=2)
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            # self.actor_optimizer.step()
+            # self.critic_optimizer.step()
 
+            # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
             actor_grad_list.append(model_grad_norm(self.actor))
             actor_loss_list.append(actor_loss.detach().cpu().item())
             critic_grad_list.append(model_grad_norm(self.critic))            
             critic_loss_list.append(critic_loss.detach().cpu().item())
             entropy_list.append(dist.entropy().mean().detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
+
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
         
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -393,5 +399,9 @@ class PPOContinuous:
         self.critic_grad = np.mean(critic_grad_list)
         self.entropy_mean = np.mean(entropy_list)
         self.ratio_mean = np.mean(ratio_list)
-
-    # update_actor_supervised 和 update_critic_only 保持原样即可，略
+        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
+        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
+        self.advantage = advantage.abs().mean().detach().cpu().item()
+        # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
+        check_weights_bias_nan(self.actor, "actor", "update后")
+        check_weights_bias_nan(self.critic, "critic", "update后")

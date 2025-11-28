@@ -20,6 +20,16 @@ def model_grad_norm(model):
             found = True
     return float(total_sq ** 0.5) if found else float('nan')
 
+
+def moving_average(a, window_size):
+    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
+    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
+    r = np.arange(1, window_size - 1, 2)
+    begin = np.cumsum(a[:window_size - 1])[::2] / r
+    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
+    return np.concatenate((begin, middle, end))
+
+
 def check_weights_bias_nan(model, model_name="model", place=None):
     """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
     参数:
@@ -34,16 +44,6 @@ def check_weights_bias_nan(model, model_name="model", place=None):
             if torch.isnan(param).any():
                 loc = f" at {place}" if place else ""
                 raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
 
 def compute_advantage(gamma, lmbda, td_delta, dones):
     td_delta = td_delta.detach().cpu().numpy()
@@ -61,24 +61,6 @@ def compute_advantage(gamma, lmbda, td_delta, dones):
         
     advantage_list.reverse()
     return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-
-class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim):
-        super(ValueNet, self).__init__()
-
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dim:
-            layers.append(torch.nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, 1)
-
-    def forward(self, x):
-        y = self.net(x)
-        return self.fc_out(y)
 
 
 class SquashedNormal:
@@ -144,13 +126,43 @@ class PolicyNetContinuous(torch.nn.Module):
         self.fc_mu = torch.nn.Linear(prev_size, action_dim)
         self.fc_std = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x, min_std=1e-6, max_std=0.4): # max_std=0.6
+    def forward(self, x, min_std=1e-6, max_std=0.3): # max_std=0.6
         # 最小方差 1e-3, 最大方差不要超过0.707否则tanh后会出现双峰函数
         x = self.net(x)
         mu = self.fc_mu(x)
         std = F.softplus(self.fc_std(x))
-        std = torch.clamp(std, min=min_std, max=max_std)
+        # 手动方差裁剪
+        # std = torch.clamp(std, min=min_std, max=max_std)
+        min_t = torch.full_like(std, float(min_std))
+        if isinstance(max_std, torch.Tensor):
+            max_t = max_std.to(std.device).type_as(std)
+            # # 如果需要，可 expand 到与 std 完全相同形状
+            # if max_t.shape != std.shape:
+            #     max_t = max_t.expand_as(std)
+        else:
+            max_t = torch.full_like(std, float(max_std))
+
+        std = torch.clamp(std, min=min_t, max=max_t)
         return mu, std
+
+
+
+class ValueNet(torch.nn.Module):
+    def __init__(self, state_dim, hidden_dim):
+        super(ValueNet, self).__init__()
+
+        layers = []
+        prev_size = state_dim
+        for layer_size in hidden_dim:
+            layers.append(torch.nn.Linear(prev_size, layer_size))
+            layers.append(nn.ReLU())
+            prev_size = layer_size
+        self.net = nn.Sequential(*layers)
+        self.fc_out = torch.nn.Linear(prev_size, 1)
+
+    def forward(self, x):
+        y = self.net(x)
+        return self.fc_out(y)
 
 
 class PPOContinuous:
@@ -246,7 +258,7 @@ class PPOContinuous:
         action_bounds_t = torch.as_tensor(action_bounds, dtype=torch.float, device=self.device)
         a_norm_t = self._unscale_exec_to_normalized(a_exec_t, action_bounds_t)
         return a_norm_t.cpu().numpy()
-    
+
     # take action
     def take_action(self, state, action_bounds, explore=True, max_std=None):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
@@ -297,7 +309,10 @@ class PPOContinuous:
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
-
+        if 'max_stds' in transition_dict:
+            max_stds = torch.tensor(np.array(transition_dict['max_stds']), dtype=torch.float).view(-1, 1).to(self.device)
+        else:
+            max_stds = self.max_std
         # 计算 td_target, advantage
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
@@ -313,7 +328,7 @@ class PPOContinuous:
         v_pred_old = self.critic(states).detach()  # (N,1)
 
         # 策略输出（未压缩的 mu,std）
-        mu, std = self.actor(states, min_std=1e-6, max_std=self.max_std)
+        mu, std = self.actor(states, min_std=1e-6, max_std=max_stds) # self.max_std
         # 构造 SquashedNormal 并计算 old_log_probs
         dist = SquashedNormal(mu.detach(), std.detach())
 
@@ -364,7 +379,7 @@ class PPOContinuous:
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
             # 可选：对surr1用一个很大的范围去clamp防止出现一个很负的数
-            entropy_factor = dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            entropy_factor = dist.entropy().mean()  # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
             actor_loss_reward_term = -torch.min(surr1, surr2).sum(-1).mean()
             actor_loss = actor_loss_reward_term - self.k_entropy * entropy_factor
 
@@ -419,98 +434,6 @@ class PPOContinuous:
         # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
-
-
-
-
-
-
-
-    # 特殊用法
-    def update_actor_supervised(self, supervisor_dict):
-        """
-        Supervised update:
-        - Actor: 通过监督学习克隆经验池中的行为策略。具体地，用执行动作反归一化得到的 u_old = atanh(a_normalized)
-                 作为目标，最小化 actor 输出 mu 与 u_old 之间的 MSE（即拟合 pre-squash 均值）。
-        """
-        # 转换为 tensor（先用 np.array 以避免警告/性能问题）
-        states = torch.tensor(np.array(supervisor_dict['states']), dtype=torch.float).to(self.device)
-        actions_exec = torch.tensor(np.array(supervisor_dict['actions']), dtype=torch.float).to(self.device)
-        action_bounds = torch.tensor(np.array(supervisor_dict['action_bounds']), dtype=torch.float).to(self.device)
-
-        # 将执行动作反向归一化到 [-1,1] 并计算 u_old = atanh(a)
-        actions_normalized = self._unscale_exec_to_normalized(actions_exec, action_bounds)
-        # u_old 作为监督目标（detach）
-        u_old = torch.atanh(actions_normalized).detach()
-
-        actor_grad_list = []
-        actor_loss_list = []
-        pre_clip_actor_grad = []
-        # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
-        # 超参：目标 std 与权重（可改成 self.attr 并由构造函数传入）
-        target_std_value = 0.5
-        std_loss_weight = 1.0
-
-        for _ in range(self.epochs):
-            # Actor 监督学习：拟合 mu -> u_old，同时把 std 拉向目标值
-            mu, std = self.actor(states)
-            mse_mu = F.mse_loss(mu, u_old)  # 拟合 mu
-            # 为 std 构造目标张量并计算 MSE（std 已由网络经过 softplus/clamp）
-            std_target = torch.full_like(std, fill_value=target_std_value)
-            mse_std = F.mse_loss(std, std_target)
-            actor_loss = mse_mu + std_loss_weight * mse_std
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            pre_clip_actor_grad.append(model_grad_norm(self.actor))
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=100)
-            self.actor_optimizer.step()
-
-            actor_grad_list.append(model_grad_norm(self.actor))
-            actor_loss_list.append(actor_loss.detach().cpu().item())
-
-        self.actor_loss = np.mean(actor_loss_list)
-        self.actor_grad = np.mean(actor_grad_list)
-        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
-    
-    def update_critic_only(self, transition_dict):
-        """
-        - Critic: 与 update() 中相同，使用 TD target 做回归。
-        """
-        # 转换为 tensor（先用 np.array 以避免警告/性能问题）
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        # actions_exec = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-        # action_bounds = torch.tensor(np.array(transition_dict['action_bounds']), dtype=torch.float).to(self.device)
-
-        # 计算 td_target（与 update() 相同）
-        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
-
-        critic_grad_list = []
-        critic_loss_list = []
-        pre_clip_critic_grad = []
-
-        # 训练若干轮：每轮先更新 critic（回归 td_target），再用监督信号更新 actor（拟合 u_old）
-        for _ in range(self.epochs):
-            # Critic 更新（同 update）
-            critic_loss = F.mse_loss(self.critic(states), td_target.detach())
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-
-            # 裁剪前梯度
-            pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
-            # 梯度裁剪
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=100)
-            self.critic_optimizer.step()
-
-            critic_grad_list.append(model_grad_norm(self.critic))            
-            critic_loss_list.append(critic_loss.detach().cpu().item())
-
-        self.critic_loss = np.mean(critic_loss_list)
-        self.critic_grad = np.mean(critic_grad_list)
-        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
-
 
 
 

@@ -51,7 +51,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 # 常规PPO
-from Algorithms.PPOcontinues_std_no_state import *
+from Algorithms.PPOcontinues_std_no_state_with_truncs import *
 
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 

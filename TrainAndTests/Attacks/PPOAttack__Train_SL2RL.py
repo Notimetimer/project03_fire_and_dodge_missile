@@ -20,14 +20,13 @@ import argparse
 import time
 import sys
 import os
-
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from Envs.Tasks.AttackManeuverEnv import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
-from collections import deque
 import matplotlib
 import json
 import glob
@@ -52,16 +51,12 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
-
-from Algorithms.Wasted.PPOcontinues_std_no_state_with_truncs_withGRU4 import *
-
+# 常规PPO
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
+from Algorithms.PPOcontinues_std_no_state_with_truncs import *
 
 # 实验性 AMPPO
 # from Algorithms.SquashedPPOcontinues_dual_a_AM import *
-
-# GRU-MLP ppo
-from Algorithms.SharedLayers import *
 
 # from tqdm import tqdm
 
@@ -95,54 +90,20 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'AttackWithGRU4'
+mission_name = 'Attack'
 
 env = AttackTrainEnv(args, tacview_show=use_tacview)
-
+# env = Battle(args, tacview_show=use_tacview)
+# r_obs_spaces = env.get_obs_spaces('r') # todo 子策略的训练不要用这个
+# b_obs_spaces = env.get_obs_spaces('b')
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
 
-state_dim = 8+7+2  # 35 # len(b_obs_spaces)
-action_dim = 3
-gru_hidden_size = state_dim
-gru_num_layers = 1
-middle_dim = state_dim
-head_hidden_dims = hidden_dim
+state_dim = 8 + 7 + 2  # len(b_obs_spaces)
+action_dim = b_action_spaces[0].shape[0]
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-# def launch_missile_if_possible(env, side='r'):
-#     """
-#     根据条件判断是否发射导弹
-#     """
-#     if side == 'r':
-#         uav = env.RUAV
-#         ally_missiles = env.Rmissiles
-#         target = env.BUAV
-#     else:  # side == 'b'
-#         uav = env.BUAV
-#         ally_missiles = env.Bmissiles
-#         target = env.RUAV
-
-#     waite = False
-#     for missile in ally_missiles:
-#         if not missile.dead:
-#             waite = True
-#             break
-        
-#     if not waite:
-#         # 判断是否可以发射导弹
-#         if uav.can_launch_missile(target, env.t):
-#             # 发射导弹
-#             new_missile = uav.launch_missile(target, env.t, missile_class)
-#             uav.ammo -= 1
-#             new_missile.side = 'red' if side == 'r' else 'blue'
-#             if side == 'r':
-#                 env.Rmissiles.append(new_missile)
-#             else:
-#                 env.Bmissiles.append(new_missile)
-#             env.missiles = env.Rmissiles + env.Bmissiles
-#             print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
 
 def save_meta_once(path, state_dict):
     if os.path.exists(path):
@@ -154,20 +115,17 @@ def save_meta_once(path, state_dict):
 
 if __name__ == "__main__":
 
-    agent = PPOContinuous(state_dim, gru_hidden_size, gru_num_layers, middle_dim,
-                          head_hidden_dims, action_dim, actor_lr, critic_lr,
-                          lmbda, epochs, eps, gamma, device, 
-                          critic_max_grad=2, actor_max_grad=2) # 2,2
-    
-    # SEQ_LEN = 10
+    agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
+                          lmbda, epochs, eps, gamma, device, critic_max_grad=2, actor_max_grad=2)  # 2,2
+
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     # log_dir = "./logs"
     from datetime import datetime
 
     # log_dir = os.path.join("./logs", "run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     # log_dir = os.path.join("./logs", f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
+    
+    logs_dir = os.path.join(project_root, "logs/attack")
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     os.makedirs(log_dir, exist_ok=True)
@@ -199,6 +157,8 @@ if __name__ == "__main__":
     t_bias = 0
 
     try:
+
+        # 强化学习训练
         rl_steps = 0
         return_list = []
         win_list = []
@@ -207,7 +167,8 @@ if __name__ == "__main__":
         while total_steps < int(max_steps * (1 - pre_train_rate)):
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_values': [], 'rewards': [], 'dones': [], 'h0s': []}
+            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],
+                               'action_bounds': []}
 
             # 飞机出生状态指定
             red_R_ = random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
@@ -227,20 +188,11 @@ if __name__ == "__main__":
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                       red_init_ammo=0, blue_init_ammo=0)
 
-            # # === 修改：初始化一个空的观测序列缓冲区 ===
-            # # 不再用0填充
-            # obs_sequence_deque = deque(maxlen=SEQ_LEN)
-
-            # # === 新增：回合内步数计数器 ===
-            # # 用于判断何时开始记录经验
-            # episode_steps = 0
-
             # a1 = env.BUAV.pos_  # 58000,7750,20000
             # a2 = env.RUAV.pos_  # 2000,7750,20000
             # b1 = env.UAVs[0].pos_
             # b2 = env.UAVs[1].pos_
             done = False
-            agent.reset_hidden_state()
 
             actor_grad_list = []
             critc_grad_list = []
@@ -257,14 +209,14 @@ if __name__ == "__main__":
             # 环境运行一轮的情况
             for count in range(round(args.max_episode_len / dt_maneuver)):
                 # print(f"time: {env.t}")  # 打印当前的 count 值
-                # 0.回合结束判断
+                # 回合结束判断
                 # print(env.running)
                 current_t = count * dt_maneuver
                 if env.running == False or done:  # count == round(args.max_episode_len / dt_maneuver) - 1:
                     # print('回合结束，时间为：', env.t, 's')
                     break
-                # 1.获取观测信息
-                _, r_obs_check = env.attack_obs('r')
+                # 获取观测信息
+                r_obs_n, r_obs_check = env.attack_obs('r')
                 b_obs_n, b_obs_check = env.attack_obs('b')
 
                 # 在这里将观测信息压入记忆
@@ -272,26 +224,6 @@ if __name__ == "__main__":
                 env.BUAV.obs_memory = b_obs_check.copy()
 
                 b_obs = np.squeeze(b_obs_n)
-                
-                h_current = agent.get_current_hidden_state()
-
-                # # 2. 更新观测序列
-                # obs_sequence_deque.append(b_obs)
-
-                # # 更新回合步数计数器
-                # episode_steps += 1
-
-                # # === 重要修改：准备模型输入 ===
-                # # 即使序列不足10，也要为决策准备输入
-                # # 我们用最新的观测值来填充序列的前面部分
-                # current_obs_list = list(obs_sequence_deque)
-                # if len(current_obs_list) < SEQ_LEN:
-                #     # 如果长度不足，用第一个有效观测值填充到满10个
-                #     padding = [current_obs_list[0]] * (SEQ_LEN - len(current_obs_list))
-                #     current_sequence_state = np.array(padding + current_obs_list)
-                # else:
-                #     current_sequence_state = np.array(current_obs_list)
-
 
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
                 # 发射导弹判决
@@ -306,7 +238,7 @@ if __name__ == "__main__":
                                            ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
                                            o00=o00, R_cage=env.R_cage, wander=1
                                            )
-                b_action_n, u, h_next = agent.take_action(state=b_obs, h_0=h_current, action_bounds=action_bound, explore=True)
+                b_action_n, u = agent.take_action(b_obs, action_bounds=action_bound, explore=True)
 
                 # b_action_n = decision_rule(ego_pos_=env.BUAV.pos_, ego_psi=env.BUAV.psi,
                 #                         enm_pos_=env.RUAV.pos_, distance=distance,
@@ -322,14 +254,13 @@ if __name__ == "__main__":
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1
-                next_value, _ = agent.get_value(next_b_obs, h_next)
 
                 transition_dict['states'].append(b_obs)
                 transition_dict['actions'].append(u)
-                transition_dict['next_values'].append(next_value)
+                transition_dict['next_states'].append(next_b_obs)
                 transition_dict['rewards'].append(b_reward)
                 transition_dict['dones'].append(done)
-                transition_dict['h0s'].append(h_current)
+                transition_dict['action_bounds'].append(action_bound)
                 # state = next_state
                 episode_return += b_reward * env.dt_maneuver
 

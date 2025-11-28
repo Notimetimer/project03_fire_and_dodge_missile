@@ -1,11 +1,12 @@
 import argparse
 import time
+import re
 import sys
 import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from ChoosingStrategyTrain_Big_dt_load_agents_MA_FSP import *
-import re
+
 from Envs.Tasks.ChooseStrategyEnv_load_agents import *
 
 use_tacview = 1  # 是否可视化

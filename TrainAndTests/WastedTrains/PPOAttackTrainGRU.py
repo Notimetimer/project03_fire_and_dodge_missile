@@ -53,7 +53,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 
-from Algorithms.Wasted.PPOcontinues_std_no_state_withGRU import *
+from Algorithms.Wasted.PPOcontinues_std_no_state_with_truncs_withGRU import *
 
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 

@@ -4,87 +4,37 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-# ================================================================= #
-#                         辅助函数                                   #
-# ================================================================= #
+import os, sys
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
-# 计算并记录 actor / critic 的梯度范数（L2）
-def model_grad_norm(model):
-    total_sq = 0.0
-    found = False
-    for p in model.parameters():
-        if p.grad is not None:
-            g = p.grad.detach().cpu()
-            total_sq += float(g.norm(2).item()) ** 2
-            found = True
-    return float(total_sq ** 0.5) if found else float('nan')
-
-
-def moving_average(a, window_size):
-    cumulative_sum = np.cumsum(np.insert(a, 0, 0))
-    middle = (cumulative_sum[window_size:] - cumulative_sum[:-window_size]) / window_size
-    r = np.arange(1, window_size - 1, 2)
-    begin = np.cumsum(a[:window_size - 1])[::2] / r
-    end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
-    return np.concatenate((begin, middle, end))
-
-
-def check_weights_bias_nan(model, model_name="model", place=None):
-    """检查模型中名为 weight/bias 的参数是否包含 NaN，发现则抛出异常。
-    参数:
-      model: torch.nn.Module
-      model_name: 用于错误消息中标识模型（如 "actor"/"critic"）
-      place: 字符串，调用位置/上下文（如 "update_loop","pretrain_step"），用于更明确的错误报告
-    """
-    for name, param in model.named_parameters():
-        if ("weight" in name) or ("bias" in name):
-            if param is None:
-                continue
-            if torch.isnan(param).any():
-                loc = f" at {place}" if place else ""
-                raise ValueError(f"NaN detected in {model_name} parameter '{name}'{loc}")
-
-def compute_advantage(gamma, lmbda, td_delta, dones):
-    td_delta = td_delta.detach().cpu().numpy()
-    dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-    advantage_list = []
-    advantage = 0.0
-    
-    # [修改] 同时遍历 delta 和 done
-    for delta, done in zip(td_delta[::-1], dones[::-1]):
-        # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-        # 此时不应该加上一步（时间上的未来）的 advantage。
-        # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-        advantage = delta + gamma * lmbda * advantage * (1 - done)
-        advantage_list.append(advantage)
-        
-    advantage_list.reverse()
-    return torch.tensor(np.array(advantage_list), dtype=torch.float)
+from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.MLP_heads import PolicyNetDiscrete
 
 # ================================================================= #
 #                         网络结构定义                                #
 # ================================================================= #
 
-class PolicyNetDiscrete(torch.nn.Module):
-    """
-    [修改] 输出 Logits 而不是 Probabilities
-    """
-    def __init__(self, obs_dim, hidden_dims, action_dim):
-        super(PolicyNetDiscrete, self).__init__()
-        layers = []
-        prev_size = obs_dim
-        for layer_size in hidden_dims:
-            layers.append(nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
-        self.fc_out = torch.nn.Linear(prev_size, action_dim)
+# class PolicyNetDiscrete(torch.nn.Module):
+#     """
+#     [修改] 输出 Logits 而不是 Probabilities
+#     """
+#     def __init__(self, obs_dim, hidden_dims, action_dim):
+#         super(PolicyNetDiscrete, self).__init__()
+#         layers = []
+#         prev_size = obs_dim
+#         for layer_size in hidden_dims:
+#             layers.append(nn.Linear(prev_size, layer_size))
+#             layers.append(nn.ReLU())
+#             prev_size = layer_size
+#         self.net = nn.Sequential(*layers)
+#         self.fc_out = torch.nn.Linear(prev_size, action_dim)
 
-    def forward(self, x):
-        x = self.net(x)
-        # [重要修改] 这里直接返回 logits (未经过 softmax)
-        # 这样结合 Categorical(logits=...) 使用时数值更稳定，避免 log(0)=-inf
-        return self.fc_out(x)
+#     def forward(self, x):
+#         x = self.net(x)
+#         # [重要修改] 这里直接返回 logits (未经过 softmax)
+#         # 这样结合 Categorical(logits=...) 使用时数值更稳定，避免 log(0)=-inf
+#         return self.fc_out(x)
 
 
 class CentralizedValueNet(torch.nn.Module):
@@ -181,7 +131,7 @@ class MAPPO:
         """根据单个智能体的观测 obs 采取行动"""
         state = torch.tensor(np.array([obs]), dtype=torch.float).to(self.device)
         # [修改] actor 返回的是 logits
-        logits = self.actor(state)
+        logits = self.actor(state, logits=1)
         
         if explore:
             # Categorical 内部会处理 softmax，数值更稳定
@@ -236,7 +186,7 @@ class MAPPO:
         # --- 提前计算旧策略的对数概率 ---
         # [修改] 使用 logits 计算 log_prob，避免 log(0) = -inf
         with torch.no_grad():
-            old_logits = self.actor(obs)
+            old_logits = self.actor(obs, logits=1)
             old_dist = Categorical(logits=old_logits)
             old_log_probs = old_dist.log_prob(actions.squeeze()).view(-1, 1) # 注意 squeeze 配合 Categorical
             v_pred_old = self.critic(global_states, agent_ids_one_hot)
@@ -281,7 +231,7 @@ class MAPPO:
 
                 # --- Actor 更新 ---
                 # [修改] 再次获取 logits，构建分布
-                logits = self.actor(mb_obs)
+                logits = self.actor(mb_obs, logits=1)
                 
                 # [重要安全检查] 如果输入是垃圾数据，logits 可能是极大的数值
                 # 我们可以简单地检查一下 logits 是否包含 NaN

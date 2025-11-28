@@ -33,7 +33,7 @@ from Envs.UAVmodel6d import UAVModel
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.PPOcontinues_std_no_state import *
+from Algorithms.PPOcontinues_std_no_state_with_truncs import *
 # from Algorithms.SquashedPPOcontinues_dual_a_out import *
 # from tqdm import tqdm #  停用tqdm
 from LaunchZone.calc_DLZ import *
