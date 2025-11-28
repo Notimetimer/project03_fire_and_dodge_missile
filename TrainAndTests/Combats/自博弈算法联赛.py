@@ -3,33 +3,33 @@ import time
 import sys
 import os
 sys.path.append(project_root)
-from TrainAndTests.ChoosingStrategyTrain_Big_dt_load_agents import *
+from TrainAndTests.Combats.ChoosingStrategyTrain_Big_dt_load_agents import *
 import re
 from Envs.Tasks.ChooseStrategyEnv_load_agents import *
 
 use_tacview = 1 # 1  # 是否可视化
 
 # # 找出日期最大的目录
-# def get_latest_log_dir(pre_log_dir, mission_name=None):
-#     # 匹配 run-YYYYMMDD-HHMMSS 目录
-#     # pattern = re.compile(r"run-(\d{8})-(\d{6})")
-#     if mission_name:
-#         pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
-#     else:
-#         pattern = re.compile(r"run-(\d{8})-(\d{6})")
-#     max_dt = None
-#     latest_dir = None
-#     for d in os.listdir(pre_log_dir):
-#         m = pattern.match(d)
-#         if m:
-#             dt_str = m.group(1) + m.group(2)  # 'YYYYMMDDHHMMSS'
-#             if max_dt is None or dt_str > max_dt:
-#                 max_dt = dt_str
-#                 latest_dir = d
-#     if latest_dir:
-#         return os.path.join(pre_log_dir, latest_dir)
-#     else:
-#         return None
+def get_latest_log_dir(pre_log_dir, mission_name=None):
+    # 匹配 run-YYYYMMDD-HHMMSS 目录
+    # pattern = re.compile(r"run-(\d{8})-(\d{6})")
+    if mission_name:
+        pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
+    else:
+        pattern = re.compile(r"run-(\d{8})-(\d{6})")
+    max_dt = None
+    latest_dir = None
+    for d in os.listdir(pre_log_dir):
+        m = pattern.match(d)
+        if m:
+            dt_str = m.group(1) + m.group(2)  # 'YYYYMMDDHHMMSS'
+            if max_dt is None or dt_str > max_dt:
+                max_dt = dt_str
+                latest_dir = d
+    if latest_dir:
+        return os.path.join(pre_log_dir, latest_dir)
+    else:
+        return None
 # # pre_log_dir = os.path.join("./logs")
 
 

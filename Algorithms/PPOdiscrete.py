@@ -170,6 +170,8 @@ class PPO_discrete:
         check_weights_bias_nan(self.critic, "critic", "update后")
 
 
+
+# 仅调用actor
 def take_action_from_policy_discrete(policy_net, state, device, explore=False):
     """
     独立的离散策略推理函数。
