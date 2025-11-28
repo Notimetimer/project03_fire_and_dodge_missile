@@ -163,7 +163,7 @@ class CrankTrainEnv(Battle):
         r_angle -= 0.01 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
                            (ego.alpha_air*180/pi< -5)*(-5 - ego.alpha_air*180/pi))
         # 滚转角速度惩罚
-        r_angle -= 0.05 * abs(p)*180/pi / 20 # 20°每秒已经很快了
+        r_angle -= 0.15 * abs(p)*180/pi / 20 # 20°每秒已经很快了
 
         # # 垂直角度惩罚
         # q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
