@@ -202,7 +202,7 @@ class CrankTrainEnv(Battle):
 
         # 速度奖励
         speed_opt = 0.95 * 340
-        r_speed = abs(speed - speed_opt) / (2 * 340)
+        r_speed = - abs(speed - speed_opt) / (2 * 340)
 
         # # 边界距离奖励 ###
         obs = self.base_obs(side)
@@ -336,7 +336,7 @@ class CrankTrainEnv(Battle):
 
         # 速度奖励
         speed_opt = 0.95 * 340
-        r_speed = abs(speed - speed_opt) / (2 * 340)
+        r_speed = - abs(speed - speed_opt) / (2 * 340)
 
         # # 边界距离奖励 ###
         obs = self.base_obs(side)
