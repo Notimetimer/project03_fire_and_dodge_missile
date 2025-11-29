@@ -231,6 +231,7 @@ class CrankTrainEnv(Battle):
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
         alpha = state["target_information"][4]
+        p = state["ego_control"][0]
         # alpha = abs(delta_psi) # 实际上是把alpha换掉
 
         if side == 'r':
@@ -280,6 +281,22 @@ class CrankTrainEnv(Battle):
         if abs(x) > 53:
             r_angle -= 3 * np.sign(x) * delta_psi_dot * 180 / pi * self.dt_maneuver / 4
 
+        
+        sin_phi = state["ego_main"][4]
+        cos_phi = state["ego_main"][5]
+        phi = atan2(sin_phi, cos_phi)
+        # 滚转角惩罚
+        r_angle -= 0.1 * abs(phi / pi)
+        # 负过载惩罚
+        if ego.Ny<0:
+            r_angle -= 0.1 * abs(ego.Ny) / 2
+        # 侧滑角惩罚
+        r_angle -= 0.05 * np.clip(abs(ego.beta_air*180/pi / 5), 0, 1)
+        # 迎角惩罚
+        r_angle -= 0.01 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
+                           (ego.alpha_air*180/pi< -5)*(-5 - ego.alpha_air*180/pi))
+        # 滚转角速度惩罚
+        r_angle -= 0.15 * abs(p)*180/pi / 20 # 20°每秒已经很快了
 
         # # 垂直角度惩罚
         # q_epsilon = atan2(Los_[1], sqrt(Los_[0]**2+Los_[2]**2))
@@ -297,9 +314,7 @@ class CrankTrainEnv(Battle):
         alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
         r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
                 (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
-        # if not self.min_alt<=alt<=self.max_alt:
-        #     r_alt -= 20
-        ###
+
         r_alt += (alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
                  (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
 
