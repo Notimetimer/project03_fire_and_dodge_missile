@@ -4,7 +4,7 @@ import numpy as np
 import pickle
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-
+from MARWIL.pure_marwil_train_attack import *
 
 def load_npz(path):
     data = np.load(path, allow_pickle=True)
@@ -66,3 +66,6 @@ if __name__ == "__main__":
         print("States/actions could not be converted to regular numpy arrays (mixed shapes/objects).")
 
     # 第4步：有监督学习teacher动作
+    for epoch in range(1000):
+        agent.MARWIL_update(il_transition_dict, beta=)
+        
