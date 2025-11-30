@@ -46,6 +46,10 @@ class PPOContinuous:
         self.critic_max_grad=critic_max_grad
         self.actor_max_grad=actor_max_grad
         self.max_std = max_std
+
+        # [新增] MARWIL 专用：优势函数归一化因子的平方 (c^2)
+        # 初始化为 1.0，用于动态追踪 (R_t - V)^2 的移动平均值
+        self.c_sq = torch.tensor(1.0, dtype=torch.float).to(device)
     
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -309,7 +313,7 @@ class PPOContinuous:
 
 
 
-    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=True):
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=True):
         """
         MARWIL 离线更新函数 (连续动作空间版 - 修正版)
         逻辑：直接使用存储的 u (pre-tanh) 计算 log_prob，无需反向归一化。
@@ -321,7 +325,7 @@ class PPOContinuous:
                 - 'returns': 预先计算好的蒙特卡洛回报 (R_t)
                 - 'max_stds' (可选): 专家数据的 max_std
                 # 注意：此时不再强制需要 'action_bounds'，除非用于其他用途，因为计算 log_prob(u) 不需要 bounds
-            beta (float): 优势指数系数
+            beta (float): 优势指数系数 建议的起始值通常是 介于 0.25 到 1.0 之间
             batch_size (int): Mini-batch 大小
             alpha (float): 模仿学习权重
             c_v (float): 价值损失权重
@@ -373,7 +377,12 @@ class PPOContinuous:
                 advantage = residual / (c + 1e-8)
                 
                 # 计算指数权重
-                weights = torch.exp(beta * advantage)
+                # weights = torch.exp(beta * advantage)
+                # 修改为:
+                # 1. 计算原始权重
+                raw_weights = torch.exp(beta * advantage)
+                # 2. 截断权重，例如最大不超过 100.0 (e^4.6)
+                weights = torch.clamp(raw_weights, max=100.0)
 
             # ----------------------------------------------------
             # B. 计算 Actor Loss (模仿学习部分)

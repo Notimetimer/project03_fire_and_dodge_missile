@@ -31,8 +31,8 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
-# 常规PPO
 from Algorithms.PPOcontinues_std_no_state import *
+from Algorithms.PPOcontinues_std_no_state import PPOContinuous
 
 # 2、读取teacher智能体
 from TrainAndTests.Attacks.PPOAttack__Train import *
@@ -41,9 +41,6 @@ from Algorithms.Utils import compute_advantage, compute_monte_carlo_returns
 
 # 读取teacher_agent
 agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                lmbda, epochs, eps, gamma, device)
-
-student_agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                 lmbda, epochs, eps, gamma, device)
 
 # pre_log_dir = os.path.join("./logs")
@@ -71,11 +68,11 @@ il_transition_dict = {'states':[], 'actions': [], 'returns': []}
 # 飞机出生状态应该是均匀的，100条示范轨迹，初始ATA分为10个，初始高度分为10个组合
 ATA_list = np.linspace(0, 9, 10)/10 *2*pi
 
-ego_psi_list = np.zeros_like(ATA_list)
-enm_beta_list = ATA_list
-enm_psi_list = pi + ATA_list
+ego_psi_list = [0] # np.zeros_like(ATA_list)
+enm_beta_list = [0] # ATA_list
+enm_psi_list = [pi] #  pi + ATA_list
 
-ego_height_list = np.linspace(5000, 10000, 5)
+ego_height_list = [7000] # np.linspace(5000, 10000, 5)
 enm_height_list = np.linspace(8000, 12000, 2)
 
 if __name__ == "__main__":
@@ -163,43 +160,34 @@ if __name__ == "__main__":
                 print("累计收集次数", episode_count, "/100")
  
     pass
-    # 计算
+    # 计算蒙特卡洛回报
     il_transition_dict['states'] = transition_dict['states']
     il_transition_dict['actions'] = transition_dict['actions']
     il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
                                                                 transition_dict['rewards'], \
                                                                 transition_dict['dones'])
     
-    # 保存到当前脚本所在目录
+    # 保存到当前脚本所在目录（只保存 pickle，且同时保存 transition_dict 以便后续分析）
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    npz_path = os.path.join(cur_dir, "il_transitions.npz")
-    # 用压缩 npz 保存（数值数据最佳），同时保留 pickle 备份
-    np.savez_compressed(npz_path,
-                        states=np.array(il_transition_dict['states'], dtype=object),
-                        actions=np.array(il_transition_dict['actions'], dtype=object),
-                        returns=np.array(il_transition_dict['returns'], dtype=object))
-
-    pkl_path = os.path.join(cur_dir, "il_transitions.pkl")
+    il_pkl_path = os.path.join(cur_dir, "il_transitions.pkl")
+    trans_pkl_path = os.path.join(cur_dir, "transition_dict.pkl")
     import pickle
-    with open(pkl_path, "wb") as f:
+    # 保存示范轨迹（IL 用）
+    with open(il_pkl_path, "wb") as f:
         pickle.dump(il_transition_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+    # 保存原始 transition_dict（包含 next_states, rewards, dones 等）
+    with open(trans_pkl_path, "wb") as f:
+        pickle.dump(transition_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    print(f"Saved il_transitions.npz to: {npz_path}")
-    print(f"Saved il_transitions.pkl to: {pkl_path}")
-
-    # 读取示例（从当前目录加载并还原为 list）
-    data = np.load(npz_path, allow_pickle=True)
-    il_loaded = {
-        'states': list(data['states']),
-        'actions': list(data['actions']),
-        'returns': list(data['returns'])
-    }
-
+    print(f"Saved il_transitions.pkl to: {il_pkl_path}")
+    print(f"Saved transition_dict.pkl to: {trans_pkl_path}")
+ 
     total_dur = time.time() - total_start_time
     avg_ep = (sum(episode_times) / len(episode_times)) if episode_times else 0.0
     print(f"Timing: total {total_dur:.2f}s, episodes {len(episode_times)}, avg per-episode {avg_ep:.2f}s")
  
     # 4、模仿学习
+    '''换一个文件来实现'''
 
 
 
