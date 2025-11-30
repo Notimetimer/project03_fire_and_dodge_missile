@@ -29,6 +29,10 @@ class PPO_discrete:
         self.actor_max_grad=actor_max_grad
         self.critic_max_grad=critic_max_grad
 
+        # [新增] MARWIL 专用：优势函数归一化因子的平方 (c^2)
+        # 初始化为 1.0，用于动态追踪 (R_t - V)^2 的移动平均值
+        self.c_sq = torch.tensor(1.0, dtype=torch.float).to(device)
+
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -169,6 +173,124 @@ class PPO_discrete:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
+
+def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=True):
+        """
+        MARWIL 离线更新函数 (执行一个 Epoch)
+        逻辑：接收全量专家数据 -> 打乱(可选) -> 按 batch_size 拆分 -> 逐个 mini-batch 更新
+        
+        参数:
+            il_transition_dict (dict): 包含 'states', 'actions', 'returns' 的字典
+            beta (float): MARWIL 优势指数系数 (exp(beta * A))
+            batch_size (int): Mini-batch 的大小
+            alpha (float): 模仿学习损失的权重 (用于平衡 Actor Loss)
+            c_v (float): 价值网络损失的权重 (用于平衡 Critic Loss)
+            shuffled (bool): 是否在分批前打乱数据
+            
+        返回:
+            avg_actor_loss, avg_critic_loss, current_c
+        """
+        # 1. 提取全量数据并转为 Tensor (一次性转移到 Device)
+        # 注意：这里需要 il_transition_dict 包含 'returns' (即计算好的 R_t)，而不是原始 rewards
+        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
+        actions_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.long).to(self.device) # 离散动作需为 long
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
+        
+        # 确保 actions 形状适配 gather (N, 1)
+        if actions_all.dim() == 1:
+            actions_all = actions_all.view(-1, 1)
+
+        # 2. 准备 Batch 索引
+        total_size = states_all.size(0)
+        indices = np.arange(total_size)
+        if shuffled:
+            np.random.shuffle(indices)
+
+        # 用于记录本轮 Epoch 的平均 Loss
+        total_actor_loss = 0
+        total_critic_loss = 0
+        batch_count = 0
+
+        # 3. Mini-batch 循环
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+            
+            # 切片获取 Mini-batch 数据
+            # torch.tensor(batch_indices) 可能会带来额外的 CPU->GPU 开销，
+            # 如果 indices 是 numpy，直接切片 tensor 也是可以的，但在 GPU tensor 上索引通常建议传入 tensor 或 list
+            # 这里为了通用性，直接使用 numpy 索引
+            s_batch = states_all[batch_indices]
+            a_batch = actions_all[batch_indices]
+            r_batch = returns_all[batch_indices]
+
+            # ----------------------------------------------------
+            # A. 计算优势 (Advantage) 和 权重 (Weights)
+            # ----------------------------------------------------
+            with torch.no_grad():
+                values = self.critic(s_batch)
+                # 计算残差: A_hat = R_t - V(s)
+                residual = r_batch - values
+                
+                # --- 动态更新归一化因子 c ---
+                # 论文脚注: c^2 <- c^2 + 10^-8 * (residual^2 - c^2)
+                batch_mse = (residual ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
+                c = torch.sqrt(self.c_sq)
+                
+                # 归一化优势
+                advantage = residual / (c + 1e-8)
+                
+                # 计算指数权重: w = exp(beta * A)
+                weights = torch.exp(beta * advantage)
+
+            # ----------------------------------------------------
+            # B. 计算 Actor Loss (模仿学习部分)
+            # ----------------------------------------------------
+            # 获取当前策略对 batch 状态的概率分布
+            all_probs = self.actor(s_batch) # (Batch, Action_Dim)
+            
+            # 使用 gather 提取实际采取动作的概率
+            probs = all_probs.gather(1, a_batch) 
+            
+            # 加上微小值防止 log(0)
+            log_probs = torch.log(probs + 1e-10)
+            
+            # Loss = - mean( alpha * weights * log_pi )
+            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+
+            # ----------------------------------------------------
+            # C. 计算 Critic Loss (监督学习拟合 R_t)
+            # ----------------------------------------------------
+            v_pred = self.critic(s_batch)
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+
+            # ----------------------------------------------------
+            # D. 反向传播与更新
+            # ----------------------------------------------------
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            # 梯度裁剪
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            # 记录数据
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            batch_count += 1
+
+        # 返回本轮 Epoch 的平均 Loss
+        avg_actor_loss = total_actor_loss / batch_count
+        avg_critic_loss = total_critic_loss / batch_count
+        
+        return avg_actor_loss, avg_critic_loss, self.c_sq.sqrt().item()
 
 
 # 仅调用actor

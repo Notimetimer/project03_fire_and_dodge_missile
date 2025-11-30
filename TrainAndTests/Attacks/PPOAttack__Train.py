@@ -23,8 +23,6 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from Envs.Tasks.AttackManeuverEnv import *
-# from Envs.battle6dof1v1_missile0919 import *
-#   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
 import numpy as np
 import matplotlib
@@ -298,6 +296,7 @@ if __name__ == "__main__":
             #     pbar.set_postfix({'episode': '%d' % (i_episode + 1),
             #                     'return': '%.3f' % np.mean(return_list[-10:])})
             # pbar.update(1)
+            
             # 训练进度显示
             if (i_episode) >= 10:
                 print(

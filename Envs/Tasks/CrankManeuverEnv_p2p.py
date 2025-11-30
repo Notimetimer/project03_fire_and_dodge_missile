@@ -286,7 +286,7 @@ class CrankTrainEnv(Battle):
         cos_phi = state["ego_main"][5]
         phi = atan2(sin_phi, cos_phi)
         # 滚转角惩罚
-        r_angle -= 0.1 * abs(phi / pi)
+        r_angle -= 0.2 * abs(phi / pi) # 禁止倒飞
         # 负过载惩罚
         if ego.Ny<0:
             r_angle -= 0.1 * abs(ego.Ny) / 2

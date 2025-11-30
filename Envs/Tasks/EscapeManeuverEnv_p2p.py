@@ -109,7 +109,10 @@ class EscapeTrainEnv(Battle):
                                    sin(delta_theta_threat),
                                    cos(delta_theta_threat)*sin_delta_psi_threat])
         alpha_threat = np.arccos(np.dot(fake_L_threat_, fake_current_heading_) / (1 + 1e-5))
-
+        p = state["ego_control"][0]
+        sin_phi = state["ego_main"][4]
+        cos_phi = state["ego_main"][5]
+        phi = atan2(sin_phi, cos_phi)
         # cos_threat_psi, sin_threat_psi, threat_delta_theta, threat_distance =\
         #     state["threat"]
 
@@ -221,13 +224,13 @@ class EscapeTrainEnv(Battle):
             r_v = np.clip(dist2m_dt2 / (9.8), -2, 2)
 
             # 过载量加入速度奖励
-            if alpha_threat <= 160*pi/180:
+            if alpha_threat <= 175*pi/180:
                 n_h = ego.Ny*sin(ego.phi)
                 n_v = ego.Ny*cos(ego.phi)
-                r_v += abs(n_h/6) * 2
+                r_v += abs(n_h/6) * 2 * min(abs(alpha_threat-175*pi/180)/(pi/4), 1)
                 r_v -= max(n_v, -3)/6
             else:
-                r_v -= 0 # abs(ego.Ny/6) * 1
+                r_v -= abs(ego.Ny/6) * 0.2
 
             # 高度奖励
             r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
@@ -294,12 +297,9 @@ class EscapeTrainEnv(Battle):
             r_dist = - dist_dot / 340
 
         # 飞行平稳性奖励
-        p = state["ego_control"][0]
-        sin_phi = state["ego_main"][4]
-        cos_phi = state["ego_main"][5]
-        phi = atan2(sin_phi, cos_phi)
+        
         # 滚转角惩罚
-        r_angle -= 0.1 * abs(phi / pi)
+        r_angle -= 0.02 * abs(phi / pi)
         # 负过载惩罚
         if ego.Ny<0:
             r_angle -= 0.1 * abs(ego.Ny) / 2

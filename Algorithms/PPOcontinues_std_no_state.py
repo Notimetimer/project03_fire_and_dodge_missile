@@ -16,33 +16,6 @@ sys.path.append(project_root)
 from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
 from Algorithms.MLP_heads import PolicyNetContinuous, ValueNet
 
-def _scale_action_to_exec_standalone(a, action_bounds, device):
-    """(独立函数) 把 normalized action a (in [-1,1]) 缩放到环境区间。"""
-    action_bounds = torch.as_tensor(action_bounds, dtype=a.dtype, device=device)
-    if action_bounds.dim() == 2:
-        amin = action_bounds[:, 0]
-        amax = action_bounds[:, 1]
-    elif action_bounds.dim() == 3:
-        amin = action_bounds[:, :, 0]
-        amax = action_bounds[:, :, 1]
-    else:
-        raise ValueError("action_bounds 的维度必须是 2 或 3")
-    return amin + (a + 1.0) * 0.5 * (amax - amin)
-
-def take_action_from_policy(policy_net, state, action_bounds, device, max_std=0.3):
-    """独立于PPO类的推理函数，仅使用策略网络。"""
-    state = torch.tensor(np.array([state]), dtype=torch.float).to(device)
-    # 确保网络处于评估模式
-    policy_net.eval()
-    with torch.no_grad():
-        mu, _ = policy_net(state, min_std=1e-6, max_std=max_std)
-        # 确定性动作：使用 mu 的 tanh 作为标准化动作
-        a_norm = torch.tanh(mu)
-        # 缩放到实际动作区间
-        a_exec = _scale_action_to_exec_standalone(a_norm, action_bounds, device)
-    return a_exec[0].cpu().numpy().flatten()
-
-
 class PPOContinuous:
     ''' 处理连续动作的PPO算法，支持时变动作区间（每步 amin/amax 不同）。
 
@@ -195,6 +168,8 @@ class PPOContinuous:
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta, dones).to(self.device)
+
+        self.actor.clear_fixed_std()  # 启动标准差梯度调节
         
         # 优势归一化
         if adv_normed:
@@ -332,6 +307,148 @@ class PPOContinuous:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
+
+
+    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=True):
+        """
+        MARWIL 离线更新函数 (连续动作空间版 - 修正版)
+        逻辑：直接使用存储的 u (pre-tanh) 计算 log_prob，无需反向归一化。
+        
+        参数:
+            il_transition_dict (dict): 必须包含:
+                - 'states': 状态
+                - 'actions': 未经 tanh 和缩放的原始输出 u (pre-tanh actions)
+                - 'returns': 预先计算好的蒙特卡洛回报 (R_t)
+                - 'max_stds' (可选): 专家数据的 max_std
+                # 注意：此时不再强制需要 'action_bounds'，除非用于其他用途，因为计算 log_prob(u) 不需要 bounds
+            beta (float): 优势指数系数
+            batch_size (int): Mini-batch 大小
+            alpha (float): 模仿学习权重
+            c_v (float): 价值损失权重
+            shuffled (bool): 是否打乱数据
+            
+        返回:
+            avg_actor_loss, avg_critic_loss, current_c
+        """
+        # 1. 提取全量数据并转为 Tensor
+        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
+        # 修正：这里的 actions 直接就是 u
+        u_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.float).to(self.device)
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
+        
+        # 2. 准备 Batch 索引
+        total_size = states_all.size(0)
+        indices = np.arange(total_size)
+        if shuffled:
+            np.random.shuffle(indices)
+
+        total_actor_loss = 0
+        total_critic_loss = 0
+        batch_count = 0
+
+        self.actor.set_fixed_std() # 监督学习期间锁定标准差
+
+        # 3. Mini-batch 循环
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+            
+            s_batch = states_all[batch_indices]
+            u_batch = u_all[batch_indices] # 直接取出 u
+            r_batch = returns_all[batch_indices]
+
+            # ----------------------------------------------------
+            # A. 计算优势 (Advantage) 和 权重 (Weights)
+            # ----------------------------------------------------
+            with torch.no_grad():
+                values = self.critic(s_batch)
+                residual = r_batch - values
+                
+                # 动态更新 c^2
+                batch_mse = (residual ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
+                c = torch.sqrt(self.c_sq)
+                
+                # 归一化优势
+                advantage = residual / (c + 1e-8)
+                
+                # 计算指数权重
+                weights = torch.exp(beta * advantage)
+
+            # ----------------------------------------------------
+            # B. 计算 Actor Loss (模仿学习部分)
+            # ----------------------------------------------------
+            # 1. 获取当前策略分布参数 mu, std
+            mu, std = self.actor(s_batch, min_std=1e-6)
+            dist = SquashedNormal(mu, std)
+            
+            # 2. 计算 Log Probability
+            # 直接使用存储的 u 计算 log_prob(u)
+            # 注意：PPO update 中通常也是 dist.log_prob(0, u_old)
+            log_probs = dist.log_prob(0, u_batch).sum(-1, keepdim=True) # (Batch, 1)
+            
+            # 3. 计算 Loss
+            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+
+            # ----------------------------------------------------
+            # C. 计算 Critic Loss
+            # ----------------------------------------------------
+            v_pred = self.critic(s_batch)
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+
+            # ----------------------------------------------------
+            # D. 反向传播
+            # ----------------------------------------------------
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            # 梯度裁剪
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            batch_count += 1
+
+        # 返回平均 Loss
+        avg_actor_loss = total_actor_loss / batch_count
+        avg_critic_loss = total_critic_loss / batch_count
+        
+        return avg_actor_loss, avg_critic_loss, c.item()
+
+
+# 仅调用actor读取输出
+def _scale_action_to_exec_standalone(a, action_bounds, device):
+    """(独立函数) 把 normalized action a (in [-1,1]) 缩放到环境区间。"""
+    action_bounds = torch.as_tensor(action_bounds, dtype=a.dtype, device=device)
+    if action_bounds.dim() == 2:
+        amin = action_bounds[:, 0]
+        amax = action_bounds[:, 1]
+    elif action_bounds.dim() == 3:
+        amin = action_bounds[:, :, 0]
+        amax = action_bounds[:, :, 1]
+    else:
+        raise ValueError("action_bounds 的维度必须是 2 或 3")
+    return amin + (a + 1.0) * 0.5 * (amax - amin)
+
+def take_action_from_policy(policy_net, state, action_bounds, device, max_std=0.3):
+    """独立于PPO类的推理函数，仅使用策略网络。"""
+    state = torch.tensor(np.array([state]), dtype=torch.float).to(device)
+    # 确保网络处于评估模式
+    policy_net.eval()
+    with torch.no_grad():
+        mu, _ = policy_net(state, min_std=1e-6, max_std=max_std)
+        # 确定性动作：使用 mu 的 tanh 作为标准化动作
+        a_norm = torch.tanh(mu)
+        # 缩放到实际动作区间
+        a_exec = _scale_action_to_exec_standalone(a_norm, action_bounds, device)
+    return a_exec[0].cpu().numpy().flatten()
 
 
 # 注意：为了兼容原来的训练循环，请在构造 transition_dict 时保证：

@@ -70,12 +70,12 @@ try:
             env.BUAV.obs_memory = b_obs_check.copy()
             state = np.squeeze(b_obs_n)
             distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
-            # r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
-            #                         enm_pos_=env.BUAV.pos_, distance=distance,
-            #                         ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
-            #                         o00=o00, R_cage=env.R_cage, wander=1
-            #                         )
-            r_action_n, u_r = agent.take_action(r_obs_n, action_bounds=action_bound, explore=False)
+            r_action_n = decision_rule(ego_pos_=env.RUAV.pos_, ego_psi=env.RUAV.psi,
+                                    enm_pos_=env.BUAV.pos_, distance=distance,
+                                    ally_missiles=env.Rmissiles, enm_missiles=env.Bmissiles,
+                                    o00=o00, R_cage=env.R_cage, wander=1
+                                    )
+            # r_action_n, u_r = agent.take_action(r_obs_n, action_bounds=action_bound, explore=False)
             b_action_n, u = agent.take_action(b_obs_n, action_bounds=action_bound, explore=False)
             
             # # 动作平滑（实验性）

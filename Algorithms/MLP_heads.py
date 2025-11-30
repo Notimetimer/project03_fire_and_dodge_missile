@@ -74,11 +74,16 @@ class PolicyNetContinuous(torch.nn.Module):
         return mu, std
 
     # ---------- 新增控制接口 ----------
-    def set_fixed_std(self, value):
-        """立即把 std 设为 value 并冻结参数（不更新 log_std_param）。"""
+    def set_fixed_std(self, value=None):
+        """把 std 设为指定 value 并冻结参数；若 value 为 None（或未传入），则冻结为当前 std 值。"""
         import math
         with torch.no_grad():
-            self.log_std_param.data.fill_(math.log(float(value)))
+            if value is None:
+                # 冻结为当前 log_std_param 的值（即当前 std）
+                current_log = self.log_std_param.data.clone()
+                self.log_std_param.data.copy_(current_log)
+            else:
+                self.log_std_param.data.fill_(math.log(float(value)))
         self._std_frozen = True
         self.log_std_param.requires_grad = False
 

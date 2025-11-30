@@ -103,6 +103,7 @@ def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncat
         advantage_list.reverse()
         return torch.tensor(np.array(advantage_list), dtype=torch.float)
 
+# 计算蒙特卡洛回报（MARWIL）
 def compute_monte_carlo_returns(gamma, rewards, dones, truncateds=None):
     """
     计算蒙特卡洛回报 (Discounted Returns / Rt)。
