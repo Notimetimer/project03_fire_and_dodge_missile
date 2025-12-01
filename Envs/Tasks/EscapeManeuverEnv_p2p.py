@@ -197,7 +197,11 @@ class EscapeTrainEnv(Battle):
             # 下高奖励
             # ego.theta_v 在高空至少应该俯冲，但是俯冲角度超过-30°就不再额外奖励
 
-            # sin_theta = state["ego_main"][2]
+            r_angle_v += 1.5 * (alt < self.min_alt_safe)*(min(theta, pi/6)/(pi/2))
+            # \
+            #             -(alt > self.min_alt_safe)*(max(theta, -pi/6)/(pi/2))
+
+            
             # if -threat_delta_theta>-pi/6:
             #     sin_theta_opt = -1*np.clip((alt-self.min_alt_safe)/5000, -0.99, 0.99)
             # else:
