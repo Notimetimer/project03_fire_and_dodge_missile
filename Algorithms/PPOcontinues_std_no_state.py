@@ -313,7 +313,7 @@ class PPOContinuous:
 
 
 
-    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=True):
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
         """
         MARWIL 离线更新函数 (连续动作空间版 - 修正版)
         逻辑：直接使用存储的 u (pre-tanh) 计算 log_prob，无需反向归一化。
@@ -350,7 +350,7 @@ class PPOContinuous:
         total_critic_loss = 0
         batch_count = 0
 
-        self.actor.set_fixed_std() # 监督学习期间锁定标准差
+        self.actor.set_fixed_std() # 监督学习期间锁定标准差，连续动作空间独有
 
         # 3. Mini-batch 循环
         for start in range(0, total_size, batch_size):
@@ -382,7 +382,7 @@ class PPOContinuous:
                 # 1. 计算原始权重
                 raw_weights = torch.exp(beta * advantage)
                 # 2. 截断权重，例如最大不超过 100.0 (e^4.6)
-                weights = torch.clamp(raw_weights, max=100.0)
+                weights = torch.clamp(raw_weights, max=max_weight)
 
             # ----------------------------------------------------
             # B. 计算 Actor Loss (模仿学习部分)

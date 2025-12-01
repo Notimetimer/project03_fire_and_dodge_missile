@@ -46,6 +46,10 @@ class PPOContinuous:
         self.critic_max_grad=critic_max_grad
         self.actor_max_grad=actor_max_grad
         self.max_std = max_std
+
+        # [新增] MARWIL 专用：优势函数归一化因子的平方 (c^2)
+        # 初始化为 1.0，用于动态追踪 (R_t - V)^2 的移动平均值
+        self.c_sq = torch.tensor(1.0, dtype=torch.float).to(device)
     
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -380,6 +384,123 @@ class PPOContinuous:
         check_weights_bias_nan(self.critic, "critic", "update后")
 
 
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
+        """
+        MARWIL 离线更新函数 (连续动作空间版 - 修正版)
+        逻辑：直接使用存储的 u (pre-tanh) 计算 log_prob，无需反向归一化。
+        
+        参数:
+            il_transition_dict (dict): 必须包含:
+                - 'states': 状态
+                - 'actions': 未经 tanh 和缩放的原始输出 u (pre-tanh actions)
+                - 'returns': 预先计算好的蒙特卡洛回报 (R_t)
+                - 'max_stds' (可选): 专家数据的 max_std
+                # 注意：此时不再强制需要 'action_bounds'，除非用于其他用途，因为计算 log_prob(u) 不需要 bounds
+            beta (float): 优势指数系数 建议的起始值通常是 介于 0.25 到 1.0 之间
+            batch_size (int): Mini-batch 大小
+            alpha (float): 模仿学习权重
+            c_v (float): 价值损失权重
+            shuffled (bool): 是否打乱数据
+            
+        返回:
+            avg_actor_loss, avg_critic_loss, current_c
+        """
+        # 1. 提取全量数据并转为 Tensor
+        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
+        # 修正：这里的 actions 直接就是 u
+        u_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.float).to(self.device)
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
+        
+        # 2. 准备 Batch 索引
+        total_size = states_all.size(0)
+        indices = np.arange(total_size)
+        if shuffled:
+            np.random.shuffle(indices)
+
+        total_actor_loss = 0
+        total_critic_loss = 0
+        batch_count = 0
+
+        self.actor.set_fixed_std() # 监督学习期间锁定标准差
+
+        # 3. Mini-batch 循环
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+            
+            s_batch = states_all[batch_indices]
+            u_batch = u_all[batch_indices] # 直接取出 u
+            r_batch = returns_all[batch_indices]
+
+            # ----------------------------------------------------
+            # A. 计算优势 (Advantage) 和 权重 (Weights)
+            # ----------------------------------------------------
+            with torch.no_grad():
+                values = self.critic(s_batch)
+                residual = r_batch - values
+                
+                # 动态更新 c^2
+                batch_mse = (residual ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
+                c = torch.sqrt(self.c_sq)
+                
+                # 归一化优势
+                advantage = residual / (c + 1e-8)
+                
+                # 计算指数权重
+                # weights = torch.exp(beta * advantage)
+                # 修改为:
+                # 1. 计算原始权重
+                raw_weights = torch.exp(beta * advantage)
+                # 2. 截断权重，例如最大不超过 100.0 (e^4.6)
+                weights = torch.clamp(raw_weights, max=max_weight)
+
+            # ----------------------------------------------------
+            # B. 计算 Actor Loss (模仿学习部分)
+            # ----------------------------------------------------
+            # 1. 获取当前策略分布参数 mu, std
+            mu, std = self.actor(s_batch, min_std=1e-6)
+            dist = SquashedNormal(mu, std)
+            
+            # 2. 计算 Log Probability
+            # 直接使用存储的 u 计算 log_prob(u)
+            # 注意：PPO update 中通常也是 dist.log_prob(0, u_old)
+            log_probs = dist.log_prob(0, u_batch).sum(-1, keepdim=True) # (Batch, 1)
+            
+            # 3. 计算 Loss
+            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+
+            # ----------------------------------------------------
+            # C. 计算 Critic Loss
+            # ----------------------------------------------------
+            v_pred = self.critic(s_batch)
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+
+            # ----------------------------------------------------
+            # D. 反向传播
+            # ----------------------------------------------------
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            # 梯度裁剪
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            batch_count += 1
+
+        # 返回平均 Loss
+        avg_actor_loss = total_actor_loss / batch_count
+        avg_critic_loss = total_critic_loss / batch_count
+        
+        return avg_actor_loss, avg_critic_loss, c.item()
 
 # 仅调用actor读取输出
 def _scale_action_to_exec_standalone(a, action_bounds, device):

@@ -9,13 +9,15 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, moving_average, check_weights_bias_nan, compute_advantage, SquashedNormal
-from Algorithms.MLP_heads import ValueNet, PolicyNetDiscrete
+# [修改] 引入 PolicyNetMultiDiscrete
+from Algorithms.MLP_heads import ValueNet, PolicyNetMultiDiscrete
 
-class PPO_discrete:
-    ''' PPO算法,采用截断方式 '''
+class PPO_multi_discrete:
+    ''' PPO算法, 适配 Multi-Discrete (多重离散) 动作空间 '''
     def __init__(self, state_dim, hidden_dims, action_dim, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2):
-        self.actor = PolicyNetDiscrete(state_dim, hidden_dims, action_dim).to(device)
+        # [修改] 使用 PolicyNetMultiDiscrete, action_dim 应当是一个 list [dim_1, dim_2, ...]
+        self.actor = PolicyNetMultiDiscrete(state_dim, hidden_dims, action_dim).to(device)
         self.critic = ValueNet(state_dim, hidden_dims).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
@@ -26,8 +28,8 @@ class PPO_discrete:
         self.eps = eps
         self.device = device
         self.k_entropy = k_entropy
-        self.actor_max_grad=actor_max_grad
-        self.critic_max_grad=critic_max_grad
+        self.actor_max_grad = actor_max_grad
+        self.critic_max_grad = critic_max_grad
 
         # [新增] MARWIL 专用：优势函数归一化因子的平方 (c^2)
         # 初始化为 1.0，用于动态追踪 (R_t - V)^2 的移动平均值
@@ -44,34 +46,98 @@ class PPO_discrete:
                 param_group['lr'] = critic_lr    
 
     def take_action(self, state, explore=True):
+        """
+        [修改] 适配多重离散动作
+        返回:
+            probs_list: list of numpy arrays (每个维度的概率分布)
+            action: list of ints (每个维度的动作索引)
+        """
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
-        probs = self.actor(state)
-        action_dist = torch.distributions.Categorical(probs) # 离散的输出为类别分布
-        if explore:
-            action = action_dist.sample()
-        else:
-            action = torch.argmax(probs)
-        # 返回动作索引与对应的概率分布（numpy array）
-        probs_np = probs.detach().cpu().numpy()[0].copy() # [0]是batch维度
-        return probs_np, action.item()
+        
+        # PolicyNetMultiDiscrete 返回的是一个 list，包含每个维度的 (batch, dim_actions) 概率
+        probs_list_t = self.actor(state)
+        
+        actions = []
+        probs_np_list = []
+
+        # 遍历每个维度的输出分布
+        for probs in probs_list_t:
+            action_dist = torch.distributions.Categorical(probs)
+            if explore:
+                action = action_dist.sample()
+            else:
+                action = torch.argmax(probs, dim=1)
+            
+            actions.append(action.item())
+            probs_np_list.append(probs.detach().cpu().numpy()[0]) # [0] batch dim
+
+        return probs_np_list, actions
+
+    def _get_log_probs_and_entropy(self, states, actions):
+        """
+        [新增辅助函数] 计算联合对数概率和总熵
+        state: (Batch, State_Dim)
+        actions: (Batch, Action_Dims_Count)
+        Returns:
+            log_prob_sum: (Batch, 1) 所有维度 log_prob 之和
+            entropy_sum: Scalar, 所有维度熵的平均值之和 (用于 Loss)
+        """
+        probs_list = self.actor(states) # List of (Batch, Num_Actions_i)
+        
+        log_prob_list = []
+        entropy_sum = 0
+        
+        # 遍历每个动作维度
+        for i, probs in enumerate(probs_list):
+            dist = torch.distributions.Categorical(probs)
+            
+            # 取出当前维度对应的动作索引 (Batch,)
+            # actions[:, i] 
+            current_action = actions[:, i]
+            
+            # 计算该维度的 log_prob
+            log_prob_list.append(dist.log_prob(current_action))
+            
+            # 计算熵 (Batch,) -> Mean
+            entropy_sum += dist.entropy().mean()
+
+        # 堆叠所有维度的 log_prob: (Batch, Num_Dims)
+        log_prob_stack = torch.stack(log_prob_list, dim=1)
+        
+        # 联合概率的 log 等于各独立概率 log 之和: (Batch, 1)
+        log_prob_sum = log_prob_stack.sum(dim=1, keepdim=True)
+        
+        return log_prob_sum, entropy_sum
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        # actions 必须为 long 用于 gather 索引
-        actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.long).view(-1, 1).to(self.device)
+        
+        # [修改] actions 形状调整为 (Batch, Num_Dims)，不再强制 view(-1, 1)
+        actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.long).to(self.device)
+        if actions.dim() == 1:
+            actions = actions.view(-1, 1) # 兼容单维度情况，变成 (N, 1)
+
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        log_probs = torch.log(self.actor(states).gather(1, actions))
-        # 添加Actor NaN检查
-        if torch.isnan(log_probs).any():
-            raise ValueError("NaN in Actor outputs")
-        # 添加Critic NaN检查
-        critic_values = self.critic(states)
-        if torch.isnan(critic_values).any():
-            raise ValueError("NaN in Critic outputs")
+        # 1. 初始计算
+        # 计算旧的 log_probs
+        with torch.no_grad():
+            old_log_probs, _ = self._get_log_probs_and_entropy(states, actions)
+            
+            # NaN 检查
+            if torch.isnan(old_log_probs).any():
+                raise ValueError("NaN in Old Actor outputs")
+            
+            critic_values = self.critic(states)
+            if torch.isnan(critic_values).any():
+                raise ValueError("NaN in Critic outputs")
+            
+            # 提前计算旧的 value 预测（用于 value clipping）
+            v_pred_old = critic_values.detach()
 
+        # 2. 优势函数计算
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
         td_delta = td_target - self.critic(states)
         advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
@@ -79,15 +145,7 @@ class PPO_discrete:
         # 优势归一化
         if adv_normed:
             adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
-            # advantage = torch.clamp((advantage - adv_mean) / (adv_std + 1e-8) -10.0, 10.0)
-            
-            # adv_mean, adv_std = advantage.mean(), advantage.std(unbiased=False) 
             advantage = (advantage - adv_mean) / (adv_std + 1e-8)
-
-        # 提前计算一次旧的 value 预测（用于 value clipping）
-        v_pred_old = self.critic(states).detach()  # (N,1)
-
-        old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
 
         actor_grad_list = []
         actor_loss_list = []
@@ -99,40 +157,35 @@ class PPO_discrete:
         ratio_list = []
 
         for _ in range(self.epochs):
-            log_probs = torch.log(self.actor(states).gather(1, actions))
-            # 添加Actor NaN检查
+            # [修改] 使用新的辅助函数获取 log_probs 和 entropy
+            log_probs, entropy_mean_step = self._get_log_probs_and_entropy(states, actions)
+            
             if torch.isnan(log_probs).any():
                 raise ValueError("NaN in Actor outputs in loop")
-            # 添加Critic NaN检查
-            critic_values = self.critic(states)
-            if torch.isnan(critic_values).any():
-                raise ValueError("NaN in Critic outputs in loop")
 
-            # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
+            # 权重/偏置 NaN 检查
             check_weights_bias_nan(self.actor, "actor", "update循环中")
             check_weights_bias_nan(self.critic, "critic", "update循环中")
 
-            log_probs = torch.log(self.actor(states).gather(1, actions)) # (N,1)
+            # Ratio 计算
             ratio = torch.exp(log_probs - old_log_probs) # (N,1)
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
 
-            probs = self.actor(states)
-            action_dist = torch.distributions.Categorical(probs)
+            # Entropy
+            entropy_factor = entropy_mean_step
 
-            entropy_factor = action_dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
+            # Actor Loss
+            actor_loss = torch.mean(-torch.min(surr1, surr2)) - self.k_entropy * entropy_factor
 
-            actor_loss = torch.mean(-torch.min(surr1, surr2)) - self.k_entropy * entropy_factor # 标量
-
-            # 计算 critic_loss：支持可选的 value clipping（PPO 风格）
+            # Critic Loss
             if clip_vf:
-                v_pred = self.critic(states)                                  # 当前预测 (N,1)
+                v_pred = self.critic(states)
                 v_pred_clipped = torch.clamp(v_pred, v_pred_old - clip_range, v_pred_old + clip_range)
-                vf_loss1 = (v_pred - td_target.detach()).pow(2)               # (N,1)
-                vf_loss2 = (v_pred_clipped - td_target.detach()).pow(2)       # (N,1)
+                vf_loss1 = (v_pred - td_target.detach()).pow(2)
+                vf_loss2 = (v_pred_clipped - td_target.detach()).pow(2)
                 critic_loss = torch.max(vf_loss1, vf_loss2).mean()
             else:
-                # critic_loss = F.mse_loss(self.critic(states), td_target.detach()) # 原有
                 critic_loss = torch.mean(F.mse_loss(self.critic(states), td_target.detach()))
             
             self.actor_optimizer.zero_grad()
@@ -140,23 +193,20 @@ class PPO_discrete:
             actor_loss.backward()
             critic_loss.backward()
             
-            # 裁剪前梯度
             pre_clip_actor_grad.append(model_grad_norm(self.actor))
             pre_clip_critic_grad.append(model_grad_norm(self.critic))  
 
-            # 梯度裁剪
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
             self.actor_optimizer.step()
             self.critic_optimizer.step()
 
-            # # 保存用于日志/展示的数值（断开计算图并搬到 CPU）
             actor_grad_list.append(model_grad_norm(self.actor))
             actor_loss_list.append(actor_loss.detach().cpu().item())
             critic_grad_list.append(model_grad_norm(self.critic))            
             critic_loss_list.append(critic_loss.detach().cpu().item())
-            entropy_list.append(action_dist.entropy().mean().detach().cpu().item())
+            entropy_list.append(entropy_factor.detach().cpu().item())
             ratio_list.append(ratio.mean().detach().cpu().item())
         
         self.actor_loss = np.mean(actor_loss_list)
@@ -168,34 +218,19 @@ class PPO_discrete:
         self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
         self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
         self.advantage = advantage.abs().mean().detach().cpu().item()
-        # 权重/偏置 NaN 检查（在每次前向后、反向前检查参数）
+        
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
-
-def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
+    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
         """
-        MARWIL 离线更新函数 (执行一个 Epoch)
-        逻辑：接收全量专家数据 -> 打乱(可选) -> 按 batch_size 拆分 -> 逐个 mini-batch 更新
-        
-        参数:
-            il_transition_dict (dict): 包含 'states', 'actions', 'returns' 的字典
-            beta (float): MARWIL 优势指数系数 (exp(beta * A))
-            batch_size (int): Mini-batch 的大小
-            alpha (float): 模仿学习损失的权重 (用于平衡 Actor Loss)
-            c_v (float): 价值网络损失的权重 (用于平衡 Critic Loss)
-            shuffled (bool): 是否在分批前打乱数据
-            
-        返回:
-            avg_actor_loss, avg_critic_loss, current_c
+        MARWIL 离线更新函数 (适配 Multi-Discrete)
         """
-        # 1. 提取全量数据并转为 Tensor (一次性转移到 Device)
-        # 注意：这里需要 il_transition_dict 包含 'returns' (即计算好的 R_t)，而不是原始 rewards
         states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
-        actions_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.long).to(self.device) # 离散动作需为 long
+        actions_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.long).to(self.device)
         returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        # 确保 actions 形状适配 gather (N, 1)
+        # 确保 actions 形状 (N, Dims)
         if actions_all.dim() == 1:
             actions_all = actions_all.view(-1, 1)
 
@@ -248,18 +283,23 @@ def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=
 
             # ----------------------------------------------------
             # B. 计算 Actor Loss (模仿学习部分)
-            # ----------------------------------------------------
-            # 获取当前策略对 batch 状态的概率分布
-            all_probs = self.actor(s_batch) # (Batch, Action_Dim)
+            # [修改] 对多维动作，Loss = - mean( weights * sum(log_probs_per_dim) )
             
-            # 使用 gather 提取实际采取动作的概率
-            probs = all_probs.gather(1, a_batch) 
+            probs_list = self.actor(s_batch) # List of (Batch, Dim_i_Actions)
+            joint_log_prob = 0
             
-            # 加上微小值防止 log(0)
-            log_probs = torch.log(probs + 1e-10)
+            for i, probs in enumerate(probs_list):
+                # 加上微小值防止 log(0)
+                # 使用 gather 提取实际采取动作的概率
+                # a_batch[:, i] -> (Batch, ) -> view(-1, 1) -> (Batch, 1)
+                action_idx = a_batch[:, i].view(-1, 1)
+                selected_probs = probs.gather(1, action_idx)
+                
+                log_prob_i = torch.log(selected_probs + 1e-10)
+                joint_log_prob = joint_log_prob + log_prob_i
             
-            # Loss = - mean( alpha * weights * log_pi )
-            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+            # Loss = - mean( alpha * weights * log_pi_joint )
+            actor_loss = -torch.mean(alpha * weights.detach() * joint_log_prob)
 
             # ----------------------------------------------------
             # C. 计算 Critic Loss (监督学习拟合 R_t)
@@ -294,26 +334,25 @@ def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=
         
         return avg_actor_loss, avg_critic_loss, self.c_sq.sqrt().item()
 
-
-# 仅调用actor
-def take_action_from_policy_discrete(policy_net, state, device, explore=False):
+# 仅调用actor的推理函数
+def take_action_from_policy_multi_discrete(policy_net, state, device, explore=False):
     """
-    独立的离散策略推理函数。
-    输入:
-      policy_net: PolicyNetDiscrete 实例
-      state: 可被 np.array 接受的状态（标量或一维特征向量）
-      device: torch.device
-      explore: True 则从分布采样，False 则选择 argmax（确定性）
+    [修改] 适配多重离散策略推理。
     返回:
-      action: int 动作索引
+      action: list of ints (每个维度的动作索引)
     """
     policy_net.eval()
     state_t = torch.tensor(np.array([state]), dtype=torch.float).to(device)
     with torch.no_grad():
-        probs = policy_net(state_t)  # (1, action_dim)
-        if explore:
-            dist = torch.distributions.Categorical(probs)
-            action = int(dist.sample().item())
-        else:
-            action = int(torch.argmax(probs, dim=1).item())
-    return action
+        probs_list = policy_net(state_t)  # List of (1, action_dim_i)
+        
+        actions = []
+        for probs in probs_list:
+            if explore:
+                dist = torch.distributions.Categorical(probs)
+                action = int(dist.sample().item())
+            else:
+                action = int(torch.argmax(probs, dim=1).item())
+            actions.append(action)
+            
+    return actions
