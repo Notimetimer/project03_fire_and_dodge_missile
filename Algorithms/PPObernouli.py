@@ -14,7 +14,8 @@ from Algorithms.MLP_heads import PolicyNetBernouli, ValueNet
 class PPO_bernouli:
     ''' PPO算法,采用截断方式 '''
     def __init__(self, state_dim, hidden_dims, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, critic_max_grad=2, actor_max_grad=2,
+                 init_temperature=1.0, temp_decay=0.995):
         self.actor = PolicyNetBernouli(state_dim, hidden_dims, action_dim).to(device)  # 使用 PolicyNetBernouli
         self.critic = ValueNet(state_dim, hidden_dims).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -37,6 +38,9 @@ class PPO_bernouli:
         # [新增] 用于 MARWIL 优势归一化的平方范数估计值
         # 初始值通常设置为 1.0 或一个小的正数
         self.c_sq = torch.tensor(1.0, dtype=torch.float).to(device)
+        self.temperature = init_temperature  # 初始温度设为 2.0 或更高，视过拟合程度而定
+        self.min_temperature = 1.0
+        self.temp_decay = temp_decay # 每个 episode 或 update 后衰减
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -53,7 +57,7 @@ class PPO_bernouli:
         :param state: 输入状态 (tensor)
         :return: 动作概率 (tensor)
         """
-        logits = self.actor(state)  # 获取未经过 sigmoid 的 logits
+        logits = self.actor(state, temperature=self.temperature)  # 获取未经过 sigmoid 的 logits
         probs = torch.sigmoid(logits)  # 应用 sigmoid 激活函数
         return probs
 
@@ -216,9 +220,15 @@ class PPO_bernouli:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
-    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
+        self.temperature = max(self.min_temperature, self.temperature * self.temp_decay)
+
+
+    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100, label_smoothing=0.0):
         """
-        MARWIL 离线更新函数 (适配 Multi-Discrete)
+        [改进版] MARWIL 离线更新函数 (Bernoulli)
+        新增参数:
+            label_smoothing (float): 标签平滑系数. 
+                                     例如 0.1 意味着目标从 [0, 1] 变为 [0.05, 0.95] (如果是向0.5平滑)
         """
         states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
         actions_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.float).to(self.device)
@@ -281,15 +291,32 @@ class PPO_bernouli:
             
             probs = self.get_action_probs(s_batch)
             probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
-
-            # 计算 log_prob (针对 Bernoulli 分布)
-            # log_probs = log(p)*a + log(1-p)*(1-a)
-            log_probs = torch.log(probs) * a_batch + torch.log(1 - probs) * (1 - a_batch)
-            log_probs = log_probs.sum(dim=-1, keepdim=True)
             
-            # Loss = - mean( alpha * weights * log_pi_joint )
-            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+            # 原有拟合目标
+            # # 计算 log_prob (针对 Bernoulli 分布)
+            # # log_probs = log(p)*a + log(1-p)*(1-a)
+            # log_probs = torch.log(probs) * a_batch + torch.log(1 - probs) * (1 - a_batch)
+            # log_probs = log_probs.sum(dim=-1, keepdim=True)
+            # # Loss = - mean( alpha * weights * log_pi_joint )
+            # actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
 
+            # 新的拟合目标
+            target = a_batch
+            if label_smoothing > 0:
+                # 标签平滑: 
+                # 如果是 1 -> 1 - 0.5*eps
+                # 如果是 0 -> 0 + 0.5*eps
+                # 公式: y_smooth = y * (1 - eps) + 0.5 * eps
+                target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+            # 计算 Binary Cross Entropy (手动计算以支持加权)
+            # BCE = - [ y * log(p) + (1-y) * log(1-p) ]
+            # 注意: 这里计算的是每个维度(Action_Dim)的 loss
+            bce_per_dim = -(target * torch.log(probs) + (1.0 - target) * torch.log(1.0 - probs))
+            # 对所有动作维度求和，得到每个样本的总 Loss (Batch, 1)
+            bce_sample = bce_per_dim.sum(dim=-1, keepdim=True)
+            # 加权 Loss
+            actor_loss = torch.mean(alpha * weights.detach() * bce_sample)
+            
             # ----------------------------------------------------
             # C. 计算 Critic Loss (监督学习拟合 R_t)
             # ----------------------------------------------------

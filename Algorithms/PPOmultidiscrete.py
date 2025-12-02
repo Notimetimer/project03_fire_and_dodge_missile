@@ -222,9 +222,11 @@ class PPO_multi_discrete:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
-    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
+def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100, label_smoothing=0.0):
         """
         MARWIL 离线更新函数 (适配 Multi-Discrete)
+        新增参数:
+            label_smoothing (float): 标签平滑系数. 
         """
         states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
         actions_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.long).to(self.device)
@@ -250,10 +252,6 @@ class PPO_multi_discrete:
             end = min(start + batch_size, total_size)
             batch_indices = indices[start:end]
             
-            # 切片获取 Mini-batch 数据
-            # torch.tensor(batch_indices) 可能会带来额外的 CPU->GPU 开销，
-            # 如果 indices 是 numpy，直接切片 tensor 也是可以的，但在 GPU tensor 上索引通常建议传入 tensor 或 list
-            # 这里为了通用性，直接使用 numpy 索引
             s_batch = states_all[batch_indices]
             a_batch = actions_all[batch_indices]
             r_batch = returns_all[batch_indices]
@@ -263,43 +261,61 @@ class PPO_multi_discrete:
             # ----------------------------------------------------
             with torch.no_grad():
                 values = self.critic(s_batch)
-                # 计算残差: A_hat = R_t - V(s)
                 residual = r_batch - values
                 
                 # --- 动态更新归一化因子 c ---
-                # 论文脚注: c^2 <- c^2 + 10^-8 * (residual^2 - c^2)
                 batch_mse = (residual ** 2).mean().item()
                 self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
                 c = torch.sqrt(self.c_sq)
                 
-                # 归一化优势
+                # 归一化优势 & 计算权重
                 advantage = residual / (c + 1e-8)
-                
-                # 计算指数权重: w = exp(beta * A)
-                # 1. 计算原始权重
                 raw_weights = torch.exp(beta * advantage)
-                # 2. 截断权重，例如最大不超过 100.0 (e^4.6)
                 weights = torch.clamp(raw_weights, max=max_weight)
 
             # ----------------------------------------------------
             # B. 计算 Actor Loss (模仿学习部分)
-            # [修改] 对多维动作，Loss = - mean( weights * sum(log_probs_per_dim) )
-            
+            # ----------------------------------------------------
             probs_list = self.actor(s_batch) # List of (Batch, Dim_i_Actions)
-            joint_log_prob = 0
             
+            # 我们需要累加所有维度的 CrossEntropy Loss
+            joint_ce_loss = 0 
+            
+            # 遍历每一个动作维度
             for i, probs in enumerate(probs_list):
-                # 加上微小值防止 log(0)
-                # 使用 gather 提取实际采取动作的概率
-                # a_batch[:, i] -> (Batch, ) -> view(-1, 1) -> (Batch, 1)
+                # 1. 获取该维度下的动作索引 (Batch, 1)
                 action_idx = a_batch[:, i].view(-1, 1)
-                selected_probs = probs.gather(1, action_idx)
                 
-                log_prob_i = torch.log(selected_probs + 1e-10)
-                joint_log_prob = joint_log_prob + log_prob_i
+                # 2. 计算该维度所有动作的 log_prob (Batch, Num_Classes_i)
+                log_all_probs = torch.log(probs + 1e-10)
+                
+                if label_smoothing > 0:
+                    # === Label Smoothing 分支 ===
+                    # A. 构建 One-hot
+                    one_hot = torch.zeros_like(probs).scatter_(1, action_idx, 1.0)
+                    
+                    # B. 构建 Soft Target
+                    # 注意: probs.size(1) 是当前维度的类别数 K
+                    n_classes = probs.size(1)
+                    smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / n_classes)
+                    
+                    # C. 计算 Soft Cross Entropy (Batch, 1)
+                    ce_loss_dim = -torch.sum(smooth_target * log_all_probs, dim=1, keepdim=True)
+                else:
+                    # === 标准 Gather 分支 ===
+                    # 只提取专家动作的 log_prob
+                    chosen_log_probs = log_all_probs.gather(1, action_idx)
+                    # 变成正的 loss
+                    ce_loss_dim = -chosen_log_probs
+                
+                # 3. 累加维度的 Loss
+                # 联合概率 P(a, b) = P(a) * P(b) -> log P(a,b) = log P(a) + log P(b)
+                # 所以 CrossEntropy(Joint) = sum(CrossEntropy(Dim_i))
+                joint_ce_loss = joint_ce_loss + ce_loss_dim
             
-            # Loss = - mean( alpha * weights * log_pi_joint )
-            actor_loss = -torch.mean(alpha * weights.detach() * joint_log_prob)
+            # 4. 加权并求平均
+            # joint_ce_loss 已经是正数形式的 Loss，所以直接 mean
+            actor_loss = torch.mean(alpha * weights.detach() * joint_ce_loss)
 
             # ----------------------------------------------------
             # C. 计算 Critic Loss (监督学习拟合 R_t)
@@ -316,7 +332,6 @@ class PPO_multi_discrete:
             actor_loss.backward()
             critic_loss.backward()
             
-            # 梯度裁剪
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
@@ -328,7 +343,6 @@ class PPO_multi_discrete:
             total_critic_loss += critic_loss.item()
             batch_count += 1
 
-        # 返回本轮 Epoch 的平均 Loss
         avg_actor_loss = total_actor_loss / batch_count
         avg_critic_loss = total_critic_loss / batch_count
         

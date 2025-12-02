@@ -139,65 +139,43 @@ class PolicyNetMultiDiscrete(torch.nn.Module):
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
 
-        # 规范化 action_dim 为 list
-        if isinstance(action_dim, (list, tuple)):
-            self.action_dims = [int(a) for a in action_dim]
-        else:
-            self.action_dims = [int(action_dim)]
+        # 强制要求 action_dim 是一个序列
+        if not isinstance(action_dim, (list, tuple)):
+            raise TypeError("action_dim must be a list or tuple of integers for PolicyNetMultiDiscrete.")
+        self.action_dims = [int(a) for a in action_dim]
 
-        # 单一 head 或 多头
-        if len(self.action_dims) == 1:
-            self.single = True
-            self.fc_out = nn.Linear(prev_size, self.action_dims[0])
-        else:
-            self.single = False
-            self.fc_outs = nn.ModuleList([nn.Linear(prev_size, a) for a in self.action_dims])
+        # 总是使用多头输出
+        self.fc_outs = nn.ModuleList([nn.Linear(prev_size, a) for a in self.action_dims])
 
         # 合理初始化输出层（可选，但推荐）
-        if self.single:
-            torch.nn.init.xavier_normal_(self.fc_out.weight, gain=0.01)
-            torch.nn.init.zeros_(self.fc_out.bias)
-        else:
-            for fc in self.fc_outs:
-                torch.nn.init.xavier_normal_(fc.weight, gain=0.01)
-                torch.nn.init.zeros_(fc.bias)
+        for fc in self.fc_outs:
+            torch.nn.init.xavier_normal_(fc.weight, gain=0.01)
+            torch.nn.init.zeros_(fc.bias)
 
     def forward(self, x, logits=False, temperature=1.0):
         """
         输入 x 可以是任意维度，最后一维必须是 state_dim（特征维）。
         - logits (bool): 若为 True，返回 scaled logits；否则返回 softmax 概率。
         - temperature (float): 应用于 logits 的温度参数。
-        - 返回值：
-          - 单头：形状为 [..., action_dim] 的张量。
-          - 多头：一个 list，每项是形状为 [..., action_dim_i] 的张量。
+        - 返回值：一个 list，每项是形状为 [..., action_dim_i] 的张量。
         """
         # 保留前导形状，flatten 到 (N, state_dim)
         *lead_shape, feat_dim = x.shape
         x_flat = x.reshape(-1, feat_dim)
         h = self.net(x_flat)
 
-        if self.single:
-            out_logits = self.fc_out(h)  # (N, action_dim)
+        outs = []
+        for fc in self.fc_outs:
+            out_logits = fc(h)  # (N, action_dim_i)
             scaled_logits = out_logits / temperature
             
             if logits:
-                return scaled_logits.view(*lead_shape, self.action_dims[0])
+                result = scaled_logits.view(*lead_shape, scaled_logits.shape[-1])
             else:
                 probs = F.softmax(scaled_logits, dim=-1)
-                return probs.view(*lead_shape, self.action_dims[0])
-        else:
-            outs = []
-            for fc in self.fc_outs:
-                out_logits = fc(h)  # (N, action_dim_i)
-                scaled_logits = out_logits / temperature
-                
-                if logits:
-                    result = scaled_logits.view(*lead_shape, scaled_logits.shape[-1])
-                else:
-                    probs = F.softmax(scaled_logits, dim=-1)
-                    result = probs.view(*lead_shape, probs.shape[-1])
-                outs.append(result)
-            return outs
+                result = probs.view(*lead_shape, probs.shape[-1])
+            outs.append(result)
+        return outs
 
 
 # 伯努利动作空间 actor head
