@@ -47,7 +47,7 @@ from Visualize.tacview_visualize import *
 from Visualize.tensorboard_visualize import *
 
 # 常规PPO
-from Algorithms.PPObernouli2 import *
+from Algorithms.PPObernouli import *
 
 # from tqdm import tqdm
 

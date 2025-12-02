@@ -305,7 +305,7 @@ class PPO_multi_discrete:
             # C. 计算 Critic Loss (监督学习拟合 R_t)
             # ----------------------------------------------------
             v_pred = self.critic(s_batch)
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v * alpha
 
             # ----------------------------------------------------
             # D. 反向传播与更新
@@ -319,7 +319,7 @@ class PPO_multi_discrete:
             # 梯度裁剪
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-            
+
             self.actor_optimizer.step()
             self.critic_optimizer.step()
 

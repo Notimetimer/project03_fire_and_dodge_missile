@@ -53,7 +53,7 @@ pre_log_dir = os.path.join(project_root, "logs/shoot")
 
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 
-log_dir = os.path.join(pre_log_dir, "Shoot_old-run-20251114-093439")
+# log_dir = os.path.join(pre_log_dir, "Shoot_old-run-20251114-093439")
 
 # print("log目录", log_dir)
 
@@ -96,7 +96,7 @@ env = ShootTrainEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 1+1+1+ 8 + 7 + 1  # len(b_obs_spaces)
-action_dim = b_action_spaces[0].shape[0]
+action_dim = 1
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -155,9 +155,7 @@ if __name__ == "__main__":
         # with tqdm(total=int(num_episodes*(1-pre_train_rate)), desc='Iteration') as pbar:  # 进度条
         # for i_episode in range(int(num_episodes*(1-pre_train_rate))):
         for i_episode in range(4):  # 10
-            i_episode += 1
             test_run = 1
-            i_episode += 1
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
 

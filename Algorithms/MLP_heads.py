@@ -216,6 +216,6 @@ class PolicyNetBernouli(torch.nn.Module):
 # todo 待测试后合入
 
 
-# MAPPO集中式 Critic
+# MAPPO集中式 Critic 带id输入
 # todo 待测试后合入，也可能分开到别的文件
 

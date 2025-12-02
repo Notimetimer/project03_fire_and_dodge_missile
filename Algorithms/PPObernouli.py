@@ -9,27 +9,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, moving_average, compute_advantage
-
-# def compute_advantage(gamma, lmbda, td_delta, dones):
-#     td_delta = td_delta.detach().cpu().numpy()
-#     dones = dones.detach().cpu().numpy() # [新增] 转为 numpy
-#     advantage_list = []
-#     advantage = 0.0
-    
-#     # [修改] 同时遍历 delta 和 done
-#     for delta, done in zip(td_delta[::-1], dones[::-1]):
-#         # 如果当前是 done，说明这是序列的最后一步（或者该步之后没有未来），
-#         # 此时不应该加上一步（时间上的未来）的 advantage。
-#         # 注意：这里的 advantage 变量存的是“下一步的优势”，所以要乘 (1-done)
-#         advantage = delta + gamma * lmbda * advantage * (1 - done)
-#         advantage_list.append(advantage)
-        
-#     advantage_list.reverse()
-#     return torch.tensor(np.array(advantage_list), dtype=torch.float)
-
-from Algorithms.MLP_heads import ValueNet, PolicyNetBernouli
-
-
+from Algorithms.MLP_heads import PolicyNetBernouli, ValueNet
 
 class PPO_bernouli:
     ''' PPO算法,采用截断方式 '''
@@ -40,6 +20,10 @@ class PPO_bernouli:
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
 
+        # [新增] 专门用于 MARWIL 的优化器 (建议学习率可以比 RL 小一点)
+        self.actor_optimizer_il = torch.optim.Adam(self.actor.parameters(), lr=actor_lr) 
+        self.critic_optimizer_il = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
+
         self.gamma = gamma
         self.lmbda = lmbda
         self.epochs = epochs
@@ -48,6 +32,11 @@ class PPO_bernouli:
         self.k_entropy = k_entropy
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
+
+
+        # [新增] 用于 MARWIL 优势归一化的平方范数估计值
+        # 初始值通常设置为 1.0 或一个小的正数
+        self.c_sq = torch.tensor(1.0, dtype=torch.float).to(device)
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -92,7 +81,7 @@ class PPO_bernouli:
         # 如果 action_dim == 1，保持返回形状为 (1,) 而不是 python int
         return actions_np, probs_np
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
+    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=False):
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
         # # 统一 actions 形状为 (N, action_dim)
@@ -130,6 +119,19 @@ class PPO_bernouli:
         old_probs = self.get_action_probs(states).detach()  # 调用 get_action_probs 获取概率
         old_log_probs = torch.log(old_probs) * actions + torch.log(1 - old_probs) * (1 - actions)
         old_log_probs = old_log_probs.sum(dim=1, keepdim=True).detach()
+
+        # [新增] 打乱顺序 (Shuffling)
+        if shuffled:
+            # 生成随机索引
+            perm_indices = torch.randperm(states.size(0)).to(self.device)
+            states = states[perm_indices]
+            actions = actions[perm_indices]
+            advantage = advantage[perm_indices]
+            td_target = td_target[perm_indices]
+            old_log_probs = old_log_probs[perm_indices]
+            v_pred_old = v_pred_old[perm_indices]
+            # rewards, next_states, dones 在 update 循环内部不直接使用（只用了计算出的 adv 和 target），
+            # 但为了保持一致性也可以打乱，不过这里关键变量已全部打乱。
 
         actor_grad_list = []
         actor_loss_list = []
@@ -214,45 +216,110 @@ class PPO_bernouli:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
-    def MARWIL_update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2):
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        actions = torch.tensor(np.array(transition_dict['actions']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
+    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
+        """
+        MARWIL 离线更新函数 (适配 Multi-Discrete)
+        """
+        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
+        actions_all = torch.tensor(np.array(il_transition_dict['actions']), dtype=torch.float).to(self.device)
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        # 1. 初始 NaN 检查
-        if torch.isnan(states).any(): raise ValueError("NaN in input states")
-        probs = self.get_action_probs(states)  # 调用 get_action_probs 获取概率
-        log_probs = torch.log(probs) * actions + torch.log(1 - probs) * (1 - actions)
-        if torch.isnan(log_probs).any(): raise ValueError("NaN in Actor outputs")
-        critic_values = self.critic(states)
-        if torch.isnan(critic_values).any(): raise ValueError("NaN in Critic outputs")
+        # 确保 actions 形状 (N, Dims)
+        if actions_all.dim() == 1:
+            actions_all = actions_all.view(-1, 1)
 
-        td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
-        td_delta = td_target - self.critic(states)
-        advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+        # 2. 准备 Batch 索引
+        total_size = states_all.size(0)
+        indices = np.arange(total_size)
+        if shuffled:
+            np.random.shuffle(indices)
+
+        # 用于记录本轮 Epoch 的平均 Loss
+        total_actor_loss = 0
+        total_critic_loss = 0
+        batch_count = 0
+
+        # 3. Mini-batch 循环
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+            
+            # 切片获取 Mini-batch 数据
+            # torch.tensor(batch_indices) 可能会带来额外的 CPU->GPU 开销，
+            # 如果 indices 是 numpy，直接切片 tensor 也是可以的，但在 GPU tensor 上索引通常建议传入 tensor 或 list
+            # 这里为了通用性，直接使用 numpy 索引
+            s_batch = states_all[batch_indices]
+            a_batch = actions_all[batch_indices]
+            r_batch = returns_all[batch_indices]
+
+            # ----------------------------------------------------
+            # A. 计算优势 (Advantage) 和 权重 (Weights)
+            # ----------------------------------------------------
+            with torch.no_grad():
+                values = self.critic(s_batch)
+                # 计算残差: A_hat = R_t - V(s)
+                residual = r_batch - values
+                
+                # --- 动态更新归一化因子 c ---
+                # 论文脚注: c^2 <- c^2 + 10^-8 * (residual^2 - c^2)
+                batch_mse = (residual ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
+                c = torch.sqrt(self.c_sq)
+                
+                # 归一化优势
+                advantage = residual / (c + 1e-8)
+                
+                # 计算指数权重: w = exp(beta * A)
+                # 1. 计算原始权重
+                raw_weights = torch.exp(beta * advantage)
+                # 2. 截断权重，例如最大不超过 100.0 (e^4.6)
+                weights = torch.clamp(raw_weights, max=max_weight)
+
+            # ----------------------------------------------------
+            # B. 计算 Actor Loss (模仿学习部分)
+            # [修改] 对多维动作，Loss = - mean( weights * sum(log_probs_per_dim) )
+            
+            probs = self.get_action_probs(s_batch)
+            probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
+
+            # 计算 log_prob (针对 Bernoulli 分布)
+            # log_probs = log(p)*a + log(1-p)*(1-a)
+            log_probs = torch.log(probs) * a_batch + torch.log(1 - probs) * (1 - a_batch)
+            log_probs = log_probs.sum(dim=-1, keepdim=True)
+            
+            # Loss = - mean( alpha * weights * log_pi_joint )
+            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+
+            # ----------------------------------------------------
+            # C. 计算 Critic Loss (监督学习拟合 R_t)
+            # ----------------------------------------------------
+            v_pred = self.critic(s_batch)
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v * alpha
+
+            # ----------------------------------------------------
+            # D. 反向传播与更新
+            # ----------------------------------------------------
+            self.actor_optimizer_il.zero_grad()
+            self.critic_optimizer_il.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            # 梯度裁剪
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+
+            self.actor_optimizer_il.step()
+            self.critic_optimizer_il.step()
+
+            # 记录数据
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            batch_count += 1
+
+        # 返回本轮 Epoch 的平均 Loss
+        avg_actor_loss = total_actor_loss / batch_count
+        avg_critic_loss = total_critic_loss / batch_count
         
-        # 优势归一化
-        if adv_normed:
-            adv_mean, adv_std = advantage.detach().mean(), advantage.detach().std(unbiased=False) 
-            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+        return avg_actor_loss, avg_critic_loss, self.c_sq.sqrt().item()
 
-        # 提前计算一次旧的 value 预测（用于 value clipping）
-        v_pred_old = self.critic(states).detach()  # (N,1)
-        for _ in range(self.epochs):
-            probs = self.get_action_probs(states)  # 调用 get_action_probs 获取概率
-            log_probs = torch.log(probs) * actions + torch.log(1 - probs) * (1 - actions)
-            # log_probs = log_probs.sum(dim=1, keepdim=True)
-            actor_loss = -torch.mean(torch.exp(self.beta * advantage * log_probs))
-
-            # 计算 critic_loss：支持可选的 value clipping（PPO 风格）
-            if clip_vf:
-                v_pred = self.critic(states)                                  # 当前预测 (N,1)
-                v_pred_clipped = torch.clamp(v_pred, v_pred_old - clip_range, v_pred_old + clip_range)
-                vf_loss1 = (v_pred - td_target.detach()).pow(2)               # (N,1)
-                vf_loss2 = (v_pred_clipped - td_target.detach()).pow(2)       # (N,1)
-                critic_loss = torch.max(vf_loss1, vf_loss2).mean()
-            else:
-                # critic_loss = F.mse_loss(self.critic(states), td_target.detach()) # 原有
-                critic_loss = torch.mean(F.mse_loss(self.critic(states), td_target.detach()))

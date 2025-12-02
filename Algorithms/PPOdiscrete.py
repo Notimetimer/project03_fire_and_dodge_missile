@@ -265,7 +265,7 @@ def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=
             # C. 计算 Critic Loss (监督学习拟合 R_t)
             # ----------------------------------------------------
             v_pred = self.critic(s_batch)
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v * alpha
 
             # ----------------------------------------------------
             # D. 反向传播与更新
