@@ -113,12 +113,19 @@ class PolicyNetDiscrete(torch.nn.Module):
         # # 固定神经网络初始化参数
         # torch.nn.init.xavier_normal_(self.fc_out.weight, gain=0.01)
 
-    def forward(self, x, logits=0):
+    def forward(self, x, logits=0, temperature=1.0):
         x = self.net(x)
+        out_logits = self.fc_out(x)
+        
+        # 关键修改：应用温度缩放
+        # 注意：只在推理概率时缩放，如果直接请求 logits 用于 loss 计算，
+        # 通常由外部决定是否包含温度，但为了 PPO 一致性，建议在这里处理
+        scaled_logits = out_logits / temperature
+
         if not logits:
-            return F.softmax(self.fc_out(x), dim=1)
+            return F.softmax(scaled_logits, dim=1)
         else:
-            return self.fc_out(x)
+            return scaled_logits
 
 # 多重轮盘赌动作空间 actor head
 class PolicyNetMultiDiscrete(torch.nn.Module):
@@ -155,11 +162,14 @@ class PolicyNetMultiDiscrete(torch.nn.Module):
                 torch.nn.init.xavier_normal_(fc.weight, gain=0.01)
                 torch.nn.init.zeros_(fc.bias)
 
-    def forward(self, x):
+    def forward(self, x, logits=False, temperature=1.0):
         """
         输入 x 可以是任意维度，最后一维必须是 state_dim（特征维）。
-        - 若 action_dim 为单个值或长度为1的列表，返回形状 [..., action_dim] 的 softmax 概率张量。
-        - 若 action_dim 为多元素列表，返回一个 list，长度等于 action_dim 列表，每项形状为 [..., action_dim_i] 的 softmax 概率张量。
+        - logits (bool): 若为 True，返回 scaled logits；否则返回 softmax 概率。
+        - temperature (float): 应用于 logits 的温度参数。
+        - 返回值：
+          - 单头：形状为 [..., action_dim] 的张量。
+          - 多头：一个 list，每项是形状为 [..., action_dim_i] 的张量。
         """
         # 保留前导形状，flatten 到 (N, state_dim)
         *lead_shape, feat_dim = x.shape
@@ -167,17 +177,26 @@ class PolicyNetMultiDiscrete(torch.nn.Module):
         h = self.net(x_flat)
 
         if self.single:
-            out = self.fc_out(h)                 # (N, action_dim)
-            out = F.softmax(out, dim=-1)
-            out = out.view(*lead_shape, self.action_dims[0])
-            return out
+            out_logits = self.fc_out(h)  # (N, action_dim)
+            scaled_logits = out_logits / temperature
+            
+            if logits:
+                return scaled_logits.view(*lead_shape, self.action_dims[0])
+            else:
+                probs = F.softmax(scaled_logits, dim=-1)
+                return probs.view(*lead_shape, self.action_dims[0])
         else:
             outs = []
             for fc in self.fc_outs:
-                o = fc(h)                       # (N, action_dim_i)
-                o = F.softmax(o, dim=-1)
-                o = o.view(*lead_shape, o.shape[-1])
-                outs.append(o)
+                out_logits = fc(h)  # (N, action_dim_i)
+                scaled_logits = out_logits / temperature
+                
+                if logits:
+                    result = scaled_logits.view(*lead_shape, scaled_logits.shape[-1])
+                else:
+                    probs = F.softmax(scaled_logits, dim=-1)
+                    result = probs.view(*lead_shape, probs.shape[-1])
+                outs.append(result)
             return outs
 
 
@@ -207,9 +226,14 @@ class PolicyNetBernouli(torch.nn.Module):
         torch.nn.init.normal_(self.fc_out.weight, mean=0.0, std=1e-3)
         torch.nn.init.zeros_(self.fc_out.bias)
 
-    def forward(self, x):
+    def forward(self, x, temperature=1.0):
         x = self.net(x)
-        return self.fc_out(x)  # 不再使用 sigmoid 激活函数
+        out_logits = self.fc_out(x)
+        # 关键修改：应用温度缩放
+        # 注意：只在推理概率时缩放，如果直接请求 logits 用于 loss 计算，
+        # 通常由外部决定是否包含温度，但为了 PPO 一致性，建议在这里处理
+        scaled_logits = out_logits / temperature
+        return scaled_logits  # 不再使用 sigmoid 激活函数
 
 
 # 混合动作空间 Actor
