@@ -223,7 +223,7 @@ class PPO_bernouli:
         self.temperature = max(self.min_temperature, self.temperature * self.temp_decay)
 
 
-    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100, label_smoothing=0.0):
+    def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100, label_smoothing=0.1):
         """
         [改进版] MARWIL 离线更新函数 (Bernoulli)
         新增参数:
