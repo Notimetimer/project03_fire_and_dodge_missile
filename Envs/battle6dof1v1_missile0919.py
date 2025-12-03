@@ -720,6 +720,34 @@ class Battle(object):
         s["border"][0] = min(1, s["border"][0] / 50e3)
         s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
         return s
+    
+    def unscale_state(self, obs_input):
+        """把 scale_state 的缩放还原。仅判断 key 是否存在（不再检查长度）。"""
+        s = copy.deepcopy(obs_input)
+
+        if "target_information" in s and s["target_information"] is not None:
+            s["target_information"][3] = s["target_information"][3] * 10e3
+            s["target_information"][5] = s["target_information"][5] * 340
+
+        if "ego_main" in s and s["ego_main"] is not None:
+            s["ego_main"][0] = s["ego_main"][0] * 340
+            s["ego_main"][1] = s["ego_main"][1] * 5e3
+
+        if "ego_control" in s and s["ego_control"] is not None:
+            s["ego_control"][0] = s["ego_control"][0] * (2 * pi)
+            s["ego_control"][1] = s["ego_control"][1] * (2 * pi)
+            s["ego_control"][2] = s["ego_control"][2] * (2 * pi)
+
+        if "weapon" in s and s["weapon"] is not None:
+            s["weapon"] = s["weapon"] * 120
+
+        if "threat" in s and s["threat"] is not None:
+            s["threat"][3] = s["threat"][3] * 10e3
+
+        if "border" in s and s["border"] is not None:
+            s["border"][0] = s["border"][0] * 50e3
+
+        return s
         
     def base_obs(self, side, pomdp=0):  # 默认为完全可观测，设置pomdp后为部分可观测
         # 处理部分可观测、默认值问题、并尺度缩放
@@ -860,6 +888,8 @@ class Battle(object):
         out = True
         if R_uav <= self.R_cage:
             out = False
+        if out:
+            print(UAV.side, '出界')
         return out
 
     # 近距处理

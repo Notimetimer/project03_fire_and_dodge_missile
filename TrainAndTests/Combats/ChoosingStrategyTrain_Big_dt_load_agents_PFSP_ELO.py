@@ -111,7 +111,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'CombatFSP'
+mission_name = 'CombatPFSP'
 
 
 env = ChooseStrategyEnv(args, tacview_show=use_tacview)
@@ -176,14 +176,26 @@ def update_elo(player_elo, opponent_elo, score):
     new_player_elo = player_elo + K_FACTOR * (score - expected)
     return new_player_elo
 
-def get_opponent_probabilities(elo_ratings):
-    """根据ELO分数计算选择概率 (使用softmax)"""
-    elos = np.array(list(elo_ratings.values()), dtype=np.float64)
-    # 温度参数 T, T越大，概率分布越平滑; T越小, 高分者被选中的概率越大
-    temperature = 100 
-    exp_elos = np.exp(elos / temperature)
-    probabilities = exp_elos / np.sum(exp_elos)
-    return probabilities
+def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=200.0):
+    """返回与 elo_ratings.keys() 顺序对应的概率数组。
+    - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
+    - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。
+    """
+    keys = list(elo_ratings.keys())
+    if len(keys) == 0:
+        return np.array([])
+
+    elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+
+    if target_elo is None:
+        target_elo = np.mean(elos)
+
+    # 以高斯核度量相似度（基于差的平方）
+    diffs = elos - float(target_elo)
+    # 数值稳定性：将 exponent 的常数项减去 max
+    scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+    probs = scores / (scores.sum() + 1e-12)
+    return probs
 
 # 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
 def shorten_actor_key(path_or_name):
@@ -304,7 +316,7 @@ if __name__=="__main__":
                 
                 # 根据ELO分数计算概率并选择对手（使用短 key）
                 opponent_keys = list(elo_ratings.keys())
-                probabilities = get_opponent_probabilities(elo_ratings)
+                probabilities = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo, sigma=200.0)
                 opponent_key = np.random.choice(opponent_keys, p=probabilities)
                 opponent_path = path_map.get(opponent_key, None)
 

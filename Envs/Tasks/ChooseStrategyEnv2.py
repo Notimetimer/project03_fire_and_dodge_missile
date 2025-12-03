@@ -1,5 +1,7 @@
 '''
-下一次更改需要加上导弹发射相关的奖励和惩罚
+出生点改在外面指定
+
+子策略暂时使用规则智能体，留下使用神经网络的接口
 '''
 
 import numpy as np
@@ -64,6 +66,20 @@ action_options = {
 class ChooseStrategyEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
+        self.key_order_1v1 = [
+            "target_alive", # 1
+            "target_observable", # 1
+            "target_locked", # 1
+            "missile_in_mid_term",  # 1
+            "locked_by_target",  # 1
+            "warning",  # 1
+            "target_information",  # 8
+            "ego_main",  # 7
+            "weapon", # 1
+            "threat",  # 4
+            "border",  # 2
+        ]
+        self.obs_dim = 1*6+8+7+1+4+2
 
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=0):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
@@ -73,6 +89,16 @@ class ChooseStrategyEnv(Battle):
         # self.last_dhor = None
         self.last_obs = None
         self.pomdp = pomdp     
+    
+    def obs_1v1(self, side, pomdp=0):
+        pre_full_obs = self.base_obs(side, pomdp)
+        full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
+                    for k in self.key_order_1v1}
+        
+        # 将观测按顺序拉成一维数组
+        flat_obs = flatten_obs(full_obs, self.key_order_1v1)
+        return flat_obs, full_obs
+
 
     def maneuver14(self, UAV, action):
         # 输入动作与动力运动学状态
@@ -189,7 +215,7 @@ class ChooseStrategyEnv(Battle):
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
     
 
-    def combat_terminate_and_reward(self, side, action_label):
+    def combat_terminate_and_reward(self, side, action_label, action_shoot):
         terminate = self.get_terminate()
         done = terminate
 
@@ -238,14 +264,6 @@ class ChooseStrategyEnv(Battle):
             else:
                 self.draw = 1
 
-        reward = 0
-        if self.win:
-            reward += 300
-        if self.lose:
-            reward -= 300
-        if self.draw:
-            reward -= 0
-
         uav_states = self.base_obs(side, pomdp=self.pomdp)  ### test 部分观测的话用1
         enm_state = self.base_obs(enm.side, pomdp=self.pomdp)  ### test 部分观测的话用1
         delta_theta = uav_states["target_information"][2]
@@ -267,122 +285,111 @@ class ChooseStrategyEnv(Battle):
         sin_delta_psi_threat = uav_states["threat"][1]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
 
-        # 事件/密集奖励
+        # ---主要奖励---
+        reward_main = 0
+        if self.win:
+            reward_main += 300
+        if self.lose:
+            reward_main -= 300
+        if self.draw:
+            reward_main -= 0
+
         # 为导弹提供制导
         if missile_in_mid_term:
-            reward += 2
+            reward_main += 2
 
         # 锁定目标
         if uav_states["target_locked"]:
-            reward += 1.1
+            reward_main += 1.1
 
         # 被目标锁定
         if uav_states["locked_by_target"]:
-            reward -= 1
+            reward_main -= 1
 
         # 收到导弹警告
         if warning:
-            reward -= 3
+            reward_main -= 3
 
         # 导弹锁定目标
         if enm_state["warning"]:
-            reward += 3
+            reward_main += 3
 
         # 逃脱导弹
         if ego.escape_once:
-            reward += 10
+            reward_main += 10
 
         # 导弹被逃脱
         if enm.escape_once:
-            reward -= 5
+            reward_main -= 5
 
-        event_reward = reward
+        # 发射导弹
+        ut = action_shoot
+        # 发射惩罚
+        if ut == 1:
+            reward_main -= 30
 
-        # # 密集奖励
-        if warning and action_label != 1 and len(alive_ally_missiles)>0:
-            reward -= 5
-
+        # ---辅助奖励---
+        reward_fire = 0
         # 没发射导弹时alpha越小越好
         if len(alive_ally_missiles) == 0 and not warning:
-            reward += 0.5 - alpha / pi
+            reward_fire += 0.5 - alpha / pi
         
         # 导弹处于中制导阶段时alpha在±60*pi/180之间为奖励高台， 其余随alpha线性减少
+        reward_lock = 0
         if missile_in_mid_term:
-            # 目标没有跑，不该重复攻击
-            if action_label==0 and abs(AA_hor)>pi*2/3:
-                reward -= 5
-
-            # 高台奖励：alpha在[-60*pi/180, 60*pi/180]区间奖励高，其余线性递减
+            # 提供制导信息奖励
             if abs(alpha) < np.pi / 3:
-                reward += 1
+                reward_lock += 0.5
             else:
-                reward += 1 - (alpha - pi / 3) / pi
+                reward_lock += 0.5 * (1 - (alpha - pi / 3) / pi)
 
         # 有warning时alpha越大越好
+        r_escape = 0
         if warning:
-            reward += 8 * abs(delta_psi_threat) / pi # 这里的alpha错了，应该是和导弹的threa_delta_psi有关的
-        
+            r_escape += 0.8 * abs(delta_psi_threat) / pi
 
-        # 角度奖励
-        r_angle = 0
-        # 侧滑角惩罚
-        r_angle -= 0.05 * np.clip(abs(ego.beta_air*180/pi / 5), 0, 1)
         # 迎角惩罚
+        r_angle = 0
         r_angle -= 0.01 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
                            (ego.alpha_air*180/pi< -5)*(-5 - ego.alpha_air*180/pi))
 
         # 高度限制奖励/惩罚
-        r_alt = (alt <= self.min_alt_safe + 1e3) * np.clip(ego.vu / 100, -1, 1) + \
+        r_alt = (alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
 
-        reward = reward + r_angle + r_alt
+
+        # 导弹发射辅助奖励/惩罚
+        reward_shoot = 0
+        if ut == 1:
+            reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 尽可能增大发射间隔
+            reward_shoot += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
+            reward_shoot += 1 * np.clip(ego.theta/(pi/3), -1, 1)  # 鼓励抛射
+            # reward_shoot -= np.clip(dist/40e3, 0, 1)
+        if terminate and ego.ammo == ego.init_ammo:
+            reward_shoot -= 300 # 一发都不打必须重罚 100
+        if terminate and ego.ammo < ego.init_ammo:
+            reward_shoot += 20 # 至少打了一枚
+        # 重复发射导弹时惩罚, 否则有奖励
+        if len(alive_ally_missiles)>1 and ut==1:
+            reward_shoot -= 30
+        if len(alive_ally_missiles)>1 and ut==0:
+            reward_shoot += 5
         
         # deltapsi变化率奖励 todobedontinued
 
         # 态势优势度 tobecontinued
 
+        reward_assisted = np.sum([
+            1 * reward_fire,
+            1 * reward_lock,
+            1 * r_escape,
+            1 * r_angle,
+            1 * r_alt,
+            1 * reward_shoot
+        ])
 
-        return done, reward, event_reward
+        return done, reward_main+reward_assisted, reward_assisted
 
-    def is_action_complete(self, side, action_label):
-        # if side == 'r':
-        #     ego = self.RUAV
-        #     enm = self.BUAV
-        # if side == 'b':
-        #     ego = self.BUAV
-        #     enm = self.RUAV
 
-        state = self.get_state(side)
-        cos_delta_psi = state["target_information"][0]
-        sin_delta_psi = state["target_information"][1]
-        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
-        delta_theta = state["target_information"][2]
-        alpha = state["target_information"][4]
-        RWR = state["warning"]
-        cos_delta_psi_threat = state["threat"][0]
-        sin_delta_psi_threat = state["threat"][1]
-        delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
-
-        action = action_options[action_label]
-
-        action_done = False
-        if action == 'attack':
-            if alpha < pi/6:
-                action_done = True
-        
-        if action == 'escape':
-            if abs(delta_psi_threat) > pi*5/6 and RWR or\
-                  abs(alpha) > pi*5/6 and not RWR:
-                action_done = True
-        
-        if action == 'left':
-            if abs(delta_psi*180/pi - 50) < 10:
-                action_done = True
-        
-        if action == 'right':
-            if abs(delta_psi*180/pi + 50) < 10:
-                action_done = True
-            
-        return action_done
         
         

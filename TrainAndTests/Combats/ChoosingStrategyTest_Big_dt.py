@@ -44,8 +44,6 @@ print("log目录", log_dir)
 start_time = time.time()
 launch_time_count = 0
 
-state_dim = 35  # len(b_obs_spaces)
-action_dim = 4  # 5 #######################
 
 # 超参数
 dt_maneuver = 0.2  # 0.2 2
@@ -71,7 +69,7 @@ env.shielded = 1
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 35  # len(b_obs_spaces)
-action_dim = 4  # 5 #######################
+action_dim = 14  # 5 #######################
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -221,9 +219,9 @@ if __name__=="__main__":
                         b_action_probs, b_action_label = agent.take_action(b_obs, explore=False)
 
 
-                    # # debug
-                    # r_action_label = 13
-                    # b_action_label = 0
+                    # # # debug
+                    # r_action_label = 8
+                    # b_action_label = 4
 
                     decide_steps_after_update += 1
                     r_action_options = action_options

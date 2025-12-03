@@ -357,7 +357,7 @@ class UAVModel(object):
                 shoot_prob = self.shoot_prob
 
             # 随机采样
-            shoot_prob_in_1s = 1-(1-shoot_prob)**(self.dt_fire/5)
+            shoot_prob_in_1s = 1-(1-shoot_prob)**(self.dt_fire)
             if np.random.uniform(0, 1) <= shoot_prob_in_1s:
                 can_shoot = True
             else:
