@@ -20,200 +20,145 @@ from Algorithms.MLP_heads import ValueNet
 # =============================================================================
 # 1. 神经网络定义 (保持不变，只负责 forward 计算)
 # =============================================================================
-
-class PolicyNetHybrid(torch.nn.Module):
-    """
-    支持混合动作空间的策略网络 (纯 MLP)。
-    """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5):
-        super(PolicyNetHybrid, self).__init__()
+class CascadePolicyNet(nn.Module):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict):
+        super().__init__()
         self.action_dims = action_dims_dict
+        
+        # --- Level 0: 基础特征提取 & Level 0 动作头 ---
+        self.l0_net = nn.Sequential(nn.Linear(state_dim, 64), nn.ReLU())
+        # 假设 Level 0 是一个 5选1 的离散动作
+        self.l0_dim = action_dims_dict['level0_cat'][0]  # 这是one-hot吗？
+        self.fc_l0_logits = nn.Linear(64, self.l0_dim)
 
-        # 共享主干网络
-        layers = []
-        prev_size = state_dim
-        for layer_size in hidden_dims:
-            layers.append(nn.Linear(prev_size, layer_size))
-            layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
+        # --- Level 1: 接收 (状态特征 + Level 0 动作的 One-Hot) ---
+        # 输入维度 = 状态特征(64) + Level 0 动作维度(5)
+        self.l1_input_dim = 64 + self.l0_dim
+        self.l1_net = nn.Sequential(nn.Linear(self.l1_input_dim, 64), nn.ReLU())
+        
+        # Level 1 的动作头 (Cat + Bern)
+        self.fc_l1_cat = nn.Linear(64, sum(action_dims_dict['level1_cat']))
+        self.fc_l1_bern = nn.Linear(64, action_dims_dict['level1_bern'])
 
-        # 动态创建输出头
-        # 连续动作头
-        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            cont_dim = self.action_dims['cont']
-            self.fc_mu = nn.Linear(prev_size, cont_dim)
-            self.log_std_param = nn.Parameter(torch.log(torch.ones(cont_dim, dtype=torch.float) * init_std))
+    def forward(self, state, l0_action=None):
+        """
+        Args:
+            state: (Batch, Dim)
+            l0_action: (Batch, ) 或 None。
+                       如果是 None (推理模式)，返回 Level 0 的 logits，Level 1 返回 None。
+                       如果有值 (训练模式)，返回 Level 0 和 Level 1 的所有 logits。
+        """
+        # 1. Level 0 计算
+        feat0 = self.l0_net(state)
+        l0_logits = self.fc_l0_logits(feat0)
+        
+        outputs = {'l0_logits': l0_logits, 'l1_logits': None, 'l1_bern': None}
 
-        # 分类/离散动作头，self.action_dims['cat']必须是list或者tuple，作为多维离散动作空间处理
-        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            self.cat_dims = self.action_dims['cat']  # list
-            total_cat_dim = sum(self.cat_dims)
-            self.fc_cat = nn.Linear(prev_size, total_cat_dim)
-
-        # 伯努利动作头
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            bern_dim = self.action_dims['bern']
-            self.fc_bern = nn.Linear(prev_size, bern_dim)
-
-    def forward(self, x, min_std=1e-6, max_std=0.4):
-        shared_features = self.net(x)
-        outputs = {'cont': None, 'cat': None, 'bern': None}
-
-        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            mu = self.fc_mu(shared_features)
-            std = torch.exp(self.log_std_param)
-            std = torch.clamp(std, min=min_std, max=max_std)
-            if mu.dim() > 1:
-                std = std.unsqueeze(0).expand_as(mu)
-            outputs['cont'] = (mu, std)
-
-        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            cat_logits_all = self.fc_cat(shared_features)
-            cat_logits_list = torch.split(cat_logits_all, self.cat_dims, dim=-1)
-            outputs['cat'] = [F.softmax(logits, dim=-1) for logits in cat_logits_list]
-
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            bern_logits = self.fc_bern(shared_features)
-            outputs['bern'] = bern_logits
-
+        # 2. Level 1 计算
+        if l0_action is not None:
+            # --- 训练模式 (Teacher Forcing) ---
+            # l0_action 是整数索引，需要转 one-hot
+            # l0_action: (Batch, ) -> (Batch, l0_dim)
+            l0_one_hot = F.one_hot(l0_action.long(), num_classes=self.l0_dim).float()
+            
+            # 拼接特征：原始特征 feat0 + 动作特征
+            l1_input = torch.cat([feat0, l0_one_hot], dim=-1)
+            
+            feat1 = self.l1_net(l1_input)
+            
+            outputs['l1_logits'] = self.fc_l1_cat(feat1)
+            outputs['l1_bern'] = self.fc_l1_bern(feat1)
+            
         return outputs
 
 # =============================================================================
 # 2. Actor 适配器 (Wrapper) - 核心重构点
 # =============================================================================
 
-class HybridActorWrapper(nn.Module):
-    """
-    统一接口适配器。
-    将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get_action 和 evaluate_actions 接口。
-    未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
-    """
-    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu'):
-        super(HybridActorWrapper, self).__init__()
+class CascadeActorWrapper(nn.Module):
+    def __init__(self, policy_net, action_dims_dict, device='cpu'):
+        super().__init__()
         self.net = policy_net
-        self.action_dims = action_dims_dict
         self.device = device
         
-        # 处理 Action Bounds
-        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            # 如果有连续动作，必须提供 action_bounds
-            if action_bounds is None:
-                raise ValueError("Continuous action space requires action_bounds")
-            self.register_buffer('action_bounds', torch.tensor(action_bounds, dtype=torch.float, device=device))
-            self.register_buffer('amin', self.action_bounds[:, 0])
-            self.register_buffer('amax', self.action_bounds[:, 1])
-            self.register_buffer('action_span', self.amax - self.amin)
 
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    def get_action(self, state, h=None, explore=True, max_std=None):
+    def get_action(self, state, explore=True, **kwargs):
         """
-        推理接口。
-        Args:
-            state: numpy array or tensor
-            h: hidden state (预留接口，目前未使用)
-        Returns:
-            actions_exec: dict (numpy), 用于环境执行
-            actions_raw: dict (numpy/tensor), 用于存入 buffer
-            next_h: hidden state (预留接口)
+        推理模式：自回归采样 (Autoregressive Sampling)
+        Step 1: 算 L0 -> 采样 L0
+        Step 2: 把采样到的 L0 喂回去 -> 算 L1 -> 采样 L1
         """
         if not isinstance(state, torch.Tensor):
             state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
+
+        # --- Step 1: 决策 Level 0 ---
+        # 此时只给 state，不给 action，网络只跑一半
+        out0 = self.net(state, l0_action=None) 
+        l0_logits = out0['l0_logits']
         
-        # 调用网络
-        actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
+        # 采样 Level 0
+        dist0 = Categorical(logits=l0_logits)
+        l0_idx = dist0.sample() if explore else torch.argmax(l0_logits, dim=-1)
         
-        actions_exec = {}
-        actions_raw = {}
+        # --- Step 2: 决策 Level 1 (基于 Level 0 的结果) ---
+        # 将刚才决策出的 l0_idx 喂给网络
+        out1 = self.net(state, l0_action=l0_idx)
+        
+        # 采样 Level 1 (Cat)
+        l1_probs = F.softmax(out1['l1_logits'], dim=-1) # 简化写了，假设只有一个cat头
+        dist1_cat = Categorical(probs=l1_probs)
+        l1_idx = dist1_cat.sample() if explore else torch.argmax(l1_probs, dim=-1)
+        
+        # 采样 Level 1 (Bern)
+        l1_bern_logits = out1['l1_bern']
+        dist1_bern = Bernoulli(logits=l1_bern_logits)
+        l1_bern_val = dist1_bern.sample() if explore else (l1_bern_logits > 0).float()
 
-        # --- Cont ---
-        if actor_outputs['cont'] is not None:
-            mu, std = actor_outputs['cont']
-            dist = SquashedNormal(mu, std)
-            if explore:
-                a_norm, u = dist.sample()
-            else:
-                u = mu
-                a_norm = torch.tanh(u)
-            
-            a_exec = self._scale_action_to_exec(a_norm)
-            actions_exec['cont'] = a_exec[0].cpu().detach().numpy().flatten()
-            actions_raw['cont'] = u[0].cpu().detach().numpy().flatten()
+        # 组装返回给 Buffer 和 环境
+        actions_exec = {
+            'l0_cat': l0_idx.cpu().numpy(),
+            'l1_cat': l1_idx.cpu().numpy(), 
+            'l1_bern': l1_bern_val.cpu().numpy()
+        }
+        # actions_raw 也是同样的结构
+        return actions_exec, actions_exec, None
 
-        # --- Cat ---
-        if actor_outputs['cat'] is not None:
-            cat_probs_list = actor_outputs['cat']
-            cat_exec_list = []      # 用于 actions_exec
-            cat_indices_raw_list = [] # 用于 actions_raw
-            
-            for probs in cat_probs_list:
-                dist = Categorical(probs=probs)
-                idx = dist.sample() if explore else torch.argmax(dist.probs, dim=-1)
-                
-                # [修改] 原先输出概率分布的代码注释掉:
-                # cat_exec_list.append(probs.cpu().detach().numpy()[0].copy()) 
-                
-                # [新增] 现在直接输出动作采样索引 (int):
-                cat_exec_list.append(idx.item())
-                
-                cat_indices_raw_list.append(idx.item())
-            
-            # 这里的 actions_exec['cat'] 现在变成了一个包含索引的 numpy 数组，例如 array([2])
-            actions_exec['cat'] = np.array(cat_exec_list) 
-            actions_raw['cat'] = np.array(cat_indices_raw_list)
-
-        # --- Bern ---
-        if actor_outputs['bern'] is not None:
-            bern_logits = actor_outputs['bern']
-            dist = Bernoulli(logits=bern_logits)
-            bern_action = dist.sample() if explore else (dist.probs > 0.5).float()
-            actions_exec['bern'] = bern_action[0].cpu().detach().numpy().flatten()
-            actions_raw['bern'] = actions_exec['bern']
-
-        return actions_exec, actions_raw, None # None for hidden state
-
-    def evaluate_actions(self, states, actions_raw, h=None, max_std=None):
+    def evaluate_actions(self, states, actions_raw, **kwargs):
         """
-        训练接口。计算 log_probs 和 entropy。
-        Args:
-            states: tensor (B, D)
-            actions_raw: dict of tensors
-        Returns:
-            log_probs: tensor (B, 1)
-            entropy: tensor (B, 1)
-            next_h: None
+        训练模式：Teacher Forcing
+        从 Buffer 里拿到真实的 l0_action，直接喂给网络，一次性算出所有概率。
         """
-        actor_outputs = self.net(states, max_std=max_std)
-        log_probs = torch.zeros(states.size(0), 1).to(self.device)
-        entropy = torch.zeros(states.size(0), 1).to(self.device)
-
-        # --- Cont ---
-        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            mu, std = actor_outputs['cont']
-            dist = SquashedNormal(mu, std)
-            u = actions_raw['cont']
-            log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
-            entropy += dist.entropy().unsqueeze(-1) # 近似熵
-
-        # --- Cat ---
-        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            cat_probs_list = actor_outputs['cat']
-            cat_action = actions_raw['cat'].long()
-            for i, probs in enumerate(cat_probs_list):
-                act_i = cat_action[:, i].unsqueeze(-1)
-                log_probs += torch.log(probs.gather(1, act_i) + 1e-8)
-                dist = Categorical(probs=probs)
-                entropy += dist.entropy().unsqueeze(-1)
-
-        # --- Bern ---
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            bern_logits = actor_outputs['bern']
-            dist = Bernoulli(logits=bern_logits)
-            bern_action = actions_raw['bern']
-            log_probs += dist.log_prob(bern_action).sum(-1, keepdim=True)
-            entropy += dist.entropy().sum(-1, keepdim=True)
+        l0_truth = actions_raw['l0_cat'] # (Batch, )
+        
+        # 一次 Forward 搞定，不需要 Loop
+        outputs = self.net(states, l0_action=l0_truth)
+        
+        log_probs = 0
+        entropy = 0
+        
+        # --- 计算 Level 0 的 LogProb ---
+        dist0 = Categorical(logits=outputs['l0_logits'])
+        log_probs += dist0.log_prob(l0_truth).unsqueeze(-1)
+        entropy += dist0.entropy().unsqueeze(-1)
+        
+        # --- 计算 Level 1 的 LogProb ---
+        # 注意：这里不需要再采样了，直接用 Buffer 里的 l1 动作去算概率
+        
+        # L1 Cat
+        l1_cat_truth = actions_raw['l1_cat']
+        l1_probs = F.softmax(outputs['l1_logits'], dim=-1)
+        dist1_cat = Categorical(probs=l1_probs)
+        log_probs += dist1_cat.log_prob(l1_cat_truth).unsqueeze(-1)
+        entropy += dist1_cat.entropy().unsqueeze(-1)
+        
+        # L1 Bern
+        l1_bern_truth = actions_raw['l1_bern']
+        dist1_bern = Bernoulli(logits=outputs['l1_bern'])
+        log_probs += dist1_bern.log_prob(l1_bern_truth).unsqueeze(-1) # Bern可能是多维的，注意求和
+        entropy += dist1_bern.entropy().unsqueeze(-1)
 
         return log_probs, entropy, None
     
@@ -547,7 +492,7 @@ class PPOHybrid:
         # 处理动作字典 (转 Tensor)
         actions_all = {}
         for k, v in il_transition_dict['actions'].items():
-            if k == 'cat':  # cont和bern分布都使用float
+            if k == 'cat':
                 actions_all[k] = torch.tensor(np.array(v), dtype=torch.long).to(self.device)
             else:
                 actions_all[k] = torch.tensor(np.array(v), dtype=torch.float).to(self.device)

@@ -2,6 +2,8 @@
 出生点改在外面指定
 
 子策略暂时使用规则智能体，留下使用神经网络的接口
+
+加入导弹发生相关奖励，区分主要奖励和辅助奖励
 '''
 
 import numpy as np
@@ -80,6 +82,8 @@ class ChooseStrategyEnv(Battle):
             "border",  # 2
         ]
         self.obs_dim = 1*6+8+7+1+4+2
+        self.fly_act_dim = [14]
+        self.fire_dim = 1
 
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=0):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化

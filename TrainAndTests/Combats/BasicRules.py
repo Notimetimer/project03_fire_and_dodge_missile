@@ -1,5 +1,7 @@
 import numpy as np
 from math import *
+import torch
+import argparse
 from numpy.linalg import norm
 import sys
 import os
@@ -10,13 +12,13 @@ print("\n根目录为：", project_root, "\n")
 
 
 from Envs.battle6dof1v1_missile0919 import launch_missile_if_possible
-from ChoosingStrategyTrain_Big_dt import *
+# from ChoosingStrategyTrain_Big_dt import *
 from Envs.Tasks.ChooseStrategyEnv2 import *
 from Math_calculates.sub_of_angles import *
 import re
 
 use_tacview = 1  # 是否可视化
-
+action_cycle_multiplier = 20
 
 def basic_rules(env, side, state_check, rules_num, last_action=0):
     '''
