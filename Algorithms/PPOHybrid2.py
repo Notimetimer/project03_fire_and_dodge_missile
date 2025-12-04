@@ -127,6 +127,7 @@ class HybridActorWrapper(nn.Module):
         
         actions_exec = {}
         actions_raw = {}
+        actions_dist_check = {} # [新增] 诊断输出
 
         # --- Cont ---
         if actor_outputs['cont'] is not None:
@@ -141,12 +142,16 @@ class HybridActorWrapper(nn.Module):
             a_exec = self._scale_action_to_exec(a_norm)
             actions_exec['cont'] = a_exec[0].cpu().detach().numpy().flatten()
             actions_raw['cont'] = u[0].cpu().detach().numpy().flatten()
+            
+            # [新增] 记录连续动作的 raw (pre-tanh) 值
+            actions_dist_check['cont'] = u[0].cpu().detach().numpy().flatten()
 
         # --- Cat ---
         if actor_outputs['cat'] is not None:
             cat_probs_list = actor_outputs['cat']
             cat_exec_list = []      # 用于 actions_exec
             cat_indices_raw_list = [] # 用于 actions_raw
+            cat_probs_check_list = [] # [新增] 记录 Cat 概率
             
             for probs in cat_probs_list:
                 dist = Categorical(probs=probs)
@@ -157,12 +162,17 @@ class HybridActorWrapper(nn.Module):
                 
                 # [新增] 现在直接输出动作采样索引 (int):
                 cat_exec_list.append(idx.item())
-                
                 cat_indices_raw_list.append(idx.item())
+                
+                # [新增] 记录 Cat 概率分布
+                cat_probs_check_list.append(probs[0].cpu().detach().numpy().copy())
             
             # 这里的 actions_exec['cat'] 现在变成了一个包含索引的 numpy 数组，例如 array([2])
             actions_exec['cat'] = np.array(cat_exec_list) 
             actions_raw['cat'] = np.array(cat_indices_raw_list)
+            
+            # [新增] 将所有 Cat 概率分布以列表形式存入诊断输出
+            actions_dist_check['cat'] = cat_probs_check_list
 
         # --- Bern ---
         if actor_outputs['bern'] is not None:
@@ -171,8 +181,13 @@ class HybridActorWrapper(nn.Module):
             bern_action = dist.sample() if explore else (dist.probs > 0.5).float()
             actions_exec['bern'] = bern_action[0].cpu().detach().numpy().flatten()
             actions_raw['bern'] = actions_exec['bern']
+            
+            # [新增] 记录 Bern 动作取 1 的概率
+            # 概率 P(1)
+            probs_one = dist.probs
+            actions_dist_check['bern'] = probs_one[0].cpu().detach().numpy().flatten()
 
-        return actions_exec, actions_raw, None # None for hidden state
+        return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
     def evaluate_actions(self, states, actions_raw, h=None, max_std=None):
         """
@@ -342,12 +357,17 @@ class PPOHybrid:
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr  
 
-    def take_action(self, state, explore=True, max_std=None):
+    def take_action(self, state, h0=None, explore=True, max_std=None):
         # 委托给 Actor Wrapper
         max_s = max_std if max_std is not None else self.max_std
         # 注意：这里返回了 hidden_state (虽然是 None)，保持接口一致性
-        actions_exec, actions_raw, _ = self.actor.get_action(state, h=None, explore=explore, max_std=max_s)
-        return actions_exec, actions_raw
+        # actions_exec, actions_raw, _ = self.actor.get_action(state, h=h0, explore=explore, max_std=max_s)
+        # return actions_exec, actions_raw
+        
+        # [修改] 现在接收四个返回值
+        actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(state, h=h0, explore=explore, max_std=max_s)
+        # [修改] 保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
+        return actions_exec, actions_raw, h_state, actions_dist_check
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1):
 

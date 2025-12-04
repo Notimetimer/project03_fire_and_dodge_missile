@@ -206,7 +206,7 @@ if __name__ == "__main__":
     # 训练循环
     # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
-    for epoch in range(50): 
+    for epoch in range(80): 
         avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
             il_transition_dict, 
             beta=1.0, 
@@ -268,7 +268,7 @@ if __name__ == "__main__":
         
         
         # 示范数据采集
-        for i_episode in range(2):
+        for i_episode in range(1):
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -327,11 +327,14 @@ if __name__ == "__main__":
 
                     # 蓝方使用智能体
                     b_state_check = env.unscale_state(b_check_obs)
-                    # b_action_label, b_fire = basic_rules(env, 'b', b_state_check, 2, last_action=last_b_action_label)
-                    b_action_exec, b_action_raw = student_agent.take_action(b_obs, explore=0)
+                    
+                    _, b_fire = basic_rules(env, 'b', b_state_check, 1, last_action=last_b_action_label)
+                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=0)
                     
                     b_action_label = b_action_exec['cat'][0] # 返回可能是一个数组
-                    b_fire = b_action_exec['bern'][0]
+                    # b_fire = b_action_exec['bern'][0]
+                    print("机动概率分布", b_action_check['cat'])
+                    print("开火概率", b_action_check['bern'][0])
                     
                     # print(type(b_action_exec['cat']))
                     # print(type(b_action_exec['bern']))
