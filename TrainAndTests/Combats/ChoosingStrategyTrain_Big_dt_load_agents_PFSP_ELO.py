@@ -275,8 +275,6 @@ if __name__=="__main__":
     # --- ELO 初始化结束 ---
 
     return_list = []
-    win_list = []
-    steps_count = 0
 
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
@@ -289,6 +287,9 @@ if __name__=="__main__":
     t_bias = 0
     decide_steps_after_update = 0
     try:
+        
+        transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
+        
         # 强化学习训练
         while total_steps < int(max_steps*(1-pre_train_rate)):
             
@@ -335,7 +336,7 @@ if __name__=="__main__":
                     red_actor_loaded = False
 
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
+            
 
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
@@ -352,15 +353,6 @@ if __name__=="__main__":
             done = False
 
             env.dt_maneuver = dt_maneuver
-            actor_grad_list = []
-            critc_grad_list = []
-            actor_loss_list = []
-            critic_loss_list = []
-            entropy_list = []
-            ratio_list = []
-
-            r_action_list = []
-            b_action_list = []
             
             episode_start_time = time.time()
 
@@ -396,7 +388,7 @@ if __name__=="__main__":
                 if steps_of_this_eps % action_cycle_multiplier == 0:
                     # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                     if steps_of_this_eps > 0:
-                        transition_dict=append_b_experience(transition_dict, last_decision_state, current_action, b_reward, b_obs, False)
+                        transition_dict = append_b_experience(transition_dict, last_decision_state, current_action, b_reward, b_obs, False)
 
                     # 开始新的动作周期：记录起始状态并决策
                     last_decision_state = b_obs
@@ -412,8 +404,7 @@ if __name__=="__main__":
                         "left",
                         "right",
                     ]
-                    # print("蓝方动作", b_action_options[b_action_label]) # Renamed b_action_list to b_action_options
-                    # b_action_list.append(b_action_label)
+
                     current_action = b_action_label
 
                     # --- 红方决策 ---
@@ -483,7 +474,7 @@ if __name__=="__main__":
                 # if 'next_b_obs' not in locals():
                 #     next_b_check_obs = env.base_obs('b')
                 #     next_b_obs = flatten_obs(next_b_check_obs, env.key_order)
-                transition_dict=append_b_experience(transition_dict, last_decision_state, current_action, b_reward, next_b_obs, True)
+                transition_dict = append_b_experience(transition_dict, last_decision_state, current_action, b_reward, next_b_obs, True)
 
             # --- ELO 更新 ---
             if red_actor_loaded and opponent_key in elo_ratings:
@@ -552,8 +543,7 @@ if __name__=="__main__":
 
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
-            r_action_list = np.array(r_action_list)
-            # b_action_list is no longer appended every dt_maneuver, need to rethink if you need this for logging
+            
 
             # --- 保存模型
             os.makedirs(log_dir, exist_ok=True)

@@ -210,7 +210,8 @@ if __name__ == "__main__":
         avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
             il_transition_dict, 
             beta=1.0, 
-            batch_size=128 # 显存如果够大可以适当调大
+            batch_size=128, # 显存如果够大可以适当调大
+            label_smoothing=0.4
         )
         
         # 记录
@@ -328,11 +329,12 @@ if __name__ == "__main__":
                     # 蓝方使用智能体
                     b_state_check = env.unscale_state(b_check_obs)
                     
-                    _, b_fire = basic_rules(env, 'b', b_state_check, 1, last_action=last_b_action_label)
-                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=0)
-                    
+                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                     b_action_label = b_action_exec['cat'][0] # 返回可能是一个数组
-                    # b_fire = b_action_exec['bern'][0]
+                    
+                    # _, b_fire = basic_rules(env, 'b', b_state_check, 1, last_action=last_b_action_label)
+                    b_fire = b_action_exec['bern'][0]
+                    
                     print("机动概率分布", b_action_check['cat'])
                     print("开火概率", b_action_check['bern'][0])
                     
