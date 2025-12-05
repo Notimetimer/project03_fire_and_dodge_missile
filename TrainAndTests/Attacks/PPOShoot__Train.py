@@ -91,7 +91,7 @@ env = ShootTrainEnv(args, tacview_show=use_tacview)
 r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 
 state_dim = 1+1+1+ 8 + 7 + 1  # len(b_obs_spaces)
-action_dim = b_action_spaces[0].shape[0]
+action_dim = 1
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

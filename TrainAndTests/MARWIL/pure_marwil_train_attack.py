@@ -169,7 +169,7 @@ if __name__ == "__main__":
     
     # 保存到当前脚本所在目录（只保存 pickle，且同时保存 transition_dict 以便后续分析）
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    il_pkl_path = os.path.join(cur_dir, "il_transitions.pkl")
+    il_pkl_path = os.path.join(cur_dir, "il_transitions_chase.pkl")
     trans_pkl_path = os.path.join(cur_dir, "transition_dict.pkl")
     import pickle
     # 保存示范轨迹（IL 用）
@@ -179,7 +179,7 @@ if __name__ == "__main__":
     with open(trans_pkl_path, "wb") as f:
         pickle.dump(transition_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    print(f"Saved il_transitions.pkl to: {il_pkl_path}")
+    print(f"Saved il_transitions_chase.pkl to: {il_pkl_path}")
     print(f"Saved transition_dict.pkl to: {trans_pkl_path}")
  
     total_dur = time.time() - total_start_time

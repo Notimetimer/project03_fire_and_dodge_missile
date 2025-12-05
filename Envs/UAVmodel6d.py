@@ -1,6 +1,8 @@
 from random import random
 import random
-from gym import spaces
+# [修改] 替换 gym 为 gymnasium
+import gymnasium as gym
+from gymnasium import spaces
 import copy
 import numpy as np
 from math import *
@@ -357,7 +359,7 @@ class UAVModel(object):
                 shoot_prob = self.shoot_prob
 
             # 随机采样
-            shoot_prob_in_1s = 1-(1-shoot_prob)**(self.dt_fire/5)
+            shoot_prob_in_1s = 1-(1-shoot_prob)**(self.dt_fire)
             if np.random.uniform(0, 1) <= shoot_prob_in_1s:
                 can_shoot = True
             else:

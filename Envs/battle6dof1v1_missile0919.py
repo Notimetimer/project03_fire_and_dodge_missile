@@ -44,7 +44,7 @@ from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
 dt_move = 0.02
-report_move_time_rate = int(round(dt_maneuver / dt_move))
+# report_move_time_rate = int(round(dt_maneuver / dt_move))
 
 o00 = np.array([144.7, 13.4])  # 地理原点的经纬
 # t = 0
@@ -165,7 +165,7 @@ class Battle(object):
         self.draw = 0
         # 红方初始化
         for i in range(self.Rnum):
-            UAV = UAVModel(dt=dt_move)
+            UAV = UAVModel(dt=self.dt_move)
             UAV.init_ammo = red_init_ammo
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
@@ -194,7 +194,7 @@ class Battle(object):
             self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
         # 蓝方初始化
         for i in range(self.Bnum):
-            UAV = UAVModel(dt=dt_move)
+            UAV = UAVModel(dt=self.dt_move)
             UAV.init_ammo = blue_init_ammo
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
@@ -261,7 +261,7 @@ class Battle(object):
 
 
     def step(self, r_actions, b_actions):
-        report_move_time_rate = int(round(self.dt_maneuver / dt_move))
+        report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
         self.t = round(self.t, 2)  # 保留两位小数
@@ -720,6 +720,34 @@ class Battle(object):
         s["border"][0] = min(1, s["border"][0] / 50e3)
         s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
         return s
+    
+    def unscale_state(self, obs_input):
+        """把 scale_state 的缩放还原。仅判断 key 是否存在（不再检查长度）。"""
+        s = copy.deepcopy(obs_input)
+
+        if "target_information" in s and s["target_information"] is not None:
+            s["target_information"][3] = s["target_information"][3] * 10e3
+            s["target_information"][5] = s["target_information"][5] * 340
+
+        if "ego_main" in s and s["ego_main"] is not None:
+            s["ego_main"][0] = s["ego_main"][0] * 340
+            s["ego_main"][1] = s["ego_main"][1] * 5e3
+
+        if "ego_control" in s and s["ego_control"] is not None:
+            s["ego_control"][0] = s["ego_control"][0] * (2 * pi)
+            s["ego_control"][1] = s["ego_control"][1] * (2 * pi)
+            s["ego_control"][2] = s["ego_control"][2] * (2 * pi)
+
+        if "weapon" in s and s["weapon"] is not None:
+            s["weapon"] = s["weapon"] * 120
+
+        if "threat" in s and s["threat"] is not None:
+            s["threat"][3] = s["threat"][3] * 10e3
+
+        if "border" in s and s["border"] is not None:
+            s["border"][0] = s["border"][0] * 50e3
+
+        return s
         
     def base_obs(self, side, pomdp=0):  # 默认为完全可观测，设置pomdp后为部分可观测
         # 处理部分可观测、默认值问题、并尺度缩放
@@ -860,6 +888,8 @@ class Battle(object):
         out = True
         if R_uav <= self.R_cage:
             out = False
+        if out:
+            print(UAV.side, '出界')
         return out
 
     # 近距处理

@@ -227,16 +227,17 @@ class missile_class:
         
         if not datalink:
             self.radar_on = True
-            # # 线性递推预测目标位置
-            # if self.last_target_t is None:
-            #     vtt_predict = self.vt0_
-            #     ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
-            # else:
-            #     vtt_predict = self.last_target_v
-            #     ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
-            # 降级方法，记住旧的目标位置而不做预测
-            vtt_predict = self.vt0_
-            ptt_predict = self.pt0_
+            # 线性递推预测目标位置
+            if self.last_target_t is None:
+                vtt_predict = self.vt0_
+                ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
+            else:
+                vtt_predict = self.last_target_v
+                ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
+
+            # # 降级方法，记住旧的目标位置而不做预测
+            # vtt_predict = self.vt0_
+            # ptt_predict = self.pt0_
         else:
             self.radar_on = False
             vtt_predict = v_target_

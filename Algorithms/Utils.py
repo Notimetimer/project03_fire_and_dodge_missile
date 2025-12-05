@@ -64,6 +64,9 @@ def check_weights_bias_nan(model, model_name="model", place=None):
 # --- 保持 compute_advantage 函数，但根据传入参数数量切换逻辑 ---
 def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncateds 默认为 None
     # 确保输入转为 numpy
+    # 只要第0维是 BufferSize (时间维度)，后续维度 (如 [Env, Agent, 1]) 会被 Numpy 广播机制自动处理。
+    # zip(td_delta[::-1], ...) 会沿着第0维切片，取出的 delta 形状为 [Env, Agent, 1]，
+    # 后续的加减乘除都是 element-wise 的，因此各环境/智能体之间计算是独立的（平行的）。
     td_delta = td_delta.detach().cpu().numpy()
     dones = dones.detach().cpu().numpy() # 假设这里的 dones 是 terminateds (term)
 
@@ -71,7 +74,7 @@ def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncat
         # --- 旧式/兼容模式：dones = term OR trunc ---
         # 此时，dones 就是 $\text{done}_t$
         advantage_list = []
-        advantage = 0.0
+        advantage = 0.0 # 初始标量0，第一次运算会自动广播为 [Env, Agent, 1]
         
         for delta, done in zip(td_delta[::-1], dones[::-1]):
             advantage = delta + gamma * lmbda * advantage * (1 - done)
@@ -90,6 +93,7 @@ def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncat
         
         for delta, term, trunc in zip(td_delta[::-1], terminateds[::-1], truncateds[::-1]):
             # 1. GAE 传递项的修正因子: $\gamma \lambda (1 - \text{term}_t) A_{t+1}$
+            # 这里的乘法是 element-wise 的，所以不同 env/agent 互不干扰
             next_advantage_term = gamma * lmbda * advantage * (1.0 - term)
             
             # 2. 预估 A_t: $A'_t = \delta_t + \text{next\_advantage\_term}$
@@ -103,7 +107,8 @@ def compute_advantage(gamma, lmbda, td_delta, dones, truncateds=None): # truncat
         advantage_list.reverse()
         return torch.tensor(np.array(advantage_list), dtype=torch.float)
 
-# 计算蒙特卡洛回报（MARWIL）
+
+# 计算蒙特卡洛回报（MARWIL），没有考虑并行和多智能体的情况（目前只用于模仿学习）
 def compute_monte_carlo_returns(gamma, rewards, dones, truncateds=None):
     """
     计算蒙特卡洛回报 (Discounted Returns / Rt)。

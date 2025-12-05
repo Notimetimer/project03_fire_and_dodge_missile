@@ -23,7 +23,7 @@ import numpy as np
 import torch as th
 from torch import nn
 import torch.nn.functional as F
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import pandas as pd
 from Envs.UAVmodel6d import UAVModel
@@ -143,8 +143,8 @@ def save_meta_once(path, state_dict):
 def creat_initial_state():
     # 飞机出生状态指定
     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-    blue_height = np.random.uniform(4000, 12000)
-    red_height = blue_height + np.random.uniform(-2000, 2500)
+    blue_height = 9000 # np.random.uniform(4000, 12000)
+    red_height = 9000 # blue_height + np.random.uniform(-2000, 2500)
     red_psi = np.random.choice([-1, 1]) * pi/2 # random.uniform(-pi, pi)
     blue_psi = sub_of_radian(red_psi, -pi)
     # blue_beta = red_psi

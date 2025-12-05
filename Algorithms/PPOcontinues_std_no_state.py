@@ -377,7 +377,7 @@ class PPOContinuous:
                 advantage = residual / (c + 1e-8)
                 
                 # 计算指数权重
-                # weights = torch.exp(beta * advantage)
+                # weights = torch.exp(beta * advantage) 
                 # 修改为:
                 # 1. 计算原始权重
                 raw_weights = torch.exp(beta * advantage)
@@ -403,7 +403,7 @@ class PPOContinuous:
             # C. 计算 Critic Loss
             # ----------------------------------------------------
             v_pred = self.critic(s_batch)
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v * alpha
 
             # ----------------------------------------------------
             # D. 反向传播

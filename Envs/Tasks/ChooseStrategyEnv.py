@@ -1,8 +1,5 @@
 '''
-出生点改在外面指定
-
-子策略暂时使用规则智能体，留下使用神经网络的接口
-
+下一次更改需要加上导弹发射相关的奖励和惩罚
 '''
 
 import numpy as np
@@ -47,22 +44,22 @@ from Algorithms.Rules import *
 # 通过继承构建观测空间、奖励函数和终止条件
 # 通过类的组合获取各子策略的观测量裁剪
 
-action_options = [
-                    "水平追踪",
-                    "30追踪",
-                    "60追踪",
-                    "-30追踪",
-                    "-60追踪",
-                    "±30crank",
-                    "±60crank",
-                    "蛇形机动",
-                    "破S",
-                    "三九线",
-                    "慢回转",
-                    "快回转",
-                    "-30回转",
-                    "-60回转",
-                ]
+action_options = {
+                    0: "track",
+                    1: "30track",
+                    2: "60track",
+                    3: "-30track",
+                    4: "-60track",
+                    5: "+-30crank",
+                    6: "+-60crank",
+                    7: "snake",
+                    8: "splitS",
+                    9: "39",
+                    10: "slowTurn",
+                    11: "fastTurn",
+                    12: "-30turn",
+                    13: "-60turn",
+                }
 
 class ChooseStrategyEnv(Battle):
     def __init__(self, args, tacview_show=0):

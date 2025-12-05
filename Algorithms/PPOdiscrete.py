@@ -14,7 +14,8 @@ from Algorithms.MLP_heads import ValueNet, PolicyNetDiscrete
 class PPO_discrete:
     ''' PPO算法,采用截断方式 '''
     def __init__(self, state_dim, hidden_dims, action_dim, actor_lr, critic_lr,
-                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2):
+                 lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2,
+                 init_temperature=1.0, temp_decay=0.995):
         self.actor = PolicyNetDiscrete(state_dim, hidden_dims, action_dim).to(device)
         self.critic = ValueNet(state_dim, hidden_dims).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -33,6 +34,11 @@ class PPO_discrete:
         # 初始化为 1.0，用于动态追踪 (R_t - V)^2 的移动平均值
         self.c_sq = torch.tensor(1.0, dtype=torch.float).to(device)
 
+        self.temperature = init_temperature  # 初始温度设为 2.0 或更高，视过拟合程度而定
+        self.min_temperature = 1.0
+        self.temp_decay = temp_decay # 每个 episode 或 update 后衰减
+        self.action_dim = action_dim
+
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         """动态设置 actor 和 critic 的学习率"""
@@ -45,7 +51,7 @@ class PPO_discrete:
 
     def take_action(self, state, explore=True):
         state = torch.tensor(np.array([state]), dtype=torch.float).to(self.device)
-        probs = self.actor(state)
+        probs = self.actor(state, temperature=self.temperature)
         action_dist = torch.distributions.Categorical(probs) # 离散的输出为类别分布
         if explore:
             action = action_dist.sample()
@@ -63,7 +69,7 @@ class PPO_discrete:
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        log_probs = torch.log(self.actor(states).gather(1, actions))
+        log_probs = torch.log(self.actor(states, temperature=self.temperature).gather(1, actions))
         # 添加Actor NaN检查
         if torch.isnan(log_probs).any():
             raise ValueError("NaN in Actor outputs")
@@ -87,7 +93,7 @@ class PPO_discrete:
         # 提前计算一次旧的 value 预测（用于 value clipping）
         v_pred_old = self.critic(states).detach()  # (N,1)
 
-        old_log_probs = torch.log(self.actor(states).gather(1, actions)).detach()
+        old_log_probs = torch.log(self.actor(states, temperature=self.temperature).gather(1, actions)).detach()
 
         actor_grad_list = []
         actor_loss_list = []
@@ -99,7 +105,7 @@ class PPO_discrete:
         ratio_list = []
 
         for _ in range(self.epochs):
-            log_probs = torch.log(self.actor(states).gather(1, actions))
+            log_probs = torch.log(self.actor(states, temperature=self.temperature).gather(1, actions))
             # 添加Actor NaN检查
             if torch.isnan(log_probs).any():
                 raise ValueError("NaN in Actor outputs in loop")
@@ -112,12 +118,12 @@ class PPO_discrete:
             check_weights_bias_nan(self.actor, "actor", "update循环中")
             check_weights_bias_nan(self.critic, "critic", "update循环中")
 
-            log_probs = torch.log(self.actor(states).gather(1, actions)) # (N,1)
+            log_probs = torch.log(self.actor(states, temperature=self.temperature).gather(1, actions)) # (N,1)
             ratio = torch.exp(log_probs - old_log_probs) # (N,1)
             surr1 = torch.clamp(ratio, -20, 20) * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
 
-            probs = self.actor(states)
+            probs = self.actor(states, temperature=self.temperature)
             action_dist = torch.distributions.Categorical(probs)
 
             entropy_factor = action_dist.entropy().mean() # torch.clamp(dist.entropy().mean(), -20, 70) # -20, 7 e^2
@@ -172,8 +178,10 @@ class PPO_discrete:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
+        self.temperature = max(self.min_temperature, self.temperature * self.temp_decay)
 
-def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100):
+
+def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, max_weight=100, label_smoothing=0.1):
         """
         MARWIL 离线更新函数 (执行一个 Epoch)
         逻辑：接收全量专家数据 -> 打乱(可选) -> 按 batch_size 拆分 -> 逐个 mini-batch 更新
@@ -188,6 +196,11 @@ def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=
             
         返回:
             avg_actor_loss, avg_critic_loss, current_c
+        
+        [改进版] MARWIL 离线更新函数 (Discrete)
+        新增参数:
+            label_smoothing (float): 标签平滑系数 (0.0~1.0). 建议值 0.05 ~ 0.1.
+                                     0.0 表示使用原始硬标签 (One-hot).
         """
         # 1. 提取全量数据并转为 Tensor (一次性转移到 Device)
         # 注意：这里需要 il_transition_dict 包含 'returns' (即计算好的 R_t)，而不是原始 rewards
@@ -252,20 +265,35 @@ def MARWIL_update(self, il_transition_dict, beta, batch_size=64, alpha=1.0, c_v=
             # 获取当前策略对 batch 状态的概率分布
             all_probs = self.actor(s_batch) # (Batch, Action_Dim)
             
-            # 使用 gather 提取实际采取动作的概率
-            probs = all_probs.gather(1, a_batch) 
+            # 【关键修正1】这里计算的是所有动作的 Log 概率，后续要一直用这个变量
+            log_all_probs = torch.log(all_probs + 1e-10)
+
+            # 新的拟合目标，人为加大熵防止过拟合
+            if label_smoothing > 0:
+                # 1. 构建 One-hot 目标
+                # a_batch shape: (Batch, 1) -> scatter 需要 index
+                one_hot = torch.zeros_like(all_probs).scatter_(1, a_batch, 1.0) # 填充一个全0向量，在下方构造概率目标
+                
+                # 2. 构建平滑目标: y_ls = (1 - epsilon) * y_hot + epsilon / K
+                smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / self.action_dim)
+                
+                # 3. 计算 Soft Cross Entropy: - sum( target * log_p )
+                # 【关键修正2】使用 log_all_probs 进行加权求和，而不是不存在的 log_probs
+                ce_loss = -torch.sum(smooth_target * log_all_probs, dim=1, keepdim=True)
+            else:
+                # 原始逻辑: 只取专家动作的 log_prob
+                # 【关键修正3】从 log_all_probs 中提取对应动作的概率
+                chosen_log_probs = log_all_probs.gather(1, a_batch) # 只收集“参考答案”所在的概率值
+                ce_loss = -chosen_log_probs
             
-            # 加上微小值防止 log(0)
-            log_probs = torch.log(probs + 1e-10)
-            
-            # Loss = - mean( alpha * weights * log_pi )
-            actor_loss = -torch.mean(alpha * weights.detach() * log_probs)
+            # 加权 Loss
+            actor_loss = torch.mean(alpha * weights.detach() * ce_loss)
 
             # ----------------------------------------------------
             # C. 计算 Critic Loss (监督学习拟合 R_t)
             # ----------------------------------------------------
             v_pred = self.critic(s_batch)
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v * alpha
 
             # ----------------------------------------------------
             # D. 反向传播与更新
