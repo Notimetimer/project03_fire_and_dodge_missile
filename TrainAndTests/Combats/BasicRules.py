@@ -20,7 +20,7 @@ import re
 use_tacview = 1  # 是否可视化
 action_cycle_multiplier = 20
 
-def basic_rules(env, side, state_check, rules_num, last_action=0):
+def basic_rules(state_check, rules_num, last_action=0):
     '''
     rules_num = 0: 保持和目标相同高度只打进攻(action_number = 0,1,3)，0平飞追踪 1爬升追踪 3下降追踪，攻击区内发射导弹，上一枚导弹发射后如果还在中制导，不发射新导弹
     rules_num = 1: 保持和目标相同高度进攻(0,1,3), 发射完导弹立马crank(6), 受到威胁立刻回转至5000m高度以下(11水平回转, 12俯冲回转), 威胁结束后回归进攻
@@ -99,10 +99,10 @@ def basic_rules(env, side, state_check, rules_num, last_action=0):
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
 
-    if fire_missile_affirmative:
-        launch_missile_immediately(env, side)
+    # if fire_missile_affirmative:
+    #     launch_missile_immediately(env, side)
 
-    return action_number, fire_missile
+    return action_number, fire_missile_affirmative
 
 
 if __name__=='__main__':
@@ -164,7 +164,7 @@ if __name__=='__main__':
         b_action_list = []
         
         # 强化学习训练
-        for i_episode in range(1):
+        for i_episode in range(3):
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -218,16 +218,20 @@ if __name__=='__main__':
                     # 1. 记录新周期的起始状态
                     last_decision_state = b_obs
                     # 2. Agent 产生一个动作
-                    
+
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(env, 'r', r_state_check, 0, last_action=last_r_action_label)
+                    r_action_label, r_fire = basic_rules(r_state_check, i_episode, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
+                    if r_fire:
+                        launch_missile_immediately(env, 'r')
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(b_check_obs)
-                    b_action_label, b_fire = basic_rules(env, 'b', b_state_check, 2, last_action=last_b_action_label)
+                    b_action_label, b_fire = basic_rules(b_state_check, 2, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
+                    if b_fire:
+                        launch_missile_immediately(env, 'b')
 
                     decide_steps_after_update += 1
                     

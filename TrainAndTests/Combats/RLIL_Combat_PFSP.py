@@ -458,18 +458,22 @@ if __name__ == "__main__":
                 r_state_check = env.unscale_state(r_check_obs)
                 if adv_is_rule:
                     # [Fix] 传入选定的 rule_num
-                    r_action_label, r_fire = basic_rules(env, 'r', r_state_check, rule_num, last_action=last_r_action_label)
+                    r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
                 else:
                     # [Fix] NN 对手决策
                     r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 红方也要开火
+                if r_fire:
+                    launch_missile_immediately(env, 'r')
 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                 b_action_label = b_action_exec['cat'][0]
                 b_fire = b_action_exec['bern'][0]
+                if b_fire:
+                    launch_missile_immediately(env, 'b')
                 
                 # print("机动概率分布", b_action_check['cat'])
                 # print("开火概率", b_action_check['bern'][0])
@@ -501,7 +505,7 @@ if __name__ == "__main__":
         
         # # --- 回合结束处理 ---
         # **关键点 3: 存储【最后一个】不完整的动作周期的经验**
-        # 循环结束后，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
+        # 循环结束，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
         if last_decision_state is not None:
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
             transition_dict = append_b_experience(transition_dict, last_decision_state, current_action, b_reward, next_b_obs, True)
@@ -595,10 +599,27 @@ if __name__ == "__main__":
                 # 记录主智能体
                 logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
                 logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps)
+
+                # 记录主智能体在当前所有 ELO 中的归一化排名位置：
+                # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
+                min_elo = np.min(list(valid_elos.values()))
+                max_elo = np.max(list(valid_elos.values()))
+                denom = float(max_elo - min_elo)
+                if denom == 0.0:
+                    rank_pos = 0.5
+                else:
+                    rank_pos = float((main_agent_elo - min_elo) / denom)
+                # 将这个指标放在 Elo_Centered 相关目录下
+                logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
                 
-                # 记录所有群体 (Original & Bias-free)
-                # 由于 Agent 很多，我们可能只关心特定的，或者全部写入
-                for k in sorted_keys:
+                # 只记录所有规则智能体和最新保存的智能体（actor_key）
+                rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
+                keys_to_log = list(sorted(rule_keys))
+                # actor_key 在本代码块上方已定义为当前保存的快照名
+                if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
+                    keys_to_log.append(actor_key)
+                
+                for k in keys_to_log:
                     logger.add(f"Elo_Raw/{k}", valid_elos[k], total_steps)
                     logger.add(f"Elo_Centered/{k}", valid_elos[k] - mean_elo, total_steps)
 

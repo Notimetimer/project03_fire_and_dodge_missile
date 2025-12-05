@@ -131,11 +131,15 @@ if __name__=='__main__':
                     r_state_check = env.unscale_state(r_check_obs)
                     r_action_label, r_fire = basic_rules(env, 'r', r_state_check, i_episode, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
+                    if r_fire:
+                        launch_missile_immediately(env, 'r')
 
                     # 蓝方维持最优规则
                     b_state_check = env.unscale_state(b_check_obs)
                     b_action_label, b_fire = basic_rules(env, 'b', b_state_check, 2, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
+                    if b_fire:
+                        launch_missile_immediately(env, 'b')
 
                     decide_steps_after_update += 1
                     

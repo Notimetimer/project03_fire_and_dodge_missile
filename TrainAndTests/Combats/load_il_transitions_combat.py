@@ -323,17 +323,21 @@ if __name__ == "__main__":
                     
                     # 红方改变规则
                     r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(env, 'r', r_state_check, i_episode, last_action=last_r_action_label)
+                    r_action_label, r_fire = basic_rules(r_state_check, i_episode, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
+                    if r_fire:
+                        launch_missile_immediately(env, 'r')
 
                     # 蓝方使用智能体
                     b_state_check = env.unscale_state(b_check_obs)
                     
-                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
+                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=0)
                     b_action_label = b_action_exec['cat'][0] # 返回可能是一个数组
                     
-                    # _, b_fire = basic_rules(env, 'b', b_state_check, 1, last_action=last_b_action_label)
+                    # _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
                     b_fire = b_action_exec['bern'][0]
+                    if b_fire:
+                        launch_missile_immediately(env, 'b')
                     
                     print("机动概率分布", b_action_check['cat'])
                     print("开火概率", b_action_check['bern'][0])

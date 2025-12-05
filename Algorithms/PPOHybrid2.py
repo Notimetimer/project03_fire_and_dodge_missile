@@ -294,27 +294,58 @@ class HybridActorWrapper(nn.Module):
                 total_loss_per_sample += ce_loss
 
         # --- 3. 伯努利动作 (Bernoulli) ---
+        # -- 1）简单加权BCE --
         # 依据提供的 Bernoulli 代码，使用 BCE
+        # if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+        #     bern_logits = actor_outputs['bern']
+        #     probs = torch.sigmoid(bern_logits) # 或者是 net 直接输出 logits，这里转 prob
+        #     target = expert_actions['bern'] # (Batch, Dim)
+        #     # Label Smoothing
+        #     if label_smoothing > 0:
+        #         target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+        #     # BCE: - [y*log(p) + (1-y)*log(1-p)]
+        #     # 加上 clamp 防止 log(0)
+        #     probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
+        #     # [关键修改] 引入正样本权重 (pos_weight)
+        #     # 假设发射只占 1/50，那么 pos_weight 可以设为 10.0 到 50.0 之间
+        #     # 这意味着每一条“发射”指令产生的 Loss 会被放大 N 倍
+        #     pos_weight = 3  # 建议从 10.0 开始尝试，如果还不敢打就加到 20.0-50.0
+        #     bce_loss = -(pos_weight * target * torch.log(probs) + (1.0 - target) * torch.log(1.0 - probs))
+        #     # 对动作维度求和 (Batch, Dim) -> (Batch, )
+        #     total_loss_per_sample += bce_loss.sum(dim=-1)
+        
+        # -- 2）Focal Loss --
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_logits = actor_outputs['bern']
-            probs = torch.sigmoid(bern_logits) # 或者是 net 直接输出 logits，这里转 prob
-            
-            target = expert_actions['bern'] # (Batch, Dim)
-            
+            probs = torch.sigmoid(bern_logits)
+            probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
+            target = expert_actions['bern'] # (Batch, 1)
             # Label Smoothing
             if label_smoothing > 0:
                 target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+            # === 方案2：Focal Loss (针对敏感度问题) ===
+            # alpha: 平衡因子，类似于 pos_weight 的作用，但范围是 0-1
+            # gamma: 聚焦因子，通常设为 2.0。值越大，越忽视简单背景，越关注难分类的发射瞬间
             
-            # BCE: - [y*log(p) + (1-y)*log(1-p)]
-            # 加上 clamp 防止 log(0)
-            probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
-            bce_loss = -(target * torch.log(probs) + (1.0 - target) * torch.log(1.0 - probs))
+            # 建议参数组合：
+            # alpha = 0.75 (意味着正样本本身权重是 0.75，负样本是 0.25，自带 3:1 的加权)
+            # gamma = 2.0 (标准设置)
             
-            # 对动作维度求和 (Batch, Dim) -> (Batch, )
+            alpha = 0.75
+            gamma = 2.0
+            
+            # Focal Loss 公式
+            # 对于正样本 (target=1): -alpha * (1-p)^gamma * log(p)
+            # 对于负样本 (target=0): -(1-alpha) * p^gamma * log(1-p)
+            
+            loss_pos = -alpha * torch.pow(1.0 - probs, gamma) * torch.log(probs) * target
+            loss_neg = -(1 - alpha) * torch.pow(probs, gamma) * torch.log(1.0 - probs) * (1.0 - target)
+            
+            bce_loss = loss_pos + loss_neg
+            
             total_loss_per_sample += bce_loss.sum(dim=-1)
-
+        
         return total_loss_per_sample
-
 # =============================================================================
 # 3. PPO 算法类 (精简版)
 # =============================================================================
