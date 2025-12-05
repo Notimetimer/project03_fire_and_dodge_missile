@@ -620,8 +620,17 @@ if __name__ == "__main__":
                     keys_to_log.append(actor_key)
                 
                 for k in keys_to_log:
-                    logger.add(f"Elo_Raw/{k}", valid_elos[k], total_steps)
-                    logger.add(f"Elo_Centered/{k}", valid_elos[k] - mean_elo, total_steps)
+                    # 如果是规则智能体，使用其自身名字
+                    if k.startswith("Rule_"):
+                        raw_tag = f"Elo_Raw/{k}"
+                        centered_tag = f"Elo_Centered/{k}"
+                    # 否则，认为是最新智能体，使用固定标签 "Latest"
+                    else:
+                        raw_tag = "Elo_Raw/Latest"
+                        centered_tag = "Elo_Centered/Latest"
+                    
+                    logger.add(raw_tag, valid_elos[k], total_steps)
+                    logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
 
         if (i_episode) >= 10:
             print(f"Episode {i_episode}, Progress: {total_steps/max_steps:.3f}, Avg Return: {np.mean(return_list[-10:]):.3f}")
