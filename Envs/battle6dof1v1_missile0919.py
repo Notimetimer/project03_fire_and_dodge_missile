@@ -44,7 +44,7 @@ from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
 dt_move = 0.02
-report_move_time_rate = int(round(dt_maneuver / dt_move))
+# report_move_time_rate = int(round(dt_maneuver / dt_move))
 
 o00 = np.array([144.7, 13.4])  # 地理原点的经纬
 # t = 0
@@ -165,7 +165,7 @@ class Battle(object):
         self.draw = 0
         # 红方初始化
         for i in range(self.Rnum):
-            UAV = UAVModel(dt=dt_move)
+            UAV = UAVModel(dt=self.dt_move)
             UAV.init_ammo = red_init_ammo
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
@@ -194,7 +194,7 @@ class Battle(object):
             self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
         # 蓝方初始化
         for i in range(self.Bnum):
-            UAV = UAVModel(dt=dt_move)
+            UAV = UAVModel(dt=self.dt_move)
             UAV.init_ammo = blue_init_ammo
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
@@ -261,7 +261,7 @@ class Battle(object):
 
 
     def step(self, r_actions, b_actions):
-        report_move_time_rate = int(round(self.dt_maneuver / dt_move))
+        report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
         self.t = round(self.t, 2)  # 保留两位小数

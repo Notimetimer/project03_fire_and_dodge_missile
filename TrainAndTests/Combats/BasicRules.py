@@ -116,6 +116,8 @@ if __name__=='__main__':
     args = parser.parse_args()
 
     env = ChooseStrategyEnv(args, tacview_show=use_tacview)
+    # test
+    env.dt_move = 0.05
 
     env.shielded = 1
 
@@ -219,7 +221,7 @@ if __name__=='__main__':
                     
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(env, 'r', r_state_check, 2, last_action=last_r_action_label)
+                    r_action_label, r_fire = basic_rules(env, 'r', r_state_check, 0, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
 
                     # 蓝方根据规则活动

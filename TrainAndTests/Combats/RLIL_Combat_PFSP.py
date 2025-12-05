@@ -168,7 +168,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4
 critic_lr = actor_lr * 5
-IL_epoches= 0  # 80
+IL_epoches= 80  # 80
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.95
@@ -271,6 +271,8 @@ if __name__ == "__main__":
     student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
     env = ChooseStrategyEnv(args, tacview_show=0)
+    env.dt_move = 0.05 # 仿真跑得快点
+    
     from BasicRules import *  # 可以直接读同一级目录
     t_bias = 0
     env.shielded = 1 # 不得不全程带上
