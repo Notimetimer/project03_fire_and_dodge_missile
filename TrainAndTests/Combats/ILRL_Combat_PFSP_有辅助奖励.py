@@ -223,7 +223,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'MARWIL_combat'
+    mission_name = 'MARWIL_combat_有辅助奖励'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -371,6 +371,8 @@ if __name__ == "__main__":
     
     while total_steps < int(max_steps):
         i_episode += 1
+        # ensure actor_key always defined for ELO bookkeeping (avoids NameError later)
+        actor_key = f"actor_rein{i_episode}"
         
         # --- [Fix] 对手选择逻辑 (PFSP) ---
         probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
@@ -425,6 +427,9 @@ if __name__ == "__main__":
         
         last_r_action_label = 0
         last_b_action_label = 0
+
+        r_m_id = None
+        b_m_id = None
         
         steps_of_this_eps = -1
         
@@ -553,7 +558,10 @@ if __name__ == "__main__":
             # 强化学习actor特殊项监控
             logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
             logger.add("train/10 ratio", student_agent.ratio_mean, total_steps) 
-            logger.add("train/11 episode/step", i_episode, total_steps)    
+            logger.add("train/11 episode/step", i_episode, total_steps)
+
+            # 有没有试图发射过导弹
+            logger.add("special/0 发射的导弹数量", env.BUAV.init_ammo-env.BUAV.ammo, total_steps)
 
             transition_dict = {'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
             
@@ -561,6 +569,10 @@ if __name__ == "__main__":
         return_list.append(episode_return)
         env.clear_render(t_bias=t_bias)
         t_bias += env.t
+
+        if (i_episode) >= 10:
+            print(f"Episode {i_episode}, Progress: {total_steps/max_steps:.3f}, Avg Return: {np.mean(return_list[-10:]):.3f}")
+
         
         # --- 保存模型与 ELO 维护 ---
         if i_episode % 10 == 0:
@@ -572,69 +584,54 @@ if __name__ == "__main__":
             # 保存权重
             torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, actor_name))
             
-            # 将当前主智能体作为一个新的历史快照加入 ELO 列表
-            # 新快照继承当前主智能体的 ELO
-            elo_ratings[actor_key] = main_agent_elo
+        # 将当前主智能体作为一个新的历史快照加入 ELO 列表
+        # 新快照继承当前主智能体的 ELO
+        elo_ratings[actor_key] = main_agent_elo
+        
+        # 保存 ELO JSON
+        try:
+            tmp_path = elo_json_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                # 同时保存 current main agent elo 以便断点续传
+                save_data = copy.deepcopy(elo_ratings)
+                save_data["__CURRENT_MAIN__"] = main_agent_elo 
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, elo_json_path)
+        except Exception as e:
+            print(f"Warning: failed to save elo json: {e}")
+
+        # --- [Fix] Logging ELOs (Sorted) ---
+        # 过滤掉特殊 Key
+        valid_elos = {k: v for k, v in elo_ratings.items() if not k.startswith("__")}
+        if valid_elos:
+            mean_elo = np.mean(list(valid_elos.values()))
+            sorted_keys = sorted(valid_elos.keys())
+
+            # [新增] 记录主智能体的原始 ELO 分数
+            logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
+
+            # 记录主智能体在当前所有 ELO 中的归一化排名位置（放到 Elo_relevant）
+            min_elo = np.min(list(valid_elos.values()))
+            max_elo = np.max(list(valid_elos.values()))
+            denom = float(max_elo - min_elo)
+            rank_pos = 0.5 if denom == 0.0 else float((main_agent_elo - min_elo) / denom)
+            logger.add("Elo_relevant/Current_Rank %", rank_pos * 100, total_steps)
             
-            # 保存 ELO JSON
-            try:
-                tmp_path = elo_json_path + ".tmp"
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    # 同时保存 current main agent elo 以便断点续传
-                    save_data = copy.deepcopy(elo_ratings)
-                    save_data["__CURRENT_MAIN__"] = main_agent_elo 
-                    json.dump(save_data, f, ensure_ascii=False, indent=2)
-                os.replace(tmp_path, elo_json_path)
-            except Exception as e:
-                print(f"Warning: failed to save elo json: {e}")
-
-            # --- [Fix] Logging ELOs (Sorted) ---
-            # 过滤掉特殊 Key
-            valid_elos = {k: v for k, v in elo_ratings.items() if not k.startswith("__")}
-            if valid_elos:
-                mean_elo = np.mean(list(valid_elos.values()))
-                # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
-                # 这里为了简单，直接遍历
-                sorted_keys = sorted(valid_elos.keys())
-                
-                # 记录主智能体
-                logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
-                logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps)
-
-                # 记录主智能体在当前所有 ELO 中的归一化排名位置：
-                # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
-                min_elo = np.min(list(valid_elos.values()))
-                max_elo = np.max(list(valid_elos.values()))
-                denom = float(max_elo - min_elo)
-                if denom == 0.0:
-                    rank_pos = 0.5
+            # 只记录所有规则智能体和最新保存的智能体（actor_key）
+            rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
+            keys_to_log = list(sorted(rule_keys))
+            if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
+                keys_to_log.append(actor_key)
+            
+            # 仅记录 Elo_relevant 下的差值信息：
+            for k in keys_to_log:
+                if k.startswith("Rule_"):
+                    tag = f"Elo_relevant/{k}"
+                    value = main_agent_elo - valid_elos[k]   # main - rule
                 else:
-                    rank_pos = float((main_agent_elo - min_elo) / denom)
-                # 将这个指标放在 Elo_Centered 相关目录下
-                logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
-                
-                # 只记录所有规则智能体和最新保存的智能体（actor_key）
-                rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
-                keys_to_log = list(sorted(rule_keys))
-                # actor_key 在本代码块上方已定义为当前保存的快照名
-                if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
-                    keys_to_log.append(actor_key)
-                
-                for k in keys_to_log:
-                    # 如果是规则智能体，使用其自身名字
-                    if k.startswith("Rule_"):
-                        raw_tag = f"Elo_Raw/{k}"
-                        centered_tag = f"Elo_Centered/{k}"
-                    # 否则，认为是最新智能体，使用固定标签 "Latest"
-                    else:
-                        raw_tag = "Elo_Raw/Latest"
-                        centered_tag = "Elo_Centered/Latest"
-                    
-                    logger.add(raw_tag, valid_elos[k], total_steps)
-                    logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
-
-        if (i_episode) >= 10:
-            print(f"Episode {i_episode}, Progress: {total_steps/max_steps:.3f}, Avg Return: {np.mean(return_list[-10:]):.3f}")
+                    tag = "Elo_relevant/Latest"
+                    value = valid_elos[k] - mean_elo         # latest centered by mean
+                logger.add(tag, value, total_steps)
 
     # End Training
     training_end_time = time.time()

@@ -268,26 +268,28 @@ class ChooseStrategyEnv(Battle):
             else:
                 self.draw = 1
 
-        uav_states = self.base_obs(side, pomdp=self.pomdp)  ### test 部分观测的话用1
-        enm_state = self.base_obs(enm.side, pomdp=self.pomdp)  ### test 部分观测的话用1
-        delta_theta = uav_states["target_information"][2]
-        distance = uav_states["target_information"][3]
-        d_hor, leftright = uav_states["border"]
-        # state = self.get_state(UAV.side)
-        speed = uav_states["ego_main"][0]
-        alt = uav_states["ego_main"][1]
-        cos_delta_psi = uav_states["target_information"][0]
-        sin_delta_psi = uav_states["target_information"][1]
+        ego_obs = self.base_obs(side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        enm_obs = self.base_obs(enm.side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        delta_theta = ego_obs["target_information"][2]
+        distance = ego_obs["target_information"][3]
+        speed = ego_obs["ego_main"][0]
+        alt = ego_obs["ego_main"][1]
+        cos_delta_psi = ego_obs["target_information"][0]
+        sin_delta_psi = ego_obs["target_information"][1]
         delta_psi = atan2(sin_delta_psi, cos_delta_psi)
-        alpha = uav_states["target_information"][4]
-        warning = uav_states["warning"]
-        missile_in_mid_term = uav_states["missile_in_mid_term"]
-        missile_time_since_shoot = uav_states["weapon"]
-        AA_hor = uav_states["target_information"][-2]
+        alpha = ego_obs["target_information"][4]
+        warning = ego_obs["warning"]
+        missile_in_mid_term = ego_obs["missile_in_mid_term"]
+        missile_time_since_shoot = ego_obs["weapon"]
+        AA_hor = ego_obs["target_information"][-2]
         
-        cos_delta_psi_threat = uav_states["threat"][0]
-        sin_delta_psi_threat = uav_states["threat"][1]
+        cos_delta_psi_threat = ego_obs["threat"][0]
+        sin_delta_psi_threat = ego_obs["threat"][1]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
+
+        ego_states = self.get_state(side)
+        d_hor = ego_states["border"][0]
+
 
         # ---主要奖励---
         reward_main = 0
@@ -303,11 +305,11 @@ class ChooseStrategyEnv(Battle):
             reward_main += 2
 
         # 锁定目标
-        if uav_states["target_locked"]:
+        if ego_obs["target_locked"]:
             reward_main += 1.1
 
         # 被目标锁定
-        if uav_states["locked_by_target"]:
+        if ego_obs["locked_by_target"]:
             reward_main -= 1
 
         # 收到导弹警告
@@ -315,7 +317,7 @@ class ChooseStrategyEnv(Battle):
             reward_main -= 3
 
         # 导弹锁定目标
-        if enm_state["warning"]:
+        if enm_obs["warning"]:
             reward_main += 3
 
         # 逃脱导弹
@@ -327,10 +329,10 @@ class ChooseStrategyEnv(Battle):
             reward_main -= 5
 
         # 发射导弹
-        ut = action_shoot
+        shoot = action_shoot
         # 发射惩罚
-        if ut == 1:
-            reward_main -= 30
+        if shoot == 1:
+            reward_main -= 10
 
         # ---辅助奖励---
         reward_fire = 0
@@ -347,10 +349,10 @@ class ChooseStrategyEnv(Battle):
             else:
                 reward_lock += 0.5 * (1 - (alpha - pi / 3) / pi)
 
-        # 有warning时alpha越大越好
+        # # 有warning时alpha越大越好
         r_escape = 0
-        if warning:
-            r_escape += 0.8 * abs(delta_psi_threat) / pi
+        # if warning:
+        #     r_escape += 0.8 * abs(delta_psi_threat) / pi
 
         # 迎角惩罚
         r_angle = 0
@@ -361,10 +363,14 @@ class ChooseStrategyEnv(Battle):
         r_alt = (alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)
 
+        # 靠近边界惩罚
+        r_border = 0
+        if d_hor < 20e3:
+            r_border = (d_hor/20e3-1) * 2
 
         # 导弹发射辅助奖励/惩罚
         reward_shoot = 0
-        if ut == 1:
+        if shoot == 1:
             reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 尽可能增大发射间隔
             reward_shoot += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
             reward_shoot += 1 * np.clip(ego.theta/(pi/3), -1, 1)  # 鼓励抛射
@@ -374,9 +380,9 @@ class ChooseStrategyEnv(Battle):
         if terminate and ego.ammo < ego.init_ammo:
             reward_shoot += 20 # 至少打了一枚
         # 重复发射导弹时惩罚, 否则有奖励
-        if len(alive_ally_missiles)>1 and ut==1:
+        if len(alive_ally_missiles)>1 and shoot==1:
             reward_shoot -= 30
-        if len(alive_ally_missiles)>1 and ut==0:
+        if len(alive_ally_missiles)>1 and shoot==0:
             reward_shoot += 5
         
         # deltapsi变化率奖励 todobedontinued
@@ -389,7 +395,8 @@ class ChooseStrategyEnv(Battle):
             1 * r_escape,
             1 * r_angle,
             1 * r_alt,
-            1 * reward_shoot
+            1 * reward_shoot,
+            1 * r_border
         ])
 
         return done, reward_main+reward_assisted, reward_assisted

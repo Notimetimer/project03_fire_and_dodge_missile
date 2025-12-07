@@ -6,6 +6,7 @@ import argparse
 import glob
 import re
 from math import pi
+import time
 
 # --- 1. 项目路径和模块导入 ---
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -72,7 +73,7 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='MARWIL_combat', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='MARWIL_combat_无辅助奖励', help="Mission name to find the log directory.")
     args = parser.parse_args()
 
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -81,7 +82,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- 初始化环境 ---
-    env = ChooseStrategyEnv(env_args, tacview_show=1)
+    env = ChooseStrategyEnv(env_args, tacview_show=0)
     env.shielded = 1
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -96,8 +97,10 @@ if __name__ == "__main__":
     if not agent_path:
         raise FileNotFoundError(f"No agent file found in '{latest_log_dir}' (ID: {args.agent_id or 'latest'})")
 
+    print()
     print(f"Found log directory: {latest_log_dir}")
     print(f"Loading agent weights from: {agent_path}")
+    print()
 
     # 实例化模型结构并加载权重
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
@@ -105,6 +108,8 @@ if __name__ == "__main__":
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device))
     actor_wrapper.eval() # **非常重要**：设置为评估模式
+
+    env = ChooseStrategyEnv(env_args, tacview_show=1)
 
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2]
@@ -122,6 +127,7 @@ if __name__ == "__main__":
 
             done = False
             last_r_action_label = 0
+            last_b_action_label = 0
             b_action_label = 0
 
             # 回合仿真循环
@@ -142,16 +148,21 @@ if __name__ == "__main__":
                         launch_missile_immediately(env, 'r')
 
                     # 蓝方 (RL 智能体)
+                    # -- 规则
+                    # b_state_check = env.unscale_state(b_check_obs)
+                    # b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
+                    # last_b_action_label = b_action_label
+                    # -- 训练
                     with torch.no_grad():
                         # **修正点：使用正确的、已加载权重的 actor_wrapper**
-                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore=False)
-                    
+                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore=0)
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
+
                     if b_fire:
                         launch_missile_immediately(env, 'b')
                     
-                    print(f"Time: {env.t:.1f}s, Blue Action Probs: Maneuver={b_action_check['cat']}, Fire={b_action_check['bern'][0]:.2f}")
+                    # print(f"Time: {env.t:.1f}s, Blue Action Probs: Maneuver={b_action_check['cat']}, Fire={b_action_check['bern'][0]:.2f}")
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14(env.RUAV, r_action_label)
@@ -167,9 +178,10 @@ if __name__ == "__main__":
             elif env.lose: result = "Lose"
             print(f"\n--- Test Finished. Result for Blue (Loaded Agent): {result} ---")
             
-            t_bias += env.t
             env.clear_render(t_bias=t_bias)
-            input("Press Enter to continue to the next test...")
+            t_bias += env.t
+            
+            # input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")

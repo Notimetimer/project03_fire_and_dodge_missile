@@ -1,3 +1,5 @@
+# 机动由agent决定，发射判决由规则控制
+
 import os
 import sys
 import numpy as np
@@ -168,7 +170,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4
 critic_lr = actor_lr * 5
-IL_epoches= 80  # 80
+IL_epoches= 0  # 80
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.95
@@ -183,7 +185,7 @@ state_dim = env.obs_dim
 # 动作空间定义 (需要与 BasicRules 产生的数据对应)
 # cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
 # bern: 攻击动作头 (env.fire_dim 通常是 1)
-action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
+action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': 0}
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 action_bound = None
 
@@ -223,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'MARWIL_combat'
+    mission_name = 'MARWIL_combat_no_shoot'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -463,18 +465,19 @@ if __name__ == "__main__":
                     # [Fix] NN 对手决策
                     r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
                     r_action_label = r_action_exec['cat'][0]
-                    r_fire = r_action_exec['bern'][0] # 网络控制开火
+                    _, r_fire = basic_rules(r_state_check, 1, last_action=last_r_action_label)
                 last_r_action_label = r_action_label
                 if r_fire:
-                    r_m_id = launch_missile_immediately(env, 'r')
+                    launch_missile_immediately(env, 'r')
 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                 b_action_label = b_action_exec['cat'][0]
-                b_fire = b_action_exec['bern'][0]
+                _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
+                last_b_action_label = b_action_label
                 if b_fire:
-                    b_m_id = launch_missile_immediately(env, 'b')
+                    launch_missile_immediately(env, 'b')
                 
                 # print("机动概率分布", b_action_check['cat'])
                 # print("开火概率", b_action_check['bern'][0])
@@ -482,13 +485,13 @@ if __name__ == "__main__":
                 decide_steps_after_update += 1
                 
                 b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-                current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
+                current_action = {'cat': b_action_exec['cat']}
 
             r_maneuver = env.maneuver14(env.RUAV, r_action_label)
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
 
             _, _, _, _, fake_terminate = env.step(r_maneuver, b_maneuver)
-            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
+            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_fire)
             done = done or fake_terminate
 
             # Accumulate rewards between student_agent decisions

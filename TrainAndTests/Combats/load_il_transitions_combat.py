@@ -326,7 +326,7 @@ if __name__ == "__main__":
                     r_action_label, r_fire = basic_rules(r_state_check, i_episode, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
                     if r_fire:
-                        launch_missile_immediately(env, 'r')
+                        r_m_id = launch_missile_immediately(env, 'r')
 
                     # 蓝方使用智能体
                     b_state_check = env.unscale_state(b_check_obs)
@@ -337,7 +337,7 @@ if __name__ == "__main__":
                     # _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
                     b_fire = b_action_exec['bern'][0]
                     if b_fire:
-                        launch_missile_immediately(env, 'b')
+                        b_m_id = launch_missile_immediately(env, 'b')
                     
                     print("机动概率分布", b_action_check['cat'])
                     print("开火概率", b_action_check['bern'][0])
@@ -357,7 +357,7 @@ if __name__ == "__main__":
                 b_action = env.maneuver14(env.BUAV, b_action_label)
 
                 _, _, _, _, fake_terminate = env.step(r_action, b_action) # Environment updates every dt_maneuver
-                done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_fire)
+                done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
                 done = done or fake_terminate
 
                 # Accumulate rewards between agent decisions
