@@ -487,9 +487,9 @@ if __name__ == "__main__":
             r_maneuver = env.maneuver14(env.RUAV, r_action_label)
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
 
-            _, _, _, _, fake_terminate = env.step(r_maneuver, b_maneuver)
+            env.step(r_maneuver, b_maneuver)
             done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
-            done = done or fake_terminate
+            done = done
 
             # Accumulate rewards between student_agent decisions
             episode_return += b_reward * env.dt_maneuver

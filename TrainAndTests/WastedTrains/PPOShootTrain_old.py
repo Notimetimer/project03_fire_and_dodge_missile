@@ -297,7 +297,7 @@ if __name__ == "__main__":
                 b_action_list.append(b_action_n)
 
                 _, _, _, _, fake_terminate, hitter = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                done, b_reward, end_reward = env.attack_terminate_and_reward('b', u, missile_id)
+                done, b_reward, end_reward = env.get_terminate_and_reward('b', u, missile_id)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1

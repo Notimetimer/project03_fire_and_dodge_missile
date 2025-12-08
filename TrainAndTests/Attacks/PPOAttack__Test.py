@@ -22,7 +22,7 @@ log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
-actor_path = load_actor_from_log(log_dir, number=None)
+actor_path = load_actor_from_log(log_dir, number=None, rein_prefix="actor_rein") # actor_rein actor_save
 if not actor_path:
     print(f"No actor checkpoint found in {log_dir}")
 else:
@@ -33,7 +33,7 @@ else:
 t_bias = 0
 
 try:
-    env = AttackTrainEnv(args, tacview_show=1) # Battle(args, tacview_show=1)
+    env = AttackTrainEnv(args, tacview_show=1) # 是否用Tacview可视化
     for i_episode in range(3):  # 10
         r_action_list=[]
         b_action_list=[]
@@ -93,8 +93,8 @@ try:
             #     launch_missile_with_basic_rules(env, side='r')
             #     launch_missile_with_basic_rules(env, side='b')
 
-            _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-            done, b_reward, _ = env.attack_terminate_and_reward('b')
+            env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+            done, b_reward, _ = env.get_terminate_and_reward('b')
 
             step += 1
             env.render(t_bias=t_bias)

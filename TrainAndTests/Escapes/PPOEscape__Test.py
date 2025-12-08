@@ -202,9 +202,9 @@ try:
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
 
-            _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+            env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
             done, b_reward, _ = env.escape_terminate_and_reward('b')
-            done = done or fake_terminate  # debug 这里需要解决下仿真结束判断的问题
+            done = done  # debug 这里需要解决下仿真结束判断的问题
 
             # if env.RUAV.dead:
             #     print()

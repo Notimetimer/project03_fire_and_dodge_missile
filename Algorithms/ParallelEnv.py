@@ -14,55 +14,88 @@ def worker(remote, parent_remote, env_fn_wrapper):
             
             if cmd == 'step':
                 # data 是一个字典 {'r': ..., 'b': ...}
-                r_action = data.get('r')
-                b_action = data.get('b')
-
-                # --- 关键：红方规则逻辑内嵌 ---
-                # 如果主进程传来的红方动作是 None，说明由环境内部规则接管
-                if r_action is None:
-                    # 我们将在 Env 中新增一个 helper 函数来处理这个
-                    if hasattr(env, 'get_red_rule_action'):
-                        r_action = env.get_red_rule_action()
+                
+                # 处理红方动作：支持 (action, fire_flag) 格式
+                r_input = data.get('r')
+                if r_input is not None:
+                    # 检查是否为 (maneuver_action, fire_flag) 结构
+                    if isinstance(r_input, (tuple, list)) and len(r_input) == 2 and isinstance(r_input[1], (bool, int, np.bool_)):
+                        r_action, r_fire = r_input
+                        # if r_fire:
+                        #     launch_missile_if_possible(env, 'r')
                     else:
-                        # 降级处理：什么都不做
-                        r_action = np.array([0, 0, 300]) 
+                        r_action = r_input
+                else:
+                    r_action = np.array([0, 0, 300]) # 默认fallback
+
+                # 处理蓝方动作
+                b_input = data.get('b')
+                if b_input is not None:
+                     b_action = b_input
+                else:
+                     b_action = np.array([0, 0, 300])
 
                 # 执行物理步进
-                # results: (r_reward, b_reward, r_done, b_done, terminate)
-                results = env.step(r_action, b_action)
+                env.step(r_action, b_action)
                 
-                # 获取观测
+                # 2. 手动调用特定任务的奖励和终止函数
+                is_done, b_reward, _ = env.get_terminate_and_reward('b')
+                
+                # 3. 获取观测
                 r_obs, _ = env.attack_obs('r')
                 b_obs, _ = env.attack_obs('b')
                 
-                # 处理自动重置
-                terminate = results[4]
-                done = terminate # 或者根据需要定义 done
-                
-                info = {'win': env.win, 'lose': env.lose}
+                # [新增] 提取红方规则所需的 Raw State
+                red_raw_info = {
+                    'pos': env.RUAV.pos_,
+                    'psi': env.RUAV.psi,
+                    'vel': env.RUAV.vel_,
+                    'ammo': env.RUAV.ammo
+                }
 
-                if done:
-                    env.reset()
-                    r_obs, _ = env.attack_obs('r')
-                    b_obs, _ = env.attack_obs('b')
+                info = {
+                    'win': env.win, 
+                    'lose': env.lose,
+                    'red_raw_info': red_raw_info # 发送给主进程计算规则
+                }
 
-                # 发回数据
+                if is_done:
+                    # 重置环境并获取初始观测
+                    b_obs, _ = env.reset() 
+                    r_obs, _ = env.attack_obs('r') 
+                    # 重置后更新 info 中的 raw info
+                    info['red_raw_info'] = {
+                        'pos': env.RUAV.pos_,
+                        'psi': env.RUAV.psi,
+                        'vel': env.RUAV.vel_,
+                        'ammo': env.RUAV.ammo
+                    }
+
                 remote.send({
                     'r_obs': r_obs,
                     'b_obs': b_obs,
-                    'r_reward': results[0], # 这里假设取标量奖励
-                    'b_reward': results[1],
-                    'done': done,
-                    'info': info
+                    'r_reward': 0,          
+                    'b_reward': b_reward,   
+                    'dones': is_done,       
+                    'infos': info
                 })
 
             elif cmd == 'reset':
-                env.reset()
+                b_obs, _ = env.reset()
                 r_obs, _ = env.attack_obs('r')
-                b_obs, _ = env.attack_obs('b')
+                
+                # Reset 时也需要发送 raw info
+                red_raw_info = {
+                    'pos': env.RUAV.pos_,
+                    'psi': env.RUAV.psi,
+                    'vel': env.RUAV.vel_,
+                    'ammo': env.RUAV.ammo
+                }
+                
                 remote.send({
                     'r_obs': r_obs,
-                    'b_obs': b_obs
+                    'b_obs': b_obs,
+                    'infos': {'red_raw_info': red_raw_info} 
                 })
 
             elif cmd == 'close':
@@ -135,8 +168,8 @@ class ParallelPettingZooEnv:
             'b_obs': np.stack([r['b_obs'] for r in results]),
             'r_reward': np.stack([r['r_reward'] for r in results]),
             'b_reward': np.stack([r['b_reward'] for r in results]),
-            'dones': np.stack([r['done'] for r in results]),
-            'infos': [r['info'] for r in results]
+            'dones': np.stack([r['dones'] for r in results]),
+            'infos': [r['infos'] for r in results]
         }
 
     def reset(self):
@@ -147,7 +180,8 @@ class ParallelPettingZooEnv:
         
         return {
             'r_obs': np.stack([r['r_obs'] for r in results]),
-            'b_obs': np.stack([r['b_obs'] for r in results])
+            'b_obs': np.stack([r['b_obs'] for r in results]),
+            'infos': [r.get('infos', {}) for r in results] # 确保 reset 也返回 infos
         }
 
     def close(self):

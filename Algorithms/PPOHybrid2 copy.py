@@ -425,87 +425,62 @@ class PPOHybrid:
         if hasattr(self.actor.net, 'log_std_param'):
             self.actor.net.log_std_param.requires_grad = True
 
-        # [修改] 支持直接传入 numpy 数组 (来自 preprocess_parallel_buffer)
-        if isinstance(transition_dict['states'], list):
-            states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-            next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-            dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-            rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        else:
-            # 已经是 numpy array
-            states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
-            next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
-            dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
-            rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
-
+        
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
+        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
+        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
         actions_from_buffer = transition_dict['actions']
         
+        # todo action_mask 防止“死后动作”干扰决策
+        # todo truncs
+        # todo global states，适配集中式Critic
+
         # 1. 准备动作数据 (转 Tensor)
         actions_on_device = {}
-        
-        # [新增] 优化：支持直接传入字典形式的动作 (来自 preprocess_parallel_buffer)
-        if isinstance(actions_from_buffer, dict):
-            for key, val in actions_from_buffer.items():
-                if key == 'cat':
-                    actions_on_device[key] = torch.tensor(val, dtype=torch.long).to(self.device)
-                else:
-                    actions_on_device[key] = torch.tensor(val, dtype=torch.float).to(self.device)
-        else:
-            # 旧逻辑：List of Dicts (较慢)
-            all_keys = actions_from_buffer[0].keys()
-            for key in all_keys:
-                vals = [d[key] for d in actions_from_buffer]
-                if key == 'cat':
-                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
-                else:
-                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
+        all_keys = actions_from_buffer[0].keys()
+        for key in all_keys:
+            vals = [d[key] for d in actions_from_buffer]
+            if key == 'cat':
+                actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
+            else:
+                actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
 
         # 2. 计算 Advantage
-        # [新增] 检查是否已经预计算了 Advantage 和 TD Target
-        if 'advantages' in transition_dict and 'td_targets' in transition_dict:
-            if isinstance(transition_dict['advantages'], list):
-                advantage = torch.tensor(np.array(transition_dict['advantages']), dtype=torch.float).view(-1, 1).to(self.device)
-                td_target = torch.tensor(np.array(transition_dict['td_targets']), dtype=torch.float).view(-1, 1).to(self.device)
-            else:
-                advantage = torch.tensor(transition_dict['advantages'], dtype=torch.float).view(-1, 1).to(self.device)
-                td_target = torch.tensor(transition_dict['td_targets'], dtype=torch.float).view(-1, 1).to(self.device)
-        else:
-            # 如果没有预计算，则现场计算 (注意：如果是并行数据直接展平进来的，这里计算会有偏差)
-            with torch.no_grad():
-                td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
-                td_delta = td_target - self.critic(states)
-                advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
-            
-        # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
+            td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+            td_delta = td_target - self.critic(states)
+            advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+            
+            # 3. 计算旧策略的 log_probs (使用 Wrapper)
             old_log_probs, _, _ = self.actor.evaluate_actions(states, actions_on_device, h=None, max_std=self.max_std)
             v_pred_old = self.critic(states)
             
-        # --- [2. 优势归一化] ---
-        if adv_normed:
-            adv_mean = advantage.mean()
-            adv_std = advantage.std(unbiased=False)
-            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+            # --- [2. 优势归一化] ---
+            if adv_normed:
+                adv_mean = advantage.mean()
+                adv_std = advantage.std(unbiased=False)
+                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
 
-        # --- [3. Shuffle 逻辑: 在此处打乱所有相关 Tensor] ---
-        if shuffled:
-            # 生成随机索引
-            idx = torch.randperm(states.size(0), device=self.device)
-            
-            # 打乱基础数据
-            states = states[idx]
-            td_target = td_target[idx]
-            advantage = advantage[idx]
-            old_log_probs = old_log_probs[idx]
-            v_pred_old = v_pred_old[idx]
-            
-            # 打乱字典形式的动作
-            for key in actions_on_device:
-                actions_on_device[key] = actions_on_device[key][idx]
-            
-            # 如果有其他 tensor 需要 shuffle (如 truncs) 也要在这里处理
-            # todo truncs的处理逻辑 当前env里面没有做，所以算法先不做
-            
+            # --- [3. Shuffle 逻辑: 在此处打乱所有相关 Tensor] ---
+            if shuffled:
+                # 生成随机索引
+                idx = torch.randperm(states.size(0), device=self.device)
+                
+                # 打乱基础数据
+                states = states[idx]
+                td_target = td_target[idx]
+                advantage = advantage[idx]
+                old_log_probs = old_log_probs[idx]
+                v_pred_old = v_pred_old[idx]
+                
+                # 打乱字典形式的动作
+                for key in actions_on_device:
+                    actions_on_device[key] = actions_on_device[key][idx]
+                
+                # 如果有其他 tensor 需要 shuffle (如 truncs) 也要在这里处理
+                # todo truncs的处理逻辑 当前env里面没有做，所以算法先不做
+                
 
         # 4. PPO Update Loop
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
@@ -569,7 +544,7 @@ class PPOHybrid:
         """
         统一将 (T, N, D) 或 (T, D) 的数据转为扁平的 (Batch, D)，并计算 GAE。
         """
-        # 1. 提取并转 Tensor
+        # 1. 提取并转 Tensor (逻辑与你上传的 PPOContinuous 一致)
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).to(self.device)
@@ -586,7 +561,7 @@ class PPOHybrid:
             dones = dones.unsqueeze(-1)
             # states 已经是 [T, N, D]
 
-        # 3. 处理 Truncs
+        # 3. 处理 Truncs (PPOContinuous 逻辑)
         use_truncs = 'truncs' in transition_dict and len(transition_dict['truncs']) > 0
         if use_truncs:
             truncs = torch.tensor(np.array(transition_dict['truncs']), dtype=torch.float).to(self.device)
@@ -595,47 +570,34 @@ class PPOHybrid:
         else:
             truncs = None
 
-        # 4. GAE 计算 (保持时间维度 T 独立计算)
+        # 4. GAE 计算
         with torch.no_grad():
             T, N = states.shape[0], states.shape[1]
-            # Critic 需要 (Batch, Dim)
             flat_s = states.reshape(T * N, -1)
             flat_ns = next_states.reshape(T * N, -1)
             curr_vals = self.critic(flat_s).view(T, N, 1)
             next_vals = self.critic(flat_ns).view(T, N, 1)
             
+            # 使用 Utils 中的 compute_advantage (支持 truncs)
             td_delta = rewards + self.gamma * next_vals * (1.0 - dones) - curr_vals
             advantage = compute_advantage(self.gamma, self.lmbda, td_delta, dones, truncs)
             returns = advantage + curr_vals
 
-        # 5. 扁平化并回填 (Flatten) -> 转回 Numpy 以节省显存并兼容 update 接口
-        # 使用 reshape(-1, ...) 展平前两个维度 (T, N) -> (T*N)
+        # 5. 扁平化并回填 (Flatten)
+        def flat(t): return t.reshape(-1, *t.shape[2:]).cpu().numpy().tolist()
         
-        transition_dict['states'] = states.reshape(T * N, -1).cpu().numpy()
-        transition_dict['next_states'] = next_states.reshape(T * N, -1).cpu().numpy()
-        transition_dict['rewards'] = rewards.reshape(T * N).cpu().numpy() # (Batch, )
-        transition_dict['dones'] = dones.reshape(T * N).cpu().numpy()     # (Batch, )
-        transition_dict['advantages'] = advantage.reshape(T * N).cpu().numpy() # (Batch, )
-        transition_dict['td_targets'] = returns.reshape(T * N).cpu().numpy()   # (Batch, )
+        transition_dict['states'] = flat(states)
+        transition_dict['next_states'] = flat(next_states)
+        transition_dict['rewards'] = flat(rewards)
+        transition_dict['dones'] = flat(dones)
+        transition_dict['advantages'] = flat(advantage)
+        transition_dict['td_targets'] = flat(returns)
+        if use_truncs: transition_dict['truncs'] = flat(truncs)
         
-        if use_truncs: 
-            transition_dict['truncs'] = truncs.reshape(T * N).cpu().numpy()
-        
-        # [新增] 处理 Actions 的展平
-        # 原始 actions 是 List(T) of Dicts, 每个 Dict 包含 (N, Dim) 的数组
-        raw_actions_list = transition_dict['actions']
-        flat_actions_dict = {}
-        # 假设所有 step 的 keys 是一样的
-        if len(raw_actions_list) > 0:
-            keys = raw_actions_list[0].keys()
-            for k in keys:
-                # stack: (T, N, Dim)
-                arr = np.stack([step_act[k] for step_act in raw_actions_list])
-                # flatten: (T*N, Dim)
-                flat_actions_dict[k] = arr.reshape(T * N, -1)
-        
-        # 将 actions 替换为扁平化后的字典 (Dict of Arrays)
-        transition_dict['actions'] = flat_actions_dict
+        # Actions 比较特殊，是字典，需要单独处理扁平化
+        # 假设 actions 是 list of dicts -> dict of lists (flat)
+        # 这步通常在 Buffer 采样时做比较好，或者在这里手动 loop key
+        pass # 具体实现视你的 Buffer 结构而定，核心是上面的 Advantage 计算
 
         return transition_dict
 

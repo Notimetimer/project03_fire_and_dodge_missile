@@ -302,11 +302,11 @@ class ChooseStrategyEnv(Battle):
 
         # 为导弹提供制导
         if missile_in_mid_term:
-            reward_main += 2
+            reward_main += 5
 
         # 锁定目标
         if ego_obs["target_locked"]:
-            reward_main += 1.1
+            reward_main += 3
 
         # 被目标锁定
         if ego_obs["locked_by_target"]:
@@ -318,7 +318,7 @@ class ChooseStrategyEnv(Battle):
 
         # 导弹锁定目标
         if enm_obs["warning"]:
-            reward_main += 3
+            reward_main += 5
 
         # 逃脱导弹
         if ego.escape_once:
@@ -332,7 +332,10 @@ class ChooseStrategyEnv(Battle):
         shoot = action_shoot
         # 发射惩罚
         if shoot == 1:
-            reward_main -= 5
+            if alpha*180/pi > 10:
+                reward_main -= 5
+            else:
+                reward_main += 1
         if shoot == 1:
             # reward_main += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 尽可能增大发射间隔
             reward_main += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀

@@ -190,8 +190,8 @@ if __name__ == "__main__":
     #         #     launch_missile_with_basic_rules(env, side='r')
     #         #     launch_missile_with_basic_rules(env, side='b')
 
-    #         _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-    #         done, b_reward, _ = env.attack_terminate_and_reward('b')
+    #         env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+    #         done, b_reward, _ = env.get_terminate_and_reward('b')
 
     #         step += 1
     #         env.render(t_bias=t_bias)

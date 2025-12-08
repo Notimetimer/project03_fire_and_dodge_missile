@@ -21,10 +21,8 @@ from Math_calculates.sub_of_angles import sub_of_radian
 
 # --- 参数配置 ---
 parser = argparse.ArgumentParser("UAV Parallel Training")
-parser.add_argument("--max-episode-len", type=float, default=120,  # 8 * 60,
-                    help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
-                    help="")
+parser.add_argument("--max-episode-len", type=float, default=120, help="maximum episode time length")
+parser.add_argument("--R-cage", type=float, default=70e3, help="")
 parser.add_argument("--n-envs", type=int, default=4, help="并行环境数量 (根据CPU核数设定)")
 parser.add_argument("--max-steps", type=float, default=2e6, help="总训练步数")
 args = parser.parse_args()
@@ -40,6 +38,117 @@ eps = 0.2
 k_entropy = 0.01
 mission_name = 'Attack_Parallel'
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+# ==============================================================================
+#  Red Rule-Based Logic (提取自 Battle Class，用于计算对手动作)
+# ==============================================================================
+
+def track_behavior(ego_height, delta_psi, speed_cmd=1.5*340):
+    """追踪行为"""
+    height_cmd = 7e3 - ego_height
+    heading_cmd = delta_psi
+    return np.array([height_cmd, heading_cmd, speed_cmd])
+
+def escape_behavior(ego_height, enm_delta_psi, warning, threat_delta_psi, speed_cmd=1.5 * 340):
+    """逃逸行为"""
+    height_cmd = 7e3 - ego_height
+    if warning: 
+        heading_cmd = np.clip(sub_of_radian(threat_delta_psi, pi), -pi / 2, pi / 2)
+    else:
+        heading_cmd = np.clip(sub_of_radian(enm_delta_psi, pi), -pi / 2, pi / 2)
+    return np.array([height_cmd, heading_cmd, speed_cmd])
+
+def left_crank_behavior(ego_height, delta_psi, speed_cmd = 1.1 * 340):
+    """左 Crank 行为"""
+    height_cmd = 7e3 - ego_height
+    heading_cmd = np.clip(delta_psi - pi / 4, -pi / 2, pi / 2)
+    return np.array([height_cmd, heading_cmd, speed_cmd])
+
+def right_crank_behavior(ego_height, delta_psi, speed_cmd = 1.1 * 340):
+    """右 Crank 行为"""
+    height_cmd = 7e3 - ego_height
+    heading_cmd = np.clip(delta_psi + pi / 4, -pi / 2, pi / 2)
+    return np.array([height_cmd, heading_cmd, speed_cmd])
+
+def wander_behavior(speed_cmd = 300):
+    """随机漫步行为"""
+    alt_cmd = 3000 * np.random.uniform(-1, 1)
+    heading_cmd = np.random.normal(0, 25 * pi / 180)
+    return np.array([alt_cmd, heading_cmd, speed_cmd])
+
+def back_in_cage(cmd, ego_pos_, ego_psi, R_cage=70e3):
+    """回笼行为 (使用绝对坐标)"""
+    height_cmd, heading_cmd, speed_cmd = cmd
+    ego_height = ego_pos_[1]
+    R_to_o00 = sqrt(ego_pos_[0] ** 2 + ego_pos_[2] ** 2)
+    if ego_height > 13e3:
+        height_cmd = -5000
+    elif ego_height < 3e3:
+        height_cmd = 5000
+    if R_cage - R_to_o00 < 8e3:
+        beta_of_o00 = atan2(-ego_pos_[2], -ego_pos_[0])
+        heading_cmd = sub_of_radian(beta_of_o00, ego_psi)
+    return np.array([height_cmd, heading_cmd, speed_cmd])
+
+def get_red_rule_decision(obs_flat, raw_info, env_index, args):
+    """
+    红方高层决策函数
+    此函数替换了 AttackManeuverEnv.py 中被删除的 get_red_rule_action
+    """
+    
+    # --- 1. 状态还原 ---
+    # 距离 (dist) 在 AttackObs 中是第 4 个元素 (索引 3)，且被 10e3 缩放
+    dist = obs_flat[3] * 10e3 
+    
+    # 相对方位角 (enm_delta_psi)
+    cos_dpsi = obs_flat[0]
+    sin_dpsi = obs_flat[1]
+    enm_delta_psi = atan2(sin_dpsi, cos_dpsi)
+    
+    # 从 raw_info 获取绝对导航信息 (Worker 进程中提取)
+    ego_pos_ = raw_info['pos']
+    ego_psi = raw_info['psi']
+    
+    # 威胁感知 (AttackObs 屏蔽了 Threat，这里假定无威胁，简化处理)
+    warning = False 
+    threat_delta_psi = 0
+    
+    # --- 2. 策略选择 ---
+    use_wander = False
+    if env_index % 2 == 1:
+        use_wander = True
+        
+    # --- 3. 核心决策逻辑 ---
+    if use_wander:
+        cmd = wander_behavior()
+    else:
+        # 简化版拦截逻辑 (与串行脚本中的 decision_rule 效果类似)
+        if dist > 40e3:
+             cmd = track_behavior(ego_pos_[1], enm_delta_psi)
+        elif dist > 10e3:
+            if enm_delta_psi >= 0:
+                cmd = left_crank_behavior(ego_pos_[1], enm_delta_psi)
+            else:
+                cmd = right_crank_behavior(ego_pos_[1], enm_delta_psi)
+        else:
+            cmd = track_behavior(ego_pos_[1], enm_delta_psi)
+             
+    # 最高优先级：强制回笼逻辑
+    cmd = back_in_cage(cmd, ego_pos_, ego_psi, R_cage=args.R_cage)
+    
+    # --- 4. 发射逻辑 ---
+    fire = False
+    # obs_ATA = obs_flat[4] # ATA (未缩放，弧度)
+    
+    # if raw_info['ammo'] > 0:
+    #     # 发射条件：距离 < 30km, ATA < 30度 (简化逻辑)
+    #     if dist < 30e3 and abs(obs_ATA) < 30 * pi / 180:
+    #          if np.random.rand() < 0.05: 
+    #              fire = True
+                 
+    return cmd, fire
+# ==============================================================================
+
 
 # --- 环境工厂函数 ---
 def make_env():
@@ -111,7 +220,8 @@ if __name__ == "__main__":
 
     # Reset 全部环境
     obs_dict = vec_env.reset()
-    b_obs = obs_dict['b_obs'] # (N_envs, State_dim)
+    b_obs = obs_dict['b_obs'] 
+    infos = obs_dict['infos'] # 捕获初始 info (包含 red_raw_info)
 
     try:
         while total_steps < args.max_steps:
@@ -128,23 +238,44 @@ if __name__ == "__main__":
                 # 返回 actions_exec (用于环境), actions_raw (用于训练)
                 b_actions_exec, b_actions_raw, _, _ = agent.take_action(b_obs, explore=True)
                 
-                # B. 构造动作字典
-                # 红方设为 None，触发 Worker 内部规则
-                # 蓝方取出 'cont' 部分传入环境
+                # B. 红方动作 (主进程循环处理不同策略)
+                r_obs = obs_dict['r_obs']
+                r_actions_list = []
+                
+                # *** 核心修改：并行化红方规则逻辑 ***
+                for i in range(args.n_envs):
+                    # 获取当前环境的 红方观测 和 Raw Info
+                    curr_r_obs = r_obs[i]
+                    curr_info = infos[i]
+                    
+                    # 提取 worker 发送的原始状态信息
+                    curr_raw = curr_info.get('red_raw_info', {'pos': np.array([0,5000,0]), 'psi': 0, 'ammo': 0})
+                    
+                    # 调用规则逻辑，获取 (maneuver_vector, fire_boolean)
+                    maneuver, fire = get_red_rule_decision(curr_r_obs, curr_raw, env_index=i, args=args)
+                    
+                    # r_action_list 的元素是 (maneuver_vector, fire_boolean)
+                    r_actions_list.append((maneuver, fire))
+                
+                # C. 构造动作字典
+                # 'r' 动作是 [(maneuver, fire), ...] 的列表
                 actions_dispatch = {
-                    'r': None, 
+                    'r': r_actions_list, 
                     'b': b_actions_exec['cont'] # (N_envs, 3)
                 }
                 
-                # C. 并行步进
+                # D. 并行步进
                 results = vec_env.step(actions_dispatch)
                 
                 next_b_obs = results['b_obs']
-                rewards = results['b_reward'] # (N_envs, )
-                dones = results['dones']      # (N_envs, )
+                rewards = results['b_reward'] 
+                dones = results['dones']      
                 
-                # D. 存储数据
-                # 注意：这里我们存的是批次数据，稍后在更新前展平
+                # 更新 obs_dict 和 infos (包含 r_obs 和最新的 red_raw_info)
+                obs_dict = results
+                infos = results['infos']
+                
+                # E. 存储数据
                 transition_dict['states'].append(b_obs)
                 transition_dict['actions'].append(b_actions_raw) # 这是一个包含 (N, 3) 数组的字典
                 transition_dict['next_states'].append(next_b_obs)
@@ -152,7 +283,6 @@ if __name__ == "__main__":
                 transition_dict['dones'].append(dones)
                 
                 b_obs = next_b_obs
-                # 每次 inner loop 统计为一次全局步（用户要求 +1）
                 total_steps += 1
             # --- 更新阶段 (Update) ---
             

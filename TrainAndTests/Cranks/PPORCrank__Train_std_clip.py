@@ -294,11 +294,11 @@ if __name__=="__main__":
                 # else:
                 #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
-                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, b_event_reward = env.right_crank_terminate_and_reward('b')
                 next_b_obs, _ = env.crank_obs('b')  # 子策略的训练不要用get_obs
 
-                done = done or fake_terminate
+                done = done
                 if not test_run:
                     total_steps += 1
                     transition_dict['states'].append(b_obs)

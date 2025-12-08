@@ -207,8 +207,8 @@ if __name__ == "__main__":
                 b_action_list.append(b_action_n)
 
                 # 环境步进
-                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)
-                done, b_reward, _ = env.attack_terminate_and_reward('b')
+                env.step(r_action_n, b_action_n)
+                done, b_reward, _ = env.get_terminate_and_reward('b')
                 next_b_obs, _ = env.attack_obs('b')
                 env.BUAV.act_memory = b_action_n.copy()
                 total_steps += 1

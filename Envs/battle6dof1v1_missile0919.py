@@ -419,15 +419,14 @@ class Battle(object):
                 # 近距杀
                 #     short_range_killed = UAV.short_range_kill(adv)
                 #     if short_range_killed:
-                #         # self.running = False
                 #         adv.got_hit = True
                 # 出界判别
                 if self.crash(UAV):
                     UAV.dead = True
                 # self.running = False
 
-        r_reward_n, b_reward_n = self.get_reward()
-        terminate = self.get_terminate()
+        # r_reward_n, b_reward_n = self.get_reward()
+        # terminate = self.get_terminate()
 
         for UAV in self.UAVs:
             if UAV.got_hit or self.crash(UAV):  # or self.out_range(UAV): ###
@@ -444,10 +443,10 @@ class Battle(object):
         self.RUAV = self.UAVs[0]
         self.BUAV = self.UAVs[1]
 
-        if terminate:
-            self.running = False
+        # if terminate:
+        #     self.running = False
 
-        return r_reward_n, b_reward_n, r_dones, b_dones, terminate
+        return 0, 0, 0, 0, 0  # 废弃不再使用了
 
     def get_missile_state(self):
         alive_r_missiles = [m for m in self.Rmissiles if not m.dead]
@@ -819,26 +818,26 @@ class Battle(object):
         self.obs_init = self.scale_state(self.state_init)
         return observation
 
-    def get_reward(self, missiled_combat='Flase'):  # 策略选择器奖励
-        if missiled_combat == True:
-            # 添加导弹命中相关的奖励和惩罚
-            pass
-        '结果奖励部分'
-        RUAV = self.RUAV
-        BUAV = self.BUAV
-        UAVs = [RUAV, BUAV]
-        A = [0, 0]  # R, B
-        rewards = [0, 0]  # R, B
-        for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
+    # def get_reward(self, missiled_combat='Flase'):  # 策略选择器奖励
+    #     if missiled_combat == True:
+    #         # 添加导弹命中相关的奖励和惩罚
+    #         pass
+    #     '结果奖励部分'
+    #     RUAV = self.RUAV
+    #     BUAV = self.BUAV
+    #     UAVs = [RUAV, BUAV]
+    #     A = [0, 0]  # R, B
+    #     rewards = [0, 0]  # R, B
+    #     for i, UAV in enumerate(UAVs):  # UAVs[0]为红方，UAVs[1]为蓝方
 
-            r_obs_n = self.base_obs('r')
-            b_obs_n = self.base_obs('b')
+    #         r_obs_n = self.base_obs('r')
+    #         b_obs_n = self.base_obs('b')
 
-            rewards[0] = 0
-            rewards[1] = 0
+    #         rewards[0] = 0
+    #         rewards[1] = 0
 
-        # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
-        return (rewards[0], rewards[0]), (rewards[1], rewards[1])
+    #     # todo 奖励改成元组形式，第一项喂给经验池，第二项用作episode_return
+    #     return (rewards[0], rewards[0]), (rewards[1], rewards[1])
 
     def get_target_by_id(self, target_id):
         for uav in self.UAVs:
@@ -846,32 +845,32 @@ class Battle(object):
                 return uav
         return None
 
-    def get_terminate(self):
-        # # 超时强制结束回合
-        # if self.t > self.game_time_limit:
-        #     return True
+    # def get_terminate(self):
+    #     # # 超时强制结束回合
+    #     # if self.t > self.game_time_limit:
+    #     #     return True
 
-        if all(self.UAV_hit):
-            return True
-        missile_dead_list = []
-        uav_dead_list = []
-        # battle和uav各自所属的missile没有同步，判断起来不方便，现改为所有发射的导弹都挂了,且无人机有一方坠落，
-        # 则仿真就结束
-        for missile in self.missiles:
-            missile_dead_list.append(missile.dead)
-        for uav in self.UAVs:
-            uav_dead_list.append(uav.dead)
+    #     if all(self.UAV_hit):
+    #         return True
+    #     missile_dead_list = []
+    #     uav_dead_list = []
+    #     # battle和uav各自所属的missile没有同步，判断起来不方便，现改为所有发射的导弹都挂了,且无人机有一方坠落，
+    #     # 则仿真就结束
+    #     for missile in self.missiles:
+    #         missile_dead_list.append(missile.dead)
+    #     for uav in self.UAVs:
+    #         uav_dead_list.append(uav.dead)
 
-        if all(missile_dead_list) and any(uav_dead_list):
-            return True
+    #     if all(missile_dead_list) and any(uav_dead_list):
+    #         return True
 
-        # r_dead = [self.RUAV.got_hit]
-        # b_dead = [self.BUAV.got_hit]
-        # if self.running == False:
-        #     return True
-        # if all(r_dead) or all(b_dead):
-        #     return True
-        return False
+    #     # r_dead = [self.RUAV.got_hit]
+    #     # b_dead = [self.BUAV.got_hit]
+    #     # if self.running == False:
+    #     #     return True
+    #     # if all(r_dead) or all(b_dead):
+    #     #     return True
+    #     return False
 
     def crash(self, UAV):
         if UAV.alt < self.min_alt:
