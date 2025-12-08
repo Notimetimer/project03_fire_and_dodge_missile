@@ -245,9 +245,9 @@ def test_win_rate(seed, test_run=1):
         # r_action_list.append(r_action_n)
         # b_action_list.append(b_action_n)
 
-        _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)
+        env.step(r_action_n, b_action_n)
         done, b_reward, _ = env.left_crank_terminate_and_reward('b')
-        done = done or fake_terminate
+        done = done
         
         episode_return += b_reward * env.dt_maneuver
         
@@ -481,11 +481,11 @@ if __name__=="__main__":
                     # r_action_list.append(r_action_n)
                     # b_action_list.append(b_action_n)
 
-                    _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                    env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                     done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
                     next_b_obs, _ = env.crank_obs('b')  # 子策略的训练不要用get_obs
 
-                    done = done or fake_terminate
+                    done = done
                     if not test_run:
                         total_steps += 1
                         transition_dict['states'].append(b_obs)

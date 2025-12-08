@@ -168,9 +168,9 @@ def run_single_test(seed):
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
 
-            _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)
+            env.step(r_action_n, b_action_n)
             done, b_reward, _ = env.left_crank_terminate_and_reward('b')
-            done = done or fake_terminate
+            done = done
 
         if env.lose:
             lose = 1

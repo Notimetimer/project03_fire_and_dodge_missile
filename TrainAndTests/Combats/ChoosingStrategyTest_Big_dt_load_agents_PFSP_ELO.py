@@ -348,9 +348,9 @@ if __name__=="__main__":
                         # launch_missile_if_possible(env, side='b')
                         launch_missile_with_basic_rules(env, side='b')
                 
-                _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
+                env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b', b_action_label)
-                done = done or fake_terminate
+                done = done
 
                 # Accumulate rewards between agent decisions
                 episode_return += b_reward * env.dt_maneuver

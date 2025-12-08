@@ -70,7 +70,7 @@ class AttackTrainEnv(Battle):
         flat_obs = flatten_obs(full_obs, self.attack_key_order)
         return flat_obs, full_obs
 
-    def attack_terminate_and_reward(self, side):  # 进攻策略训练与奖励
+    def get_terminate_and_reward(self, side):  # 进攻策略训练与奖励
         terminate = False
         state = self.get_state(side)
         speed = state["ego_main"][0]
@@ -160,37 +160,38 @@ class AttackTrainEnv(Battle):
         return terminate, reward, reward_for_show
 
     
-    # 并行化修改
-    def get_red_rule_action(self):
-        """
-        供并行 Worker 调用的辅助函数。
-        利用环境内部状态生成红方规则动作。
-        """
-        # 1. 获取红方内部状态 (可以直接读属性，也可以用 get_state)
-        # 为了兼容性，我们通过 obs 获取感知信息
-        r_state = self.get_state('r')
+    # # 并行化修改
+    
+    # def get_red_rule_action(self):
+    #     """
+    #     供并行 Worker 调用的辅助函数。
+    #     利用环境内部状态生成红方规则动作。
+    #     """
+    #     # 1. 获取红方内部状态 (可以直接读属性，也可以用 get_state)
+    #     # 为了兼容性，我们通过 obs 获取感知信息
+    #     r_state = self.get_state('r')
         
-        dist = r_state["target_information"][3]
-        # 注意：decision_rule 需要的参数需与 base_obs 的定义对应
-        # 这里做一个简化的参数提取
+    #     dist = r_state["target_information"][3]
+    #     # 注意：decision_rule 需要的参数需与 base_obs 的定义对应
+    #     # 这里做一个简化的参数提取
         
-        r_action = self.decision_rule(
-            ego_pos_=self.RUAV.pos_,
-            ego_psi=self.RUAV.psi,
-            enm_delta_psi=r_state["target_information"][1], # 相对方位角
-            distance=dist,
-            warning=r_state["warning"],
-            threat_delta_psi=r_state["threat"][0], # 假设 threat[0] 是方位
-            ally_missiles=self.Rmissiles,
-            wander=1 # 启用规则漫游
-        )
+    #     r_action = self.decision_rule(
+    #         ego_pos_=self.RUAV.pos_,
+    #         ego_psi=self.RUAV.psi,
+    #         enm_delta_psi=r_state["target_information"][1], # 相对方位角
+    #         distance=dist,
+    #         warning=r_state["warning"],
+    #         threat_delta_psi=r_state["threat"][0], # 假设 threat[0] 是方位
+    #         ally_missiles=self.Rmissiles,
+    #         wander=1 # 启用规则漫游
+    #     )
         
-        # 2. 顺便处理红方发射逻辑
-        # 因为这是在 Worker 内部，直接调用全局或类方法均可
-        # 假设 launch_missile_if_possible 已经导入
-        launch_missile_if_possible(self, 'r')
+    #     # 2. 顺便处理红方发射逻辑
+    #     # 因为这是在 Worker 内部，直接调用全局或类方法均可
+    #     # 假设 launch_missile_if_possible 已经导入
+    #     launch_missile_if_possible(self, 'r')
         
-        return r_action
+    #     return r_action
     
     # [新增] 封装随机出生状态生成逻辑
     def _get_random_birth_states(self):
@@ -236,10 +237,10 @@ class AttackTrainEnv(Battle):
         flat_obs, _ = self.attack_obs('b')
         return flat_obs.astype(np.float32), {}
 
-    def _get_obs(self):
-        flat_obs, _ = self.attack_obs('b')
-        return flat_obs.astype(np.float32)
+    # def _get_obs(self):
+    #     flat_obs, _ = self.attack_obs('b')
+    #     return flat_obs.astype(np.float32)
 
-    def _get_reward(self):
-        is_done, b_reward, _ = self.attack_terminate_and_reward('b')
-        return (0, 0), (b_reward, b_reward)
+    # def _get_reward(self):
+    #     is_done, b_reward, _ = self.get_terminate_and_reward('b')
+    #     return (0, 0), (b_reward, b_reward)

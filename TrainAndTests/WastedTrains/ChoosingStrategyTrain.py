@@ -294,12 +294,12 @@ if __name__=="__main__":
                 r_action_list.append(r_action_label)
                 b_action_list.append(b_action_label)
 
-                _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label)  # 2、环境更新并反馈
+                env.step(r_action_label, b_action_label)  # 2、环境更新并反馈
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b')
                 next_b_check_obs = env.base_obs('b')
                 next_b_obs = flatten_obs(next_b_check_obs, env.key_order)
 
-                done = done or fake_terminate
+                done = done
                 if not test_run:
                     total_steps += 1
                     transition_dict['states'].append(b_obs)

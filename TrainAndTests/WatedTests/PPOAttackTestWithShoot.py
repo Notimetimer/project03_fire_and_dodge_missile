@@ -116,8 +116,8 @@ try:
             r_action_list.append(r_action_n)
             b_action_list.append(b_action_n)
 
-            _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-            done, b_reward, _ = env.attack_terminate_and_reward('b')
+            env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+            done, b_reward, _ = env.get_terminate_and_reward('b')
 
             step += 1
             env.render(t_bias=t_bias)

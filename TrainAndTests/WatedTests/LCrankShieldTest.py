@@ -247,7 +247,7 @@ if __name__=="__main__":
             # else:
             #     b_action_n[1] = min(sub_of_radian(delta_psi+50*pi/180, 0), b_action_n[1])
 
-            _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+            env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
             done, b_reward, b_event_reward = env.left_crank_terminate_and_reward('b')
             next_b_obs, next_b_obs_check = env.crank_obs('b')  # 子策略的训练不要用get_obs
 
@@ -257,7 +257,7 @@ if __name__=="__main__":
             else:
                 out_angle = 0
 
-            done = done or fake_terminate
+            done = done
 
             '''显示运行轨迹'''
             # 可视化

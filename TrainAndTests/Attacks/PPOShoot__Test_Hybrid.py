@@ -248,8 +248,8 @@ if __name__ == "__main__":
                 r_action_list.append(r_action_n)
                 b_action_list.append(b_action_n)
 
-                _, _, _, _, fake_terminate = env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
-                done, b_reward, _ = env.attack_terminate_and_reward('b', ut)
+                env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
+                done, b_reward, _ = env.get_terminate_and_reward('b', ut)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
                 env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1

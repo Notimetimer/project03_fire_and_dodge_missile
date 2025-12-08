@@ -6,28 +6,77 @@ sys.path.append(project_root)
 from TrainAndTests.Attacks.PPOAttack__Train import *
 import re
 import glob
+import torch as th
+
+from Envs.Tasks.AttackManeuverEnv import AttackTrainEnv, dt_maneuver
+# 引入我们刚才写的并行 Wrapper
+from Algorithms.ParallelEnv import ParallelPettingZooEnv
+from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.MLP_heads import ValueNet
+from Visualize.tensorboard_visualize import TensorBoardLogger
+from Math_calculates.ScaleLearningRate import scale_learning_rate
 
 dt_maneuver= 0.2 
 action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
 
 from Utilities.LocateDirAndAgents import *
 
-# 测试训练效果
-agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                lmbda, epochs, eps, gamma, device)
+# --- 用与并行训练一致的 actor/agent 初始化并加载 checkpoint ---
 
-# pre_log_dir = os.path.join("./logs")
+hidden_dim = [128, 128, 128]  # 与训练脚本一致
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+# 获取环境维度（复用 AttackTrainEnv 的 args，如果不存在请手动构造）
+try:
+    tmp_env = AttackTrainEnv(args)
+except Exception:
+    tmp_env = AttackTrainEnv(argparse.Namespace(max_episode_len=120, R_cage=70e3, n_envs=1, max_steps=1))
+tmp_env.reset()
+b_action_dim = tmp_env.b_action_spaces[0].shape[0]
+tmp_obs, _ = tmp_env.attack_obs('b')
+state_dim = tmp_obs.shape[0]
+del tmp_env
+
+# action 定义（与训练一致）
+action_bound = np.array([[-5000, 5000], [-pi, pi], [200, 600]])
+action_dims_dict = {'cont': b_action_dim, 'cat': [], 'bern': 0}
+
+# 构建 actor_net + wrapper，并把权重加载到 wrapper 上
+actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
+
+# optional critic (用于构建 PPOHybrid，如果只做推理可以不用)
+critic_net = ValueNet(state_dim, hidden_dim).to(device)
+agent = PPOHybrid(actor=actor_wrapper, critic=critic_net,
+                  actor_lr=1e-4, critic_lr=5e-4,
+                  lmbda=0.95, epochs=10, eps=0.2, gamma=0.9, device=device)
+
+# 找 checkpoint（兼容 actor_rein 和 actor_save 命名）
 pre_log_dir = os.path.join(project_root, "logs/attack")
-log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+log_dir = get_latest_log_dir(pre_log_dir, mission_name='Attack_Parallel')
+actor_path = None
+if log_dir:
+    actor_path = load_actor_from_log(log_dir, number=None, rein_prefix="actor_rein")
+    if actor_path is None:
+        actor_path = load_actor_from_log(log_dir, number=None, rein_prefix="actor_save")
 
-# 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
-actor_path = load_actor_from_log(log_dir, number=None, rein_prefix="actor_rein") # actor_rein actor_save
 if not actor_path:
     print(f"No actor checkpoint found in {log_dir}")
 else:
     sd = th.load(actor_path, map_location=device, weights_only=True)
-    agent.actor.load_state_dict(sd)
+    # sd may be state_dict for actor or for agent.actor; try to load safely
+    try:
+        actor_wrapper.load_state_dict(sd)
+    except Exception:
+        # try to extract actor keys if saved full agent
+        if 'actor' in sd:
+            actor_wrapper.load_state_dict(sd['actor'])
+        else:
+            # fallback: attempt to filter matching keys
+            model_sd = actor_wrapper.state_dict()
+            filtered = {k: v for k, v in sd.items() if k in model_sd and model_sd[k].shape == v.shape}
+            model_sd.update(filtered)
+            actor_wrapper.load_state_dict(model_sd)
     print(f"Loaded actor for test from: {actor_path}")
 
 t_bias = 0
@@ -76,7 +125,7 @@ try:
                                     o00=o00, R_cage=env.R_cage, wander=1
                                     )
             # r_action_n, u_r = agent.take_action(r_obs_n, action_bounds=action_bound, explore=False)
-            b_action_n, u = agent.take_action(b_obs_n, action_bounds=action_bound, explore=False)
+            b_action_n, u,  _, _  = agent.take_action(b_obs_n, explore=False)
             
             # # 动作平滑（实验性）
             # b_action_n = action_eps*hist_b_action+(1-action_eps)*b_action_n

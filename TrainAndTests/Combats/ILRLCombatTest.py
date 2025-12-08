@@ -167,9 +167,9 @@ if __name__ == "__main__":
                 # 执行机动并步进
                 r_maneuver = env.maneuver14(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14(env.BUAV, b_action_label)
-                _, _, _, _, fake_terminate = env.step(r_maneuver, b_maneuver)
+                env.step(r_maneuver, b_maneuver)
                 done, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_fire)
-                done = done or fake_terminate
+                done = done
                 env.render(t_bias=t_bias)
 
             # 报告结果

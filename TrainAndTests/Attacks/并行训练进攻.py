@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from datetime import datetime
 from math import pi
+from math import pi, sqrt, atan2, exp, cos, sin
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -17,6 +18,7 @@ from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Math_calculates.ScaleLearningRate import scale_learning_rate
+from Math_calculates.sub_of_angles import sub_of_radian
 
 # --- 参数配置 ---
 parser = argparse.ArgumentParser("UAV Parallel Training")
@@ -87,7 +89,7 @@ if __name__ == "__main__":
     agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
     # 日志
-    log_dir = os.path.join(project_root, f"logs/attack/{mission_name}-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    log_dir = os.path.join(project_root, f"logs/attack/{mission_name}-run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     os.makedirs(log_dir, exist_ok=True)
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
     
@@ -96,12 +98,18 @@ if __name__ == "__main__":
     with open(os.path.join(log_dir, "actor.meta.json"), "w") as f:
         json.dump({k: list(v.shape) for k, v in agent.actor.state_dict().items()}, f)
 
+    # 新增：按保存次数计数（从1开始）
+    save_count = 0
+
     # 4. 训练主循环
     total_steps = 0
     # 每次 PPO 更新前收集的步数 = update_steps * n_envs
     # 例如 update_steps=256, n_envs=8 -> 每次更新基于 2048 个样本
-    steps_per_rollout = 256 
-    
+    steps_per_rollout = 600 
+
+    # 保存间隔：每隔 steps_per_rollout * 10 步保存一次
+    save_interval = steps_per_rollout * 10
+
     # Reset 全部环境
     obs_dict = vec_env.reset()
     b_obs = obs_dict['b_obs'] # (N_envs, State_dim)
@@ -145,71 +153,29 @@ if __name__ == "__main__":
                 transition_dict['dones'].append(dones)
                 
                 b_obs = next_b_obs
-                total_steps += args.n_envs
-
+                # 每次 inner loop 统计为一次全局步（用户要求 +1）
+                total_steps += 1
             # --- 更新阶段 (Update) ---
             
-            # 1. 数据展平 (Flatten) [Time, Batch, Dim] -> [Time*Batch, Dim]
-            # 状态
-            s_stack = np.stack(transition_dict['states']) # (T, N, D)
-            flat_states = s_stack.reshape(-1, s_stack.shape[-1]) # (T*N, D)
-            
-            ns_stack = np.stack(transition_dict['next_states'])
-            flat_next_states = ns_stack.reshape(-1, ns_stack.shape[-1])
-            
-            # 奖励 & Done
-            flat_rewards = np.stack(transition_dict['rewards']).flatten()
-            flat_dones = np.stack(transition_dict['dones']).flatten()
-            
-            # 动作 (字典特殊处理)
-            # 原始 list 里的元素是 {'cont': (N, 3), ...}
-            # 我们需要把它变成 [{'cont': [1,2,3]}, {'cont': ...}] 这种形式给 PPO
-            # 或者更高效：直接拼成 {'cont': (T*N, 3)}
-            
-            raw_actions_list = transition_dict['actions']
-            flat_actions_dict = {}
-            for k in raw_actions_list[0].keys():
-                # 堆叠 (T, N, Dim) -> (T*N, Dim)
-                arr = np.stack([item[k] for item in raw_actions_list])
-                flat_actions_dict[k] = arr.reshape(-1, arr.shape[-1])
-
-            # 为了兼容 PPOHybrid2 内部的 update 逻辑 (它可能预期 actions 是一个 list of dicts)
-            # 我们这里做一个快速转换，或者你需要确认 PPOHybrid2.update 是否能处理 dict of big arrays
-            # 假设 PPOHybrid2 里的逻辑是: actions_from_buffer = transition_dict['actions']
-            # vals = [d[key] for d in actions_from_buffer]
-            # 为了兼容性，我们需要构造一个 Update 专用的 transition_dict
-            
-            # 高效构建符合接口的 transition_dict
-            update_transition_dict = {
-                'states': flat_states,
-                'next_states': flat_next_states,
-                'rewards': flat_rewards,
-                'dones': flat_dones,
-                # 这里的 actions 我们直接传“展开后的字典”
-                # 但是 PPOHybrid2 现在的代码是遍历 list。
-                # 技巧：我们把 (T*N) 的数据伪装成列表传进去，
-                # 或者更简单：修改 PPOHybrid2.update 让它能直接接收 dict of tensors (推荐)
-                # 鉴于不能改 PPO 代码，我们这里手动展开：
-                'actions': [] 
-            }
-            
-            # 手动展开 actions (Python循环较慢，但对于几千个样本还好)
-            # 或者我们可以修改 agent.update 逻辑。
-            # 这里采用最稳妥的方式：构造 list of dicts
-            n_samples = flat_states.shape[0]
-            cont_actions = flat_actions_dict['cont']
-            # 下面这行可能稍微有点慢，但兼容性最好
-            update_transition_dict['actions'] = [{'cont': cont_actions[i]} for i in range(n_samples)]
+            # [修改] 使用 PPOHybrid2 内置的并行数据预处理
+            # 1. 计算 GAE (在展平前)
+            # 2. 展平所有数据 (States, Actions, Rewards...)
+            # 3. 返回包含 'advantages' 和 'td_targets' 的字典
+            transition_dict = agent.preprocess_parallel_buffer(transition_dict)
 
             # 2. 执行 PPO 更新
-            # 注意：如果启用了 GAE，这里直接把展平的数据传进去可能破坏时间相关性
-            # 但如果 batch 足够大且 shuffled，PPO 还是能工作的。
-            # 若追求完美，应该在 ParallelEnv 层面不做 Flatten，而是让 Agent 处理 (T, N) 数据
-            # 但鉴于 PPOHybrid2 是标准实现，Flatten 是通用做法。
-            agent.update(update_transition_dict)
+            # 现在 update 内部会检测到 advantages 已存在，从而跳过重复计算
+            # 并且 actions 已經是优化过的 Dict of Arrays 格式
+            agent.update(transition_dict)
             
             # 3. 记录日志
-            avg_return = np.mean(flat_rewards) 
+            # 注意：transition_dict['rewards'] 已经被展平成 numpy array 了
+            # 计算 avg_return：按照用户要求的归一化方式
+            rewards_arr = np.array(transition_dict['rewards'])
+            total_reward_all_envs = rewards_arr.sum()   # rollout 内所有 env、所有步的 reward 之和
+            n_envs = args.n_envs
+            # 将每步 reward 积分到回合尺度，且把 rollout 平均到每个回合/每个子环境上
+            avg_return = (total_reward_all_envs / n_envs) * dt_maneuver * (round(args.max_episode_len / dt_maneuver) / steps_per_rollout)
             logger.add("train/reward_step", avg_return, total_steps)
             logger.add("train/actor_loss", agent.actor_loss, total_steps)
             logger.add("train/critic_loss", agent.critic_loss, total_steps)
@@ -217,8 +183,50 @@ if __name__ == "__main__":
             print(f"Step {total_steps}: Reward={avg_return:.4f}, ActorLoss={agent.actor_loss:.4f}")
 
             # 4. 保存模型
-            if total_steps % 10000 < args.n_envs * steps_per_rollout: # 约每1万步保存
-                torch.save(agent.actor.state_dict(), os.path.join(log_dir, f"actor_{total_steps}.pt"))
+            # 按保存间隔保存（每隔 save_interval 步）
+            if total_steps > 0 and total_steps % save_interval == 0:
+                # 先自增保存计数
+                save_count += 1
+                fname = os.path.join(log_dir, f"actor_rein{save_count}.pt")
+                torch.save(agent.actor.state_dict(), fname)
+
+                # 更新/写入 elo_ratings.json：优先使用已有的同名条目，否则回退到上一次保存的分数，再无则默认1200
+                elo_path = os.path.join(log_dir, "elo_ratings.json")
+                try:
+                    if os.path.exists(elo_path):
+                        with open(elo_path, "r") as ef:
+                            elo_dict = json.load(ef)
+                    else:
+                        elo_dict = {}
+                except Exception:
+                    elo_dict = {}
+
+                key = f"actor_rein{save_count}"
+                if key in elo_dict:
+                    # 已有评估过程提前写入该保存点的 Elo，保留不变
+                    pass
+                else:
+                    # 优先回退到上一次保存的 Elo（若存在）
+                    prev_key = f"actor_rein{save_count-1}"
+                    if prev_key in elo_dict:
+                        elo_score = elo_dict[prev_key]
+                    else:
+                        # 若没有上一次记录，尝试取文件中最大的已有 actor_reinX 的分数
+                        actor_keys = [k for k in elo_dict.keys() if k.startswith("actor_rein")]
+                        if len(actor_keys) > 0:
+                            # 取最大编号对应的分数
+                            try:
+                                nums = [(int(k.replace("actor_rein", "")), k) for k in actor_keys]
+                                nums.sort()
+                                elo_score = elo_dict[nums[-1][1]]
+                            except Exception:
+                                elo_score = 1200.0
+                        else:
+                            elo_score = 1200.0
+
+                    elo_dict[key] = float(elo_score)
+                    with open(elo_path, "w") as ef:
+                        json.dump(elo_dict, ef, indent=2)
                 
     finally:
         vec_env.close()
