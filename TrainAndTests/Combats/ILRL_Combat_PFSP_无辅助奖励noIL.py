@@ -305,10 +305,11 @@ if __name__ == "__main__":
     INITIAL_ELO = 1200
     
     # 初始化 ELO 字典，包含基础规则智能体
+    # --- [Modification] 注释掉规则对手的初始化 ---
     elo_ratings = {
-        "Rule_0": INITIAL_ELO,
-        "Rule_1": INITIAL_ELO,
-        "Rule_2": INITIAL_ELO
+        # "Rule_0": INITIAL_ELO,
+        # "Rule_1": INITIAL_ELO,
+        # "Rule_2": INITIAL_ELO
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
@@ -335,8 +336,8 @@ if __name__ == "__main__":
 
     def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=200.0):
         """返回与 elo_ratings.keys() 顺序对应的概率数组。"""
-        # [Modification] 确保只选择有效的 keys (排除我们用于持久化主分数的状态)
-        valid_keys = [k for k in elo_ratings.keys() if not k.startswith("__")]
+        # [Modification] 确保只选择有效的 keys (排除我们用于持久化主分数的状态和规则对手)
+        valid_keys = [k for k in elo_ratings.keys() if not k.startswith("__") and not k.startswith("Rule")]
         
         if len(valid_keys) == 0:
             return np.array([]), [] 
@@ -385,13 +386,19 @@ if __name__ == "__main__":
         if len(opponent_keys) > 0:
             selected_opponent_name = np.random.choice(opponent_keys, p=probs)
         else:
-            selected_opponent_name = "Rule_2" 
+            # --- [Modification] 如果没有历史智能体，则选择与自己对战 ---
+            selected_opponent_name = "self" 
         
         adv_is_rule = False
         rule_num = 0
         
         # 判断对手类型并加载
-        if "Rule" in selected_opponent_name:
+        if selected_opponent_name == "self":
+            # --- [Modification] 与自己对战的逻辑 ---
+            adv_is_rule = False
+            adv_agent.actor.load_state_dict(student_agent.actor.state_dict())
+            print(f"Eps {i_episode}: Opponent is Self (no historical agents available)")
+        elif "Rule" in selected_opponent_name:
             adv_is_rule = True
             # 解析 "Rule_1" -> 1
             try:
