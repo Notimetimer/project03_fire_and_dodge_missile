@@ -166,7 +166,7 @@ parser.add_argument("--R-cage", type=float, default=55e3, help="")
 args = parser.parse_args()
 
 # 超参数
-actor_lr = 1e-4
+actor_lr = 1e-5 # 4
 critic_lr = actor_lr * 5
 IL_epoches= 0  # 80
 max_steps = 165e4
@@ -175,7 +175,7 @@ gamma = 0.95
 lmbda = 0.95
 epochs = 10
 eps = 0.2
-k_entropy = 0.01
+k_entropy = 0.05 # 1
 
 env = ChooseStrategyEnv(args, tacview_show=0)
 state_dim = env.obs_dim

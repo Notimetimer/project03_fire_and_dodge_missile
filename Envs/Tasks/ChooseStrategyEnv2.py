@@ -292,7 +292,7 @@ class ChooseStrategyEnv(Battle):
 
 
         # ---主要奖励---
-        reward_main = 0
+        reward_main = 10  # 防自杀奖励
         if self.win:
             reward_main += 300
         if self.lose:
@@ -332,7 +332,20 @@ class ChooseStrategyEnv(Battle):
         shoot = action_shoot
         # 发射惩罚
         if shoot == 1:
-            reward_main -= 10
+            reward_main -= 5
+        if shoot == 1:
+            # reward_main += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 尽可能增大发射间隔
+            reward_main += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
+            reward_main += 1 * np.clip(ego.theta/(pi/3), -1, 1)  # 鼓励抛射
+            # reward_main -= np.clip(dist/40e3, 0, 1)
+        if terminate and ego.ammo == ego.init_ammo:
+            reward_main -= 300 # 一发都不打必须重罚 100
+        if terminate and ego.ammo < ego.init_ammo:
+            reward_main += 20 # 至少打了一枚
+        # 重复发射导弹时惩罚, 否则有奖励
+        if len(alive_ally_missiles)>1 and shoot==1:
+            reward_main -= 30
+
 
         # ---辅助奖励---
         reward_fire = 0
@@ -370,20 +383,6 @@ class ChooseStrategyEnv(Battle):
 
         # 导弹发射辅助奖励/惩罚
         reward_shoot = 0
-        if shoot == 1:
-            reward_shoot += np.clip((missile_time_since_shoot-30)/30, -1,1)  # 尽可能增大发射间隔
-            reward_shoot += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
-            reward_shoot += 1 * np.clip(ego.theta/(pi/3), -1, 1)  # 鼓励抛射
-            # reward_shoot -= np.clip(dist/40e3, 0, 1)
-        if terminate and ego.ammo == ego.init_ammo:
-            reward_shoot -= 300 # 一发都不打必须重罚 100
-        if terminate and ego.ammo < ego.init_ammo:
-            reward_shoot += 20 # 至少打了一枚
-        # 重复发射导弹时惩罚, 否则有奖励
-        if len(alive_ally_missiles)>1 and shoot==1:
-            reward_shoot -= 30
-        if len(alive_ally_missiles)>1 and shoot==0:
-            reward_shoot += 5
         
         # deltapsi变化率奖励 todobedontinued
 
