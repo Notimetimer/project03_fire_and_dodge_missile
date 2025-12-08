@@ -299,7 +299,7 @@ if __name__=="__main__":
                 r_action_list.append(r_action_label)
                 # b_action_list.append(b_action_label) # Removed this here, as action is taken less frequently
 
-                _, _, _, _, fake_terminate = env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
+                env.step(r_action_label, b_action_label) # Environment updates every dt_maneuver
                 done, b_reward, b_event_reward = env.combat_terminate_and_reward('b')
                 
                 # Accumulate rewards between agent decisions
@@ -314,7 +314,7 @@ if __name__=="__main__":
                         transition_dict['rewards'].append(episode_return - sum(transition_dict['rewards'])) # Reward for this action cycle
                         transition_dict['dones'].append(done)
 
-                done = done or fake_terminate
+                done = done
                 
                 steps_since_update += 1 # This counts actual env steps
 

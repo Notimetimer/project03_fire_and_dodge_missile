@@ -220,8 +220,8 @@ class ChooseStrategyEnv(Battle):
     
 
     def combat_terminate_and_reward(self, side, action_label, action_shoot):
-        terminate = self.get_terminate()
-        done = terminate
+        # terminate = self.get_terminate()
+        # done = terminate
 
         # todo 奖励函数调用或是重写都要在这实现
         self.get_missile_state()
@@ -338,9 +338,9 @@ class ChooseStrategyEnv(Battle):
             reward_main += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
             reward_main += 1 * np.clip(ego.theta/(pi/3), -1, 1)  # 鼓励抛射
             # reward_main -= np.clip(dist/40e3, 0, 1)
-        if terminate and ego.ammo == ego.init_ammo:
+        if done and ego.ammo == ego.init_ammo:
             reward_main -= 300 # 一发都不打必须重罚 100
-        if terminate and ego.ammo < ego.init_ammo:
+        if done and ego.ammo < ego.init_ammo:
             reward_main += 20 # 至少打了一枚
         # 重复发射导弹时惩罚, 否则有奖励
         if len(alive_ally_missiles)>1 and shoot==1:

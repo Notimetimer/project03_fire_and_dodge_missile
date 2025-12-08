@@ -7,7 +7,8 @@ import argparse
 import glob
 import copy
 import json
-import re  # [Fix] 引入正则模块
+import re
+import time  # 确保引入 time 模块
 from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +18,7 @@ from Envs.Tasks.ChooseStrategyEnv2 import *
 from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
-from BasicRules import * # [Fix] 确保引入规则函数
+from BasicRules import *
 
 def get_current_file_dir():
     try:
@@ -273,7 +274,7 @@ if __name__ == "__main__":
     env = ChooseStrategyEnv(args, tacview_show=0)
     env.dt_move = 0.05 # 仿真跑得快点
     
-    from BasicRules import *  # 可以直接读同一级目录
+    from BasicRules import * # 可以直接读同一级目录
     t_bias = 0
     env.shielded = 1 # 不得不全程带上
     
@@ -299,7 +300,7 @@ if __name__ == "__main__":
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
     transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
 
-    # --- [Fix] 初始化 ELO 变量与辅助函数 ---
+    # --- [Modification] 初始化 ELO 变量与辅助函数 ---
     K_FACTOR = 32
     INITIAL_ELO = 1200
     
@@ -311,13 +312,17 @@ if __name__ == "__main__":
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
+    # 主智能体当前的 ELO (从 JSON 或初始值加载)
+    main_agent_elo = INITIAL_ELO
+
     # 尝试加载已有的 ELO 记录
     if os.path.exists(elo_json_path):
         with open(elo_json_path, 'r', encoding='utf-8') as f:
-            elo_ratings = json.load(f)
-            
-    # 主智能体当前的 ELO
-    main_agent_elo = INITIAL_ELO
+            loaded_data = json.load(f)
+            # [Modification] 恢复主智能体当前的分数（即使未保存为快照）
+            if "__CURRENT_MAIN__" in loaded_data:
+                main_agent_elo = loaded_data.pop("__CURRENT_MAIN__")
+            elo_ratings.update(loaded_data)
 
     def calculate_expected_score(player_elo, opponent_elo):
         """计算期望得分"""
@@ -329,14 +334,14 @@ if __name__ == "__main__":
         return player_elo + K_FACTOR * (score - expected)
 
     def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=200.0):
-        """返回与 elo_ratings.keys() 顺序对应的概率数组。
-        - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
-        - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。
-        """
-        keys = list(elo_ratings.keys())
-        if len(keys) == 0:
-            return np.array([]), keys # 返回 keys 以便索引
-        elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+        """返回与 elo_ratings.keys() 顺序对应的概率数组。"""
+        # [Modification] 确保只选择有效的 keys (排除我们用于持久化主分数的状态)
+        valid_keys = [k for k in elo_ratings.keys() if not k.startswith("__")]
+        
+        if len(valid_keys) == 0:
+            return np.array([]), [] 
+            
+        elos = np.array([elo_ratings[k] for k in valid_keys], dtype=np.float64)
 
         if target_elo is None:
             target_elo = np.mean(elos)
@@ -346,7 +351,7 @@ if __name__ == "__main__":
         # 数值稳定性：将 exponent 的常数项减去 max
         scores = np.exp(-0.5 * (diffs / float(sigma))**2)
         probs = scores / (scores.sum() + 1e-12)
-        return probs, keys # 修改为返回 probs 和 keys
+        return probs, valid_keys # 修改为返回 probs 和 keys
 
     # 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
     def shorten_actor_key(path_or_name):
@@ -371,12 +376,16 @@ if __name__ == "__main__":
     
     while total_steps < int(max_steps):
         i_episode += 1
-        # ensure actor_key always defined for ELO bookkeeping (avoids NameError later)
-        actor_key = f"actor_rein{i_episode}"
+        # [Modification] 移除了 actor_key 的提前定义，只在保存时定义
         
-        # --- [Fix] 对手选择逻辑 (PFSP) ---
+        # --- [Modification] 对手选择逻辑 (PFSP) ---
         probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
-        selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+        
+        # 确保列表非空，否则 fallback
+        if len(opponent_keys) > 0:
+            selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+        else:
+            selected_opponent_name = "Rule_2" 
         
         adv_is_rule = False
         rule_num = 0
@@ -393,13 +402,14 @@ if __name__ == "__main__":
         else:
             adv_is_rule = False
             # 尝试找到对应的权重文件
-            # 假设 selected_opponent_name 格式为 "actor_rein10"
             adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
             if os.path.exists(adv_path):
-                adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device))
+                # [Modification] 如果文件存在，加载
+                adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device, weights_only=True))
                 print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
             else:
-                print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_2.")
+                # [Modification] 理论上不应该发生，但如果发生了，fallback 到规则
+                print(f"Warning: Opponent file {adv_path} not found despite ELO entry. Fallback to Rule_2.")
                 adv_is_rule = True
                 rule_num = 2
         
@@ -492,9 +502,9 @@ if __name__ == "__main__":
             r_maneuver = env.maneuver14(env.RUAV, r_action_label)
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
 
-            _, _, _, _, fake_terminate = env.step(r_maneuver, b_maneuver)
+            env.step(r_maneuver, b_maneuver)
             done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
-            done = done or fake_terminate
+            done = done
 
             # Accumulate rewards between student_agent decisions
             episode_return += b_reward * env.dt_maneuver
@@ -516,14 +526,14 @@ if __name__ == "__main__":
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
             transition_dict = append_b_experience(transition_dict, last_decision_state, current_action, b_reward-b_reward_assisted, next_b_obs, True)
             
-        # --- [Fix] ELO 更新逻辑 ---
+        # --- [Modification] ELO 更新逻辑 (每回合都更新) ---
         actual_score = 0.5 # Default draw
         if env.win: actual_score = 1.0
         elif env.lose: actual_score = 0.0
         
         # 更新主智能体 (临时变量)
         prev_main_elo = main_agent_elo
-        adv_elo = elo_ratings[selected_opponent_name]
+        adv_elo = elo_ratings.get(selected_opponent_name, INITIAL_ELO)
         
         main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
         # 更新对手 (写入字典)
@@ -537,6 +547,7 @@ if __name__ == "__main__":
             student_agent.update(transition_dict, adv_normed=False)
             decide_steps_after_update = 0
             
+            # [Modification] 保留原有梯度监控代码
             actor_grad_norm = student_agent.actor_grad
             actor_pre_clip_grad = student_agent.pre_clip_actor_grad
             critic_grad_norm = student_agent.critic_grad
@@ -574,31 +585,32 @@ if __name__ == "__main__":
             print(f"Episode {i_episode}, Progress: {total_steps/max_steps:.3f}, Avg Return: {np.mean(return_list[-10:]):.3f}")
 
         
-        # --- 保存模型与 ELO 维护 ---
+        # --- [Modification] 保存模型与 ELO 维护 (每 10 个 Episode 执行一次) ---
         if i_episode % 10 == 0:
+            # 1. 保存 Critic
             torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
             
-            actor_name = f"actor_rein{i_episode}.pt" # 物理文件名
+            # 2. 保存 Actor 文件，并确定 Key
             actor_key = f"actor_rein{i_episode}"     # ELO 字典 Key
-            
-            # 保存权重
+            actor_name = f"{actor_key}.pt" # 物理文件名
             torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, actor_name))
             
-        # 将当前主智能体作为一个新的历史快照加入 ELO 列表
-        # 新快照继承当前主智能体的 ELO
-        elo_ratings[actor_key] = main_agent_elo
-        
-        # 保存 ELO JSON
-        try:
-            tmp_path = elo_json_path + ".tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                # 同时保存 current main agent elo 以便断点续传
-                save_data = copy.deepcopy(elo_ratings)
-                save_data["__CURRENT_MAIN__"] = main_agent_elo 
-                json.dump(save_data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, elo_json_path)
-        except Exception as e:
-            print(f"Warning: failed to save elo json: {e}")
+            # 3. 将当前主智能体作为新的历史快照加入 ELO 列表
+            # 这一点至关重要：只有在这里才注册 Key，确保文件已存在。
+            elo_ratings[actor_key] = main_agent_elo
+            print(f"Registered new historical agent: {actor_key} (ELO: {main_agent_elo:.0f})")
+            
+            # 4. 保存 ELO JSON
+            try:
+                tmp_path = elo_json_path + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    # [Modification] 保存完整的 elo_ratings，并添加当前主智能体的游离 ELO
+                    save_data = copy.deepcopy(elo_ratings)
+                    save_data["__CURRENT_MAIN__"] = main_agent_elo 
+                    json.dump(save_data, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, elo_json_path)
+            except Exception as e:
+                print(f"Warning: failed to save elo json: {e}")
 
         # --- [Fix] Logging ELOs (Sorted) ---
         # 过滤掉特殊 Key
@@ -607,21 +619,28 @@ if __name__ == "__main__":
             mean_elo = np.mean(list(valid_elos.values()))
             sorted_keys = sorted(valid_elos.keys())
 
-            # [新增] 记录主智能体的原始 ELO 分数
+            # [新增] 记录主智能体的原始 ELO 分数 (每个回合都记录)
             logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
 
-            # 记录主智能体在当前所有 ELO 中的归一化排名位置（放到 Elo_relevant）
+            # 记录主智能体在当前所有 ELO 中的归一化排名位置
             min_elo = np.min(list(valid_elos.values()))
             max_elo = np.max(list(valid_elos.values()))
             denom = float(max_elo - min_elo)
             rank_pos = 0.5 if denom == 0.0 else float((main_agent_elo - min_elo) / denom)
             logger.add("Elo_relevant/Current_Rank %", rank_pos * 100, total_steps)
             
-            # 只记录所有规则智能体和最新保存的智能体（actor_key）
+            # 只记录所有规则智能体和最新保存的智能体（如果 i_episode % 10 == 0）
             rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
             keys_to_log = list(sorted(rule_keys))
-            if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
-                keys_to_log.append(actor_key)
+            
+            # [Modification] 只有在 i_episode % 10 == 0 时，actor_key 变量才存在
+            if i_episode % 10 == 0:
+                current_actor_key = f"actor_rein{i_episode}"
+                if current_actor_key not in keys_to_log:
+                    keys_to_log.append(current_actor_key)
+            elif 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
+                 # 保留上一个保存的 key
+                 pass
             
             # 仅记录 Elo_relevant 下的差值信息：
             for k in keys_to_log:
