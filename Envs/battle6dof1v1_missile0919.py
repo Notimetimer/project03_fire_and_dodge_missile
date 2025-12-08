@@ -130,8 +130,13 @@ class Battle(object):
             self.tacview.handshake()
             self.visualize_cage()
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, ):  # 重置位置和状态
-
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, seed=None, options=None,):  # 重置位置和状态
+        
+        # [新增] 如果需要支持随机种子控制，可以在这里设置
+        if seed is not None:
+            np.random.seed(seed)
+            random.seed(seed)
+            
         if red_birth_state is None:
             red_birth_state = self.RED_BIRTH_STATE
         if blue_birth_state is None:

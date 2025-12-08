@@ -9,7 +9,8 @@ import sys
 import os
 import importlib
 import copy
-
+from math import pi, cos, sin # [新增] 引入数学库
+import random # [新增] 引入随机库
 
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
@@ -157,3 +158,88 @@ class AttackTrainEnv(Battle):
         reward_for_show = np.array([r_angle, r_alt, r_speed, r_dist, reward_event, r_border])
 
         return terminate, reward, reward_for_show
+
+    
+    # 并行化修改
+    def get_red_rule_action(self):
+        """
+        供并行 Worker 调用的辅助函数。
+        利用环境内部状态生成红方规则动作。
+        """
+        # 1. 获取红方内部状态 (可以直接读属性，也可以用 get_state)
+        # 为了兼容性，我们通过 obs 获取感知信息
+        r_state = self.get_state('r')
+        
+        dist = r_state["target_information"][3]
+        # 注意：decision_rule 需要的参数需与 base_obs 的定义对应
+        # 这里做一个简化的参数提取
+        
+        r_action = self.decision_rule(
+            ego_pos_=self.RUAV.pos_,
+            ego_psi=self.RUAV.psi,
+            enm_delta_psi=r_state["target_information"][1], # 相对方位角
+            distance=dist,
+            warning=r_state["warning"],
+            threat_delta_psi=r_state["threat"][0], # 假设 threat[0] 是方位
+            ally_missiles=self.Rmissiles,
+            wander=1 # 启用规则漫游
+        )
+        
+        # 2. 顺便处理红方发射逻辑
+        # 因为这是在 Worker 内部，直接调用全局或类方法均可
+        # 假设 launch_missile_if_possible 已经导入
+        launch_missile_if_possible(self, 'r')
+        
+        return r_action
+    
+    # [新增] 封装随机出生状态生成逻辑
+    def _get_random_birth_states(self):
+        # 这里完全照搬你在串行代码中的逻辑
+        red_R_ = random.uniform(30e3, 40e3) 
+        red_beta = random.uniform(0, 2 * pi)
+        red_psi = random.uniform(0, 2 * pi)
+        red_height = random.uniform(3e3, 10e3)
+        red_N = red_R_ * cos(red_beta)
+        red_E = red_R_ * sin(red_beta)
+        blue_height = random.uniform(3e3, 10e3)
+
+        DEFAULT_RED_BIRTH_STATE = {
+            'position': np.array([red_N, red_height, red_E]),
+            'psi': red_psi
+        }
+        DEFAULT_BLUE_BIRTH_STATE = {
+            'position': np.array([0.0, blue_height, 0.0]),
+            'psi': pi
+        }
+        return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+
+    # [修改] Reset 逻辑：如果没有传入具体的 birth_state，则自动随机
+    def reset(self, seed=None, options=None, 
+              red_birth_state=None, blue_birth_state=None, 
+              red_init_ammo=0, blue_init_ammo=0): # 注意：这里默认弹药改为0，符合你提供的代码片段
+        
+        # 1. 如果外部没有指定出生状态，则使用内部随机逻辑
+        if red_birth_state is None and blue_birth_state is None:
+            red_birth_state, blue_birth_state = self._get_random_birth_states()
+
+        # 2. 调用父类 Battle 的 reset
+        super().reset(seed=seed, options=options, 
+                      red_birth_state=red_birth_state, blue_birth_state=blue_birth_state, 
+                      red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo)
+        
+        # 3. 初始化额外变量
+        self.last_dist_dot = None
+        self.last_dhor = None
+        self.lock_time_count = 0
+        
+        # 4. 获取观测并返回
+        flat_obs, _ = self.attack_obs('b')
+        return flat_obs.astype(np.float32), {}
+
+    def _get_obs(self):
+        flat_obs, _ = self.attack_obs('b')
+        return flat_obs.astype(np.float32)
+
+    def _get_reward(self):
+        is_done, b_reward, _ = self.attack_terminate_and_reward('b')
+        return (0, 0), (b_reward, b_reward)
