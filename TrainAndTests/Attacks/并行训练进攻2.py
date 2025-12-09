@@ -26,7 +26,7 @@ parser.add_argument("--max-episode-len", type=float, default=120,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
                     help="")
-parser.add_argument("--n-envs", type=int, default=4, help="并行环境数量 (根据CPU核数设定)")
+parser.add_argument("--n-envs", type=int, default=8, help="并行环境数量 (根据CPU核数设定)")
 parser.add_argument("--max-steps", type=float, default=2e6, help="总训练步数")
 args = parser.parse_args()
 
@@ -327,11 +327,14 @@ if __name__ == "__main__":
             n_envs = args.n_envs
             # 将每步 reward 积分到回合尺度，且把 rollout 平均到每个回合/每个子环境上
             avg_return = (total_reward_all_envs / n_envs) * dt_maneuver * (round(args.max_episode_len / dt_maneuver) / steps_per_rollout)
-            logger.add("train/reward_step", avg_return, total_steps)
+            logger.add("train/1 episode_return", avg_return, total_steps)
             logger.add("train/actor_loss", agent.actor_loss, total_steps)
             logger.add("train/critic_loss", agent.critic_loss, total_steps)
             
-            print(f"Step {total_steps}: Reward={avg_return:.4f}, ActorLoss={agent.actor_loss:.4f}")
+            # 显示训练进度（当前步数 / 最大步数）及平均回报
+            max_steps_val = float(args.max_steps) if getattr(args, "max_steps", None) is not None else 1.0
+            progress = total_steps / max_steps_val if max_steps_val > 0 else 0.0
+            print(f"Step {total_steps}/{int(max_steps_val)} ({progress:.2%}) - Reward={avg_return:.4f}")
 
             # 4. 保存模型
             # 按保存间隔保存（每隔 save_interval 步）

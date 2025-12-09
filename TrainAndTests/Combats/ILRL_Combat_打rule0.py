@@ -412,8 +412,8 @@ if __name__ == "__main__":
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
-                if r_fire:
-                    r_m_id = launch_missile_immediately(env, 'r')
+                # if r_fire:
+                #     r_m_id = launch_missile_immediately(env, 'r')
 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)

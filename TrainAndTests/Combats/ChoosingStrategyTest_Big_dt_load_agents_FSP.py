@@ -130,7 +130,7 @@ if __name__=="__main__":
     latest_actor_path = latest_actor_by_index(rein_list)
     if latest_actor_path:
         # 直接加载权重到现有的 agent
-        sd = th.load(latest_actor_path, map_location=device)
+        sd = th.load(latest_actor_path, map_location=device, weights_only=1)
         agent.actor.load_state_dict(sd)  # , strict=False)  # 忽略缺失的键
         print(f"Loaded actor for test from: {latest_actor_path}")
 
@@ -162,23 +162,21 @@ if __name__=="__main__":
 
             test_run = 1
 
-            # --- FSP核心：为红方加载一个历史策略 ---
-            # 查找所有已保存的 actor 模型
-            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
-            if not actor_files:
-                # 如果没有历史模型，红方使用固定策略（例如总是进攻）
+            # --- [修改] 红蓝双方都加载最新的 agent ---
+            # latest_actor_path 已经在脚本开头被确定
+            if not latest_actor_path:
+                # 如果没有找到任何模型
                 red_actor_loaded = False
+                print("Warning: No actor model found. Red agent will use default action.")
             else:
-                # 随机选择一个历史模型
-                opponent_path = random.choice(actor_files)
+                # 为红方加载最新的模型
                 try:
-                    red_actor.load_state_dict(torch.load(opponent_path, map_location=device))
+                    red_actor.load_state_dict(torch.load(latest_actor_path, map_location=device, weights_only=1))
                     red_actor.eval() # 设置为评估模式
                     red_actor_loaded = True
-                    if i_episode % 20 == 0: # 每20回合打印一次对手信息
-                        print(f"Episode {i_episode}: Red opponent is {os.path.basename(opponent_path)}")
+                    print(f"Episode {i_episode}: Red opponent is {os.path.basename(latest_actor_path)}")
                 except Exception as e:
-                    print(f"Warning: Failed to load opponent model {opponent_path}. Error: {e}")
+                    print(f"Warning: Failed to load opponent model {latest_actor_path}. Error: {e}")
                     red_actor_loaded = False
 
             episode_return = 0
