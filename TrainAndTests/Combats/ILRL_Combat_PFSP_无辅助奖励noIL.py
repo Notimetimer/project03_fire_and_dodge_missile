@@ -630,8 +630,9 @@ if __name__ == "__main__":
             logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
 
             # 记录主智能体在当前所有 ELO 中的归一化排名位置
-            min_elo = np.min(list(valid_elos.values()))
-            max_elo = np.max(list(valid_elos.values()))
+            all_current_elos = list(valid_elos.values()) + [main_agent_elo]
+            min_elo = np.min(all_current_elos)
+            max_elo = np.max(all_current_elos)
             denom = float(max_elo - min_elo)
             rank_pos = 0.5 if denom == 0.0 else float((main_agent_elo - min_elo) / denom)
             logger.add("Elo_relevant/Current_Rank %", rank_pos * 100, total_steps)

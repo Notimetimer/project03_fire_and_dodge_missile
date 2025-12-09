@@ -73,13 +73,14 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_无辅助奖励', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_打rule0', help="Mission name to find the log directory.")
     args = parser.parse_args()
     
     'MARWIL_combat_有辅助奖励'
     'MARWIL_combat_无辅助奖励'
     'RL_combat_有辅助奖励'
     'RL_combat_无辅助奖励'
+    'RL_combat_打rule0'
 
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
@@ -88,7 +89,7 @@ if __name__ == "__main__":
 
     # --- 初始化环境 ---
     env = ChooseStrategyEnv(env_args, tacview_show=0)
-    env.shielded = 1
+    
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
 
@@ -111,11 +112,12 @@ if __name__ == "__main__":
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     # 注意：测试时只需要 Actor Wrapper，不需要完整的 PPO agent
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
-    actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device))
+    actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1))
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
     env = ChooseStrategyEnv(env_args, tacview_show=1)
-
+    env.shielded = 1
+    
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2]
     t_bias = 0
@@ -163,6 +165,9 @@ if __name__ == "__main__":
                         b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore=0)
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
+                    print("开火概率", b_action_check['bern'][0])
+                    
+                    b_action_label = np.random.choice([4,6,13])
 
                     if b_fire:
                         launch_missile_immediately(env, 'b')

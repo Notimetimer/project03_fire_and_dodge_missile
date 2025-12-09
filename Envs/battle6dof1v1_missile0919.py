@@ -315,6 +315,7 @@ class Battle(object):
                         target_height = max(self.min_alt_safe - UAV.alt, target_height)
                         # delta_heading = 0
                         p2p = False
+                        delta_heading = np.clip(delta_heading, -pi/2, pi/2)
 
                     # 不许超过限高
                     if UAV.alt > self.max_alt_safe:
@@ -1195,7 +1196,7 @@ def launch_missile_immediately(env, side='r'):
     target_locked = ego_state["target_locked"]
 
     # 发射导弹
-    if uav.ammo>0 and not uav.dead and target_locked and ego_state["weapon"]>=0.1 and ATA<=30 *pi/180: # 3
+    if uav.ammo>0 and not uav.dead: # and target_locked and ego_state["weapon"]>=0.1 and ATA<=30 *pi/180: # 3
         new_missile = uav.launch_missile(target, env.t, missile_class)
         uav.ammo -= 1
         new_missile.side = 'r' if side == 'r' else 'b'

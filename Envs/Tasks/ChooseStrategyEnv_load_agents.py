@@ -393,8 +393,8 @@ class ChooseStrategyEnv(Battle):
                     UAV.dead = True
                     # self.running = False
 
-        r_reward_n, b_reward_n = self.get_reward()
-        terminate = self.get_terminate()
+        # r_reward_n, b_reward_n = self.get_reward()
+        # terminate = self.get_terminate()
 
         for UAV in self.UAVs:
             if UAV.got_hit or UAV.crash or self.out_range(UAV):
@@ -411,14 +411,14 @@ class ChooseStrategyEnv(Battle):
         self.RUAV = self.UAVs[0]
         self.BUAV = self.UAVs[1]
 
-        if terminate:
-            self.running = False
+        # if terminate:
+        #     self.running = False
 
-        return r_reward_n, b_reward_n, r_dones, b_dones, terminate
+        # return r_reward_n, b_reward_n, r_dones, b_dones, terminate
 
     def combat_terminate_and_reward(self, side, action_label):
-        terminate = self.get_terminate()
-        done = terminate
+        # terminate = self.get_terminate()
+        # done = terminate
 
         # todo 奖励函数调用或是重写都要在这实现
         self.get_missile_state()

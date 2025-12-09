@@ -13,8 +13,9 @@ sys.path.append(project_root)
 from Envs.Tasks.AttackManeuverEnv import AttackTrainEnv, dt_maneuver
 # 引入我们刚才写的并行 Wrapper
 from Algorithms.ParallelEnv import ParallelPettingZooEnv
-from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid3 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
+from Algorithms.HybridBuffer import HybridReplayBuffer # [新增]
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Math_calculates.ScaleLearningRate import scale_learning_rate
 from Math_calculates.sub_of_angles import sub_of_radian
@@ -216,6 +217,17 @@ if __name__ == "__main__":
     # 每次 PPO 更新前收集的步数 = update_steps * n_envs
     # 例如 update_steps=256, n_envs=8 -> 每次更新基于 2048 个样本
     steps_per_rollout = 600 
+    
+    # [新增] 初始化高效 Buffer
+    # 注意：actor_hidden_dim 暂设为 None，如果你用了 GRU 请填入维度
+    replay_buffer = HybridReplayBuffer(
+        n_envs=args.n_envs,
+        buffer_size=steps_per_rollout,
+        obs_dim=state_dim,   # 假设 obs_dim = state_dim (如果用了 attack_obs)
+        state_dim=state_dim, # Critic 用的状态
+        action_dims_dict=action_dims_dict,
+        device=device
+    )
 
     # 保存间隔：每隔 steps_per_rollout * 10 步保存一次
     save_interval = steps_per_rollout * 10
@@ -227,11 +239,8 @@ if __name__ == "__main__":
 
     try:
         while total_steps < args.max_steps:
-            # 缓冲区
-            transition_dict = {
-                'states': [], 'actions': [], 'next_states': [], 
-                'rewards': [], 'dones': []
-            }
+            # [修改] 每次循环前只需清空 Buffer 指针
+            replay_buffer.clear()
             
             # --- 数据收集阶段 (Rollout) ---
             for _ in range(steps_per_rollout):
@@ -273,26 +282,37 @@ if __name__ == "__main__":
                 rewards = results['b_reward'] 
                 dones = results['dones']      
                 
-                # 更新 obs_dict 和 infos (包含 r_obs 和最新的 red_raw_info)
+                # E. [修改] 存入 HybridReplayBuffer
+                # 注意：add 方法需要 (N, D) 的 numpy 数组
+                replay_buffer.add(
+                    obs=b_obs,
+                    state=b_obs, # 如果没有区分全局状态，就用 obs
+                    action_dict=b_actions_raw, # 传入包含 'cont' 的字典
+                    reward=rewards,
+                    done=dones,
+                    next_state=next_b_obs
+                )
+                
+                # 更新循环变量
                 obs_dict = results
                 infos = results['infos']
-                
-                # E. 存储数据
-                transition_dict['states'].append(b_obs)
-                transition_dict['actions'].append(b_actions_raw) # 这是一个包含 (N, 3) 数组的字典
-                transition_dict['next_states'].append(next_b_obs)
-                transition_dict['rewards'].append(rewards)
-                transition_dict['dones'].append(dones)
-                
                 b_obs = next_b_obs
-                total_steps += 1
+                total_steps += 1 # 这里 +1 代表所有环境都走了一步
+                
             # --- 更新阶段 (Update) ---
             
             # [修改] 使用 PPOHybrid2 内置的并行数据预处理
             # 1. 计算 GAE (在展平前)
             # 2. 展平所有数据 (States, Actions, Rewards...)
             # 3. 返回包含 'advantages' 和 'td_targets' 的字典
-            transition_dict = agent.preprocess_parallel_buffer(transition_dict)
+            # transition_dict = agent.preprocess_parallel_buffer(transition_dict)
+            # [修改] 使用 Buffer 计算 GAE 并导出为 Dict
+            # 传入 critic 网络用于价值评估
+            transition_dict = replay_buffer.compute_estimates_and_flatten(
+                critic_net=agent.critic, 
+                gamma=gamma, 
+                lmbda=lmbda
+            )
 
             # 2. 执行 PPO 更新
             # 现在 update 内部会检测到 advantages 已存在，从而跳过重复计算

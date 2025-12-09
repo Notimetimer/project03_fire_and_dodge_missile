@@ -424,55 +424,116 @@ class PPOHybrid:
         # [修改] 保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
+
+    # def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1):
+
+    #     # RL 更新阶段：解冻 std 参数，允许策略调整探索方差
+    #     if hasattr(self.actor.net, 'log_std_param'):
+    #         self.actor.net.log_std_param.requires_grad = True
+
+    #     # [修改] 支持直接传入 numpy 数组 (来自 preprocess_parallel_buffer)
+    #     if isinstance(transition_dict['states'], list):
+    #         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+    #         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
+    #         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
+    #         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
+    #     else:
+    #         # 已经是 numpy array
+    #         states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
+    #         next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
+    #         dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
+    #         rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
+
+    #     # ==============================================================================
+    #     # [核心修改] 区分 Actor 的观测 (obs) 和 Critic 的状态 (state)
+    #     # ==============================================================================
+    #     actor_inputs = states  # 默认情况：Actor 和 Critic 都用 global states
+    #     critic_inputs = states
+        
+    #     # 检查是否存在局部观测 obs
+    #     if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+    #         if isinstance(transition_dict['obs'], list):
+    #             obs = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+    #         else:
+    #             obs = torch.tensor(transition_dict['obs'], dtype=torch.float).to(self.device)
+            
+    #         actor_inputs = obs      # Actor 看局部 obs
+    #         critic_inputs = states  # Critic 看全局 states
+    #     # ==============================================================================
+        
+    #     actions_from_buffer = transition_dict['actions']
+        
+    #     # 1. 准备动作数据 (转 Tensor)
+    #     actions_on_device = {}
+        
+    #     # [新增] 优化：支持直接传入字典形式的动作 (来自 preprocess_parallel_buffer)
+    #     if isinstance(actions_from_buffer, dict):
+    #         for key, val in actions_from_buffer.items():
+    #             if key == 'cat':
+    #                 actions_on_device[key] = torch.tensor(val, dtype=torch.long).to(self.device)
+    #             else:
+    #                 actions_on_device[key] = torch.tensor(val, dtype=torch.float).to(self.device)
+    #     else:
+    #         # 旧逻辑：List of Dicts (较慢)
+    #         all_keys = actions_from_buffer[0].keys()
+    #         for key in all_keys:
+    #             vals = [d[key] for d in actions_from_buffer]
+    #             if key == 'cat':
+    #                 actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
+    #             else:
+    #                 actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
+
+    #     # 2. 计算 Advantage
+    #     # [新增] 检查是否已经预计算了 Advantage 和 TD Target
+    #     if 'advantages' in transition_dict and 'td_targets' in transition_dict:
+    #         if isinstance(transition_dict['advantages'], list):
+    #             advantage = torch.tensor(np.array(transition_dict['advantages']), dtype=torch.float).view(-1, 1).to(self.device)
+    #             td_target = torch.tensor(np.array(transition_dict['td_targets']), dtype=torch.float).view(-1, 1).to(self.device)
+    #         else:
+    #             advantage = torch.tensor(transition_dict['advantages'], dtype=torch.float).view(-1, 1).to(self.device)
+    #             td_target = torch.tensor(transition_dict['td_targets'], dtype=torch.float).view(-1, 1).to(self.device)
+    #     else:
+    
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1):
 
-        # RL 更新阶段：解冻 std 参数，允许策略调整探索方差
+        # RL 更新阶段：解冻 std 参数
         if hasattr(self.actor.net, 'log_std_param'):
             self.actor.net.log_std_param.requires_grad = True
 
-        # [修改] 支持直接传入 numpy 数组 (来自 preprocess_parallel_buffer)
-        if isinstance(transition_dict['states'], list):
-            states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-            next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-            dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-            rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        else:
-            # 已经是 numpy array
-            states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
-            next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
-            dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
-            rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
-
-        # ==============================================================================
-        # [核心修改] 区分 Actor 的观测 (obs) 和 Critic 的状态 (state)
-        # ==============================================================================
-        actor_inputs = states  # 默认情况：Actor 和 Critic 都用 global states
-        critic_inputs = states
-        
-        # 检查是否存在局部观测 obs
-        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
-            if isinstance(transition_dict['obs'], list):
-                obs = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+        # [修改] 6. 智能数据转换：如果已经是 np.ndarray (来自 HybridReplayBuffer)，直接转 Tensor
+        # 否则 (来自 list append)，先转 np 再转 Tensor
+        def to_tensor(x, dtype):
+            if isinstance(x, np.ndarray):
+                return torch.tensor(x, dtype=dtype).to(self.device)
             else:
-                obs = torch.tensor(transition_dict['obs'], dtype=torch.float).to(self.device)
-            
-            actor_inputs = obs      # Actor 看局部 obs
-            critic_inputs = states  # Critic 看全局 states
-        # ==============================================================================
+                return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+
+        states = to_tensor(transition_dict['states'], torch.float)
+        next_states = to_tensor(transition_dict['next_states'], torch.float)
+        dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
+        rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
+
+        # 处理 obs (如果存在)
+        if 'obs' in transition_dict:
+            actor_inputs = to_tensor(transition_dict['obs'], torch.float)
+            critic_inputs = states
+        else:
+            actor_inputs = states
+            critic_inputs = states
         
+        # 1. 准备动作数据
         actions_from_buffer = transition_dict['actions']
-        
-        # 1. 准备动作数据 (转 Tensor)
         actions_on_device = {}
         
-        # [新增] 优化：支持直接传入字典形式的动作 (来自 preprocess_parallel_buffer)
+        # Buffer 传来的 actions 已经是 dict of arrays
         if isinstance(actions_from_buffer, dict):
             for key, val in actions_from_buffer.items():
                 if key == 'cat':
-                    actions_on_device[key] = torch.tensor(val, dtype=torch.long).to(self.device)
+                    actions_on_device[key] = to_tensor(val, torch.long)
                 else:
-                    actions_on_device[key] = torch.tensor(val, dtype=torch.float).to(self.device)
+                    actions_on_device[key] = to_tensor(val, torch.float)
         else:
+            # 兼容旧代码 (list of dicts)
             # 旧逻辑：List of Dicts (较慢)
             all_keys = actions_from_buffer[0].keys()
             for key in all_keys:
@@ -482,16 +543,15 @@ class PPOHybrid:
                 else:
                     actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
 
-        # 2. 计算 Advantage
-        # [新增] 检查是否已经预计算了 Advantage 和 TD Target
+
+        # 2. 获取 Advantage (优先使用 Buffer 算好的)
         if 'advantages' in transition_dict and 'td_targets' in transition_dict:
-            if isinstance(transition_dict['advantages'], list):
-                advantage = torch.tensor(np.array(transition_dict['advantages']), dtype=torch.float).view(-1, 1).to(self.device)
-                td_target = torch.tensor(np.array(transition_dict['td_targets']), dtype=torch.float).view(-1, 1).to(self.device)
-            else:
-                advantage = torch.tensor(transition_dict['advantages'], dtype=torch.float).view(-1, 1).to(self.device)
-                td_target = torch.tensor(transition_dict['td_targets'], dtype=torch.float).view(-1, 1).to(self.device)
+            advantage = to_tensor(transition_dict['advantages'], torch.float).view(-1, 1)
+            td_target = to_tensor(transition_dict['td_targets'], torch.float).view(-1, 1)
         else:
+            # 现场计算 GAE (不推荐用于并行展平后的数据)
+            
+            # 以下为公共部分
             # 如果没有预计算，则现场计算 (注意：如果是并行数据直接展平进来的，这里计算会有偏差)
             with torch.no_grad():
                 # 修改：Critic 使用全局 next_states 计算 Target
