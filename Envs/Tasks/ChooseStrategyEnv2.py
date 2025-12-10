@@ -95,6 +95,10 @@ class ChooseStrategyEnv(Battle):
         # self.last_dist_dot = None
         # self.last_dhor = None
         
+        # [新增] 初始化 last_dead 属性，防止死亡惩罚重复计算
+        self.RUAV.last_dead = False
+        self.BUAV.last_dead = False
+
         # [确认存在/修改] 确保每个 Episode 开始时重置 last_obs
         self.last_obs = None 
         
@@ -361,9 +365,19 @@ class ChooseStrategyEnv(Battle):
         # 发射导弹
         shoot = action_shoot
         # 如果死了，就把剩余导弹损耗的惩罚一并加上，禁止自杀套利
-        if ego.dead or self.out_range(ego):
+        
+        # [修改] 引入 last_dead 判定，确保死亡惩罚只扣一次
+        is_dead_now = ego.dead or self.out_range(ego)
+        if is_dead_now and not getattr(ego, 'last_dead', False):
             shoot = ego.ammo
             wasted = ego.ammo
+            ego.last_dead = True
+        elif is_dead_now and getattr(ego, 'last_dead', False):
+            # 已经死过一次了，不再重复扣除剩余导弹的惩罚
+            shoot = 0
+            wasted = 0
+        
+        # 如果撞地之后导弹还在飞，就会持续扣奖励，而且剩余弹量越多，导弹飞得越久。奖励扣得越狠
         
         # 发射惩罚
         if shoot >= 1:

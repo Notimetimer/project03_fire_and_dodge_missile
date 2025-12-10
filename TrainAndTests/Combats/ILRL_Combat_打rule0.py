@@ -398,6 +398,8 @@ if __name__ == "__main__":
                 if steps_of_this_eps > 0:
                     # 修改：传入 last_decision_obs 和 last_decision_state
                     transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward-b_reward_assisted, b_state_global, False)
+                    
+                    '''需要引入 active_mask以应对“死后还在做决策”的极端情况'''
 
                 # **关键点 2: 开始【新的】一个动作周期**
                 # 1. 记录新周期的起始状态
