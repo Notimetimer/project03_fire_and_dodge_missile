@@ -151,8 +151,8 @@ if __name__ == "__main__":
                     r_state_check = env.unscale_state(r_check_obs)
                     r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
-                    if r_fire:
-                        launch_missile_immediately(env, 'r')
+                    # if r_fire:
+                    #     launch_missile_immediately(env, 'r')
 
                     # 蓝方 (RL 智能体)
                     # -- 规则
@@ -167,7 +167,7 @@ if __name__ == "__main__":
                     b_fire = b_action_exec['bern'][0]
                     print("开火概率", b_action_check['bern'][0])
                     
-                    b_action_label = np.random.choice([4,6,13])
+                    # b_action_label = np.random.choice([4,6,13])
 
                     if b_fire:
                         launch_missile_immediately(env, 'b')

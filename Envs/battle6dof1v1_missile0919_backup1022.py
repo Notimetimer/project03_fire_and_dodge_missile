@@ -350,7 +350,7 @@ class Battle(object):
 
         return r_reward_n, b_reward_n, r_dones, b_dones, terminate
 
-    def get_missile_state(self):
+    def update_missile_state(self):
         alive_red_missiles = self.Rmissiles.copy()
         alive_blue_missiles = self.Bmissiles.copy()
         for missile in alive_red_missiles[:]:  # 遍历
@@ -396,7 +396,7 @@ class Battle(object):
         #     self.alive_r_missiles = alive_enm_missiles
         #     self.alive_b_missiles = alive_own_missiles
 
-        alive_red_missiles, alive_blue_missiles = self.get_missile_state()
+        alive_red_missiles, alive_blue_missiles = self.update_missile_state()
         if side == 'r':
             alive_own_missiles = alive_red_missiles
             alive_enm_missiles = alive_blue_missiles

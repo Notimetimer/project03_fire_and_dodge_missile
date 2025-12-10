@@ -235,8 +235,8 @@ class ChooseStrategyEnv(Battle):
     
 
     def combat_terminate_and_reward(self, side, action_label, action_shoot):
-
-        self.get_missile_state()
+        self.close_range_kill() # 允许跑刀
+        self.update_missile_state()
         if side == 'r':
             ego = self.RUAV
             enm = self.BUAV
@@ -320,14 +320,16 @@ class ChooseStrategyEnv(Battle):
         last_enm_warning = last_info.get("enm_warning", 0)
 
 
-        # ---主要奖励---
-        reward_main = 0.1  # 防自杀奖励
+        reward_main = 0.1  # 主要奖励，带防自杀
+        reward_assisted = 0  # 辅助奖励
+        
         if self.win:
-            reward_main += 300
+            reward_main += 300 # 300  --1210新增
+            reward_main += ego.ammo * 20  # 每一发剩余导弹多给 5 分 --1210新增
         if self.lose:
-            reward_main -= 300
+            reward_main -= 300 # 300  --1210新增
         if self.draw:
-            reward_main -= 0
+            reward_main -= 50 #  --1210新增，之前为0
 
         # [修改] 为导弹提供制导 (大幅降低持续奖励)
         # 假设制导过程持续较长，将每步奖励设为极小值，防止刷分。
@@ -336,47 +338,62 @@ class ChooseStrategyEnv(Battle):
             reward_main += 0.05 
 
         # [修改] 锁定目标 (改为瞬时奖励：当前锁定 且 上一时刻未锁定)
-        if ego_obs["target_locked"] and not last_target_locked:
-            reward_main += 3
+        if ego_obs["target_locked"]: #  and not last_target_locked:
+            reward_main += 0.03
 
         # [修改] 被目标锁定 (改为瞬时惩罚，且使用严格判定)
-        if strict_locked_by_target and not last_strict_locked_by_target:
-            reward_main -= 1
+        if strict_locked_by_target: # and not last_strict_locked_by_target:
+            reward_main -= 0.03
 
         # [修改] 收到导弹警告 (改为瞬时惩罚)
-        if warning and not last_warning:
-            reward_main -= 3
+        if warning: # and not last_warning:
+            reward_main -= 0.3
 
         # [修改] 导弹锁定目标 (对手收到警告) (改为瞬时奖励)
-        if enm_obs["warning"] and not last_enm_warning:
-            reward_main += 5
+        if enm_obs["warning"]: # and not last_enm_warning:
+            reward_main += 0.5
 
         # 逃脱导弹 (保持原逻辑，这通常由escape_once标志位控制，本身就是一次性的)
         if ego.escape_once:
-            reward_main += 10
+            reward_main += 50 # 10  --1210新增
 
         # 导弹被逃脱 (保持原逻辑)
         if enm.escape_once:
-            reward_main -= 10
+            reward_main -= 50 # 10  --1210新增
 
         # 发射导弹
         shoot = action_shoot
-        # 发射惩罚
-        if shoot == 1:
-            if alpha*180/pi > 10:
-                reward_main -= 10
-            else:
-                reward_main -= 5
-
+        # 如果输了，就把剩余导弹损耗的惩罚一并加上，禁止自杀套利
+        if ego.dead or self.out_range(ego):
+            shoot = ego.ammo
+            ego.ammo = 0  # 
         
-        if done and ego.ammo == ego.init_ammo:
-            reward_main -= 300 # 一发都不打必须重罚 100
+        # 发射惩罚
+        if shoot >= 1:
+            if alpha*180/pi > 10:
+                reward_main -= 50*shoot # 10  --1210新增
+            else:
+                reward_main -= 40*shoot # 8  --1210新增
+                
+            if len(alive_ally_missiles)>1:
+                reward_main -= 80*shoot # 30 --1210 新增
+            
+            if not ego.dead:
+                reward_assisted += 3 * (pi/3-alpha)/(pi/3)
+                reward_assisted += 3 * (abs(AA_hor)/pi-1)
+                reward_assisted += 3 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
+                
+                # 发射距离奖励
+                if distance > 30e3:
+                    reward_assisted += 5 * (1-(distance-30e3)/(50e3))
+
+                reward_assisted += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
+
+        #  --1210新增 ，原先非注释
+        # if done and ego.ammo == ego.init_ammo:
+        #     reward_main -= 300 # 一发都不打必须重罚 100
         # if done and ego.ammo < ego.init_ammo:
         #     reward_main += 20 # 至少打了一枚
-
-        # 重复发射导弹时惩罚
-        if len(alive_ally_missiles)>1 and shoot==1:
-            reward_main -= 30
 
         # 高度限制奖励/惩罚
         reward_main += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
@@ -393,50 +410,29 @@ class ChooseStrategyEnv(Battle):
             "warning": float(warning),
             "enm_warning": float(enm_obs["warning"])
         }
-            
-        # ---辅助奖励---
-        reward_fire = 0
-        # 没发射导弹时alpha越小越好
-        if len(alive_ally_missiles) == 0 and not warning:
-            reward_fire += 0.5 - alpha / pi
-        
-        # # 导弹处于中制导阶段时alpha在±60*pi/180之间为奖励高台， 其余随alpha线性减少
-        # reward_lock = 0
-        # if missile_in_mid_term:
-        #     # 提供制导信息奖励
-        #     if abs(alpha) < np.pi / 3:
-        #         reward_lock += 0.5
-        #     else:
-        #         reward_lock += 0.5 * (1 - (alpha - pi / 3) / pi)
 
+        
+        # 没发射导弹时alpha越小越好
+        if len(alive_ally_missiles) == 0 and ego.ammo > 0 and not warning:
+            reward_assisted += 0.5 - alpha / pi
+        
         # # 有warning时alpha越大越好
-        r_escape = 0
         if warning:
-            r_escape += 0.8 * abs(delta_psi_threat) / pi
+            reward_assisted += 0.8 * abs(delta_psi_threat) / pi
 
         # 迎角惩罚
-        r_angle = 0
-        r_angle -= 0.1 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
+        reward_assisted -= 0.1 * ((ego.alpha_air*180/pi> 15)*(ego.alpha_air*180/pi-15)+\
                            (ego.alpha_air*180/pi< -5)*(-5 - ego.alpha_air*180/pi))
-        r_angle -= 0.1 * (abs(ego.theta)/pi*2)  # 俯仰角惩罚
+        reward_assisted -= 0.1 * (abs(ego.theta)/pi*2)  # 俯仰角惩罚
 
-        # 导弹发射辅助奖励/惩罚
-        reward_shoot = 0
-        # if shoot == 1:
-        #     # reward_shoot += 1 * abs(AA_hor)/pi-1  # 要把敌人骗进来杀
-        #     reward_shoot += -1 + 1 * np.clip(ego.theta/(pi/3), -1, 1)  # 鼓励抛射
+
         
         # deltapsi变化率奖励 todobedontinued
 
         # 态势优势度 tobecontinued
 
-        reward_assisted = np.sum([
-            1 * reward_fire,
-            # 1 * reward_lock,
-            1 * r_escape,
-            1 * r_angle,
-            1 * reward_shoot,
-        ])
+        if done or ego.dead or enm.dead:
+            print('回合结束')
 
         return done, reward_main+reward_assisted, reward_assisted
 
@@ -445,7 +441,7 @@ class ChooseStrategyEnv(Battle):
     #     # -------------------------------------------------------------------------
     #     # 状态获取与解包 (保持原样)
     #     # -------------------------------------------------------------------------
-    #     self.get_missile_state()
+    #     self.update_missile_state()
     #     if side == 'r':
     #         ego = self.RUAV
     #         enm = self.BUAV

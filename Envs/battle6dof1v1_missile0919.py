@@ -343,7 +343,7 @@ class Battle(object):
                 # UAV.act_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
-            self.get_missile_state() # 先把存活的导弹找出来
+            self.update_missile_state() # 先把存活的导弹找出来
             # self.missiles = self.Rmissiles + self.Bmissiles
             for missile in self.alive_missiles[:]:  # 使用切片创建副本以允许删除
                 target = self.get_target_by_id(missile.target_id)
@@ -417,10 +417,7 @@ class Battle(object):
                 pt_ = adv.pos_
                 L_ = pt_ - UAV.pos_
                 distance = np.linalg.norm(L_)
-                # 近距杀
-                #     short_range_killed = UAV.short_range_kill(adv)
-                #     if short_range_killed:
-                #         adv.got_hit = True
+
                 # 出界判别
                 if self.crash(UAV):
                     UAV.dead = True
@@ -449,7 +446,7 @@ class Battle(object):
 
         return 0, 0, 0, 0, 0  # 废弃不再使用了
 
-    def get_missile_state(self):
+    def update_missile_state(self):
         alive_r_missiles = [m for m in self.Rmissiles if not m.dead]
         alive_b_missiles = [m for m in self.Bmissiles if not m.dead]
 
@@ -898,7 +895,7 @@ class Battle(object):
         return out
 
     # 近距处理
-    def close_range_kill(self):
+    def close_range_kill(self,):
         # todo 使用这个最好在奖励函数里面加上距离奖励
         for ruav in self.RUAVs:
             if ruav.dead:
@@ -921,7 +918,6 @@ class Battle(object):
                         buav.dead = True
                         ruav.got_hit = True
                         buav.got_hit = True
-                        # todo win-lose
                     # 单杀
                     if cos_ATA_r >= cos(pi / 3) and cos_ATA_b < cos(pi / 3):
                         buav.dead = True
@@ -929,6 +925,7 @@ class Battle(object):
                     if cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
                         ruav.dead = True
                         ruav.got_hit = True
+
 
     def render(self, t_bias=0):
         if self.tacview_show:

@@ -222,6 +222,9 @@ class HybridActorWrapper(nn.Module):
         actor_outputs = self.net(states, max_std=max_std)
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
         entropy = torch.zeros(states.size(0), 1).to(self.device)
+        
+        # [新增] 用于记录分项 Entropy 的字典
+        entropy_details = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Cont ---
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -230,16 +233,32 @@ class HybridActorWrapper(nn.Module):
             u = actions_raw['cont']
             log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
             entropy += dist.entropy().unsqueeze(-1) # 近似熵
+            
+            # [修改] 单独记录 cont entropy
+            e_cont = dist.entropy().unsqueeze(-1)
+            entropy += e_cont
+            entropy_details['cont'] = e_cont.mean().item() # 记录均值
 
         # --- Cat ---
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             cat_probs_list = actor_outputs['cat']
             cat_action = actions_raw['cat'].long()
+            
+            # [新增] 临时列表用于计算 cat 总熵
+            e_cat_sum = torch.zeros_like(entropy)
+            
             for i, probs in enumerate(cat_probs_list):
                 act_i = cat_action[:, i].unsqueeze(-1)
                 log_probs += torch.log(probs.gather(1, act_i) + 1e-8)
                 dist = Categorical(probs=probs)
-                entropy += dist.entropy().unsqueeze(-1)
+                
+                # 累加每个离散头的熵
+                e_head = dist.entropy().unsqueeze(-1)
+                entropy += e_head
+                e_cat_sum += e_head
+            
+            # [修改] 记录 cat entropy
+            entropy_details['cat'] = e_cat_sum.mean().item()
 
         # --- Bern ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
@@ -247,9 +266,13 @@ class HybridActorWrapper(nn.Module):
             dist = Bernoulli(logits=bern_logits)
             bern_action = actions_raw['bern']
             log_probs += dist.log_prob(bern_action).sum(-1, keepdim=True)
-            entropy += dist.entropy().sum(-1, keepdim=True)
+            
+            # [修改] 单独记录 bern entropy
+            e_bern = dist.entropy().sum(-1, keepdim=True)
+            entropy += e_bern
+            entropy_details['bern'] = e_bern.mean().item()
 
-        return log_probs, entropy, None
+        return log_probs, entropy, entropy_details, None
     
     def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
         """
@@ -403,6 +426,10 @@ class PPOHybrid:
         self.approx_kl = 0        # 近似 KL 散度 (判断策略变化幅度)
         self.clip_frac = 0        # 裁剪触发比例 (判断 eps 或 lr 是否合适)
         self.explained_var = 0    # 解释方差 (判断 Critic 拟合程度)
+        # [新增] 分项 Entropy 监控
+        self.entropy_cat = 0
+        self.entropy_bern = 0
+        self.entropy_cont = 0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -503,7 +530,7 @@ class PPOHybrid:
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
             # 修改：Actor 使用 actor_inputs (可能是 obs)
-            old_log_probs, _, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            old_log_probs, _, _, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
             # 修改：Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
@@ -557,11 +584,15 @@ class PPOHybrid:
         # [新增] 监控列表
         kl_list = []
         clip_frac_list = []
+        # [新增] 分项 Entropy 列表
+        entropy_cat_list = []
+        entropy_bern_list = []
+        entropy_cont_list = []
         
         for _ in range(self.epochs):
             # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
-            # 修改：Actor 使用 actor_inputs
-            log_probs, entropy, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            # [修改] 接收 entropy_details
+            log_probs, entropy, entropy_details ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
             
             # [修改] 计算 log_ratio 用于更精准的 KL 计算
             log_ratio = log_probs - old_log_probs
@@ -611,6 +642,14 @@ class PPOHybrid:
             critic_loss_list.append(critic_loss.item())
             entropy_list.append(entropy.mean().item())
             ratio_list.append(ratio.mean().item())
+            
+            # [新增] 记录分项 Entropy
+            if entropy_details['cont'] is not None:
+                entropy_cont_list.append(entropy_details['cont'])
+            if entropy_details['cat'] is not None:
+                entropy_cat_list.append(entropy_details['cat'])
+            if entropy_details['bern'] is not None:
+                entropy_bern_list.append(entropy_details['bern'])
 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -625,6 +664,10 @@ class PPOHybrid:
         # [新增] 汇总新指标
         self.approx_kl = np.mean(kl_list)
         self.clip_frac = np.mean(clip_frac_list)
+        # [新增] 计算分项 Entropy 均值
+        self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
+        self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
+        self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
         
         # [新增] 计算 Explained Variance
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)

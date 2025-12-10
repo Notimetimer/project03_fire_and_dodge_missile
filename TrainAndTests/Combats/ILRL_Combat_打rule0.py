@@ -272,7 +272,7 @@ if __name__ == "__main__":
     # critic_lr = scale_learning_rate(critic_lr, student_agent.critic)
     # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
-    env = ChooseStrategyEnv(args, tacview_show=0)
+    env = ChooseStrategyEnv(args)
     env.shielded = 1 # 不得不全程带上
     env.dt_move = 0.05 # 仿真跑得快点
     
@@ -332,8 +332,8 @@ if __name__ == "__main__":
         # --- [Modification] 对手选择逻辑 (PFSP) ---
         # 强制对手为 Rule 0
         adv_is_rule = True
-        rule_num = 0
-        print(f"Eps {i_episode}: Opponent is Rule_0")
+        rule_num = 1
+        print(f"Eps {i_episode}: Opponent is Rule {rule_num}")
         
         episode_return = 0
 
@@ -368,6 +368,8 @@ if __name__ == "__main__":
         b_m_id = None
         
         steps_of_this_eps = -1
+        
+        m_fired = 0
         
         # --- Episode Loop ---
         for count in range(round(args.max_episode_len / dt_maneuver)):
@@ -423,6 +425,8 @@ if __name__ == "__main__":
                 b_fire = b_action_exec['bern'][0]
                 if b_fire:
                     b_m_id = launch_missile_immediately(env, 'b')
+                if b_m_id is not None:
+                    m_fired += 1
                 
                 # print("机动概率分布", b_action_check['cat'])
                 # print("开火概率", b_action_check['bern'][0])
@@ -486,7 +490,7 @@ if __name__ == "__main__":
         # ... (所有 ELO 更新代码均被移除)
         
         # 有没有试图发射过导弹
-        logger.add("special/0 发射的导弹数量", env.BUAV.init_ammo-env.BUAV.ammo, total_steps)
+        logger.add("special/0 发射的导弹数量", m_fired, total_steps)
         # 每一场胜负变化
         logger.add("train/1 episode_return", episode_return, total_steps)
         logger.add("train/2 win", env.win, total_steps)
@@ -513,6 +517,9 @@ if __name__ == "__main__":
             logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
             # 强化学习actor特殊项监控
             logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
+            logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
+            logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
+            
             logger.add("train/10 advantage", student_agent.advantage, total_steps) 
             # 强化学习
             logger.add("train/10 explained_var", student_agent.explained_var, total_steps)

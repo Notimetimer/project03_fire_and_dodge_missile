@@ -421,7 +421,7 @@ class ChooseStrategyEnv(Battle):
         # done = terminate
 
         # todo 奖励函数调用或是重写都要在这实现
-        self.get_missile_state()
+        self.update_missile_state()
         if side == 'r':
             ego = self.RUAV
             enm = self.BUAV
