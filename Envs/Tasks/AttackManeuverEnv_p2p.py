@@ -141,7 +141,7 @@ class AttackTrainEnv(Battle):
         r_dist = -dist_dot/340  # 接近率越高奖励越高
 
         # # 边界距离奖励 ###
-        obs = self.base_obs(side)
+        obs = self.base_obs(side, reward_fn=1)
         d_hor = obs["border"][0]
         r_border = d_hor
 

@@ -117,7 +117,7 @@ class EscapeTrainEnv(Battle):
         #     state["threat"]
 
         RWR = state["warning"]
-        obs = self.base_obs(side)
+        obs = self.base_obs(side, reward_fn=1)
         d_hor = obs["border"][0]
 
         if side == 'r':

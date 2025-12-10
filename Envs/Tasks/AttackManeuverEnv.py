@@ -44,26 +44,20 @@ class AttackTrainEnv(Battle):
             "border",  # 2
         ]
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):
-        # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
-        super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
-        # 初始化红蓝远离速度
-        self.last_dist_dot = None
-        self.last_dhor = None
-        self.lock_time_count = 0
+    # def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):
+    #     # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
+    #     super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
+    #     # 初始化红蓝远离速度
+    #     self.last_dist_dot = None
+    #     self.last_dhor = None
+    #     self.lock_time_count = 0
 
     # 进攻策略观测量
-    def attack_obs(self, side):
-        pre_full_obs = self.base_obs(side)
+    def attack_obs(self, side, pomdp=0):
+        pre_full_obs = self.base_obs(side, pomdp)
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.attack_key_order}
         full_obs["ego_main"][6]=0
-        # 先对dict的元素mask
-        # 只需要 target_information 和 ego_main
-        # full_obs["ego_control"] = copy.deepcopy(self.obs_init["ego_control"])
-        # full_obs["weapon"] = copy.deepcopy(self.obs_init["weapon"])
-        # full_obs["threat"] = copy.deepcopy(self.obs_init["threat"])
-        # full_obs["border"] = copy.deepcopy(self.obs_init["border"])
 
         # 将观测按顺序拉成一维数组
         # flat_obs = flatten_obs(full_obs, self.key_order)
@@ -137,7 +131,7 @@ class AttackTrainEnv(Battle):
         r_dist = -dist_dot/340  # 接近率越高奖励越高
 
         # # 边界距离奖励 ###
-        obs = self.base_obs(side)
+        obs = self.base_obs(side, reward_fn=1)
         d_hor = obs["border"][0]
         r_border = d_hor
 
@@ -217,7 +211,7 @@ class AttackTrainEnv(Battle):
     # [修改] Reset 逻辑：如果没有传入具体的 birth_state，则自动随机
     def reset(self, seed=None, options=None, 
               red_birth_state=None, blue_birth_state=None, 
-              red_init_ammo=0, blue_init_ammo=0): # 注意：这里默认弹药改为0，符合你提供的代码片段
+              red_init_ammo=6, blue_init_ammo=6):
         
         # 1. 如果外部没有指定出生状态，则使用内部随机逻辑
         if red_birth_state is None and blue_birth_state is None:

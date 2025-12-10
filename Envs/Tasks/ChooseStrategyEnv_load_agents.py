@@ -474,8 +474,8 @@ class ChooseStrategyEnv(Battle):
         if self.draw:
             reward -= 0
 
-        uav_states = self.base_obs(side, pomdp=0)  ### test 部分观测的话用1
-        enm_state = self.base_obs(enm.side, pomdp=0)  ### test 部分观测的话用1
+        uav_states = self.get_state(side)
+        enm_state = self.get_state(enm.side)
         delta_theta = uav_states["target_information"][2]
         distance = uav_states["target_information"][3]
         d_hor, leftright = uav_states["border"]

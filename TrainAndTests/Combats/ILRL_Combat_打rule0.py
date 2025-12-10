@@ -179,7 +179,7 @@ epochs = 10
 eps = 0.2
 k_entropy = 0.05 # 1 # 
 
-env = ChooseStrategyEnv(args, tacview_show=0)
+env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
 
 # 动作空间定义 (需要与 BasicRules 产生的数据对应)
@@ -272,8 +272,17 @@ if __name__ == "__main__":
     # critic_lr = scale_learning_rate(critic_lr, student_agent.critic)
     # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
-    env = ChooseStrategyEnv(args)
-    env.shielded = 1 # 不得不全程带上
+    tacview_input = input("Enable tacview visualization? (0=no, 1=yes) [default 0]: ").strip()
+    if tacview_input == "":
+        tacview_show = 0
+    else:
+        try:
+            tacview_show = 1 if int(tacview_input) != 0 else 0
+        except Exception:
+            tacview_show = 0
+    print(f"tacview_show={tacview_show}")
+    env = ChooseStrategyEnv(args, tacview_show=tacview_show)
+    env.shielded = 1 # 不得不全程带上，否则对手也会撞地
     env.dt_move = 0.05 # 仿真跑得快点
     
     from BasicRules import * # 可以直接读同一级目录
@@ -381,11 +390,8 @@ if __name__ == "__main__":
             r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
             
             b_obs, b_check_obs = env.obs_1v1('b', pomdp=1) # Actor Input
-            b_state_global, _ = env.obs_1v1('b', pomdp=0)  # Critic Input
+            b_state_global, _ = env.obs_1v1('b', pomdp=0, )  # Critic Input
             
-            # 在这里将观测信息压入记忆
-            env.RUAV.obs_memory = r_check_obs.copy()
-            env.BUAV.obs_memory = b_check_obs.copy()
 
             # --- 智能体决策 ---
             # 判断是否到达了决策点（每 10 步）

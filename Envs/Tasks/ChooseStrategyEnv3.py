@@ -100,8 +100,8 @@ class ChooseStrategyEnv(Battle):
         
         self.pomdp = pomdp   
     
-    def obs_1v1(self, side, pomdp=0, reward_fn=0):
-        pre_full_obs = self.base_obs(side, pomdp, reward_fn)
+    def obs_1v1(self, side, pomdp=0):
+        pre_full_obs = self.base_obs(side, pomdp)
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.key_order_1v1}
         
@@ -282,7 +282,6 @@ class ChooseStrategyEnv(Battle):
 
         ego_states = self.get_state(side)
         enm_states = self.get_state(enm.side)
-        
         delta_theta = ego_states["target_information"][2]
         distance = ego_states["target_information"][3]
         speed = ego_states["ego_main"][0]
@@ -300,6 +299,7 @@ class ChooseStrategyEnv(Battle):
         sin_delta_psi_threat = ego_states["threat"][1]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
 
+        
         d_hor = ego_states["border"][0]
         # [新增] 计算对手视角下的ATA，用于判定严格的“被锁定”条件
         # 注意：这里计算的是 enm 的速度矢量 与 enm指向ego的连线 之间的夹角
@@ -320,7 +320,7 @@ class ChooseStrategyEnv(Battle):
         last_enm_warning = last_info.get("enm_warning", 0)
 
 
-        reward_main = 0.1  # 主要奖励，带微小存活奖励
+        reward_main = 0.1  # 主要奖励，带防自杀
         reward_assisted = 0  # 辅助奖励
         
         if self.win:
@@ -357,13 +357,16 @@ class ChooseStrategyEnv(Battle):
         if ego.escape_once:
             reward_main += 50 # 10  --1210新增
 
-        wasted = 0
+        # 导弹被逃脱 (保持原逻辑)
+        if enm.escape_once:
+            reward_main -= 50 # 10  --1210新增
+
         # 发射导弹
         shoot = action_shoot
-        # 如果死了，就把剩余导弹损耗的惩罚一并加上，禁止自杀套利
+        # 如果输了，就把剩余导弹损耗的惩罚一并加上，禁止自杀套利
         if ego.dead or self.out_range(ego):
             shoot = ego.ammo
-            wasted = ego.ammo
+            ego.ammo = 0  # 
         
         # 发射惩罚
         if shoot >= 1:
@@ -385,14 +388,6 @@ class ChooseStrategyEnv(Battle):
                     reward_assisted += 5 * (1-(distance-30e3)/(50e3))
 
                 reward_assisted += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
-
-        # 导弹被逃脱 (保持原逻辑)
-        escape_penalty = 50  # 10  --1210新增
-        if enm.escape_once:
-            reward_main -= escape_penalty
-        # 死了也当剩下导弹全被逃脱处理
-        if wasted>0:
-            reward_main -= escape_penalty*wasted # --1210新增
 
         #  --1210新增 ，原先非注释
         # if done and ego.ammo == ego.init_ammo:
@@ -436,13 +431,8 @@ class ChooseStrategyEnv(Battle):
 
         # 态势优势度 tobecontinued
 
-        if done:
+        if done or ego.dead or enm.dead:
             print('回合结束')
-            if self.out_range(ego):
-                print('出界')
-            
-        # if self.out_range(ego) or self.out_range(enm):
-        #     print()
 
         return done, reward_main+reward_assisted, reward_assisted
 
@@ -479,3 +469,5 @@ class ChooseStrategyEnv(Battle):
                         ruav.dead = True
                         ruav.got_hit = True
                         print('近距单杀')
+
+    

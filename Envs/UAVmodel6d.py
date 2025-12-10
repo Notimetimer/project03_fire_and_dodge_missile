@@ -92,8 +92,6 @@ class UAVModel(object):
         self.o00 = None
         self.start_lon = None
         self.start_lat = None
-        self.obs_memory = None
-        self.act_memory = None
 
     def reset(self, lon0=118, lat0=30, h0=8000, v0=200, psi0=0, phi0=0, theta0=0, o00=np.array([118, 30])):
         sim = jsbsim.FGFDMExec(None, None)

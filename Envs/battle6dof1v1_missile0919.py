@@ -171,6 +171,9 @@ class Battle(object):
         # 红方初始化
         for i in range(self.Rnum):
             UAV = UAVModel(dt=self.dt_move)
+            UAV.state_memory = None
+            UAV.last_state = None
+            UAV.current_state = None
             UAV.init_ammo = red_init_ammo
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
@@ -200,6 +203,9 @@ class Battle(object):
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=self.dt_move)
+            UAV.state_memory = None
+            UAV.last_state = None
+            UAV.current_state = None
             UAV.init_ammo = blue_init_ammo
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
@@ -315,7 +321,9 @@ class Battle(object):
                         target_height = max(self.min_alt_safe - UAV.alt, target_height)
                         # delta_heading = 0
                         p2p = False
-                        delta_heading = np.clip(delta_heading, -pi/2, pi/2)
+                        delta_heading = np.clip(delta_heading, -pi/3, pi/3)
+                    # if UAV.alt < self.min_alt_safe + 1500:
+                    #     target_height = max(5000 * -pi/3, target_height)
 
                     # 不许超过限高
                     if UAV.alt > self.max_alt_safe:
@@ -608,8 +616,8 @@ class Battle(object):
         # down_ = np.array([0,-1,0])
         # L_left_ = np.cross(L_, down_)/dist
         # L_left_ = L_left_/norm(L_left_)
-        # omega_vert_ = np.dot(omega_, down_)*1
-        # omega_hor_ = omega_-omega_vert_
+        # omega_vert_ = np.dot(omega_, down_) * 1
+        # omega_hor_ = omega_ - omega_vert_
         # delta_psi_dot = np.dot(omega_vert_, down_) # 目标相对方位角速度
         # delta_theta_dot = -np.dot(omega_hor_, L_left_) # 目标相对俯仰角速度
 
@@ -751,7 +759,7 @@ class Battle(object):
 
         return s
         
-    def base_obs(self, side, pomdp=0):  # 默认为完全可观测，设置pomdp后为部分可观测
+    def base_obs(self, side, pomdp=0, reward_fn=0):  # 默认为完全可观测，设置pomdp后为部分可观测
         # 处理部分可观测、默认值问题、并尺度缩放
         # 输出保持字典的形式
         if side == 'r':
@@ -759,7 +767,27 @@ class Battle(object):
         if side == 'b':
             uav = self.BUAV
 
-        state = self.get_state(side)  # np.stack(self.get_state(side)) stack适用于多架无人机观测拼接为np数组
+        # 如果是用来计算奖励的或是被critic用的，强制全局信息
+        if reward_fn == 1:
+            pomdp = 0
+        
+        # [修改] 获取当前真实状态
+        state = self.get_state(side) # np.stack(self.get_state(side)) stack用于多架无人机
+
+        # [新增] 增加时间戳，用于状态管理
+        state['t'] = self.t
+
+        # [新增] 智能的状态快照更新逻辑：防止同一时间步多次调用导致 last_state 被覆盖
+        if uav.current_state is None:
+            # 初始化
+            uav.last_state = copy.deepcopy(state)
+        else:
+            # 通过比对时间戳判断是否为新的仿真步
+            # 只有当时间推进了，才把旧的 current_state 归档为 last_state
+            if abs(self.t - uav.current_state['t']) > 0.1:
+                uav.last_state = copy.deepcopy(uav.current_state)
+
+        uav.current_state = copy.deepcopy(state)
 
         # 默认值设定
         self.state_init = self.get_state(side)
@@ -779,38 +807,61 @@ class Battle(object):
         self.state_init["threat"] = np.array([1, 0, 0, 30e3])
         self.state_init["border"] = np.array([50e3, 0])
 
-        # todo 重构pomdp的代码实现，尤其是state[x]的部分，state已经被改成字典了
         if pomdp:  # 只有在部分观测情况下需要添加屏蔽
-            if uav.obs_memory is None:  # 假如不存在记忆，给默认值
+            # 1. 获取记忆 (Rolling Memory)
+            if uav.state_memory is None:
                 memory = copy.deepcopy(self.state_init)
             else:
-                memory = uav.obs_memory
+                memory = uav.state_memory
 
             ATA = state["target_information"][4]
             dist = state["target_information"][3]
 
-            # 超出探测距离
-            if dist > 160e3:  # 啥也看不到
+            # 2. 根据条件决定是 "全覆盖" 还是 "部分覆盖"
+            
+            # 情况A: 超出探测距离 -> 完全不可见
+            if dist > 160e3:
                 state["target_observable"] = 0
+                # 整体覆盖：所有信息都用旧的
                 state["target_information"] = memory["target_information"].copy()
-            # 探测距离到近距
+            
+            # 情况B: 距离较近
             elif dist > 10e3:
-                if ATA > pi / 3 and state["locked_by_target"] == 0:  # 夹角>3/pi时观测不到目标
+                # B1: 角度大 且 未被锁定 -> 完全不可见
+                if ATA > pi / 3 and state["locked_by_target"] == 0:
                     state["target_observable"] = 0
+                    # 整体覆盖
                     state["target_information"] = memory["target_information"].copy()
-                elif ATA > pi / 3 and state["locked_by_target"] == 1:  # 被目标探测后有对目标的角度信息
+                
+                # B2: 角度大 但 被锁定 (RWR告警) -> 部分可见
+                elif ATA > pi / 3 and state["locked_by_target"] == 1:
                     state["target_observable"] = 1
-                    # for idx in (0, 3, 5, 6, 7):
+                    # 【核心逻辑】只覆盖运动学信息 (dist, speed, AA)，保留当前真实的 RWR 信息 (角度, ATA)
+                    # 因为 memory['dist'] 已经是上一步复制下来的旧值，所以这里再次复制依然是旧值
                     for idx in (3, 5, 6, 7):
                         state["target_information"][idx] = memory["target_information"][idx]
+                
+                # B3: 角度合适 -> 完全可见
                 else:
-                    state["target_observable"] = 2  # 否则除了不能发射导弹，都是可见的
+                    state["target_observable"] = 2
+                    # 不做任何覆盖，state 保持 get_state() 获取的最新真实值
+            
+            # 情况C: 极近距离 -> 完全可见
             else:
-                state["target_observable"] = 2  # 10km类信息完全可见
-            # if not state["target_alive"]:
-            #     state["target_observable"] = 0
+                state["target_observable"] = 2
 
-        uav.obs_memory = copy.deepcopy(state)  # 更新残留值
+        # 3. 更新记忆 (Rolling Update)
+        # 无论刚才发生了什么，把处理后的 state 存入 memory
+        # 如果刚才发生了部分覆盖，这里存入的就是 "旧dist + 新ATA" 的混合体
+        # 下一步循环时，读取这个混合体，dist 依然是旧的
+        # [修改] 仅在 pomdp 开启时更新记忆，防止奖励函数调用(pomdp=0)时泄露真实状态
+        
+        if reward_fn == 0: # 防止在奖励函数里面调用的时候泄露信息
+            uav.state_memory = copy.deepcopy(state)
+
+        # 在把 state 传入 scale_state 之前移除时间戳 't'
+        if 't' in state:
+            del state['t']
 
         observation = self.scale_state(state)
         self.obs_init = self.scale_state(self.state_init)
@@ -890,41 +941,38 @@ class Battle(object):
         out = True
         if R_uav <= self.R_cage:
             out = False
-        if out:
-            print(UAV.side, '出界')
         return out
 
-    # 近距处理
-    def close_range_kill(self,):
-        # todo 使用这个最好在奖励函数里面加上距离奖励
-        for ruav in self.RUAVs:
-            if ruav.dead:
-                continue
-            for buav in self.BUAVs:
-                if buav.dead:
-                    continue
-                elif norm(ruav.pos_ - buav.pos_) >= 8e3:
-                    continue
-                else:
-                    Lbr_ = ruav.pos_ - buav.pos_
-                    Lrb_ = buav.pos_ - ruav.pos_
-                    dist = norm(Lbr_)
-                    # 求解hot-cold关系
-                    cos_ATA_r = np.dot(Lrb_, ruav.vel_) / (dist * ruav.speed)
-                    cos_ATA_b = np.dot(Lbr_, buav.vel_) / (dist * buav.speed)
-                    # 双杀
-                    if cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
-                        ruav.dead = True
-                        buav.dead = True
-                        ruav.got_hit = True
-                        buav.got_hit = True
-                    # 单杀
-                    if cos_ATA_r >= cos(pi / 3) and cos_ATA_b < cos(pi / 3):
-                        buav.dead = True
-                        buav.got_hit = True
-                    if cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
-                        ruav.dead = True
-                        ruav.got_hit = True
+    # # 近距处理
+    # def close_range_kill(self,):
+    #     for ruav in self.RUAVs:
+    #         if ruav.dead:
+    #             continue
+    #         for buav in self.BUAVs:
+    #             if buav.dead:
+    #                 continue
+    #             elif norm(ruav.pos_ - buav.pos_) >= 8e3:
+    #                 continue
+    #             else:
+    #                 Lbr_ = ruav.pos_ - buav.pos_
+    #                 Lrb_ = buav.pos_ - ruav.pos_
+    #                 dist = norm(Lbr_)
+    #                 # 求解hot-cold关系
+    #                 cos_ATA_r = np.dot(Lrb_, ruav.vel_) / (dist * ruav.speed)
+    #                 cos_ATA_b = np.dot(Lbr_, buav.vel_) / (dist * buav.speed)
+    #                 # 双杀
+    #                 if cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+    #                     ruav.dead = True
+    #                     buav.dead = True
+    #                     ruav.got_hit = True
+    #                     buav.got_hit = True
+    #                 # 单杀
+    #                 if cos_ATA_r >= cos(pi / 3) and cos_ATA_b < cos(pi / 3):
+    #                     buav.dead = True
+    #                     buav.got_hit = True
+    #                 if cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+    #                     ruav.dead = True
+    #                     ruav.got_hit = True
 
 
     def render(self, t_bias=0):

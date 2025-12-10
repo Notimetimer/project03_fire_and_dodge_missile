@@ -460,8 +460,8 @@ if __name__ == "__main__":
             r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
             b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
             # 在这里将观测信息压入记忆
-            env.RUAV.obs_memory = r_check_obs.copy()
-            env.BUAV.obs_memory = b_check_obs.copy()
+            # env.RUAV.obs_memory = r_check_obs.copy()
+            # env.BUAV.obs_memory = b_check_obs.copy()
 
             # --- 智能体决策 ---
             # 判断是否到达了决策点（每 10 步）

@@ -217,8 +217,8 @@ if __name__=="__main__":
                 b_check_obs = env.base_obs('b')
                 b_obs_n = flatten_obs(b_check_obs, env.key_order)
                 # 在这里将观测信息压入记忆
-                env.RUAV.obs_memory = r_check_obs.copy()
-                env.BUAV.obs_memory = b_check_obs.copy()
+                # env.RUAV.obs_memory = r_check_obs.copy()
+                # env.BUAV.obs_memory = b_check_obs.copy()
                 b_obs = np.squeeze(b_obs_n)
                 distance = norm(env.RUAV.pos_ - env.BUAV.pos_)
 
