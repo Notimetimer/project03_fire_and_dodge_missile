@@ -372,9 +372,6 @@ if __name__ == "__main__":
         
         last_r_action_label = 0
         last_b_action_label = 0
-
-        r_m_id = None
-        b_m_id = None
         
         steps_of_this_eps = -1
         
@@ -390,7 +387,7 @@ if __name__ == "__main__":
             r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
             
             b_obs, b_check_obs = env.obs_1v1('b', pomdp=1) # Actor Input
-            b_state_global, _ = env.obs_1v1('b', pomdp=0, )  # Critic Input
+            b_state_global, _ = env.obs_1v1('b', reward_fn=1)  # Critic Input
             
 
             # --- 智能体决策 ---
@@ -420,6 +417,7 @@ if __name__ == "__main__":
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
+                r_m_id = None
                 # if r_fire:
                 #     r_m_id = launch_missile_immediately(env, 'r')
 
@@ -429,10 +427,16 @@ if __name__ == "__main__":
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                 b_action_label = b_action_exec['cat'][0]
                 b_fire = b_action_exec['bern'][0]
+
+                b_m_id = None
                 if b_fire:
                     b_m_id = launch_missile_immediately(env, 'b')
+                    print(b_m_id)
                 if b_m_id is not None:
                     m_fired += 1
+
+                # if i_episode % 2 == 0:
+                #     b_action_label = 12 # debug
                 
                 # print("机动概率分布", b_action_check['cat'])
                 # print("开火概率", b_action_check['bern'][0])
@@ -454,11 +458,13 @@ if __name__ == "__main__":
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
                 episode_return += b_reward
+                print(b_reward-b_reward_assisted, b_reward_assisted)
+                print()
             
             if dead_dict['b'] == 0:
                 # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储
                 next_b_obs, next_b_check_obs = env.obs_1v1('b', pomdp=1)
-                next_b_state_global, _ = env.obs_1v1('b', pomdp=0) # 获取全局Next State
+                next_b_state_global, _ = env.obs_1v1('b', reward_fn=1) # 获取全局Next State
                 if env.BUAV.dead:
                     dead_dict['b'] = 1
 
@@ -506,7 +512,7 @@ if __name__ == "__main__":
         
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            student_agent.update(transition_dict, adv_normed=1)  # 优势归一化
+            student_agent.update(transition_dict, adv_normed=1)  # 优势归一化 debug
             decide_steps_after_update = 0
 
             # [Modification] 保留原有梯度监控代码
