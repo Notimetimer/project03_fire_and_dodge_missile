@@ -14,11 +14,11 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Envs.Tasks.ChooseStrategyEnv2 import *
 from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from BasicRules import *
+from Envs.Tasks.ChooseStrategyEnv2 import *
 
 def get_current_file_dir():
     try:
@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'ILRL_combat_打rule1'
+    mission_name = 'RL_combat_打rule1'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -285,7 +285,6 @@ if __name__ == "__main__":
     env.shielded = 1 # 不得不全程带上，否则对手也会撞地
     env.dt_move = 0.05 # 仿真跑得快点
     
-    from BasicRules import * # 可以直接读同一级目录
     t_bias = 0
     
     

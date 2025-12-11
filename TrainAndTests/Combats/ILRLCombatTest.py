@@ -73,7 +73,7 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_打rule0', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='ILRL_combat_打rule1', help="Mission name to find the log directory.")
     args = parser.parse_args()
     
     'MARWIL_combat_有辅助奖励'

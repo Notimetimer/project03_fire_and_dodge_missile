@@ -7,17 +7,18 @@ import argparse
 import glob
 import copy
 import json
-import re  # [Fix] 引入正则模块
+import re
+import time  # 确保引入 time 模块
 from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Envs.Tasks.ChooseStrategyEnv2 import *
 from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
-from BasicRules import * # [Fix] 确保引入规则函数
+from BasicRules import *
+from Envs.Tasks.ChooseStrategyEnv2 import *
 
 def get_current_file_dir():
     try:
@@ -129,15 +130,16 @@ def summarize(il_dict):
         else:
             print(f"  {k}: shape={getattr(v, 'shape', 'Unknown')}")
             
-def append_b_experience(td, state, action, reward, next_state, done):
+def append_b_experience(td, obs, state, action, reward, next_state, done):
     """
     统一把一次蓝方经验追加到 transition_dict。
-    只负责按给定值追加，不处理死亡冻结逻辑（主流程中通过 dead_dict 控制何时计算 next_state/reward）。
+    修改：增加 obs 输入，用于存储局部观测
     """
-    td['states'].append(state)
+    td['obs'].append(obs) # 新增：存储Actor用的局部观测
+    td['states'].append(state) # 修改：这里存储Critic用的全局状态(pomdp=0)
     td['actions'].append(action)
     td['rewards'].append(reward)
-    td['next_states'].append(next_state)
+    td['next_states'].append(next_state) # 修改：这里存储Critic用的全局Next状态(pomdp=0)
     td['dones'].append(done)
     return td
 
@@ -166,18 +168,18 @@ parser.add_argument("--R-cage", type=float, default=55e3, help="")
 args = parser.parse_args()
 
 # 超参数
-actor_lr = 1e-4
-critic_lr = actor_lr * 5
-IL_epoches= 80  # 80
+actor_lr = 1e-3 # 4 1e-3
+critic_lr = actor_lr * 5 # * 5
+IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.95
 lmbda = 0.95
 epochs = 10
 eps = 0.2
-k_entropy = 0.01
+k_entropy = 0.05 # 1 # 
 
-env = ChooseStrategyEnv(args, tacview_show=0)
+env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
 
 # 动作空间定义 (需要与 BasicRules 产生的数据对应)
@@ -223,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'MARWIL_combat'
+    mission_name = 'RL_combat_PFSP'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -264,20 +266,29 @@ if __name__ == "__main__":
     # 强化学习 (Self-Play / PFSP) 阶段
     # ==============================================================================
     
-    # 根据参数数量缩放学习率
-    from Math_calculates.ScaleLearningRate import scale_learning_rate
-    actor_lr = scale_learning_rate(actor_lr, student_agent.actor)
-    critic_lr = scale_learning_rate(critic_lr, student_agent.critic)
-    student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+    # # 根据参数数量缩放学习率
+    # from Math_calculates.ScaleLearningRate import scale_learning_rate
+    # actor_lr = scale_learning_rate(actor_lr, student_agent.actor)
+    # critic_lr = scale_learning_rate(critic_lr, student_agent.critic)
+    # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
-    env = ChooseStrategyEnv(args, tacview_show=0)
+    tacview_input = input("Enable tacview visualization? (0=no, 1=yes) [default 0]: ").strip()
+    if tacview_input == "":
+        tacview_show = 0
+    else:
+        try:
+            tacview_show = 1 if int(tacview_input) != 0 else 0
+        except Exception:
+            tacview_show = 0
+    print(f"tacview_show={tacview_show}")
+    env = ChooseStrategyEnv(args, tacview_show=tacview_show)
+    env.shielded = 1 # 不得不全程带上，否则对手也会撞地
     env.dt_move = 0.05 # 仿真跑得快点
     
-    from BasicRules import *  # 可以直接读同一级目录
     t_bias = 0
-    env.shielded = 1 # 不得不全程带上
     
-    def creat_initial_state():
+    
+    def create_initial_state():
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
         blue_height = 9000
@@ -367,7 +378,9 @@ if __name__ == "__main__":
     
     r_action_list = []
     b_action_list = []
-    transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
+    
+    # 修改：初始化增加 'obs' 键
+    transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
     
     while total_steps < int(max_steps):
         i_episode += 1
@@ -397,20 +410,24 @@ if __name__ == "__main__":
                 adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device))
                 print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
             else:
-                print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_2.")
+                print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_0.")
                 adv_is_rule = True
-                rule_num = 2
+                rule_num = 0
         
         episode_return = 0
 
-        DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+        DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
 
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=6, blue_init_ammo=6)
         
         r_action_label = 0
         b_action_label = 0
+        
+        # 修改：分别记录决策时的 Obs (Actor用) 和 State (Critic用)
+        last_decision_obs = None 
         last_decision_state = None
+        
         current_action = None
         b_reward = None
         
@@ -428,30 +445,37 @@ if __name__ == "__main__":
         
         steps_of_this_eps = -1
         
+        m_fired = 0
+        
         # --- Episode Loop ---
         for count in range(round(args.max_episode_len / dt_maneuver)):
             current_t = count * dt_maneuver
             steps_of_this_eps += 1
             if env.running == False or done:
                 break
-            # 获取观测信息
+            # 修改：同时获取局部观测(pomdp=1)和全局状态(pomdp=0)
             r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
-            b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
-            # 在这里将观测信息压入记忆
-            # env.RUAV.obs_memory = r_check_obs.copy()
-            # env.BUAV.obs_memory = b_check_obs.copy()
+            
+            b_obs, b_check_obs = env.obs_1v1('b', pomdp=1) # Actor Input
+            b_state_global, _ = env.obs_1v1('b', reward_fn=1)  # Critic Input
+            
 
             # --- 智能体决策 ---
             # 判断是否到达了决策点（每 10 步）
             if steps_of_this_eps % action_cycle_multiplier == 0:
                 # # **关键点 1: 完成并存储【上一个】动作周期的经验**
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
-                if steps_of_this_eps > 0:
-                    transition_dict = append_b_experience(transition_dict, last_decision_state, current_action, b_reward, b_obs, False)
+                if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
+                    # 修改：传入 last_decision_obs 和 last_decision_state
+                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, b_state_global, False)
+                    
+                    '''需要引入 active_mask以应对“死后还在做决策”的极端情况'''
 
                 # **关键点 2: 开始【新的】一个动作周期**
                 # 1. 记录新周期的起始状态
-                last_decision_state = b_obs
+                # 修改：更新 obs 和 state 两个变量
+                last_decision_obs = b_obs
+                last_decision_state = b_state_global
                 # 2. student_agent 产生一个动作
                 
                 # 红方(对手决策)
@@ -465,16 +489,26 @@ if __name__ == "__main__":
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
+                r_m_id = None
                 if r_fire:
                     r_m_id = launch_missile_immediately(env, 'r')
 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
+                # 修改：Actor 依然使用 b_obs (局部观测) 进行决策
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                 b_action_label = b_action_exec['cat'][0]
                 b_fire = b_action_exec['bern'][0]
+
+                b_m_id = None
                 if b_fire:
                     b_m_id = launch_missile_immediately(env, 'b')
+                    # print(b_m_id)
+                if b_m_id is not None:
+                    m_fired += 1
+
+                # if i_episode % 2 == 0:
+                #     b_action_label = 12 # debug
                 
                 # print("机动概率分布", b_action_check['cat'])
                 # print("开火概率", b_action_check['bern'][0])
@@ -483,6 +517,8 @@ if __name__ == "__main__":
                 
                 b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
+                
+                
 
             r_maneuver = env.maneuver14(env.RUAV, r_action_label)
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
@@ -492,10 +528,15 @@ if __name__ == "__main__":
             done = done
 
             # Accumulate rewards between student_agent decisions
-            episode_return += b_reward * env.dt_maneuver
+            if steps_of_this_eps % action_cycle_multiplier == 0:
+                episode_return += b_reward
+                # print(b_reward-b_reward_assisted, b_reward_assisted)
+                # print()
             
             if dead_dict['b'] == 0:
+                # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储
                 next_b_obs, next_b_check_obs = env.obs_1v1('b', pomdp=1)
+                next_b_state_global, _ = env.obs_1v1('b', reward_fn=1) # 获取全局Next State
                 if env.BUAV.dead:
                     dead_dict['b'] = 1
 
@@ -509,58 +550,86 @@ if __name__ == "__main__":
         # 循环结束，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
         if last_decision_state is not None:
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
-            transition_dict = append_b_experience(transition_dict, last_decision_state, current_action, b_reward, next_b_obs, True)
+            # 修改：传入最后时刻的 next_b_state_global 作为 Next State
+            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, next_b_state_global, True)
+            episode_return += b_reward
+            
+        print('r 剩余导弹数量:', env.RUAV.ammo)
+        print('r 发射时间:', env.RUAV.missile_launch_time)
+        
+        print('b 剩余导弹数量:', env.BUAV.ammo)
+        print('b 发射时间:', env.BUAV.missile_launch_time)
+        
+        if env.crash(env.RUAV):
+            print('r 撞地')
+        if env.crash(env.BUAV):
+            print('b 撞地')
             
         # --- [Fix] ELO 更新逻辑 ---
         actual_score = 0.5 # Default draw
         if env.win: actual_score = 1.0
         elif env.lose: actual_score = 0.0
         
-        # 更新主智能体 (临时变量)
+        # 更新主智能体ELO (临时变量)
         prev_main_elo = main_agent_elo
         adv_elo = elo_ratings[selected_opponent_name]
         
         main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
-        # 更新对手 (写入字典)
+        # 更新对手ELO (写入字典)
         new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
         elo_ratings[selected_opponent_name] = new_adv_elo
         
         print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
-
+        
+        # 有没有试图发射过导弹
+        logger.add("special/0 发射的导弹数量", m_fired, total_steps)
+        # 每一场胜负变化
+        logger.add("train/1 episode_return", episode_return, total_steps)
+        logger.add("train/2 win", env.win, total_steps)
+        logger.add("train/2 lose", env.lose, total_steps)
+        logger.add("train/2 draw", env.draw, total_steps)
+        logger.add("train/11 episode/step", i_episode, total_steps)
+        
         # --- RL Update ---
-        if 1: 
-            student_agent.update(transition_dict, adv_normed=False)
+        if len(transition_dict['dones'])>=transition_dict_capacity: 
+            student_agent.update(transition_dict, adv_normed=1)  # 优势归一化 debug
             decide_steps_after_update = 0
-            
+
+            # [Modification] 保留原有梯度监控代码
             actor_grad_norm = student_agent.actor_grad
             actor_pre_clip_grad = student_agent.pre_clip_actor_grad
             critic_grad_norm = student_agent.critic_grad
             critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
-
-            logger.add("train/1 episode_return", episode_return, total_steps)
-            logger.add("train/2 win", env.win, total_steps)
-            logger.add("train/2 lose", env.lose, total_steps)
-            logger.add("train/2 draw", env.draw, total_steps)
             # 梯度监控
-            logger.add("train/3 actor_grad_norm", actor_grad_norm, total_steps)
             logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
-            logger.add("train/4 critic_grad_norm", critic_grad_norm, total_steps)
             logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
             # 损失函数监控
             logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
             logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
             # 强化学习actor特殊项监控
             logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
-            logger.add("train/10 ratio", student_agent.ratio_mean, total_steps) 
-            logger.add("train/11 episode/step", i_episode, total_steps)    
-
-            transition_dict = {'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
+            logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
+            logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
+            
+            logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+            # 强化学习
+            logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
+            logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
+            logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+            
+            # 修改：重置 transition_dict 时保留 obs 键
+            transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
             
             
         return_list.append(episode_return)
         env.clear_render(t_bias=t_bias)
         t_bias += env.t
+
+        print(f"Episode {i_episode}, Progress: {total_steps/max_steps:.3f}, Curr Return: {episode_return}")
+        print()
+
+        
         
         # --- 保存模型与 ELO 维护 ---
         if i_episode % 10 == 0:
@@ -571,7 +640,8 @@ if __name__ == "__main__":
             
             # 保存权重
             torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, actor_name))
-            
+            print(f"Saved critic.pt and {actor_name} at episode {i_episode}")
+
             # 将当前主智能体作为一个新的历史快照加入 ELO 列表
             # 新快照继承当前主智能体的 ELO
             elo_ratings[actor_key] = main_agent_elo
@@ -633,9 +703,7 @@ if __name__ == "__main__":
                     logger.add(raw_tag, valid_elos[k], total_steps)
                     logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
 
-        if (i_episode) >= 10:
-            print(f"Episode {i_episode}, Progress: {total_steps/max_steps:.3f}, Avg Return: {np.mean(return_list[-10:]):.3f}")
-
+        
     # End Training
     training_end_time = time.time()
     env.end_render()
