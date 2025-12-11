@@ -395,7 +395,7 @@ if __name__ == "__main__":
             if steps_of_this_eps % action_cycle_multiplier == 0:
                 # # **关键点 1: 完成并存储【上一个】动作周期的经验**
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
-                if steps_of_this_eps > 0:
+                if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
                     # 修改：传入 last_decision_obs 和 last_decision_state
                     transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward-b_reward_assisted, b_state_global, False)
                     
@@ -433,7 +433,7 @@ if __name__ == "__main__":
                 b_m_id = None
                 if b_fire:
                     b_m_id = launch_missile_immediately(env, 'b')
-                    print(b_m_id)
+                    # print(b_m_id)
                 if b_m_id is not None:
                     m_fired += 1
 
@@ -460,8 +460,8 @@ if __name__ == "__main__":
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
                 episode_return += b_reward
-                print(b_reward-b_reward_assisted, b_reward_assisted)
-                print()
+                # print(b_reward-b_reward_assisted, b_reward_assisted)
+                # print()
             
             if dead_dict['b'] == 0:
                 # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储

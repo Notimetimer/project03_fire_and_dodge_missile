@@ -326,41 +326,9 @@ class ChooseStrategyEnv(Battle):
 
         reward_main = 0.1  # 主要奖励，带微小存活奖励
         reward_assisted = 0  # 辅助奖励
+        reward_fly = 0
+        reward_fire = 0
         
-        if self.win:
-            reward_main += 300 # 300  --1210新增
-            reward_main += ego.ammo * 20  # 每一发剩余导弹多给 5 分 --1210新增
-        if self.lose:
-            reward_main -= 300 # 300  --1210新增
-        if self.draw:
-            reward_main -= 200 #  --1210新增，之前为 50
-
-        # [修改] 为导弹提供制导 (大幅降低持续奖励)
-        # 假设制导过程持续较长，将每步奖励设为极小值，防止刷分。
-        # 例如：0.05 * 100步 = 5分。
-        if missile_in_mid_term:
-            reward_main += 0.05 
-
-        # [修改] 锁定目标 (改为瞬时奖励：当前锁定 且 上一时刻未锁定)
-        if ego_states["target_locked"]: #  and not last_target_locked:
-            reward_main += 0.03
-
-        # [修改] 被目标锁定 (改为瞬时惩罚，且使用严格判定)
-        if strict_locked_by_target: # and not last_strict_locked_by_target:
-            reward_main -= 0.03
-
-        # [修改] 收到导弹警告 (改为瞬时惩罚)
-        if warning: # and not last_warning:
-            reward_main -= 0.3
-
-        # [修改] 导弹锁定目标 (对手收到警告) (改为瞬时奖励)
-        if enm_states["warning"]: # and not last_enm_warning:
-            reward_main += 0.5
-
-        # 逃脱导弹 (保持原逻辑，这通常由escape_once标志位控制，本身就是一次性的)
-        if ego.escape_once:
-            reward_main += 50 # 10  --1210新增
-
         wasted = 0
         # 发射导弹
         shoot = action_shoot
@@ -376,8 +344,49 @@ class ChooseStrategyEnv(Battle):
             # 已经死过一次了，不再重复扣除剩余导弹的惩罚
             shoot = 0
             wasted = 0
-        
-        # 如果撞地之后导弹还在飞，就会持续扣奖励，而且剩余弹量越多，导弹飞得越久。奖励扣得越狠
+            
+        if self.win:
+            reward_main += 300 # 300  --1210新增
+            reward_main += ego.ammo * 20  # 每一发剩余导弹多给 5 分 --1210新增
+        if self.lose:
+            reward_main -= 300 # 300  --1210新增
+        if self.draw:
+            reward_main -= 200 #  --1210新增，之前为 50
+
+        # [修改] 为导弹提供制导 (大幅降低持续奖励)
+        # 假设制导过程持续较长，将每步奖励设为极小值，防止刷分。
+        # 例如：0.05 * 100步 = 5分。
+        if missile_in_mid_term:
+            reward_main += 0.4 # 0.05
+
+        # [修改] 锁定目标
+        if ego_states["target_locked"]: #  and not last_target_locked:
+            reward_main += 0.6 # 0.03
+
+        # [修改] 被目标锁定
+        if strict_locked_by_target: # and not last_strict_locked_by_target:
+            reward_main -= 0.5 # 0.03
+
+        # [修改] 收到导弹警告
+        if warning: # and not last_warning:
+            reward_main -= 0.6 # 0.3
+
+        # [修改] 导弹锁定目标 (对手收到警告)
+        if enm_states["warning"]: # and not last_enm_warning:
+            reward_main += 0.5
+
+        # 逃脱导弹 (保持原逻辑，这通常由escape_once标志位控制，本身就是一次性的)
+        if ego.escape_once:
+            reward_main += 50 # 10  --1210新增
+
+        # 导弹被逃脱 (保持原逻辑)
+        escape_penalty = 50  # 10  --1210新增
+        if enm.escape_once:
+            reward_main -= escape_penalty
+
+        # 死了也当剩下导弹全被逃脱处理
+        if wasted>0:
+            reward_main -= escape_penalty*wasted # --1210新增
         
         # 发射惩罚
         if shoot >= 1:
@@ -400,13 +409,8 @@ class ChooseStrategyEnv(Battle):
 
                 reward_assisted += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
 
-        # 导弹被逃脱 (保持原逻辑)
-        escape_penalty = 50  # 10  --1210新增
-        if enm.escape_once:
-            reward_main -= escape_penalty
-        # 死了也当剩下导弹全被逃脱处理
-        if wasted>0:
-            reward_main -= escape_penalty*wasted # --1210新增
+        
+        
 
         #  --1210新增 ，原先非注释
         # if done and ego.ammo == ego.init_ammo:

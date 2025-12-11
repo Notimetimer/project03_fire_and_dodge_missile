@@ -222,6 +222,9 @@ class HybridActorWrapper(nn.Module):
         actor_outputs = self.net(states, max_std=max_std)
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
         entropy = torch.zeros(states.size(0), 1).to(self.device)
+        
+        # [新增] 用于记录分项 Entropy 的字典
+        entropy_details = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Cont ---
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -230,16 +233,32 @@ class HybridActorWrapper(nn.Module):
             u = actions_raw['cont']
             log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
             entropy += dist.entropy().unsqueeze(-1) # 近似熵
+            
+            # [修改] 单独记录 cont entropy
+            e_cont = dist.entropy().unsqueeze(-1)
+            entropy += e_cont
+            entropy_details['cont'] = e_cont.mean().item() # 记录均值
 
         # --- Cat ---
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             cat_probs_list = actor_outputs['cat']
             cat_action = actions_raw['cat'].long()
+            
+            # [新增] 临时列表用于计算 cat 总熵
+            e_cat_sum = torch.zeros_like(entropy)
+            
             for i, probs in enumerate(cat_probs_list):
                 act_i = cat_action[:, i].unsqueeze(-1)
                 log_probs += torch.log(probs.gather(1, act_i) + 1e-8)
                 dist = Categorical(probs=probs)
-                entropy += dist.entropy().unsqueeze(-1)
+                
+                # 累加每个离散头的熵
+                e_head = dist.entropy().unsqueeze(-1)
+                entropy += e_head
+                e_cat_sum += e_head
+            
+            # [修改] 记录 cat entropy
+            entropy_details['cat'] = e_cat_sum.mean().item()
 
         # --- Bern ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
@@ -247,9 +266,13 @@ class HybridActorWrapper(nn.Module):
             dist = Bernoulli(logits=bern_logits)
             bern_action = actions_raw['bern']
             log_probs += dist.log_prob(bern_action).sum(-1, keepdim=True)
-            entropy += dist.entropy().sum(-1, keepdim=True)
+            
+            # [修改] 单独记录 bern entropy
+            e_bern = dist.entropy().sum(-1, keepdim=True)
+            entropy += e_bern
+            entropy_details['bern'] = e_bern.mean().item()
 
-        return log_probs, entropy, None
+        return log_probs, entropy, entropy_details, None
     
     def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
         """
@@ -403,6 +426,10 @@ class PPOHybrid:
         self.approx_kl = 0        # 近似 KL 散度 (判断策略变化幅度)
         self.clip_frac = 0        # 裁剪触发比例 (判断 eps 或 lr 是否合适)
         self.explained_var = 0    # 解释方差 (判断 Critic 拟合程度)
+        # [新增] 分项 Entropy 监控
+        self.entropy_cat = 0
+        self.entropy_bern = 0
+        self.entropy_cont = 0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -424,76 +451,6 @@ class PPOHybrid:
         # [修改] 保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
-
-    # def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1):
-
-    #     # RL 更新阶段：解冻 std 参数，允许策略调整探索方差
-    #     if hasattr(self.actor.net, 'log_std_param'):
-    #         self.actor.net.log_std_param.requires_grad = True
-
-    #     # [修改] 支持直接传入 numpy 数组 (来自 preprocess_parallel_buffer)
-    #     if isinstance(transition_dict['states'], list):
-    #         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-    #         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-    #         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
-    #         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-    #     else:
-    #         # 已经是 numpy array
-    #         states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
-    #         next_states = torch.tensor(transition_dict['next_states'], dtype=torch.float).to(self.device)
-    #         dones = torch.tensor(transition_dict['dones'], dtype=torch.float).view(-1, 1).to(self.device)
-    #         rewards = torch.tensor(transition_dict['rewards'], dtype=torch.float).view(-1, 1).to(self.device)
-
-    #     # ==============================================================================
-    #     # [核心修改] 区分 Actor 的观测 (obs) 和 Critic 的状态 (state)
-    #     # ==============================================================================
-    #     actor_inputs = states  # 默认情况：Actor 和 Critic 都用 global states
-    #     critic_inputs = states
-        
-    #     # 检查是否存在局部观测 obs
-    #     if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
-    #         if isinstance(transition_dict['obs'], list):
-    #             obs = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
-    #         else:
-    #             obs = torch.tensor(transition_dict['obs'], dtype=torch.float).to(self.device)
-            
-    #         actor_inputs = obs      # Actor 看局部 obs
-    #         critic_inputs = states  # Critic 看全局 states
-    #     # ==============================================================================
-        
-    #     actions_from_buffer = transition_dict['actions']
-        
-    #     # 1. 准备动作数据 (转 Tensor)
-    #     actions_on_device = {}
-        
-    #     # [新增] 优化：支持直接传入字典形式的动作 (来自 preprocess_parallel_buffer)
-    #     if isinstance(actions_from_buffer, dict):
-    #         for key, val in actions_from_buffer.items():
-    #             if key == 'cat':
-    #                 actions_on_device[key] = torch.tensor(val, dtype=torch.long).to(self.device)
-    #             else:
-    #                 actions_on_device[key] = torch.tensor(val, dtype=torch.float).to(self.device)
-    #     else:
-    #         # 旧逻辑：List of Dicts (较慢)
-    #         all_keys = actions_from_buffer[0].keys()
-    #         for key in all_keys:
-    #             vals = [d[key] for d in actions_from_buffer]
-    #             if key == 'cat':
-    #                 actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
-    #             else:
-    #                 actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
-
-    #     # 2. 计算 Advantage
-    #     # [新增] 检查是否已经预计算了 Advantage 和 TD Target
-    #     if 'advantages' in transition_dict and 'td_targets' in transition_dict:
-    #         if isinstance(transition_dict['advantages'], list):
-    #             advantage = torch.tensor(np.array(transition_dict['advantages']), dtype=torch.float).view(-1, 1).to(self.device)
-    #             td_target = torch.tensor(np.array(transition_dict['td_targets']), dtype=torch.float).view(-1, 1).to(self.device)
-    #         else:
-    #             advantage = torch.tensor(transition_dict['advantages'], dtype=torch.float).view(-1, 1).to(self.device)
-    #             td_target = torch.tensor(transition_dict['td_targets'], dtype=torch.float).view(-1, 1).to(self.device)
-    #     else:
-    
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1):
 
         # RL 更新阶段：解冻 std 参数
@@ -563,7 +520,7 @@ class PPOHybrid:
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
             # 修改：Actor 使用 actor_inputs (可能是 obs)
-            old_log_probs, _, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            old_log_probs, _, _, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
             # 修改：Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
@@ -617,11 +574,15 @@ class PPOHybrid:
         # [新增] 监控列表
         kl_list = []
         clip_frac_list = []
+        # [新增] 分项 Entropy 列表
+        entropy_cat_list = []
+        entropy_bern_list = []
+        entropy_cont_list = []
         
         for _ in range(self.epochs):
             # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
-            # 修改：Actor 使用 actor_inputs
-            log_probs, entropy, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            # [修改] 接收 entropy_details
+            log_probs, entropy, entropy_details ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
             
             # [修改] 计算 log_ratio 用于更精准的 KL 计算
             log_ratio = log_probs - old_log_probs
@@ -671,6 +632,14 @@ class PPOHybrid:
             critic_loss_list.append(critic_loss.item())
             entropy_list.append(entropy.mean().item())
             ratio_list.append(ratio.mean().item())
+            
+            # [新增] 记录分项 Entropy
+            if entropy_details['cont'] is not None:
+                entropy_cont_list.append(entropy_details['cont'])
+            if entropy_details['cat'] is not None:
+                entropy_cat_list.append(entropy_details['cat'])
+            if entropy_details['bern'] is not None:
+                entropy_bern_list.append(entropy_details['bern'])
 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -685,6 +654,10 @@ class PPOHybrid:
         # [新增] 汇总新指标
         self.approx_kl = np.mean(kl_list)
         self.clip_frac = np.mean(clip_frac_list)
+        # [新增] 计算分项 Entropy 均值
+        self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
+        self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
+        self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
         
         # [新增] 计算 Explained Variance
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
