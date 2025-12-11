@@ -358,6 +358,13 @@ if __name__ == "__main__":
         scores = np.exp(-0.5 * (diffs / float(sigma))**2)
         probs = scores / (scores.sum() + 1e-12)
         return probs, keys # 修改为返回 probs 和 keys
+    
+    '''
+    通过高斯核与elo分确定对手概率
+    Δ = 200 (1σ = 200)：≈ 0.7597 → 75.97% ： 相似度 ≈ 0.6065，区域内概率0.683
+    Δ = 400 (2σ = 400)：≈ 0.9091 → 90.91% ： 相似度 ≈ 0.1353，区域内概率0.955
+    Δ = 600 (3σ = 600)：≈ 0.9693 → 96.93% ： 相似度 ≈ 0.0111，区域内概率0.997
+    '''
 
     # 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
     def shorten_actor_key(path_or_name):
@@ -680,8 +687,13 @@ if __name__ == "__main__":
                     rank_pos = 0.5
                 else:
                     rank_pos = float((main_agent_elo - min_elo) / denom)
-                # 将这个指标放在 Elo_Centered 相关目录下
+                # 现有日志
                 logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                
+                # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
+                elo_spread = float(max_elo - min_elo)
+                print('elo分极差：', elo_spread)
+                logger.add("Elo/Spread", elo_spread, total_steps)
                 
                 # 只记录所有规则智能体和最新保存的智能体（actor_key）
                 rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
