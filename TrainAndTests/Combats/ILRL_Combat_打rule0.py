@@ -289,7 +289,7 @@ if __name__ == "__main__":
     t_bias = 0
     
     
-    def creat_initial_state():
+    def create_initial_state():
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
         blue_height = 9000
@@ -346,7 +346,7 @@ if __name__ == "__main__":
         
         episode_return = 0
 
-        DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+        DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
 
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=6, blue_init_ammo=6)
