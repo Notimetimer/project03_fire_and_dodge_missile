@@ -480,6 +480,12 @@ class PPOHybrid:
         
         # 1. 准备动作数据
         actions_from_buffer = transition_dict['actions']
+        
+        # todo action_mask 防止“死后动作”干扰决策
+        # todo truncs
+        # todo global states，适配集中式Critic
+
+        # 1. 准备动作数据 (转 Tensor)
         actions_on_device = {}
         
         # Buffer 传来的 actions 已经是 dict of arrays

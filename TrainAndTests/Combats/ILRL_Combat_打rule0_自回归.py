@@ -14,11 +14,11 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Envs.Tasks.ChooseStrategyEnv2 import *
-from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from BasicRules import *
+from Envs.Tasks.ChooseStrategyEnv2 import *
+from Algorithms.PPOHybrid3 import PPOHybrid, CascadePolicyNet, CascadeActorWrapper # 注意这里改用 Cascade 类
 
 def get_current_file_dir():
     try:
@@ -52,65 +52,51 @@ def load_il_and_transitions(folder, il_name, rl_name):
     return il, trans
 
 # ==========================================
-# 核心修复：数据结构重组函数
+# 核心修复：数据结构重组函数 (适配自回归结构)
 # ==========================================
 def restructure_actions(actions_data):
     """
-    将 list of dicts [{'fly': 1, 'fire': 0}, ...] 
-    转换为 dict of arrays {'cat': array([[1],...]), 'bern': array([[0],...])}
-    并确保维度是 (N, 1) 以适配 PPOHybrid2 的索引操作
+    将原始 {'cat': ..., 'bern': ...} 或 list of dicts
+    转换为 {'l0_cat': ..., 'l1_bern': ...} 以适配 CascadePolicyNet
     """
-    # 如果已经是字典格式，直接返回
-    if isinstance(actions_data, dict):
-        return actions_data
+    # 1. 先标准化为 {'cat': array, 'bern': array} (复用原有逻辑或简化)
+    std_actions = {'cat': [], 'bern': []}
     
-    # 如果是列表且包含字典，进行转换
-    if isinstance(actions_data, list) and len(actions_data) > 0:
-        print("Restructuring actions from List[Dict] to Dict[Array]...")
-        
-        # 初始化容器
-        new_actions = {'cat': [], 'bern': []}
-        
+    if isinstance(actions_data, dict):
+        # 已经是字典，直接改名
+        cat_data = actions_data.get('cat')
+        bern_data = actions_data.get('bern')
+    else:
+        # 是 List[Dict]，需解包
         for item in actions_data:
-            # 兼容处理：item 可能是 dict，也可能是包含 dict 的 numpy array
-            act = item
-            if isinstance(item, np.ndarray) and item.dtype == object:
-                act = item.item() # 提取 numpy 里的 dict
-            
-            # 映射 'fly' -> 'cat' (离散机动)
-            # 映射 'fire' -> 'bern' (开关开火)
+            act = item.item() if (isinstance(item, np.ndarray) and item.dtype == object) else item
             if isinstance(act, dict):
-                if 'fly' in act:
-                    new_actions['cat'].append(act['fly'])
-                if 'fire' in act:
-                    new_actions['bern'].append(act['fire'])
-            # 备用：如果数据意外变成了 list/tuple
-            elif isinstance(act, (list, np.ndarray, tuple)) and len(act) >= 2:
-                 new_actions['cat'].append(act[0])
-                 new_actions['bern'].append(act[1])
-
-        # 转换为 Numpy Array 并调整形状为 (Batch, 1)
-        # 这一点至关重要：PPOHybrid2 里的 expert_cat[:, i] 需要 expert_cat 是二维的
+                if 'fly' in act: std_actions['cat'].append(act['fly'])
+                elif 'cat' in act: std_actions['cat'].append(act['cat'])
+                
+                if 'fire' in act: std_actions['bern'].append(act['fire'])
+                elif 'bern' in act: std_actions['bern'].append(act['bern'])
         
-        # 1. 'cat': 离散动作，转为 int64，Reshape 为 (N, 1)
-        cat_arr = np.array(new_actions['cat'], dtype=np.int64)
-        if cat_arr.ndim == 1:
-            cat_arr = cat_arr.reshape(-1, 1)
-        
-        # 2. 'bern': 伯努利动作，转为 float32 (BCE Loss需要)，Reshape 为 (N, 1)
-        bern_arr = np.array(new_actions['bern'], dtype=np.float32)
-        if bern_arr.ndim == 1:
-            bern_arr = bern_arr.reshape(-1, 1)
+        cat_data = np.array(std_actions['cat'])
+        bern_data = np.array(std_actions['bern'])
 
-        result = {
-            'cat': cat_arr,
-            'bern': bern_arr
-        }
-        
-        print(f"Structure fixed: 'cat' shape={cat_arr.shape}, 'bern' shape={bern_arr.shape}")
-        return result
+    # 2. 维度处理与键名重映射 (Mapping to Cascade Keys)
+    # L0: Fly (Cat)
+    l0_cat = np.array(cat_data, dtype=np.int64)
+    if l0_cat.ndim == 1: l0_cat = l0_cat.reshape(-1, 1) # (N, 1)
 
-    return actions_data
+    # L1: Fire (Bern)
+    l1_bern = np.array(bern_data, dtype=np.float32)
+    if l1_bern.ndim == 1: l1_bern = l1_bern.reshape(-1, 1) # (N, 1)
+
+    result = {
+        'l0_cat': l0_cat,   # 对应 CascadePolicyNet 的 l0
+        'l1_bern': l1_bern  # 对应 CascadePolicyNet 的 l1
+    }
+    
+    print(f"Restructured for Cascade: 'l0_cat' shape={l0_cat.shape}, 'l1_bern' shape={l1_bern.shape}")
+    return result
+
 
 def save_meta_once(path, state_dict):
     if os.path.exists(path):
@@ -170,7 +156,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-3 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 80  # 80 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 0  # 80
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.95
@@ -185,16 +171,22 @@ state_dim = env.obs_dim
 # 动作空间定义 (需要与 BasicRules 产生的数据对应)
 # cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
 # bern: 攻击动作头 (env.fire_dim 通常是 1)
-action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
+# [修改] 动作空间定义，适配 CascadePolicyNet
+# l0_cat: 对应 Fly (14维)
+# l1_bern: 对应 Fire (1维)
+action_dims_dict = {
+    'l0_cat': env.fly_act_dim, # [14]
+    'l1_bern': env.fire_dim    # 1
+}
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 action_bound = None
 
-# 1. 创建神经网络
-actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+# 1. 创建神经网络 (使用 CascadePolicyNet)
+actor_net = CascadePolicyNet(state_dim, hidden_dim, action_dims_dict).to(device)
 critic_net = ValueNet(state_dim, hidden_dim).to(device)
 
-# 2. Wrapper
-actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
+# 2. Wrapper (使用 CascadeActorWrapper)
+actor_wrapper = CascadeActorWrapper(actor_net, action_dims_dict, device=device).to(device)
 
 # 3. student_agent
 student_agent = PPOHybrid(
@@ -225,7 +217,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'ILRL_combat_打rule0'
+    mission_name = 'RL_combat_打rule0_自回归'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -427,8 +419,13 @@ if __name__ == "__main__":
                 b_state_check = env.unscale_state(b_check_obs)
                 # 修改：Actor 依然使用 b_obs (局部观测) 进行决策
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
-                b_action_label = b_action_exec['cat'][0]
-                b_fire = b_action_exec['bern'][0]
+                
+                # [修改] 键名变更
+                b_action_label = b_action_exec['l0_cat'][0]  # cat -> l0_cat
+                b_fire = b_action_exec['l1_bern'][0]         # bern -> l1_bern
+    
+                # b_action_label = b_action_exec['cat'][0]
+                # b_fire = b_action_exec['bern'][0]
 
                 b_m_id = None
                 if b_fire:
@@ -446,7 +443,10 @@ if __name__ == "__main__":
                 decide_steps_after_update += 1
                 
                 b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-                current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
+                # 存储动作时使用新键名
+                current_action = {'l0_cat': b_action_exec['l0_cat'], 'l1_bern': b_action_exec['l1_bern']}
+                
+                # current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
                 
 

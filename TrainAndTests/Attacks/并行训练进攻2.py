@@ -13,7 +13,7 @@ sys.path.append(project_root)
 from Envs.Tasks.AttackManeuverEnv import AttackTrainEnv, dt_maneuver
 # 引入我们刚才写的并行 Wrapper
 from Algorithms.ParallelEnv import ParallelPettingZooEnv
-from Algorithms.PPOHybrid3 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Algorithms.HybridBuffer import HybridReplayBuffer # [新增]
 from Visualize.tensorboard_visualize import TensorBoardLogger
