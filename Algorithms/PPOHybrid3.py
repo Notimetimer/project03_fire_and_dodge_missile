@@ -2,6 +2,8 @@
 修改进行中：
 
 改自回归级联结构
+
+准备把PPOHybrid2 的active_mask处理复制过来
 '''
 
 import numpy as np

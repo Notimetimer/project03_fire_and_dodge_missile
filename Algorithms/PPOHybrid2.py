@@ -470,6 +470,14 @@ class PPOHybrid:
         dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
         rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
 
+        # [新增] 处理 active_masks (可选输入)
+        # 如果 transition_dict 中没有 active_masks，则默认所有样本均有效
+        if 'active_masks' in transition_dict:
+            active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
+        else:
+            # 创建与 dones 形状一致的全 1 张量
+            active_masks = torch.ones_like(dones)
+
         # 处理 obs (如果存在)
         if 'obs' in transition_dict:
             actor_inputs = to_tensor(transition_dict['obs'], torch.float)
@@ -530,16 +538,26 @@ class PPOHybrid:
             # 修改：Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
-        # --- [2. 优势归一化] ---
+        # --- [2. 优势归一化 - 适配 active_masks] ---
         if adv_normed:
-            adv_mean = advantage.mean()
-            adv_std = advantage.std(unbiased=False)
-            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+            # [修改] 仅使用 active 的数据计算统计量
+            active_adv = advantage[active_masks.squeeze(-1).bool()]
+            
+            if active_adv.numel() > 1: # 防止 active 数据过少导致 NaN
+                adv_mean = active_adv.mean()
+                adv_std = active_adv.std(unbiased=False)
+                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+            else:
+                # 降级策略：如果有效数据太少，不进行归一化或者只做去中心化
+                pass
         else:
             # 推荐: 即使不归一化，也建议减去均值 (Centering)
             # 这有助于降低方差，且不改变梯度的方向
-            adv_mean = advantage.mean()
-            advantage = advantage - adv_mean
+            # [修改] 使用 mask 计算均值
+            active_adv = advantage[active_masks.squeeze(-1).bool()]
+            if active_adv.numel() > 0:
+                adv_mean = active_adv.mean()
+                advantage = advantage - adv_mean
 
         # --- [3. Shuffle 逻辑: 在此处打乱所有相关 Tensor] ---
         if shuffled:
@@ -563,6 +581,8 @@ class PPOHybrid:
             advantage = advantage[idx]
             old_log_probs = old_log_probs[idx]
             v_pred_old = v_pred_old[idx]
+            # [新增] 打乱 active_masks
+            active_masks = active_masks[idx]
             
             # 打乱字典形式的动作
             for key in actions_on_device:
@@ -585,6 +605,9 @@ class PPOHybrid:
         entropy_bern_list = []
         entropy_cont_list = []
         
+        # [新增] 防止除零的小数
+        mask_eps = 1e-5
+
         for _ in range(self.epochs):
             # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
             # [修改] 接收 entropy_details
@@ -596,16 +619,29 @@ class PPOHybrid:
             # [新增] 计算 Approximate KL Divergence (http://joschu.net/blog/kl-approx.html)
             with torch.no_grad():
                 # old_approx_kl = (-log_ratio).mean()
-                approx_kl = ((ratio - 1) - log_ratio).mean()
+                # [修改] KL 计算也最好应用 mask，但为了监控方便，这里先保持全局均值或应用mask均值
+                active_sum = active_masks.sum()
+                approx_kl = (((ratio - 1) - log_ratio) * active_masks).sum() / (active_sum + mask_eps)
                 kl_list.append(approx_kl.item())
                 
                 # [新增] 计算 Clip Fraction (有多少样本触发了裁剪)
-                clip_fracs = ((ratio - 1.0).abs() > self.eps).float().mean()
+                # 仅统计 active 的样本
+                clip_fracs = (((ratio - 1.0).abs() > self.eps).float() * active_masks).sum() / (active_sum + mask_eps)
                 clip_frac_list.append(clip_fracs.item())
             
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
-            actor_loss = -torch.min(surr1, surr2).mean() - self.k_entropy * entropy.mean()
+            
+            # [修改] Actor Loss 使用 mask 加权
+            surrogate_loss = -torch.min(surr1, surr2)
+            active_sum = active_masks.sum() # 重新获取 sum (虽然这里是全batch不切分，但保持逻辑一致)
+            
+            actor_loss = (surrogate_loss * active_masks).sum() / (active_sum + mask_eps)
+            
+            # [修改] Entropy 使用 mask 加权
+            entropy_loss = (entropy * active_masks).sum() / (active_sum + mask_eps)
+            
+            actor_loss = actor_loss - self.k_entropy * entropy_loss
 
             # Critic Loss
             # 修改：Critic 使用 critic_inputs
@@ -614,9 +650,13 @@ class PPOHybrid:
                 v_pred_clipped = torch.clamp(v_pred, v_pred_old - clip_range, v_pred_old + clip_range)
                 vf_loss1 = (v_pred - td_target).pow(2)
                 vf_loss2 = (v_pred_clipped - td_target).pow(2)
-                critic_loss = torch.max(vf_loss1, vf_loss2).mean()
+                critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
             else:
-                critic_loss = F.mse_loss(v_pred, td_target)
+                # [修改] reduction='none' 使得我们可以应用 mask
+                critic_loss_per_sample = F.mse_loss(v_pred, td_target, reduction='none')
+            
+            # [修改] Critic Loss 使用 mask 加权
+            critic_loss = (critic_loss_per_sample * active_masks).sum() / (active_sum + mask_eps)
             
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
@@ -636,8 +676,8 @@ class PPOHybrid:
             critic_grad_list.append(model_grad_norm(self.critic))            
             actor_loss_list.append(actor_loss.item())
             critic_loss_list.append(critic_loss.item())
-            entropy_list.append(entropy.mean().item())
-            ratio_list.append(ratio.mean().item())
+            entropy_list.append(entropy_loss.item()) # 记录 active 的 entropy 均值
+            ratio_list.append(ratio.mean().item()) # ratio 依然可以看整体，或者也改成 masked mean
             
             # [新增] 记录分项 Entropy
             if entropy_details['cont'] is not None:
@@ -655,7 +695,13 @@ class PPOHybrid:
         self.ratio_mean = np.mean(ratio_list)
         self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
         self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
-        self.advantage = advantage.abs().mean().item()
+        
+        # [修改] 记录 active 的 advantage 均值
+        active_sum_total = active_masks.sum().item()
+        if active_sum_total > 0:
+            self.advantage = (advantage.abs() * active_masks).sum().item() / active_sum_total
+        else:
+            self.advantage = 0
         
         # [新增] 汇总新指标
         self.approx_kl = np.mean(kl_list)
@@ -668,13 +714,19 @@ class PPOHybrid:
         # [新增] 计算 Explained Variance
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
         # 这里使用 numpy 计算以防 tensor 维度广播问题
-        y_true = td_target.flatten().cpu().numpy()
-        y_pred = v_pred_old.flatten().cpu().numpy() # 比较更新前的 Value 网络预测能力
-        var_y = np.var(y_true)
-        if var_y == 0:
-            self.explained_var = np.nan
+        # [修改] explained_var 最好也只看 active 的，但为了简单起见，这里先保持原样或简单过滤
+        mask_bool = active_masks.squeeze(-1).bool().cpu().numpy()
+        y_true = td_target.flatten().cpu().numpy()[mask_bool]
+        y_pred = v_pred_old.flatten().cpu().numpy()[mask_bool] # 比较更新前的 Value 网络预测能力
+        
+        if len(y_true) > 1:
+            var_y = np.var(y_true)
+            if var_y == 0:
+                self.explained_var = np.nan
+            else:
+                self.explained_var = 1 - np.var(y_true - y_pred) / var_y
         else:
-            self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+            self.explained_var = 0
 
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")

@@ -222,6 +222,9 @@ class HybridActorWrapper(nn.Module):
         actor_outputs = self.net(states, max_std=max_std)
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
         entropy = torch.zeros(states.size(0), 1).to(self.device)
+        
+        # [新增] 用于记录分项 Entropy 的字典
+        entropy_details = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Cont ---
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -230,16 +233,32 @@ class HybridActorWrapper(nn.Module):
             u = actions_raw['cont']
             log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
             entropy += dist.entropy().unsqueeze(-1) # 近似熵
+            
+            # [修改] 单独记录 cont entropy
+            e_cont = dist.entropy().unsqueeze(-1)
+            entropy += e_cont
+            entropy_details['cont'] = e_cont.mean().item() # 记录均值
 
         # --- Cat ---
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             cat_probs_list = actor_outputs['cat']
             cat_action = actions_raw['cat'].long()
+            
+            # [新增] 临时列表用于计算 cat 总熵
+            e_cat_sum = torch.zeros_like(entropy)
+            
             for i, probs in enumerate(cat_probs_list):
                 act_i = cat_action[:, i].unsqueeze(-1)
                 log_probs += torch.log(probs.gather(1, act_i) + 1e-8)
                 dist = Categorical(probs=probs)
-                entropy += dist.entropy().unsqueeze(-1)
+                
+                # 累加每个离散头的熵
+                e_head = dist.entropy().unsqueeze(-1)
+                entropy += e_head
+                e_cat_sum += e_head
+            
+            # [修改] 记录 cat entropy
+            entropy_details['cat'] = e_cat_sum.mean().item()
 
         # --- Bern ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
@@ -247,9 +266,13 @@ class HybridActorWrapper(nn.Module):
             dist = Bernoulli(logits=bern_logits)
             bern_action = actions_raw['bern']
             log_probs += dist.log_prob(bern_action).sum(-1, keepdim=True)
-            entropy += dist.entropy().sum(-1, keepdim=True)
+            
+            # [修改] 单独记录 bern entropy
+            e_bern = dist.entropy().sum(-1, keepdim=True)
+            entropy += e_bern
+            entropy_details['bern'] = e_bern.mean().item()
 
-        return log_probs, entropy, None
+        return log_probs, entropy, entropy_details, None
     
     def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
         """
@@ -398,6 +421,15 @@ class PPOHybrid:
         self.ratio_mean = 0
         self.pre_clip_actor_grad = 0
         self.pre_clip_critic_grad = 0
+        
+        # [新增] 额外的监控指标
+        self.approx_kl = 0        # 近似 KL 散度 (判断策略变化幅度)
+        self.clip_frac = 0        # 裁剪触发比例 (判断 eps 或 lr 是否合适)
+        self.explained_var = 0    # 解释方差 (判断 Critic 拟合程度)
+        # [新增] 分项 Entropy 监控
+        self.entropy_cat = 0
+        self.entropy_bern = 0
+        self.entropy_cont = 0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -421,15 +453,32 @@ class PPOHybrid:
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1):
 
-        # RL 更新阶段：解冻 std 参数，允许策略调整探索方差
+        # RL 更新阶段：解冻 std 参数
         if hasattr(self.actor.net, 'log_std_param'):
             self.actor.net.log_std_param.requires_grad = True
 
+        # [修改] 6. 智能数据转换：如果已经是 np.ndarray (来自 HybridReplayBuffer)，直接转 Tensor
+        # 否则 (来自 list append)，先转 np 再转 Tensor
+        def to_tensor(x, dtype):
+            if isinstance(x, np.ndarray):
+                return torch.tensor(x, dtype=dtype).to(self.device)
+            else:
+                return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+
+        states = to_tensor(transition_dict['states'], torch.float)
+        next_states = to_tensor(transition_dict['next_states'], torch.float)
+        dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
+        rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
+
+        # 处理 obs (如果存在)
+        if 'obs' in transition_dict:
+            actor_inputs = to_tensor(transition_dict['obs'], torch.float)
+            critic_inputs = states
+        else:
+            actor_inputs = states
+            critic_inputs = states
         
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
-        rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).view(-1, 1).to(self.device)
-        next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
-        dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).view(-1, 1).to(self.device)
+        # 1. 准备动作数据
         actions_from_buffer = transition_dict['actions']
         
         # todo action_mask 防止“死后动作”干扰决策
@@ -438,66 +487,129 @@ class PPOHybrid:
 
         # 1. 准备动作数据 (转 Tensor)
         actions_on_device = {}
-        all_keys = actions_from_buffer[0].keys()
-        for key in all_keys:
-            vals = [d[key] for d in actions_from_buffer]
-            if key == 'cat':
-                actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
-            else:
-                actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
+        
+        # Buffer 传来的 actions 已经是 dict of arrays
+        if isinstance(actions_from_buffer, dict):
+            for key, val in actions_from_buffer.items():
+                if key == 'cat':
+                    actions_on_device[key] = to_tensor(val, torch.long)
+                else:
+                    actions_on_device[key] = to_tensor(val, torch.float)
+        else:
+            # 兼容旧代码 (list of dicts)
+            # 旧逻辑：List of Dicts (较慢)
+            all_keys = actions_from_buffer[0].keys()
+            for key in all_keys:
+                vals = [d[key] for d in actions_from_buffer]
+                if key == 'cat':
+                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
+                else:
+                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
 
-        # 2. 计算 Advantage
+
+        # 2. 获取 Advantage (优先使用 Buffer 算好的)
+        if 'advantages' in transition_dict and 'td_targets' in transition_dict:
+            advantage = to_tensor(transition_dict['advantages'], torch.float).view(-1, 1)
+            td_target = to_tensor(transition_dict['td_targets'], torch.float).view(-1, 1)
+        else:
+            # 现场计算 GAE (不推荐用于并行展平后的数据)
+            
+            # 以下为公共部分
+            # 如果没有预计算，则现场计算 (注意：如果是并行数据直接展平进来的，这里计算会有偏差)
+            with torch.no_grad():
+                # 修改：Critic 使用全局 next_states 计算 Target
+                td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+                # 修改：Critic 使用全局 states 计算当前 Value
+                td_delta = td_target - self.critic(critic_inputs)
+                advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+                
+        # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
-            td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
-            td_delta = td_target - self.critic(states)
-            advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+            # 修改：Actor 使用 actor_inputs (可能是 obs)
+            old_log_probs, _, _, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            # 修改：Critic 使用 critic_inputs (全局 states)
+            v_pred_old = self.critic(critic_inputs)
             
-            # 3. 计算旧策略的 log_probs (使用 Wrapper)
-            old_log_probs, _, _ = self.actor.evaluate_actions(states, actions_on_device, h=None, max_std=self.max_std)
-            v_pred_old = self.critic(states)
-            
-            # --- [2. 优势归一化] ---
-            if adv_normed:
-                adv_mean = advantage.mean()
-                adv_std = advantage.std(unbiased=False)
-                advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+        # --- [2. 优势归一化] ---
+        if adv_normed:
+            adv_mean = advantage.mean()
+            adv_std = advantage.std(unbiased=False)
+            advantage = (advantage - adv_mean) / (adv_std + 1e-8)
+        else:
+            # 推荐: 即使不归一化，也建议减去均值 (Centering)
+            # 这有助于降低方差，且不改变梯度的方向
+            adv_mean = advantage.mean()
+            advantage = advantage - adv_mean
 
-            # --- [3. Shuffle 逻辑: 在此处打乱所有相关 Tensor] ---
-            if shuffled:
-                # 生成随机索引
-                idx = torch.randperm(states.size(0), device=self.device)
-                
-                # 打乱基础数据
+        # --- [3. Shuffle 逻辑: 在此处打乱所有相关 Tensor] ---
+        if shuffled:
+            # 生成随机索引
+            # 修改：使用 actor_inputs 的大小作为基准 (通常和 states 一样长)
+            idx = torch.randperm(actor_inputs.size(0), device=self.device)
+            
+            # 打乱基础数据
+            # 修改：同时打乱 actor_inputs 和 critic_inputs
+            # 如果它们指向同一个对象 (states)，也不会出错，只是多做了一次索引操作
+            if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+                actor_inputs = actor_inputs[idx] # 打乱 obs
+                critic_inputs = critic_inputs[idx] # 打乱 states
+            else:
+                # 只有 states 的情况
                 states = states[idx]
-                td_target = td_target[idx]
-                advantage = advantage[idx]
-                old_log_probs = old_log_probs[idx]
-                v_pred_old = v_pred_old[idx]
-                
-                # 打乱字典形式的动作
-                for key in actions_on_device:
-                    actions_on_device[key] = actions_on_device[key][idx]
-                
-                # 如果有其他 tensor 需要 shuffle (如 truncs) 也要在这里处理
-                # todo truncs的处理逻辑 当前env里面没有做，所以算法先不做
-                
+                actor_inputs = states
+                critic_inputs = states
+
+            td_target = td_target[idx]
+            advantage = advantage[idx]
+            old_log_probs = old_log_probs[idx]
+            v_pred_old = v_pred_old[idx]
+            
+            # 打乱字典形式的动作
+            for key in actions_on_device:
+                actions_on_device[key] = actions_on_device[key][idx]
+            
+            # 如果有其他 tensor 需要 shuffle (如 truncs) 也要在这里处理
+            # todo truncs的处理逻辑 当前env里面没有做，所以算法先不做
+            
 
         # 4. PPO Update Loop
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
         actor_grad_list, critic_grad_list = [], []
         pre_clip_actor_grad, pre_clip_critic_grad = [], []
 
+        # [新增] 监控列表
+        kl_list = []
+        clip_frac_list = []
+        # [新增] 分项 Entropy 列表
+        entropy_cat_list = []
+        entropy_bern_list = []
+        entropy_cont_list = []
+        
         for _ in range(self.epochs):
             # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
-            log_probs, entropy, _ = self.actor.evaluate_actions(states, actions_on_device, h=None, max_std=self.max_std)
+            # [修改] 接收 entropy_details
+            log_probs, entropy, entropy_details ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
             
-            ratio = torch.exp(log_probs - old_log_probs)
+            # [修改] 计算 log_ratio 用于更精准的 KL 计算
+            log_ratio = log_probs - old_log_probs
+            ratio = torch.exp(log_ratio)
+            # [新增] 计算 Approximate KL Divergence (http://joschu.net/blog/kl-approx.html)
+            with torch.no_grad():
+                # old_approx_kl = (-log_ratio).mean()
+                approx_kl = ((ratio - 1) - log_ratio).mean()
+                kl_list.append(approx_kl.item())
+                
+                # [新增] 计算 Clip Fraction (有多少样本触发了裁剪)
+                clip_fracs = ((ratio - 1.0).abs() > self.eps).float().mean()
+                clip_frac_list.append(clip_fracs.item())
+            
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
             actor_loss = -torch.min(surr1, surr2).mean() - self.k_entropy * entropy.mean()
 
             # Critic Loss
-            v_pred = self.critic(states)
+            # 修改：Critic 使用 critic_inputs
+            v_pred = self.critic(critic_inputs)
             if clip_vf:
                 v_pred_clipped = torch.clamp(v_pred, v_pred_old - clip_range, v_pred_old + clip_range)
                 vf_loss1 = (v_pred - td_target).pow(2)
@@ -526,6 +638,14 @@ class PPOHybrid:
             critic_loss_list.append(critic_loss.item())
             entropy_list.append(entropy.mean().item())
             ratio_list.append(ratio.mean().item())
+            
+            # [新增] 记录分项 Entropy
+            if entropy_details['cont'] is not None:
+                entropy_cont_list.append(entropy_details['cont'])
+            if entropy_details['cat'] is not None:
+                entropy_cat_list.append(entropy_details['cat'])
+            if entropy_details['bern'] is not None:
+                entropy_bern_list.append(entropy_details['bern'])
 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -537,6 +657,25 @@ class PPOHybrid:
         self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
         self.advantage = advantage.abs().mean().item()
         
+        # [新增] 汇总新指标
+        self.approx_kl = np.mean(kl_list)
+        self.clip_frac = np.mean(clip_frac_list)
+        # [新增] 计算分项 Entropy 均值
+        self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
+        self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
+        self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
+        
+        # [新增] 计算 Explained Variance
+        # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
+        # 这里使用 numpy 计算以防 tensor 维度广播问题
+        y_true = td_target.flatten().cpu().numpy()
+        y_pred = v_pred_old.flatten().cpu().numpy() # 比较更新前的 Value 网络预测能力
+        var_y = np.var(y_true)
+        if var_y == 0:
+            self.explained_var = np.nan
+        else:
+            self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
@@ -544,12 +683,21 @@ class PPOHybrid:
         """
         统一将 (T, N, D) 或 (T, D) 的数据转为扁平的 (Batch, D)，并计算 GAE。
         """
-        # 1. 提取并转 Tensor (逻辑与你上传的 PPOContinuous 一致)
+        # 1. 提取并转 Tensor
         states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         next_states = torch.tensor(np.array(transition_dict['next_states']), dtype=torch.float).to(self.device)
         rewards = torch.tensor(np.array(transition_dict['rewards']), dtype=torch.float).to(self.device)
         dones = torch.tensor(np.array(transition_dict['dones']), dtype=torch.float).to(self.device)
         
+        # [新增] 处理 Obs 的展平 (如果存在)
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            obs = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+            # 维度处理同 states
+            if obs.dim() == 1: obs = obs.unsqueeze(1) # [T, 1]
+            # [T, N, D] -> [T*N, D]
+            T, N = obs.shape[0], obs.shape[1]
+            transition_dict['obs'] = obs.reshape(T * N, -1).cpu().numpy()
+            
         # 2. 维度统一化 (升维到 [T, N, 1])
         if rewards.dim() == 1: # 单环境
             states = states.unsqueeze(1)
@@ -561,7 +709,7 @@ class PPOHybrid:
             dones = dones.unsqueeze(-1)
             # states 已经是 [T, N, D]
 
-        # 3. 处理 Truncs (PPOContinuous 逻辑)
+        # 3. 处理 Truncs
         use_truncs = 'truncs' in transition_dict and len(transition_dict['truncs']) > 0
         if use_truncs:
             truncs = torch.tensor(np.array(transition_dict['truncs']), dtype=torch.float).to(self.device)
@@ -570,34 +718,47 @@ class PPOHybrid:
         else:
             truncs = None
 
-        # 4. GAE 计算
+        # 4. GAE 计算 (保持时间维度 T 独立计算)
         with torch.no_grad():
             T, N = states.shape[0], states.shape[1]
+            # Critic 需要 (Batch, Dim)
             flat_s = states.reshape(T * N, -1)
             flat_ns = next_states.reshape(T * N, -1)
             curr_vals = self.critic(flat_s).view(T, N, 1)
             next_vals = self.critic(flat_ns).view(T, N, 1)
             
-            # 使用 Utils 中的 compute_advantage (支持 truncs)
             td_delta = rewards + self.gamma * next_vals * (1.0 - dones) - curr_vals
             advantage = compute_advantage(self.gamma, self.lmbda, td_delta, dones, truncs)
             returns = advantage + curr_vals
 
-        # 5. 扁平化并回填 (Flatten)
-        def flat(t): return t.reshape(-1, *t.shape[2:]).cpu().numpy().tolist()
+        # 5. 扁平化并回填 (Flatten) -> 转回 Numpy 以节省显存并兼容 update 接口
+        # 使用 reshape(-1, ...) 展平前两个维度 (T, N) -> (T*N)
         
-        transition_dict['states'] = flat(states)
-        transition_dict['next_states'] = flat(next_states)
-        transition_dict['rewards'] = flat(rewards)
-        transition_dict['dones'] = flat(dones)
-        transition_dict['advantages'] = flat(advantage)
-        transition_dict['td_targets'] = flat(returns)
-        if use_truncs: transition_dict['truncs'] = flat(truncs)
+        transition_dict['states'] = states.reshape(T * N, -1).cpu().numpy()
+        transition_dict['next_states'] = next_states.reshape(T * N, -1).cpu().numpy()
+        transition_dict['rewards'] = rewards.reshape(T * N).cpu().numpy() # (Batch, )
+        transition_dict['dones'] = dones.reshape(T * N).cpu().numpy()     # (Batch, )
+        transition_dict['advantages'] = advantage.reshape(T * N).cpu().numpy() # (Batch, )
+        transition_dict['td_targets'] = returns.reshape(T * N).cpu().numpy()   # (Batch, )
         
-        # Actions 比较特殊，是字典，需要单独处理扁平化
-        # 假设 actions 是 list of dicts -> dict of lists (flat)
-        # 这步通常在 Buffer 采样时做比较好，或者在这里手动 loop key
-        pass # 具体实现视你的 Buffer 结构而定，核心是上面的 Advantage 计算
+        if use_truncs: 
+            transition_dict['truncs'] = truncs.reshape(T * N).cpu().numpy()
+        
+        # [新增] 处理 Actions 的展平
+        # 原始 actions 是 List(T) of Dicts, 每个 Dict 包含 (N, Dim) 的数组
+        raw_actions_list = transition_dict['actions']
+        flat_actions_dict = {}
+        # 假设所有 step 的 keys 是一样的
+        if len(raw_actions_list) > 0:
+            keys = raw_actions_list[0].keys()
+            for k in keys:
+                # stack: (T, N, Dim)
+                arr = np.stack([step_act[k] for step_act in raw_actions_list])
+                # flatten: (T*N, Dim)
+                flat_actions_dict[k] = arr.reshape(T * N, -1)
+        
+        # 将 actions 替换为扁平化后的字典 (Dict of Arrays)
+        transition_dict['actions'] = flat_actions_dict
 
         return transition_dict
 
@@ -606,6 +767,13 @@ class PPOHybrid:
         """
         MARWIL 离线更新函数 (混合动作空间支持版 + Mini-batch)
         """
+        # 可能的局部观测
+        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
+            obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
+            use_obs = True
+        else:
+            use_obs = False
+            
         # --- [1. MARWIL模式：冻结连续动作 std 参数] ---
         if hasattr(self.actor.net, 'log_std_param'):
             self.actor.net.log_std_param.requires_grad = False
@@ -639,8 +807,13 @@ class PPOHybrid:
             batch_indices = indices[start:end]
             
             # 切片取 Batch 数据
-            s_batch = states_all[batch_indices]
+            s_batch = states_all[batch_indices] # Critic 总是用全局状态
+            
             r_batch = returns_all[batch_indices]
+            if use_obs:
+                actor_input_batch = obs_all[batch_indices] # Actor 用局部
+            else:
+                actor_input_batch = s_batch # Actor 用全局
             
             # 动作字典切片
             actions_batch = {}
@@ -673,7 +846,7 @@ class PPOHybrid:
             # B. 计算 Actor Loss (委托给 Wrapper)
             # ----------------------------------------------------
             # compute_il_loss 返回的是 (Batch, ) 的 loss，没有 reduce
-            raw_il_loss = self.actor.compute_il_loss(s_batch, actions_batch, label_smoothing)
+            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing)
             
             # 加权平均: mean( alpha * w * loss )
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
