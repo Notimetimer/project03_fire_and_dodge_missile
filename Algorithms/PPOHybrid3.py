@@ -20,34 +20,51 @@ from Algorithms.MLP_heads import ValueNet
 # =============================================================================
 # 1. 神经网络定义 (修复：处理可能为空的动作头，增强鲁棒性)
 # =============================================================================
-class CascadePolicyNet(nn.Module):
+class CascadePolicyNet(nn.Module): # 警告，这个结构没有泛化性，必须针对场景单独设计
     def __init__(self, state_dim, hidden_dims, action_dims_dict):
         super().__init__()
         self.action_dims = action_dims_dict
         
         # --- Level 0: 基础特征提取 (Maneuver/Fly) ---
-        self.l0_net = nn.Sequential(nn.Linear(state_dim, 128), nn.ReLU(),
-                                    nn.Linear(128, 64), nn.ReLU())
+        # 构建隐藏层序列（使用传入的 hidden_dims 列表）
+        layers = []
+        prev_size = state_dim
+        for layer_size in hidden_dims:
+            layers.append(nn.Linear(prev_size, layer_size))
+            layers.append(nn.ReLU())
+            prev_size = layer_size
+        # prev_size 为最后一层隐藏单元数，作为特征维度
+        self.l0_feat_dim = prev_size
+        self.l0_net = nn.Sequential(*layers)
         
         # 假设 Level 0 是必须存在的 cat 动作 (Fly)
         # action_dims_dict['l0_cat'] 应为列表 [14]
         self.l0_dim = action_dims_dict['l0_cat'][0] 
-        self.fc_l0_logits = nn.Linear(64, self.l0_dim)
+        self.fc_l0_logits = nn.Linear(self.l0_feat_dim, self.l0_dim)
 
         # --- Level 1: 接收 (状态特征 + Level 0 动作的 One-Hot) ---
-        # 输入维度 = 状态特征(64) + Level 0 动作维度(14)
-        self.l1_input_dim = 64 + self.l0_dim
-        self.l1_net = nn.Sequential(nn.Linear(self.l1_input_dim, 64), nn.ReLU())
+        # 输入维度 = Level0 特征 + Level 0 动作维度(14)
+        self.l1_input_dim = self.l0_feat_dim + self.l0_dim
+
+        # 同样使用 hidden_dims 构建 l1_net 的隐藏层
+        layers = []
+        prev_size = self.l1_input_dim
+        for layer_size in hidden_dims:
+            layers.append(nn.Linear(prev_size, layer_size))
+            layers.append(nn.ReLU())
+            prev_size = layer_size
+        self.l1_feat_dim = prev_size
+        self.l1_net = nn.Sequential(*layers)
         
         # Level 1 的动作头 (Fire/Bern)
         # 允许 l1_cat 为空，只保留 l1_bern
         self.has_l1_cat = 'l1_cat' in action_dims_dict and sum(action_dims_dict['l1_cat']) > 0
         if self.has_l1_cat:
-            self.fc_l1_cat = nn.Linear(64, sum(action_dims_dict['l1_cat']))
+            self.fc_l1_cat = nn.Linear(self.l1_feat_dim, sum(action_dims_dict['l1_cat']))
             
         self.has_l1_bern = 'l1_bern' in action_dims_dict and action_dims_dict['l1_bern'] > 0
         if self.has_l1_bern:
-            self.fc_l1_bern = nn.Linear(64, action_dims_dict['l1_bern'])
+            self.fc_l1_bern = nn.Linear(self.l1_feat_dim, action_dims_dict['l1_bern'])
 
     def forward(self, state, l0_action=None):
         # 1. Level 0 计算
@@ -80,7 +97,7 @@ class CascadePolicyNet(nn.Module):
 # =============================================================================
 # 2. Actor 适配器 (Wrapper) - 修复返回值接口
 # =============================================================================
-class CascadeActorWrapper(nn.Module):
+class CascadeActorWrapper(nn.Module): # 警告，这个结构没有泛化性，必须针对场景单独设计
     def __init__(self, policy_net, action_dims_dict, device='cpu'):
         super().__init__()
         self.net = policy_net
@@ -121,6 +138,14 @@ class CascadeActorWrapper(nn.Module):
             else:
                 l1_bern_val = (l1_bern_logits > 0).float()
             
+            # [CRITICAL FIX] 关键修改：
+            # Bernoulli.sample() 返回 (Batch, 1)，而 Categorical.sample() 返回 (Batch,)。
+            # 为了在后续 Buffer 存储时保持维度一致（防止变成 Batch, 1, 1），
+            # 同时也为了适配 seq_len 等未来扩展，我们需要把最后一个维度(特征维)去掉，
+            # 让它变成 (Batch,) 或 (Batch, Seq)，与 cat 动作保持一致。
+            if l1_bern_val.shape[-1] == 1:
+               l1_bern_val = l1_bern_val.squeeze(-1)
+               
             actions_exec['l1_bern'] = l1_bern_val.cpu().numpy() # (Batch, 1)
             actions_dist_check['l1_bern'] = torch.sigmoid(l1_bern_logits).detach().cpu().numpy()
 
@@ -577,7 +602,7 @@ class PPOHybrid:
         return transition_dict
 
     # --- 新增功能 2: MARWIL Update ---
-    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0):
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=128, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0):
         """
         MARWIL 离线更新函数 (混合动作空间支持版 + Mini-batch)
         """
