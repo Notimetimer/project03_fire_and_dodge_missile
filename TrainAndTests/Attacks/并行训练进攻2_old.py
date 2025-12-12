@@ -12,10 +12,14 @@ sys.path.append(project_root)
 
 from Envs.Tasks.AttackManeuverEnv_old import AttackTrainEnv, dt_maneuver
 # 引入我们刚才写的并行 Wrapper
-from Algorithms.ParallelEnv_old import ParallelPettingZooEnv
+# debug1
+# from Algorithms.ParallelEnv_old import ParallelPettingZooEnv
+from Algorithms.ParallelEnv import ParallelPettingZooEnv
 from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
-from Algorithms.HybridBuffer_old import HybridReplayBuffer # [新增]
+# debug2
+from Algorithms.HybridBuffer_old import HybridReplayBuffer
+# from Algorithms.HybridBuffer import HybridReplayBuffer # [新增]
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Math_calculates.ScaleLearningRate import scale_learning_rate
 from Math_calculates.sub_of_angles import sub_of_radian
@@ -26,7 +30,7 @@ parser.add_argument("--max-episode-len", type=float, default=120,  # 8 * 60,
                     help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
 parser.add_argument("--R-cage", type=float, default=70e3,  # 8 * 60,
                     help="")
-parser.add_argument("--n-envs", type=int, default=8, help="并行环境数量 (根据CPU核数设定)")
+parser.add_argument("--n-envs", type=int, default=4, help="并行环境数量 (根据CPU核数设定)")
 parser.add_argument("--max-steps", type=float, default=2e6, help="总训练步数")
 args = parser.parse_args()
 
