@@ -10,12 +10,12 @@ from math import pi, sqrt, atan2, exp, cos, sin
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Envs.Tasks.AttackManeuverEnv import AttackTrainEnv, dt_maneuver
+from Envs.Tasks.AttackManeuverEnv_old import AttackTrainEnv, dt_maneuver
 # 引入我们刚才写的并行 Wrapper
-from Algorithms.ParallelEnv import ParallelPettingZooEnv
+from Algorithms.ParallelEnv_old import ParallelPettingZooEnv
 from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
-from Algorithms.HybridBuffer import HybridReplayBuffer # [新增]
+from Algorithms.HybridBuffer_old import HybridReplayBuffer # [新增]
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Math_calculates.ScaleLearningRate import scale_learning_rate
 from Math_calculates.sub_of_angles import sub_of_radian
