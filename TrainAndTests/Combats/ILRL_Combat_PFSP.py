@@ -171,7 +171,7 @@ args = parser.parse_args()
 actor_lr = 1e-3 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
-max_steps = 165e4
+max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.95
 lmbda = 0.95
@@ -308,7 +308,7 @@ if __name__ == "__main__":
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
     K_FACTOR = 32
@@ -339,7 +339,7 @@ if __name__ == "__main__":
         expected = calculate_expected_score(player_elo, opponent_elo)
         return player_elo + K_FACTOR * (score - expected)
 
-    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=200.0):
+    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400):
         """返回与 elo_ratings.keys() 顺序对应的概率数组。
         - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
         - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。

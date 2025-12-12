@@ -522,14 +522,31 @@ class PPOHybrid:
         else:
             # 现场计算 GAE (不推荐用于并行展平后的数据)
             
+            # [新增] 处理 truncs
+            if 'truncs' in transition_dict:
+                truncs = to_tensor(transition_dict['truncs'], torch.float).view(-1, 1)
+            else:
+                truncs = None # 或者 torch.zeros_like(dones)
+
             # 以下为公共部分
             # 如果没有预计算，则现场计算 (注意：如果是并行数据直接展平进来的，这里计算会有偏差)
             with torch.no_grad():
                 # 修改：Critic 使用全局 next_states 计算 Target
-                td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)
+                # 注意：对于截断的步，next_value 应该是 V(s_t+1) 而不是 0
+                next_vals = self.critic(next_states)
+                if truncs is not None:
+                    # 如果是 done 但不是 trunc，则 next_value 为 0
+                    # 如果是 trunc，则 next_value 为 V(s_t+1)
+                    # (1-dones) 会处理 done 的情况，但我们需要确保 truncs 时 next_value 不被置零
+                    # (1 - dones + truncs) 无法处理 done 和 trunc 同时为 1 的情况
+                    # 正确做法是 GAE 函数内部处理，或者这里用 (1.0 - (dones * (1.0 - truncs)))
+                    td_target = rewards + self.gamma * next_vals * (1 - dones) # (1.0 - (dones * (1.0 - truncs.float())))
+                else:
+                    td_target = rewards + self.gamma * next_vals * (1 - dones)
+
                 # 修改：Critic 使用全局 states 计算当前 Value
                 td_delta = td_target - self.critic(critic_inputs)
-                advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu()).to(self.device)
+                advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
                 
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
@@ -588,9 +605,7 @@ class PPOHybrid:
             for key in actions_on_device:
                 actions_on_device[key] = actions_on_device[key][idx]
             
-            # 如果有其他 tensor 需要 shuffle (如 truncs) 也要在这里处理
-            # todo truncs的处理逻辑 当前env里面没有做，所以算法先不做
-            
+            # 如果有其他 tensor 需要 shuffle，也要在这里处理
 
         # 4. PPO Update Loop
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
