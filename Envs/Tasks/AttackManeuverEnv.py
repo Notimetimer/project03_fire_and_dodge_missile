@@ -44,13 +44,15 @@ class AttackTrainEnv(Battle):
             "border",  # 2
         ]
 
-    # def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):
-    #     # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
-    #     super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
-    #     # 初始化红蓝远离速度
-    #     self.last_dist_dot = None
-    #     self.last_dhor = None
-    #     self.lock_time_count = 0
+    def reset(self, seed=None, options=None,\
+                red_birth_state=None, blue_birth_state=None, \
+                  red_init_ammo=6, blue_init_ammo=6):
+        # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
+        super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo, seed=seed, options=options)
+        # 初始化红蓝远离速度
+        self.last_dist_dot = None
+        self.last_dhor = None
+        self.lock_time_count = 0
 
     # 进攻策略观测量
     def attack_obs(self, side, pomdp=0):
@@ -187,54 +189,46 @@ class AttackTrainEnv(Battle):
         
     #     return r_action
     
-    # [新增] 封装随机出生状态生成逻辑
-    def _get_random_birth_states(self):
-        # 这里完全照搬你在串行代码中的逻辑
-        red_R_ = random.uniform(30e3, 40e3) 
-        red_beta = random.uniform(0, 2 * pi)
-        red_psi = random.uniform(0, 2 * pi)
-        red_height = random.uniform(3e3, 10e3)
-        red_N = red_R_ * cos(red_beta)
-        red_E = red_R_ * sin(red_beta)
-        blue_height = random.uniform(3e3, 10e3)
+    # # [新增] 封装随机出生状态生成逻辑
+    # def _get_random_birth_states(self):
+    #     # 这里完全照搬你在串行代码中的逻辑
+    #     red_R_ = random.uniform(30e3, 40e3) 
+    #     red_beta = random.uniform(0, 2 * pi)
+    #     red_psi = random.uniform(0, 2 * pi)
+    #     red_height = random.uniform(3e3, 10e3)
+    #     red_N = red_R_ * cos(red_beta)
+    #     red_E = red_R_ * sin(red_beta)
+    #     blue_height = random.uniform(3e3, 10e3)
 
-        DEFAULT_RED_BIRTH_STATE = {
-            'position': np.array([red_N, red_height, red_E]),
-            'psi': red_psi
-        }
-        DEFAULT_BLUE_BIRTH_STATE = {
-            'position': np.array([0.0, blue_height, 0.0]),
-            'psi': pi
-        }
-        return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+    #     DEFAULT_RED_BIRTH_STATE = {
+    #         'position': np.array([red_N, red_height, red_E]),
+    #         'psi': red_psi
+    #     }
+    #     DEFAULT_BLUE_BIRTH_STATE = {
+    #         'position': np.array([0.0, blue_height, 0.0]),
+    #         'psi': pi
+    #     }
+    #     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
-    # [修改] Reset 逻辑：如果没有传入具体的 birth_state，则自动随机
-    def reset(self, seed=None, options=None, 
-              red_birth_state=None, blue_birth_state=None, 
-              red_init_ammo=6, blue_init_ammo=6):
+    # # [修改] Reset 逻辑：如果没有传入具体的 birth_state，则自动随机
+    # def reset(self, seed=None, options=None, 
+    #           red_birth_state=None, blue_birth_state=None, 
+        #       red_init_ammo=6, blue_init_ammo=6):
         
-        # 1. 如果外部没有指定出生状态，则使用内部随机逻辑
-        if red_birth_state is None and blue_birth_state is None:
-            red_birth_state, blue_birth_state = self._get_random_birth_states()
+        # # 1. 如果外部没有指定出生状态，则使用内部随机逻辑
+        # if red_birth_state is None and blue_birth_state is None:
+        #     red_birth_state, blue_birth_state = self._get_random_birth_states()
 
-        # 2. 调用父类 Battle 的 reset
-        super().reset(seed=seed, options=options, 
-                      red_birth_state=red_birth_state, blue_birth_state=blue_birth_state, 
-                      red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo)
+        # # 2. 调用父类 Battle 的 reset
+        # super().reset(seed=seed, options=options, 
+        #               red_birth_state=red_birth_state, blue_birth_state=blue_birth_state, 
+        #               red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo)
         
-        # 3. 初始化额外变量
-        self.last_dist_dot = None
-        self.last_dhor = None
-        self.lock_time_count = 0
+        # # 3. 初始化额外变量
+        # self.last_dist_dot = None
+        # self.last_dhor = None
+        # self.lock_time_count = 0
         
-        # 4. 获取观测并返回
-        flat_obs, _ = self.attack_obs('b')
-        return flat_obs.astype(np.float32), {}
-
-    # def _get_obs(self):
-    #     flat_obs, _ = self.attack_obs('b')
-    #     return flat_obs.astype(np.float32)
-
-    # def _get_reward(self):
-    #     is_done, b_reward, _ = self.get_terminate_and_reward('b')
-    #     return (0, 0), (b_reward, b_reward)
+        # # 4. 获取观测并返回
+        # flat_obs, _ = self.attack_obs('b')
+        # return flat_obs.astype(np.float32), {}

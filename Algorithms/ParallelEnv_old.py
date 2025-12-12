@@ -45,25 +45,6 @@ def worker(remote, parent_remote, env_fn_wrapper):
                 r_obs, _ = env.attack_obs('r')
                 b_obs, _ = env.attack_obs('b')
                 
-                # ================= [新增核心逻辑 START] =================
-                
-                # 1. 获取 State (目前暂用 Obs 代替，为未来留接口)
-                r_state = r_obs  # 以后如果环境有了 env.get_global_state() 改这里即可
-                b_state = b_obs
-                
-                # 2. 计算 Masks (1=存活, 0=死亡)
-                # 假设环境中的对象有 dead 属性 (需要在 AttackManeuverEnv 确认有此属性)
-                # 如果没有 dead 属性，可以用 health > 0 判断
-                b_active_mask = 1.0 if not getattr(env.BUAV, 'dead', False) else 0.0
-                r_action_mask = 1.0 if not getattr(env.RUAV, 'dead', False) else 0.0
-                
-                # 3. 计算 Truncation (截断)
-                # 通常是超时截断，非胜负平导致的结束
-                # 假设 is_done 包含超时，这里简单处理：如果是超时导致的 done，则 trunc=True
-                # 如果你的 env.t 是当前时间，game_time_limit 是最大时间
-                trunc = False 
-                # ==============================================================
-                
                 # [新增] 提取红方规则所需的 Raw State
                 red_raw_info = {
                     'pos': env.RUAV.pos_,
@@ -80,15 +61,8 @@ def worker(remote, parent_remote, env_fn_wrapper):
 
                 if is_done:
                     # 重置环境并获取初始观测
-                    env.reset()
-                    r_obs, _ = env.attack_obs('r')
+                    b_obs, _ = env.reset() 
                     r_obs, _ = env.attack_obs('r') 
-                    # Reset 后也要更新 state
-                    r_state = r_obs
-                    b_state = b_obs
-                    # Mask 重置为 1
-                    b_active_mask = 1.0
-                    r_action_mask = 1.0
                     # 重置后更新 info 中的 raw info
                     info['red_raw_info'] = {
                         'pos': env.RUAV.pos_,
@@ -100,11 +74,6 @@ def worker(remote, parent_remote, env_fn_wrapper):
                 remote.send({
                     'r_obs': r_obs,
                     'b_obs': b_obs,
-                    'r_state': r_state,           # [新增]
-                    'b_state': b_state,           # [新增]
-                    'b_active_masks': b_active_mask, # [新增]
-                    'r_action_masks': r_action_mask, # [新增]
-                    'truncs': trunc,              # [新增]
                     'r_reward': 0,          
                     'b_reward': b_reward,   
                     'dones': is_done,       
@@ -112,15 +81,9 @@ def worker(remote, parent_remote, env_fn_wrapper):
                 })
 
             elif cmd == 'reset':
-                # 1. 执行环境重置 (现在它不返回 obs 了)
-                env.reset() 
-                # 2. [新增] 在 Worker 内部显式调用观测函数
-                #    这样符合你“reset后单独调用obs”的逻辑，
-                #    同时只通过管道发送一次数据回主进程
+                b_obs, _ = env.reset()
                 r_obs, _ = env.attack_obs('r')
-                b_obs, _ = env.attack_obs('b')
                 
-                # 3. 重新提取 Raw Info
                 # Reset 时也需要发送 raw info
                 red_raw_info = {
                     'pos': env.RUAV.pos_,
@@ -129,20 +92,10 @@ def worker(remote, parent_remote, env_fn_wrapper):
                     'ammo': env.RUAV.ammo
                 }
                 
-                # 4. 发送回主进程
                 remote.send({
                     'r_obs': r_obs,
                     'b_obs': b_obs,
-                    'r_state': r_obs, # init state
-                    'b_state': b_obs, # init state
-                    'b_active_masks': 1.0,
-                    'r_action_masks': 1.0,
-                    'truncs': False,
-                    'infos': {
-                        'win': env.win, 
-                        'lose': env.lose,
-                        'red_raw_info': red_raw_info # 这是一个字典，包含 'pos', 'psi' 等
-                    }
+                    'infos': {'red_raw_info': red_raw_info} 
                 })
 
             elif cmd == 'close':
@@ -213,13 +166,6 @@ class ParallelPettingZooEnv:
         return {
             'r_obs': np.stack([r['r_obs'] for r in results]),
             'b_obs': np.stack([r['b_obs'] for r in results]),
-            # [新增] 堆叠新变量
-            'r_state': np.stack([r['r_state'] for r in results]),
-            'b_state': np.stack([r['b_state'] for r in results]),
-            'b_active_masks': np.stack([r['b_active_masks'] for r in results]).reshape(-1, 1), # 变成 (N, 1)
-            'r_action_masks': np.stack([r['r_action_masks'] for r in results]).reshape(-1, 1),
-            'truncs': np.stack([r['truncs'] for r in results]).reshape(-1, 1),
-            # 原有
             'r_reward': np.stack([r['r_reward'] for r in results]),
             'b_reward': np.stack([r['b_reward'] for r in results]),
             'dones': np.stack([r['dones'] for r in results]),

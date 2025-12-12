@@ -3,7 +3,7 @@ import torch
 
 class HybridReplayBuffer:
     def __init__(self, n_envs, buffer_size, obs_dim, state_dim, action_dims_dict, 
-                 actor_hidden_dim=None, critic_hidden_dim=None, use_truncs=False, use_active_masks=False, device='cpu'):
+                 actor_hidden_dim=None, critic_hidden_dim=None, use_truncs=False, device='cpu'):
         """
         参数:
             n_envs: 并行环境数量 (Threads)
@@ -13,7 +13,6 @@ class HybridReplayBuffer:
             action_dims_dict: 动作维度字典 {'cont': int, 'cat': [], 'bern': int}
             actor/critic_hidden_dim: RNN 隐藏状态维度 (Layers, Dim) 或 None
             use_truncs: 是否处理截断信号
-            use_active_masks: 是否处理Active Mask (用于多智能体死后屏蔽)
         """
         self.n_envs = n_envs
         self.buffer_size = buffer_size
@@ -24,7 +23,6 @@ class HybridReplayBuffer:
         self.ptr = 0
         self.full = False
         self.use_truncs = use_truncs
-        self.use_active_masks = use_active_masks
 
         # 1. 预分配内存 (Time, Envs, Dim)
         self.obs = np.zeros((buffer_size, n_envs, obs_dim), dtype=np.float32)
@@ -35,9 +33,6 @@ class HybridReplayBuffer:
         
         if self.use_truncs:
             self.truncs = np.zeros((buffer_size, n_envs), dtype=np.float32)
-            
-        if self.use_active_masks:
-            self.active_masks = np.zeros((buffer_size, n_envs), dtype=np.float32)
 
         # 动作处理 (支持混合动作)
         self.actions = {}
@@ -68,7 +63,7 @@ class HybridReplayBuffer:
         self.full = False
 
     def add(self, obs, state, action_dict, reward, done, next_state, 
-            trunc=None, active_mask=None, actor_h=None, critic_h=None):
+            trunc=None, actor_h=None, critic_h=None):
         """
         添加一步数据。所有输入都应该是 (N_Envs, ...) 形状的 numpy 数组。
         """
@@ -84,9 +79,6 @@ class HybridReplayBuffer:
         
         if self.use_truncs and trunc is not None:
             self.truncs[self.ptr] = trunc
-            
-        if self.use_active_masks and active_mask is not None:
-            self.active_masks[self.ptr] = active_mask
 
         # 动作填入
         for k, v in action_dict.items():
@@ -171,9 +163,6 @@ class HybridReplayBuffer:
         
         if self.use_truncs:
             flatten_dict['truncs'] = self.truncs.reshape(-1)
-            
-        if self.use_active_masks:
-            flatten_dict['active_masks'] = self.active_masks.reshape(-1)
 
         # 动作字典展平
         flat_actions = {}
@@ -205,7 +194,7 @@ if __name__ == '__main__':
         def forward(self, x):
             return torch.sum(x, dim=1, keepdim=True) * 0.1 # dummy value
 
-    buffer = HybridReplayBuffer(n_envs, bs, obs_d, state_d, act_dims, use_active_masks=True)
+    buffer = HybridReplayBuffer(n_envs, bs, obs_d, state_d, act_dims)
     critic = MockCritic()
     
     # Fill buffer
@@ -220,10 +209,9 @@ if __name__ == '__main__':
         }
         r = np.random.randn(n_envs)
         d = np.zeros(n_envs)
-        active = np.ones(n_envs)
         if i == bs-1: d[:] = 1 # last step done
         
-        buffer.add(o, s, a, r, d, ns, active_mask=active)
+        buffer.add(o, s, a, r, d, ns)
         
     print(f"Buffer filled. Pointer: {buffer.ptr}")
     
@@ -234,9 +222,6 @@ if __name__ == '__main__':
     print("States shape (Expected 40, 10):", data['states'].shape)
     print("Actions Cont shape (Expected 40, 3):", data['actions']['cont'].shape)
     print("Advantages shape (Expected 40,):", data['advantages'].shape)
-    
-    if 'active_masks' in data:
-        print("Active masks shape:", data['active_masks'].shape)
     
     assert data['states'].shape == (n_envs * bs, state_d)
     assert data['actions']['cont'].shape == (n_envs * bs, 3)

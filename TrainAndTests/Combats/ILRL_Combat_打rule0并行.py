@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'ILRL_combat_打rule0带导弹'
+    mission_name = 'ILRL_combat_打rule0'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -271,10 +271,8 @@ if __name__ == "__main__":
     # actor_lr = scale_learning_rate(actor_lr, student_agent.actor)
     # critic_lr = scale_learning_rate(critic_lr, student_agent.critic)
     # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
-    
+    tacview_input = 0
     # tacview_input = input("Enable tacview visualization? (0=no, 1=yes) [default 0]: ").strip()
-    tacview_input= 0
-    
     if tacview_input == "":
         tacview_show = 0
     else:
@@ -287,7 +285,6 @@ if __name__ == "__main__":
     env.shielded = 1 # 不得不全程带上，否则对手也会撞地
     env.dt_move = 0.05 # 仿真跑得快点
     
-    from BasicRules import * # 可以直接读同一级目录
     t_bias = 0
     
     
@@ -343,7 +340,7 @@ if __name__ == "__main__":
         # --- [Modification] 对手选择逻辑 (PFSP) ---
         # 强制对手为 Rule 0
         adv_is_rule = True
-        rule_num = 0
+        rule_num = 1
         print(f"Eps {i_episode}: Opponent is Rule {rule_num}")
         
         episode_return = 0
@@ -422,8 +419,8 @@ if __name__ == "__main__":
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
                 r_m_id = None
-                if r_fire:
-                    r_m_id = launch_missile_immediately(env, 'r')
+                # if r_fire:
+                #     r_m_id = launch_missile_immediately(env, 'r')
 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
