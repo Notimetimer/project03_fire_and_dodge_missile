@@ -73,14 +73,18 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='ILRL_combat_打rule1', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='ILRL_combat_打rule0带导弹', help="Mission name to find the log directory.")
     args = parser.parse_args()
     
+
     'MARWIL_combat_有辅助奖励'
     'MARWIL_combat_无辅助奖励'
     'RL_combat_有辅助奖励'
     'RL_combat_无辅助奖励'
     'RL_combat_打rule0'
+    'ILRL_combat_打rule1'
+    'ILRL_combat_打rule0带导弹'
+    
 
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
@@ -151,8 +155,8 @@ if __name__ == "__main__":
                     r_state_check = env.unscale_state(r_check_obs)
                     r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
                     last_r_action_label = r_action_label
-                    # if r_fire:
-                    #     launch_missile_immediately(env, 'r')
+                    if r_fire:
+                        launch_missile_immediately(env, 'r')
 
                     # 蓝方 (RL 智能体)
                     # -- 规则
