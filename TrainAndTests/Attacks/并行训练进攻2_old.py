@@ -285,7 +285,7 @@ if __name__ == "__main__":
                 
                 next_b_obs = results['b_obs']
                 rewards = results['b_reward'] 
-                dones = results['dones']      
+                dones = results['dones']
                 
                 # E. [修改] 存入 HybridReplayBuffer
                 # 注意：add 方法需要 (N, D) 的 numpy 数组

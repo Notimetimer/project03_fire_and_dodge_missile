@@ -235,6 +235,10 @@ class ParallelPettingZooEnv:
         return {
             'r_obs': np.stack([r['r_obs'] for r in results]),
             'b_obs': np.stack([r['b_obs'] for r in results]),
+            # ================= [新增] =================
+            'r_state': np.stack([r['r_state'] for r in results]), # 必须把初始 state 接住
+            'b_state': np.stack([r['b_state'] for r in results]), 
+            # =========================================
             'infos': [r.get('infos', {}) for r in results] # 确保 reset 也返回 infos
         }
 

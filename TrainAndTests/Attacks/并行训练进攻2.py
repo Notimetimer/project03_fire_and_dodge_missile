@@ -9,12 +9,17 @@ from math import pi, sqrt, atan2, exp, cos, sin
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-
-from Envs.Tasks.AttackManeuverEnv_old import AttackTrainEnv, dt_maneuver
+# debug0 排除环境的问题
+from Envs.Tasks.AttackManeuverEnv import AttackTrainEnv, dt_maneuver
+# from Envs.Tasks.AttackManeuverEnv_old import AttackTrainEnv, dt_maneuver
 # 引入我们刚才写的并行 Wrapper
+# debug1 排除ParallelEnv未修改部分的问题
+# from Algorithms.ParallelEnv_old import ParallelPettingZooEnv
 from Algorithms.ParallelEnv import ParallelPettingZooEnv
 from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
+# debug2 排除HybridBuffer未修改部分的问题
+# from Algorithms.HybridBuffer_old import HybridReplayBuffer
 from Algorithms.HybridBuffer import HybridReplayBuffer # [新增]
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Math_calculates.ScaleLearningRate import scale_learning_rate
@@ -226,7 +231,7 @@ if __name__ == "__main__":
         obs_dim=state_dim,   # 假设 obs_dim = state_dim (如果用了 attack_obs)
         state_dim=state_dim, # Critic 用的状态
         action_dims_dict=action_dims_dict,
-        # use_truncs=True, use_active_masks=True,
+        use_truncs=True, use_active_masks=True,
         device=device
     )
 
@@ -236,6 +241,16 @@ if __name__ == "__main__":
     # Reset 全部环境
     obs_dict = vec_env.reset()
     b_obs = obs_dict['b_obs'] 
+
+    # ================= [修正 1：必须初始化 b_state] =================
+    # 从 reset 结果中获取 t=0 的状态
+    if 'b_state' in obs_dict:
+        b_state = obs_dict['b_state']
+    else:
+        # 如果 ParallelEnv 还没准备好 state，暂时用 obs 代替
+        b_state = b_obs 
+    # =============================================================
+
     infos = obs_dict['infos'] # 捕获初始 info (包含 red_raw_info)
 
     try:
@@ -279,33 +294,37 @@ if __name__ == "__main__":
                 # D. 并行步进
                 results = vec_env.step(actions_dispatch)
                 
-                next_b_state = results['b_obs']
+                next_b_obs = results['b_obs']
+                next_b_state = results['b_obs'] # 这是 S_{t+1}
                 rewards = results['b_reward'] 
-                dones = results['dones']      
+                dones = results['dones']
+
                 # [新增] 获取新数据
                 # 如果你的 Buffer 需要 state，现在可以直接拿
-                b_states = results['b_state'] 
-                # b_masks = results['b_active_masks']
-                # truncs = results['truncs']
+                b_masks = 1 # results['b_active_masks']
+                truncs = 0 # results['truncs']
                 
-                # E. [修改] 存入 HybridReplayBuffer
-                # 注意：add 方法需要 (N, D) 的 numpy 数组
+                # ================= [修正 2：存入 Buffer] =================
                 replay_buffer.add(
-                    obs=b_obs,
-                    state=b_states, # 如果没有区分全局状态，就用 obs
-                    action_dict=b_actions_raw, # 传入包含 'cont' 的字典
+                    obs=b_obs,       # 使用循环当前的 b_obs (S_t)
+                    state=b_state,   # <--- 【关键】使用循环当前的 b_state (S_t)
+                    action_dict=b_actions_raw,
                     reward=rewards,
                     done=dones,
-                    next_state=next_b_state,
-                    # # [新增]
-                    # active_mask=b_masks,
-                    # trunc=truncs
+                    next_state=next_b_state, # 存入 S_{t+1}
+                    trunc=truncs, # 无法调换truncs和dones的位置，环境就不是这回事
+                    active_mask=b_masks,
                 )
+                # ========================================================
                 
                 # 更新循环变量
                 obs_dict = results
                 infos = results['infos']
-                b_obs = next_b_state
+                b_obs = next_b_obs
+                # t 变成 t+1
+                # ================= [修正 3：更新状态] =================
+                b_state = next_b_state   # <--- 更新 b_state 为 S_{t+1}
+                # ====================================================
                 total_steps += 1 # 这里 +1 代表所有环境都走了一步
                 
             # --- 更新阶段 (Update) ---

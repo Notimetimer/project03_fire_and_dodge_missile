@@ -37,7 +37,7 @@ class HybridReplayBuffer:
             self.truncs = np.zeros((buffer_size, n_envs), dtype=np.float32)
             
         if self.use_active_masks:
-            self.active_masks = np.zeros((buffer_size, n_envs), dtype=np.float32)
+            self.active_masks = np.ones((buffer_size, n_envs), dtype=np.float32)
 
         # 动作处理 (支持混合动作)
         self.actions = {}
