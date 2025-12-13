@@ -557,7 +557,7 @@ if __name__ == "__main__":
             # 混合强化学习与模仿学习
             # 1. 定义 IL 衰减的最大轮次
             # 使用浮点数以确保计算精度
-            MAX_IL_EPISODE = 100.0 
+            MAX_IL_EPISODE = 500 # 100.0 
             # 2. 计算当前 IL 权重 alpha_il (线性衰减，确保不小于 0)
             # 当 i_episode = 0 时，alpha_il = 1.0
             # 当 i_episode = 100 时，alpha_il = 0.0
