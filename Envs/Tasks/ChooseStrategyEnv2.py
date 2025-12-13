@@ -347,7 +347,7 @@ class ChooseStrategyEnv(Battle):
             
         if self.win:
             reward_main += 300 # 300  --1210新增
-            reward_main += ego.ammo * 20  # 每一发剩余导弹多给 5 分 --1210新增
+            reward_main += ego.ammo * 10  # 每一发剩余导弹多给 5 分 --1210新增 20
         if self.lose:
             reward_main -= 300 # 300  --1210新增
         if self.draw:
@@ -403,9 +403,9 @@ class ChooseStrategyEnv(Battle):
                 reward_assisted += 3 * (abs(AA_hor)/pi-1)
                 reward_assisted += 3 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
                 
-                # 发射距离奖励
-                if distance > 30e3:
-                    reward_assisted += 5 * (1-(distance-30e3)/(50e3))
+                # # 发射距离奖励
+                # if distance > 30e3:
+                #     reward_assisted += 5 * (1-(distance-30e3)/(50e3))
 
                 reward_assisted += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
 
