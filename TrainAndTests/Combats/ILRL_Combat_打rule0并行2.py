@@ -79,6 +79,9 @@ def worker(remote, parent_remote, env_fn_wrapper):
                 
                 step_reward = 0
                 done = False
+                win_flag = False
+                lose_flag = False
+                draw_flag = False
                 
                 # --- Frame Skipping Loop (物理步进) ---
                 for _ in range(cycle_mult):
@@ -91,6 +94,10 @@ def worker(remote, parent_remote, env_fn_wrapper):
                     
                     if is_done:
                         done = True
+                        # 记录胜负状态用于主进程统计
+                        if env.win: win_flag = True
+                        elif env.lose: lose_flag = True
+                        else: draw_flag = True # 假设非胜非负即为平/超时
                         break
                 
                 # --- 获取 Next State / Obs ---
@@ -405,13 +412,24 @@ if __name__ == "__main__":
         while total_steps < args.max_steps:
             replay_buffer.clear()
             
+            # --- 统计计数器 (收集周期内) ---
+            rollout_total_reward = 0       # 总奖励
+            rollout_missile_counts = 0     # 导弹发射总数
+            rollout_wins = 0               # 胜场数
+            rollout_loses = 0              # 负场数
+            rollout_draws = 0              # 平场数
+            
             # --- Rollout Loop ---
             for _ in range(steps_per_rollout):
                 # 1. 蓝方决策 (NN)
                 # PPOHybrid2 的 take_action 返回字典
                 b_action_exec, b_action_raw, _, _ = student_agent.take_action(b_obs, explore=True)
                 
-                # 2. 红方决策 (Rule 0) - 并行计算
+                # 统计导弹 (bern > 0.5)
+                # b_action_exec['bern'] 是 (N_envs, 1) 的 numpy 数组
+                fired_this_step = np.sum(b_action_exec['bern'] > 0.5)
+                rollout_missile_counts += fired_this_step
+                
                 r_actions_list = []
                 for i in range(args.n_envs):
                     # 从 unscale_state 获取真实物理状态
@@ -449,6 +467,16 @@ if __name__ == "__main__":
                 dones = results['dones']
                 b_active_masks = results['b_active_masks']
                 truncs = results['truncs']
+                result_infos = results['infos']
+                
+                # 累加奖励 (Sum rewards across all envs for this step)
+                rollout_total_reward += np.sum(rewards)
+                
+                # 统计胜负平 (遍历 infos)
+                for info in result_infos:
+                    if info.get('win', False): rollout_wins += 1
+                    elif info.get('lose', False): rollout_loses += 1
+                    elif info.get('draw', False): rollout_draws += 1
                 
                 # 5. 存入 Buffer
                 # [关键修正] state=b_state (T), next_state=next_b_state (T+1)
@@ -470,6 +498,19 @@ if __name__ == "__main__":
                 
                 total_steps += args.n_envs # 每个环境走了一步(决策步)
             
+            # --- 统计检查与计算 ---
+            total_battles = rollout_wins + rollout_loses + rollout_draws
+            if total_battles == 0:
+                raise RuntimeError("Error: No episodes finished in this rollout cycle. Please increase buffer size (steps_per_rollout)!")
+
+            # 计算平均值
+            avg_rollout_reward = rollout_total_reward / args.n_envs
+            avg_missiles = rollout_missile_counts / args.n_envs
+            
+            avg_wins = rollout_wins / args.n_envs
+            avg_loses = rollout_loses / args.n_envs
+            avg_draws = rollout_draws / args.n_envs
+            
             # --- Update Phase ---
             # 计算 GAE 并展平数据
             transition_dict = replay_buffer.compute_estimates_and_flatten(
@@ -481,17 +522,37 @@ if __name__ == "__main__":
             # PPO 更新
             student_agent.update(transition_dict, adv_normed=True)
             
-            # --- Logging ---
-            avg_return = np.mean(transition_dict['rewards']) * steps_per_rollout # 估算一下回传
-            # 注意：这里的 rewards 已经被 flatten 了，上面估算不准确。
-            # 更准确的方法是 logging 累加，但为了性能，我们直接看 Tensorboard 的 reward 曲线即可
-            # 或者统计 dones == True 时的 reward
+            # --- Logging (恢复所有监控项) ---
+            # 1. 业务指标
+            logger.add("train/1 episode_return (avg)", avg_rollout_reward, total_steps) # 约等于 mean return
+            logger.add("train/2 win (avg_count)", avg_wins, total_steps)
+            logger.add("train/2 lose (avg_count)", avg_loses, total_steps)
+            logger.add("train/2 draw (avg_count)", avg_draws, total_steps)
+            logger.add("special/0 missiles (avg_count)", avg_missiles, total_steps)
             
-            logger.add("train/actor_loss", student_agent.actor_loss, total_steps)
-            logger.add("train/critic_loss", student_agent.critic_loss, total_steps)
-            logger.add("train/entropy", student_agent.entropy_mean, total_steps)
+            # 2. 训练进度
+            logger.add("train/11 episode/step", total_steps / args.max_episode_len, total_steps) # 估算 Episode 数
             
-            print(f"Step {total_steps}: Actor Loss {student_agent.actor_loss:.3f}, Entropy {student_agent.entropy_mean:.3f}")
+            # 3. 梯度与网络监控 (PPOHybrid 内部属性)
+            logger.add("train/5 actor_pre_clip_grad", student_agent.pre_clip_actor_grad, total_steps)
+            logger.add("train/6 critic_pre_clip_grad", student_agent.pre_clip_critic_grad, total_steps)
+            
+            # 4. 损失函数
+            logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
+            logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
+            
+            # 5. 熵 (总熵及分项)
+            logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
+            logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
+            logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
+            
+            # 6. PPO 诊断指标 (Advantage, Explained Var, Clip Frac)
+            # 注意: student_agent.advantage 需要在 PPOHybrid 中正确计算并保存
+            logger.add("train/10 advantage", student_agent.advantage, total_steps)
+            logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
+            logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+
+            print(f"Step {total_steps}: Reward {avg_rollout_reward:.2f}, Wins {rollout_wins}, Loss {student_agent.actor_loss:.3f}")
             
             # Save Model
             if total_steps % save_interval < args.n_envs * steps_per_rollout:
