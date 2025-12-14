@@ -420,7 +420,7 @@ if __name__ == "__main__":
             rollout_draws = 0              # 平场数
             
             # --- Rollout Loop ---
-            for _ in range(steps_per_rollout):
+            for step_idx in range(steps_per_rollout):
                 # 1. 蓝方决策 (NN)
                 # PPOHybrid2 的 take_action 返回字典
                 b_action_exec, b_action_raw, _, _ = student_agent.take_action(b_obs, explore=True)
@@ -496,20 +496,33 @@ if __name__ == "__main__":
                 b_state = next_b_state # 更新当前状态为 T+1
                 r_check_obs = results['r_check_obs'] # 更新红方状态
                 
-                total_steps += args.n_envs # 每个环境走了一步(决策步)
+                total_steps += 1 # 每个环境走了一步(决策步)
             
             # --- 统计检查与计算 ---
             total_battles = rollout_wins + rollout_loses + rollout_draws
+            
+            # 计算一个回合最大的决策步数: T_max / T_decide
+            T_decide = action_cycle_multiplier * dt_maneuver
+            max_episode_decision_steps = args.max_episode_len / T_decide if T_decide > 0 else 1.0
+
             if total_battles == 0:
                 raise RuntimeError("Error: No episodes finished in this rollout cycle. Please increase buffer size (steps_per_rollout)!")
-
-            # 计算平均值
-            avg_rollout_reward = rollout_total_reward / args.n_envs
-            avg_missiles = rollout_missile_counts / args.n_envs
             
-            avg_wins = rollout_wins / args.n_envs
-            avg_loses = rollout_loses / args.n_envs
-            avg_draws = rollout_draws / args.n_envs
+            # 【修正 3：平均奖励缩放】
+            # 计算缩放因子： (最大决策步数 / 经验收集步数)
+            scaling_factor = max_episode_decision_steps / steps_per_rollout
+            
+            # Rollout 总奖励平均到每个环境/每个完整回合的尺度上
+            avg_rollout_reward = (rollout_total_reward / args.n_envs) * scaling_factor
+            
+            # 导弹数平均到每个环境/每个完整回合的尺度上
+            avg_missiles = (rollout_missile_counts / args.n_envs) * scaling_factor
+            
+            # 【修正 2：胜负平比例】
+            # 注意：这里计算的是总的胜场/败场/平场数。如果目标是比例，则除以总战斗场次
+            win_ratio = rollout_wins / total_battles
+            lose_ratio = rollout_loses / total_battles
+            draw_ratio = rollout_draws / total_battles
             
             # --- Update Phase ---
             # 计算 GAE 并展平数据
@@ -524,10 +537,10 @@ if __name__ == "__main__":
             
             # --- Logging (恢复所有监控项) ---
             # 1. 业务指标
-            logger.add("train/1 episode_return (avg)", avg_rollout_reward, total_steps) # 约等于 mean return
-            logger.add("train/2 win (avg_count)", avg_wins, total_steps)
-            logger.add("train/2 lose (avg_count)", avg_loses, total_steps)
-            logger.add("train/2 draw (avg_count)", avg_draws, total_steps)
+            logger.add("train/1 episode_return (avg)", avg_rollout_reward, total_steps) 
+            logger.add("train/2 win (ratio)", win_ratio, total_steps)
+            logger.add("train/2 lose (ratio)", lose_ratio, total_steps)
+            logger.add("train/2 draw (ratio)", draw_ratio, total_steps)
             logger.add("special/0 missiles (avg_count)", avg_missiles, total_steps)
             
             # 2. 训练进度
@@ -552,7 +565,7 @@ if __name__ == "__main__":
             logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
             logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
 
-            print(f"Step {total_steps}: Reward {avg_rollout_reward:.2f}, Wins {rollout_wins}, Loss {student_agent.actor_loss:.3f}")
+            print(f"Step {total_steps}: Reward {avg_rollout_reward:.2f}, Win Ratio {win_ratio:.2f}, Loss {student_agent.actor_loss:.3f}")
             
             # Save Model
             if total_steps % save_interval < args.n_envs * steps_per_rollout:
