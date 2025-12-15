@@ -550,7 +550,7 @@ if __name__ == "__main__":
             )
             
             # PPO 更新
-            student_agent.update(transition_dict, adv_normed=True, mini_batch_size=)
+            student_agent.update(transition_dict, adv_normed=True, mini_batch_size=128)
             
             # --- Logging (恢复所有监控项) ---
             # 1. 业务指标
