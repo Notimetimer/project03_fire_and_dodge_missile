@@ -14,7 +14,7 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Algorithms.PPOHybrid23 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid24 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from BasicRules import *
@@ -177,7 +177,7 @@ gamma = 0.95
 lmbda = 0.95
 epochs = 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.2, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.08} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP'
+    mission_name = 'RL_combat_PFSP_熵裁剪'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)

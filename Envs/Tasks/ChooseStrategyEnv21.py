@@ -384,7 +384,7 @@ class ChooseStrategyEnv(Battle):
             reward_main += 50 # 10  --1210新增
 
         # 导弹被逃脱 (保持原逻辑)
-        escape_penalty = 50  # 10  --1210新增
+        escape_penalty = 20  # 10  --1210新增 50
         if enm.escape_once:
             reward_main -= escape_penalty
 
@@ -395,12 +395,12 @@ class ChooseStrategyEnv(Battle):
         # 发射惩罚
         if shoot >= 1:
             if alpha*180/pi > 10 or distance > 50e3:
-                reward_main -= 10*shoot if shoot==1 else 0
+                reward_main -= 10*shoot
             else:
                 reward_main += 10*shoot if shoot==1 else 0
 
             if len(alive_ally_missiles)>1:
-                reward_main -= 30*shoot # 30 --1210 新增
+                reward_main -= 100*shoot # 30 --1210 新增
             
             if not ego.dead:
                 reward_assisted += 3 * (pi/3-alpha)/(pi/3)

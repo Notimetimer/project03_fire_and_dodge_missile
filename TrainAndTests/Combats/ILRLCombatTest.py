@@ -14,9 +14,9 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 
 from Envs.Tasks.ChooseStrategyEnv2 import ChooseStrategyEnv
-from Algorithms.PPOHybrid2 import PolicyNetHybrid, HybridActorWrapper
 from BasicRules import basic_rules
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
+from Algorithms.PPOHybrid23 import PolicyNetHybrid, HybridActorWrapper
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 20
@@ -134,7 +134,7 @@ if __name__ == "__main__":
                     # -- 训练
                     with torch.no_grad():
                         # **修正点：使用正确的、已加载权重的 actor_wrapper**
-                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore=0)
+                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore={'cont':0, 'cat':1, 'bern':1})
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
                     print("开火概率", b_action_check['bern'][0])

@@ -530,11 +530,6 @@ class PPOHybrid:
         self.entropy_cat = 0
         self.entropy_bern = 0
         self.entropy_cont = 0
-        
-        # 新增 IL 监控
-        self.il_actor_loss = 0
-        self.il_critic_loss = 0
-        self.advantage = 0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -755,8 +750,7 @@ class PPOHybrid:
                 
                 actor_loss = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
-                # [关键修改] 使用 MSE (均方误差) 替换原有的线性熵正则
-                # 计算 (Entropy - Target)^2
+                # [修改] 分项 Entropy Loss 计算 (引入 Target Entropy)
                 e_cont = entropy_details['cont'] 
                 e_cat = entropy_details['cat'] 
                 e_bern = entropy_details['bern'] 
@@ -766,35 +760,21 @@ class PPOHybrid:
                 t_cat = self.target_entropy['cat']
                 t_bern = self.target_entropy['bern']
 
-                # 1. 连续动作 MSE
-                if e_cont is not None:
-                    # 使用平方差作为 Loss
-                    mse_cont = (e_cont - t_cont).pow(2)
-                    loss_ent_cont = (mse_cont * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cont = torch.tensor(0., device=self.device)
+                # 计算 (Entropy - Target)
+                diff_cont = (e_cont - t_cont) if e_cont is not None else torch.tensor(0., device=self.device)
+                diff_cat = (e_cat - t_cat) if e_cat is not None else torch.tensor(0., device=self.device)
+                diff_bern = (e_bern - t_bern) if e_bern is not None else torch.tensor(0., device=self.device)
 
-                # 2. 离散动作 MSE
-                if e_cat is not None:
-                    mse_cat = (e_cat - t_cat).pow(2)
-                    loss_ent_cat = (mse_cat * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cat = torch.tensor(0., device=self.device)
-
-                # 3. 伯努利动作 MSE
-                if e_bern is not None:
-                    mse_bern = (e_bern - t_bern).pow(2)
-                    loss_ent_bern = (mse_bern * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_bern = torch.tensor(0., device=self.device)
+                loss_ent_cont = (diff_cont * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_cat = (diff_cat * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_bern = (diff_bern * mb_active_masks).sum() / (active_sum + mask_eps)
 
                 k_cont = self.k_entropy.get('cont', 0.0)
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
 
-                # [关键修改] 符号由 '-' 改为 '+'，因为现在是惩罚项 (Penalty)
-                # Actor Loss = Policy Loss + k * (H - H_target)^2
-                actor_loss = actor_loss + (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+                # Actor Loss = Policy Loss - k * (H - H_target)
+                actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
@@ -1070,7 +1050,7 @@ class PPOHybrid:
             raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing)
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
 
-            # [关键修改] 使用 MSE 惩罚熵偏离 (MARWIL 阶段)
+            # [新增] Entropy Regularization for MARWIL (引入 Target Entropy)
             _, _, entropy_details, _ = self.actor.evaluate_actions(actor_input_batch, actions_batch, max_std=self.max_std)
             
             e_cont = entropy_details['cont']
@@ -1081,17 +1061,20 @@ class PPOHybrid:
             t_cat = self.target_entropy['cat']
             t_bern = self.target_entropy['bern']
             
-            # MARWIL 假设全有效，直接 mean
-            loss_ent_cont = (e_cont - t_cont).pow(2).mean() if e_cont is not None else torch.tensor(0., device=self.device)
-            loss_ent_cat = (e_cat - t_cat).pow(2).mean() if e_cat is not None else torch.tensor(0., device=self.device)
-            loss_ent_bern = (e_bern - t_bern).pow(2).mean() if e_bern is not None else torch.tensor(0., device=self.device)
+            diff_cont = (e_cont - t_cont) if e_cont is not None else torch.tensor(0., device=self.device)
+            diff_cat = (e_cat - t_cat) if e_cat is not None else torch.tensor(0., device=self.device)
+            diff_bern = (e_bern - t_bern) if e_bern is not None else torch.tensor(0., device=self.device)
+            
+            # MARWIL 假设全有效
+            loss_ent_cont = diff_cont.mean()
+            loss_ent_cat = diff_cat.mean()
+            loss_ent_bern = diff_bern.mean()
             
             k_cont = self.k_entropy.get('cont', 0.0)
             k_cat = self.k_entropy.get('cat', 0.0)
             k_bern = self.k_entropy.get('bern', 0.0)
             
-            # [关键修改] 符号由 '-' 改为 '+' (Penalty)
-            actor_loss = actor_loss + (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+            actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
             # C. Critic Loss
             v_pred = self.critic(s_batch)
@@ -1330,7 +1313,7 @@ class PPOHybrid:
                 
                 actor_loss_rl = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
-                # [关键修改] 使用 MSE 惩罚 (Mixed Update 阶段)
+                # [修改] 分项 Entropy Loss 计算 (引入 Target Entropy)
                 e_cont = entropy_details['cont'] 
                 e_cat = entropy_details['cat'] 
                 e_bern = entropy_details['bern'] 
@@ -1340,27 +1323,21 @@ class PPOHybrid:
                 t_cat = self.target_entropy['cat']
                 t_bern = self.target_entropy['bern']
 
-                if e_cont is not None:
-                    loss_ent_cont = ((e_cont - t_cont).pow(2) * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cont = torch.tensor(0., device=self.device)
+                # 计算 (Entropy - Target)
+                diff_cont = (e_cont - t_cont) if e_cont is not None else torch.tensor(0., device=self.device)
+                diff_cat = (e_cat - t_cat) if e_cat is not None else torch.tensor(0., device=self.device)
+                diff_bern = (e_bern - t_bern) if e_bern is not None else torch.tensor(0., device=self.device)
 
-                if e_cat is not None:
-                    loss_ent_cat = ((e_cat - t_cat).pow(2) * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cat = torch.tensor(0., device=self.device)
-
-                if e_bern is not None:
-                    loss_ent_bern = ((e_bern - t_bern).pow(2) * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_bern = torch.tensor(0., device=self.device)
+                loss_ent_cont = (diff_cont * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_cat = (diff_cat * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_bern = (diff_bern * mb_active_masks).sum() / (active_sum + mask_eps)
 
                 k_cont = self.k_entropy.get('cont', 0.0)
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
 
-                # [关键修改] 符号由 '-' 改为 '+' (Penalty)
-                actor_loss_rl = actor_loss_rl + (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+                # Actor Loss = Policy Loss - k * (H - H_target)
+                actor_loss_rl = actor_loss_rl - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
