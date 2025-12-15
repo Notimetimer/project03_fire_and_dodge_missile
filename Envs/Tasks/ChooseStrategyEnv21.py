@@ -394,13 +394,13 @@ class ChooseStrategyEnv(Battle):
         
         # 发射惩罚
         if shoot >= 1:
-            if alpha*180/pi > 10:
-                reward_main -= 50*shoot # 10  --1210新增
+            if alpha*180/pi > 10 or distance > 50e3:
+                reward_main -= 10*shoot if shoot==1 else 0
             else:
-                reward_main -= 40*shoot # 8  --1210新增
-                
+                reward_main += 10*shoot if shoot==1 else 0
+
             if len(alive_ally_missiles)>1:
-                reward_main -= 80*shoot # 30 --1210 新增
+                reward_main -= 30*shoot # 30 --1210 新增
             
             if not ego.dead:
                 reward_assisted += 3 * (pi/3-alpha)/(pi/3)

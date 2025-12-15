@@ -7,6 +7,7 @@ import glob
 import re
 from math import pi
 import time
+import datetime
 
 # --- 1. 项目路径和模块导入 ---
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,41 +24,7 @@ dt_maneuver = 0.2
 # -----------------------------------------
 
 # --- 2. 辅助函数 ---
-def get_latest_log_dir(pre_log_dir, mission_name):
-    """在日志根目录中查找最新的一个训练文件夹"""
-    pattern = re.compile(rf"{re.escape(mission_name)}-run-(\d{{8}})-(\d{{6}})")
-    latest_dir = None
-    max_dt = None
-    for d in os.listdir(pre_log_dir):
-        m = pattern.match(d)
-        if m:
-            dt_str = m.group(1) + m.group(2)
-            if max_dt is None or dt_str > max_dt:
-                max_dt = dt_str
-                latest_dir = d
-    return os.path.join(pre_log_dir, latest_dir) if latest_dir else None
-
-def find_latest_agent_path(log_dir, agent_id=None):
-    """在指定的日志文件夹中查找智能体权重文件"""
-    if agent_id is not None:
-        path = os.path.join(log_dir, f"actor_rein{agent_id}.pt")
-        return path if os.path.exists(path) else None
-
-    search_pattern = os.path.join(log_dir, "actor_rein*.pt")
-    files = glob.glob(search_pattern)
-    if not files:
-        return None
-    
-    latest_file = None
-    max_id = -1
-    for f in files:
-        match = re.search(r'actor_rein(\d+)\.pt', os.path.basename(f))
-        if match:
-            current_id = int(match.group(1))
-            if current_id > max_id:
-                max_id = current_id
-                latest_file = f
-    return latest_file
+from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
 
 def create_initial_state():
     """创建固定的初始状态"""
@@ -73,7 +40,7 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='ILRL_combat_打rule0带导弹', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP', help="Mission name to find the log directory.")
     args = parser.parse_args()
     
 
@@ -84,6 +51,7 @@ if __name__ == "__main__":
     'RL_combat_打rule0'
     'ILRL_combat_打rule1'
     'ILRL_combat_打rule0带导弹'
+    'RL_combat_PFSP'
     
 
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -116,7 +84,7 @@ if __name__ == "__main__":
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     # 注意：测试时只需要 Actor Wrapper，不需要完整的 PPO agent
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
-    actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1))
+    actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
     env = ChooseStrategyEnv(env_args, tacview_show=1)
