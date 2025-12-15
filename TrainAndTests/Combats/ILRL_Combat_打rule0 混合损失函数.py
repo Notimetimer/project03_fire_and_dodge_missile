@@ -15,7 +15,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 
 from Envs.Tasks.ChooseStrategyEnv2 import *
-from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid22 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from BasicRules import *
@@ -570,7 +570,8 @@ if __name__ == "__main__":
                 il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
                 label_smoothing=0.3,      # 沿用 IL 实例中的标签平滑
                 alpha=alpha_il,           # 核心：传入随时间衰减的权重
-                beta=1.0                  # 沿用 IL 实例中的 beta
+                beta=1.0,                  # 沿用 IL 实例中的 beta
+                mini_batch_size = 128
             )
             decide_steps_after_update = 0
             #===========================================

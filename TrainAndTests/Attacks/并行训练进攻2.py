@@ -16,7 +16,7 @@ from Envs.Tasks.AttackManeuverEnv import AttackTrainEnv, dt_maneuver
 # debug1 排除ParallelEnv未修改部分的问题
 # from Algorithms.ParallelEnv_old import ParallelPettingZooEnv
 from Algorithms.ParallelEnv import ParallelPettingZooEnv
-from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid22 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 # debug2 排除HybridBuffer未修改部分的问题
 # from Algorithms.HybridBuffer_old import HybridReplayBuffer
@@ -345,7 +345,7 @@ if __name__ == "__main__":
             # 2. 执行 PPO 更新
             # 现在 update 内部会检测到 advantages 已存在，从而跳过重复计算
             # 并且 actions 已經是优化过的 Dict of Arrays 格式
-            agent.update(transition_dict)
+            agent.update(transition_dict, mini_batch_size=64)
             
             # 3. 记录日志
             # 注意：transition_dict['rewards'] 已经被展平成 numpy array 了
