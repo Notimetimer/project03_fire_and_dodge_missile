@@ -1,3 +1,12 @@
+'''
+通信流程（简化）
+
+ParallelPettingZooEnv 创建 pipes + processes，把 CloudpickleWrapper(env_fn) 传入子进程；
+子进程的 worker 从 wrapper 中恢复 env 并等待命令；
+主进程调用 vec_env.step(...) 或 reset()，通过 remotes 发送 ('step', data)；
+worker 执行环境逻辑，send 回结果；主进程收集并返回批量结果。
+'''
+
 import os
 import sys
 import numpy as np
@@ -29,7 +38,7 @@ sys.path.append(project_root)
 
 # 引入必要的模块
 from Envs.Tasks.ChooseStrategyEnv2 import *
-from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid22 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Algorithms.HybridBuffer import HybridReplayBuffer  # 确保你有这个文件
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -40,7 +49,7 @@ from BasicRules import *
 # ==============================================================================
 # Part 1: ParallelEnv 定义 (Worker & Manager)
 # ==============================================================================
-
+# （子进程函数）
 def worker(remote, parent_remote, env_fn_wrapper):
     parent_remote.close()
     env = env_fn_wrapper.x()
@@ -184,6 +193,8 @@ def worker(remote, parent_remote, env_fn_wrapper):
     finally:
         remote.close()
 
+# 实现 getstate 和 setstate，用 cloudpickle 将可调用对象（env factory）序列化为字节流。
+# 解决 multiprocessing 在传递复杂可调用对象（如闭包或局部定义的函数/类）时的 pickle 问题，使 worker 能在子进程中重建 env
 class CloudpickleWrapper(object):
     def __init__(self, x):
         self.x = x
@@ -192,6 +203,12 @@ class CloudpickleWrapper(object):
     def __setstate__(self, ob):
         self.x = pickle.loads(ob)
 
+# 进程管理器
+# 在主进程中创建若干 mp.Pipe() 对和 mp.Process（target=worker），
+# 每个 process 接收一个 CloudpickleWrapper 包裹的 env_fn
+# 保存 remotes（主端管道）并在 step/reset 时把命令与数据发给各子进程，
+# 收集各子进程返回的结果并做批量拼接/打包返回（_stack_results）。
+# 提供 close() 清理子进程并结束管道。
 class ParallelPettingZooEnv:
     def __init__(self, env_fns):
         self.closed = False
@@ -533,7 +550,7 @@ if __name__ == "__main__":
             )
             
             # PPO 更新
-            student_agent.update(transition_dict, adv_normed=True)
+            student_agent.update(transition_dict, adv_normed=True, mini_batch_size=)
             
             # --- Logging (恢复所有监控项) ---
             # 1. 业务指标
