@@ -177,7 +177,7 @@ gamma = 0.95
 lmbda = 0.95
 epochs = 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.2, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
+k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim

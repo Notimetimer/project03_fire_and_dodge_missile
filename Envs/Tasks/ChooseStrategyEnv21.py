@@ -4,6 +4,8 @@
 子策略暂时使用规则智能体，留下使用神经网络的接口
 
 加入导弹发生相关奖励，区分主要奖励和辅助奖励
+
+env21是env2的再训练环境，env2的奖励更适合打固定对手作为预训练
 '''
 
 import numpy as np
@@ -361,19 +363,19 @@ class ChooseStrategyEnv(Battle):
         # 假设制导过程持续较长，将每步奖励设为极小值，防止刷分。
         # 例如：0.05 * 100步 = 5分。
         if missile_in_mid_term:
-            reward_main += 0.4 # 0.05
+            reward_main += 0.4
 
         # [修改] 锁定目标
         if ego_states["target_locked"]: #  and not last_target_locked:
-            reward_main += 0.6 # 0.03
+            reward_main += 0.6
 
         # [修改] 被目标锁定
         if strict_locked_by_target: # and not last_strict_locked_by_target:
-            reward_main -= 0.5 # 0.03
+            reward_main -= 0.5
 
         # [修改] 收到导弹警告
         if warning: # and not last_warning:
-            reward_main -= 0.6 # 0.3
+            reward_main -= 0.6
 
         # [修改] 导弹锁定目标 (对手收到警告)
         if enm_states["warning"]: # and not last_enm_warning:
@@ -381,26 +383,31 @@ class ChooseStrategyEnv(Battle):
 
         # 逃脱导弹 (保持原逻辑，这通常由escape_once标志位控制，本身就是一次性的)
         if ego.escape_once:
-            reward_main += 50 # 10  --1210新增
+            reward_main += 50
 
         # 导弹被逃脱 (保持原逻辑)
-        escape_penalty = 20  # 10  --1210新增 50
+        escape_penalty = 50  # 20 --1216
         if enm.escape_once:
             reward_main -= escape_penalty
 
         # 死了也当剩下导弹全被逃脱处理
         if wasted>0:
-            reward_main -= escape_penalty*wasted # --1210新增
+            reward_main -= escape_penalty*wasted
         
         # 发射惩罚
         if shoot >= 1:
-            if alpha*180/pi > 10 or distance > 50e3:
-                reward_main -= 10*shoot
+            if alpha*180/pi > 15 or distance > 50e3:
+                reward_main -= 50*shoot # 10  --1216
+            elif alpha*180/pi < 30 and distance < 20e3:  # 近距瞄准开火给奖励 --1216
+                reward_main += 20
             else:
-                reward_main += 10*shoot if shoot==1 else 0
+                reward_main -= 10*shoot # 8  --1216
 
             if len(alive_ally_missiles)>1:
-                reward_main -= 100*shoot # 30 --1210 新增
+                if missile_time_since_shoot > 30 and shoot==1: # 30s后重复发射不再额外扣分
+                    pass
+                else:
+                    reward_main -= 80*shoot # 30 --1216
             
             if not ego.dead:
                 reward_assisted += 3 * (pi/3-alpha)/(pi/3)

@@ -40,7 +40,7 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_熵裁剪', help="Mission name to find the log directory.")
     args = parser.parse_args()
     
 
@@ -52,6 +52,7 @@ if __name__ == "__main__":
     'ILRL_combat_打rule1'
     'ILRL_combat_打rule0带导弹'
     'RL_combat_PFSP'
+    'RL_combat_PFSP_熵裁剪'
     
 
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -134,7 +135,7 @@ if __name__ == "__main__":
                     # -- 训练
                     with torch.no_grad():
                         # **修正点：使用正确的、已加载权重的 actor_wrapper**
-                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore={'cont':0, 'cat':1, 'bern':1})
+                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, explore={'cont':0, 'cat':0, 'bern':0}, bern_threshold=1e-4)
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
                     print("开火概率", b_action_check['bern'][0])
