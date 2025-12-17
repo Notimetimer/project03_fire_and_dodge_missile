@@ -234,9 +234,10 @@ class HybridActorWrapper(nn.Module):
                     # locked_condition = (locked == 1)
                     locked_condition = 1
                     
-                    # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
-                    ammo = check_obs["ego_main"][6]
-                    ammo_condition = (ammo > 0)
+                    # # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
+                    # ammo = check_obs["ego_main"][6]
+                    # ammo_condition = (ammo > 0)
+                    ammo_condition = 1
                     
                     # 综合判定
                     if not (ata_condition and locked_condition and ammo_condition):

@@ -15,7 +15,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules import *
 from Envs.Tasks.ChooseStrategyEnv20 import *
-from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+# from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-182327
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-205333
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
@@ -173,8 +174,8 @@ critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
-gamma = 0.95
-lmbda = 0.95
+gamma = 0.995
+lmbda = 0.995
 epochs = 10
 eps = 0.2
 k_entropy = 0.05 # 1 # 
@@ -399,7 +400,7 @@ if __name__ == "__main__":
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                 if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
                     # 修改：传入 last_decision_obs 和 last_decision_state
-                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward_assisted, b_state_global, False)
+                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, b_state_global, False)
                     
                     '''需要引入 active_mask以应对“死后还在做决策”的极端情况'''
 
@@ -456,7 +457,7 @@ if __name__ == "__main__":
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
 
             env.step(r_maneuver, b_maneuver)
-            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
+            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
             done = done
 
             # Accumulate rewards between student_agent decisions
@@ -483,7 +484,7 @@ if __name__ == "__main__":
         if last_decision_state is not None:
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
             # 修改：传入最后时刻的 next_b_state_global 作为 Next State
-            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward_assisted, next_b_state_global, True)
+            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, next_b_state_global, True)
             episode_return += b_reward
             
         print('r 剩余导弹数量:', env.RUAV.ammo)

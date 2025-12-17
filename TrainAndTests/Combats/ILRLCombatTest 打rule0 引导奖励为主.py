@@ -16,10 +16,10 @@ sys.path.append(project_root)
 from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
 from BasicRules import basic_rules
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
-from Algorithms.PPOHybrid21 import PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 
 # --- [修正] 在此处直接定义缺失的常量 ---
-action_cycle_multiplier = 40
+action_cycle_multiplier = 30
 dt_maneuver = 0.2
 # -----------------------------------------
 
@@ -40,10 +40,12 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='打莽夫—全密集奖励', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='打rule1—时间相关结果奖励', help="Mission name to find the log directory.")
     args = parser.parse_args()
 
-
+    '打rule1—时间相关结果奖励'
+    '打莽夫—全密集奖励'
+    
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
     hidden_dim = [128, 128, 128]
@@ -131,7 +133,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         # **修正点：使用正确的、已加载权重的 actor_wrapper**
                         b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, bern_threshold= 0.33) # , bern_threshold= 1e-4
+                                    explore={'cont':0, 'cat':0, 'bern':1}, bern_threshold= 0.69) # , bern_threshold= 1e-4
                         
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]

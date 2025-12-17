@@ -18,7 +18,7 @@ from Algorithms.PPOHybrid23 import PPOHybrid, PolicyNetHybrid, HybridActorWrappe
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from BasicRules import *
-from Envs.Tasks.ChooseStrategyEnv21 import *
+from Envs.Tasks.ChooseStrategyEnv3 import *
 
 def get_current_file_dir():
     try:
