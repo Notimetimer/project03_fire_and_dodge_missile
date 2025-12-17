@@ -106,7 +106,7 @@ class HybridActorWrapper(nn.Module):
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    def get_action(self, state, h=None, explore=True, max_std=None):
+    def get_action(self, state, h=None, explore=True, max_std=None, bern_threshold=0.5):
         """
         推理接口。
         Args:
@@ -193,7 +193,7 @@ class HybridActorWrapper(nn.Module):
         if actor_outputs['bern'] is not None:
             bern_logits = actor_outputs['bern']
             dist = Bernoulli(logits=bern_logits)
-            bern_action = dist.sample() if explore else (dist.probs > 0.5).float()
+            bern_action = dist.sample() if explore else (dist.probs > bern_threshold).float()
             
             if is_batch:
                 actions_exec['bern'] = bern_action.cpu().detach().numpy() # (Batch, Dim)

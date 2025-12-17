@@ -13,14 +13,13 @@ import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Envs.Tasks.ChooseStrategyEnv2 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
 from BasicRules import basic_rules
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
-# from Algorithms.PPOHybrid23 import PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid21 import PolicyNetHybrid, HybridActorWrapper
 
 # --- [修正] 在此处直接定义缺失的常量 ---
-action_cycle_multiplier = 20
+action_cycle_multiplier = 40
 dt_maneuver = 0.2
 # -----------------------------------------
 
@@ -41,23 +40,9 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='ILRL_combat_打rule0带导弹', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='打莽夫—全密集奖励', help="Mission name to find the log directory.")
     args = parser.parse_args()
-    
 
-    'MARWIL_combat_有辅助奖励'
-    'MARWIL_combat_无辅助奖励'
-    'RL_combat_有辅助奖励'
-    'RL_combat_无辅助奖励'
-    'RL_combat_打rule0'
-    'ILRL_combat_打rule1'
-    'ILRL_combat_打rule0带导弹'
-    'RL_combat_PFSP'
-    'RL_combat_PFSP_熵裁剪'
-    'RL_combat_PFSP_SAC熵'
-    'RL_combat_PFSP_简单熵'
-    
-    
 
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)

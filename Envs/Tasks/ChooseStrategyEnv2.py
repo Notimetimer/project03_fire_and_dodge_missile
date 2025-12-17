@@ -302,6 +302,7 @@ class ChooseStrategyEnv(Battle):
         
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
+        threat_distance = ego_states["threat"][3]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
 
         d_hor = ego_states["border"][0]
@@ -444,7 +445,7 @@ class ChooseStrategyEnv(Battle):
             reward_assisted += 0.5 - alpha / pi
         
         # # 有warning时alpha越大越好
-        if warning:
+        if warning and threat_distance<=24e3:
             reward_assisted += 0.8 * abs(delta_psi_threat) / pi
 
         # 迎角惩罚

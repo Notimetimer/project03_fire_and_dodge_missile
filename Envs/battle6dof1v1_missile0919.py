@@ -70,6 +70,7 @@ class Battle(object):
         # super(Battle, self).__init__() 
         # self.p2p_control = False
         self.shielded = False
+        self.no_out = False
         self.alive_b_missiles = None
         self.alive_r_missiles = None
         self.alive_missiles = None
@@ -317,13 +318,10 @@ class Battle(object):
                 # 防撞地系统
                 if self.shielded:
                     # 临近撞地强制拉起
-                    if UAV.alt < self.min_alt_safe:
-                        target_height = max(self.min_alt_safe - UAV.alt, target_height)
-                        # delta_heading = 0
+                    if UAV.alt < self.min_alt_safe + 1e3:
+                        target_height = max(self.min_alt_safe + 1e3 - UAV.alt, target_height)
                         p2p = False
                         delta_heading = np.clip(delta_heading, -pi/3, pi/3)
-                    # if UAV.alt < self.min_alt_safe + 1500:
-                    #     target_height = max(5000 * -pi/3, target_height)
 
                     # 不许超过限高
                     if UAV.alt > self.max_alt_safe:
@@ -336,6 +334,15 @@ class Battle(object):
                             UAV.target_speed = 1
                         else:
                             UAV.target_speed = max(340, target_speed)
+                    
+                d, d_hor, left_or_right = calc_intern_dist2cylinder(self.R_cage, UAV.pos_, UAV.psi_v, UAV.theta_v)
+                # 不准出界
+                if self.no_out:
+                    if d_hor < 8e3:
+                        if left_or_right == 1:
+                            delta_heading = min(-pi/2, delta_heading)
+                        if left_or_right == -1:
+                            delta_heading = max(pi/2, delta_heading)
 
                 # 出界就炸
                 if self.out_range(UAV):
@@ -1222,7 +1229,7 @@ def launch_missile_if_possible(env, side='r'):
         return 0
 
 
-def launch_missile_immediately(env, side='r'):
+def launch_missile_immediately(env, side='r', tabu=0):
     """
     立即发射导弹
     """
@@ -1241,17 +1248,19 @@ def launch_missile_immediately(env, side='r'):
     target_locked = ego_state["target_locked"]
 
     # 发射导弹
-    if uav.ammo>0 and not uav.dead and target_locked and ego_state["weapon"]>=0.1 and ATA<=45 *pi/180: # 3
-        new_missile = uav.launch_missile(target, env.t, missile_class)
-        uav.ammo -= 1
-        new_missile.side = 'r' if side == 'r' else 'b'
-        new_missile_id = new_missile.id
-        if side == 'r':
-            env.Rmissiles.append(new_missile)
-        else:
-            env.Bmissiles.append(new_missile)
-        env.missiles = env.Rmissiles + env.Bmissiles
-        # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+    if uav.ammo>0 and not uav.dead:
+        if not tabu or\
+                target_locked and ego_state["weapon"]>=0.1 and ATA<=60 *pi/180:
+            new_missile = uav.launch_missile(target, env.t, missile_class)
+            uav.ammo -= 1
+            new_missile.side = 'r' if side == 'r' else 'b'
+            new_missile_id = new_missile.id
+            if side == 'r':
+                env.Rmissiles.append(new_missile)
+            else:
+                env.Bmissiles.append(new_missile)
+            env.missiles = env.Rmissiles + env.Bmissiles
+            # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
     
     return new_missile_id
 

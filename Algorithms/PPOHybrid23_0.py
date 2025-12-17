@@ -1,7 +1,9 @@
 '''
 实验性举措：把log_std_param的影响也加到离散动作空间上面
 
-增加目标熵
+12月15日使用简单熵正则项的备份
+
+现在给伯努利分布加入actor内mask
 '''
 
 import numpy as np
@@ -64,12 +66,15 @@ class PolicyNetHybrid(torch.nn.Module):
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
             self.fc_bern = nn.Linear(prev_size, bern_dim)
+            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
+            nn.init.constant_(self.fc_bern.bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temp=1.0)
             self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
-
-    def forward(self, x, min_std=1e-6, max_std=1.0):
+    
+    # [修改] 增加 action_masks 参数
+    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None):
         shared_features = self.net(x)
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -106,20 +111,35 @@ class PolicyNetHybrid(torch.nn.Module):
             
             outputs['cat'] = final_probs_list
 
-        # --- Bernoulli ---
+        # --- Bernoulli (核心修改区域) ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_logits = self.fc_bern(shared_features)
-            
-            # 获取温度并广播
-            # temps 形状: (bern_dim, )
+            # [新增] Action Masking 逻辑
+            # 如果提供了 mask，将 mask 为 0 (False) 的位置的 logit 设为 -1e9
+            if action_masks is not None and 'bern' in action_masks:
+                mask = action_masks['bern']
+                # 确保 mask 和 logits 维度匹配 (Batch, Dim)
+                # mask == 0 代表禁止开火，设为极小值
+                bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
+
             temps = torch.exp(self.log_temp_bern)
             if bern_logits.dim() > 1:
-                temps = temps.unsqueeze(0) # (1, bern_dim)
+                temps = temps.unsqueeze(0)
             
-            # 应用温度缩放
             scaled_bern_logits = bern_logits / (temps + 1e-8)
-            
             outputs['bern'] = scaled_bern_logits
+            
+            # [原有]
+            # # 获取温度并广播
+            # # temps 形状: (bern_dim, )
+            # temps = torch.exp(self.log_temp_bern)
+            # if bern_logits.dim() > 1:
+            #     temps = temps.unsqueeze(0) # (1, bern_dim)
+            
+            # # 应用温度缩放
+            # scaled_bern_logits = bern_logits / (temps + 1e-8)
+            
+            # outputs['bern'] = scaled_bern_logits
 
         return outputs
 
@@ -152,7 +172,8 @@ class HybridActorWrapper(nn.Module):
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    def get_action(self, state, h=None, explore=True, max_std=None, bern_threshold=0.5):
+    # [修改] 增加 check_obs 参数，默认为 None
+    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5):
         """
         推理接口。
         Args:
@@ -191,8 +212,56 @@ class HybridActorWrapper(nn.Module):
             # 对于其他意外的输入类型，默认全部探索
             explore_opts = {'cont': True, 'cat': True, 'bern': True}
 
-        # 调用网络
-        actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
+        # =====================================================================
+        # [新增] 解析 check_obs 并构建 Action Mask
+        # =====================================================================
+        action_masks = None
+        if check_obs is not None:
+            # 默认允许开火 (mask=0)
+            can_fire = True
+            
+            # 只有当 check_obs 是单个字典时 (Inference 模式) 进行处理
+            # 如果是 Batch 训练模式，通常 check_obs 会比较复杂，这里暂只处理推理
+            if isinstance(check_obs, dict):
+                try:
+                    # 1. ATA <= 60度 (0.523 rad)
+                    # ATA = check_obs["target_information"][4]
+                    # ata_condition = (ATA <= 60 * np.pi / 180)
+                    ata_condition = 1
+                    
+                    # # 2. Target Locked == 1
+                    # locked = check_obs["target_locked"]
+                    # locked_condition = (locked == 1)
+                    locked_condition = 1
+                    
+                    # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
+                    ammo = check_obs["ego_main"][6]
+                    ammo_condition = (ammo > 0)
+                    
+                    # 综合判定
+                    if not (ata_condition and locked_condition and ammo_condition):
+                        can_fire = False
+                        
+                except Exception as e:
+                    print(f"Warning: Mask generation failed: {e}")
+                    can_fire = True # 出错则不mask
+
+            # 构建 Tensor Mask: (Batch_Size, Bern_Dim) -> (1, 1)
+            # 1.0 表示允许 (保留 Logits)，0.0 表示禁止 (Logits -> -inf)
+            mask_val = 1.0 if can_fire else 0.0
+            
+            # 适配 state 的 batch size
+            batch_size = state.size(0)
+            mask_tensor = torch.full((batch_size, 1), mask_val, device=self.device, dtype=torch.float)
+            
+            action_masks = {'bern': mask_tensor}
+        # =====================================================================
+
+        # [修改] 调用网络时传入 action_masks
+        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks)
+        
+        # # [原有] 调用网络
+        # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
         
         actions_exec = {}
         actions_raw = {}
@@ -278,6 +347,7 @@ class HybridActorWrapper(nn.Module):
             log_probs: tensor (B, 1)
             entropy: tensor (B, 1)
             next_h: None
+            actor_outputs: dict (raw outputs from net) [新增]
         """
         actor_outputs = self.net(states, max_std=max_std)
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
@@ -332,7 +402,8 @@ class HybridActorWrapper(nn.Module):
             entropy += e_bern
             entropy_details['bern'] = e_bern # [修改] 保持 Tensor 用于 Loss 计算
 
-        return log_probs, entropy, entropy_details, None
+        # [修改] 返回 actor_outputs 以便外部访问 logits
+        return log_probs, entropy, entropy_details, actor_outputs, None
     
     def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
         """
@@ -455,9 +526,7 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, 
-                 target_entropy=None, # [新增] 支持传入自定义目标熵
-                 critic_max_grad=2, actor_max_grad=2, max_std=0.3):
+                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
@@ -475,38 +544,6 @@ class PPOHybrid:
             self.k_entropy = k_entropy
         else:
             self.k_entropy = {'cont': k_entropy, 'cat': k_entropy, 'bern': k_entropy}
-
-        # [新增] SAC 风格的目标熵 (Target Entropy) 配置
-        # 如果未提供，则使用启发式默认值
-        self.target_entropy = {}
-        
-        # 1. Continuous: 默认为 -dim (SAC标准) 或 0.215 * dim (用户指定)
-        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
-            if target_entropy and 'cont' in target_entropy:
-                self.target_entropy['cont'] = target_entropy['cont']
-            else:
-                # 用户指定的默认值: 0.215 * 维度数
-                self.target_entropy['cont'] = 0.215 * self.actor.action_dims['cont']
-        else:
-            self.target_entropy['cont'] = 0.0
-
-        # 2. Bernoulli: 默认为 0.325
-        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-            if target_entropy and 'bern' in target_entropy:
-                self.target_entropy['bern'] = target_entropy['bern']
-            else:
-                self.target_entropy['bern'] = 0.325
-        else:
-            self.target_entropy['bern'] = 0.0
-
-        # 3. Categorical: 默认为 1.0
-        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-            if target_entropy and 'cat' in target_entropy:
-                self.target_entropy['cat'] = target_entropy['cat']
-            else:
-                self.target_entropy['cat'] = 2.0
-        else:
-            self.target_entropy['cat'] = 0.0
             
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
@@ -530,11 +567,6 @@ class PPOHybrid:
         self.entropy_cat = 0
         self.entropy_bern = 0
         self.entropy_cont = 0
-        
-        # 新增 IL 监控
-        self.il_actor_loss = 0
-        self.il_critic_loss = 0
-        self.advantage = 0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -544,19 +576,21 @@ class PPOHybrid:
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr  
 
-    def take_action(self, state, h0=None, explore=True, max_std=None):
+    def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None):
         # 委托给 Actor Wrapper
         max_s = max_std if max_std is not None else self.max_std
         # 注意：这里返回了 hidden_state (虽然是 None)，保持接口一致性
         # actions_exec, actions_raw, _ = self.actor.get_action(state, h=h0, explore=explore, max_std=max_s)
         # return actions_exec, actions_raw
         
-        #  现在接收四个返回值
-        actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(state, h=h0, explore=explore, max_std=max_s)
+        # [修改] 透传 check_obs
+        actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(
+            state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs
+        )
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None):
+    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -654,7 +688,8 @@ class PPOHybrid:
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)
-            old_log_probs, _, _, _ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            # [修改] 接收 5 个返回值
+            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
             # Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
@@ -728,8 +763,8 @@ class PPOHybrid:
                     mb_actions[k] = v[batch_idx]
 
                 # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
-                #  接收 entropy_details
-                log_probs, entropy, entropy_details ,_ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
+                #  接收 entropy_details 和 actor_outputs
+                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
                 
                 #  计算 log_ratio 用于更精准的 KL 计算
                 log_ratio = log_probs - mb_old_log_probs
@@ -755,46 +790,29 @@ class PPOHybrid:
                 
                 actor_loss = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
-                # [关键修改] 使用 MSE (均方误差) 替换原有的线性熵正则
-                # 计算 (Entropy - Target)^2
-                e_cont = entropy_details['cont'] 
-                e_cat = entropy_details['cat'] 
-                e_bern = entropy_details['bern'] 
+                # [修改] 分项 Entropy Loss 计算
+                e_cont = entropy_details['cont'] if entropy_details['cont'] is not None else torch.tensor(0., device=self.device)
+                e_cat = entropy_details['cat'] if entropy_details['cat'] is not None else torch.tensor(0., device=self.device)
+                e_bern = entropy_details['bern'] if entropy_details['bern'] is not None else torch.tensor(0., device=self.device)
 
-                # 获取目标熵
-                t_cont = self.target_entropy['cont']
-                t_cat = self.target_entropy['cat']
-                t_bern = self.target_entropy['bern']
-
-                # 1. 连续动作 MSE
-                if e_cont is not None:
-                    # 使用平方差作为 Loss
-                    mse_cont = (e_cont - t_cont).pow(2)
-                    loss_ent_cont = (mse_cont * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cont = torch.tensor(0., device=self.device)
-
-                # 2. 离散动作 MSE
-                if e_cat is not None:
-                    mse_cat = (e_cat - t_cat).pow(2)
-                    loss_ent_cat = (mse_cat * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cat = torch.tensor(0., device=self.device)
-
-                # 3. 伯努利动作 MSE
-                if e_bern is not None:
-                    mse_bern = (e_bern - t_bern).pow(2)
-                    loss_ent_bern = (mse_bern * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_bern = torch.tensor(0., device=self.device)
+                loss_ent_cont = (e_cont * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_cat = (e_cat * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_bern = (e_bern * mb_active_masks).sum() / (active_sum + mask_eps)
 
                 k_cont = self.k_entropy.get('cont', 0.0)
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
 
-                # [关键修改] 符号由 '-' 改为 '+'，因为现在是惩罚项 (Penalty)
-                # Actor Loss = Policy Loss + k * (H - H_target)^2
-                actor_loss = actor_loss + (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+                actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+
+                # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
+                if actor_outputs['bern'] is not None:
+                    bern_logits = actor_outputs['bern']
+                    # 仅对绝对值超出阈值的部分施加平缓增加的惩罚：
+                    # over = max(|logit| - 4, 0)，惩罚 (over)^2 的均值
+                    over = F.relu(torch.abs(bern_logits) - 4.0)
+                    logit_loss = (over ** 2).mean()
+                    actor_loss = actor_loss + alpha_logit_reg * logit_loss
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
@@ -903,7 +921,7 @@ class PPOHybrid:
             obs = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
             # 维度处理同 states
             if obs.dim() == 1: obs = obs.unsqueeze(1) # [T, 1]
-            # [T, N, D] -> [T*N, D]
+            # [T, N] -> [T*N, 1]
             T, N = obs.shape[0], obs.shape[1]
             transition_dict['obs'] = obs.reshape(T * N, -1).cpu().numpy()
             
@@ -1070,29 +1088,6 @@ class PPOHybrid:
             raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing)
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
 
-            # [关键修改] 使用 MSE 惩罚熵偏离 (MARWIL 阶段)
-            _, _, entropy_details, _ = self.actor.evaluate_actions(actor_input_batch, actions_batch, max_std=self.max_std)
-            
-            e_cont = entropy_details['cont']
-            e_cat = entropy_details['cat']
-            e_bern = entropy_details['bern']
-            
-            t_cont = self.target_entropy['cont']
-            t_cat = self.target_entropy['cat']
-            t_bern = self.target_entropy['bern']
-            
-            # MARWIL 假设全有效，直接 mean
-            loss_ent_cont = (e_cont - t_cont).pow(2).mean() if e_cont is not None else torch.tensor(0., device=self.device)
-            loss_ent_cat = (e_cat - t_cat).pow(2).mean() if e_cat is not None else torch.tensor(0., device=self.device)
-            loss_ent_bern = (e_bern - t_bern).pow(2).mean() if e_bern is not None else torch.tensor(0., device=self.device)
-            
-            k_cont = self.k_entropy.get('cont', 0.0)
-            k_cat = self.k_entropy.get('cat', 0.0)
-            k_bern = self.k_entropy.get('bern', 0.0)
-            
-            # [关键修改] 符号由 '-' 改为 '+' (Penalty)
-            actor_loss = actor_loss + (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
-
             # C. Critic Loss
             v_pred = self.critic(s_batch)
             critic_loss = F.mse_loss(v_pred, r_batch) * c_v
@@ -1127,7 +1122,7 @@ class PPOHybrid:
                      # IL 参数
                      beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0,
                      # 公共参数
-                     shuffled=1, mini_batch_size=None):
+                     shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
         
         # =====================================================================
         # Part A: RL 数据准备
@@ -1199,7 +1194,9 @@ class PPOHybrid:
                 rl_td_target = td_target
 
         with torch.no_grad():
-            old_log_probs, _, _, _ = self.actor.evaluate_actions(rl_actor_inputs, rl_actions_tensor, h=None, max_std=self.max_std)
+            # Actor 使用 actor_inputs (可能是 obs)
+            # [修改] 接收 5 个返回值
+            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(rl_actor_inputs, rl_actions_tensor, h=None, max_std=self.max_std)
             v_pred_old = self.critic(rl_critic_inputs)
 
         if adv_normed:
@@ -1274,7 +1271,7 @@ class PPOHybrid:
                 rl_idx = torch.randperm(rl_num_samples, device=self.device)
             else:
                 rl_idx = torch.arange(rl_num_samples, device=self.device)
-                
+            
             is_last_epoch = (i_epoch == self.epochs - 1)
             
             # === [分流逻辑] ===
@@ -1310,7 +1307,8 @@ class PPOHybrid:
                     mb_actions[k] = v[batch_idx]
 
                 # 2. RL Loss 计算
-                log_probs, entropy, entropy_details, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
+                # [修改] 接收 actor_outputs
+                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
                 
                 log_ratio = log_probs - mb_old_log_probs
                 ratio = torch.exp(log_ratio)
@@ -1331,40 +1329,30 @@ class PPOHybrid:
                 
                 actor_loss_rl = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
-                # [关键修改] 使用 MSE 惩罚 (Mixed Update 阶段)
-                e_cont = entropy_details['cont'] 
-                e_cat = entropy_details['cat'] 
-                e_bern = entropy_details['bern'] 
+                # [修改] 分项 Entropy Loss 计算 (Mixed Update)
+                e_cont = entropy_details['cont'] if entropy_details['cont'] is not None else torch.tensor(0., device=self.device)
+                e_cat = entropy_details['cat'] if entropy_details['cat'] is not None else torch.tensor(0., device=self.device)
+                e_bern = entropy_details['bern'] if entropy_details['bern'] is not None else torch.tensor(0., device=self.device)
 
-                # 获取目标熵
-                t_cont = self.target_entropy['cont']
-                t_cat = self.target_entropy['cat']
-                t_bern = self.target_entropy['bern']
-
-                if e_cont is not None:
-                    loss_ent_cont = ((e_cont - t_cont).pow(2) * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cont = torch.tensor(0., device=self.device)
-
-                if e_cat is not None:
-                    loss_ent_cat = ((e_cat - t_cat).pow(2) * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_cat = torch.tensor(0., device=self.device)
-
-                if e_bern is not None:
-                    loss_ent_bern = ((e_bern - t_bern).pow(2) * mb_active_masks).sum() / (active_sum + mask_eps)
-                else:
-                    loss_ent_bern = torch.tensor(0., device=self.device)
+                loss_ent_cont = (e_cont * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_cat = (e_cat * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_bern = (e_bern * mb_active_masks).sum() / (active_sum + mask_eps)
 
                 k_cont = self.k_entropy.get('cont', 0.0)
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
 
-                # [关键修改] 符号由 '-' 改为 '+' (Penalty)
-                actor_loss_rl = actor_loss_rl + (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+                actor_loss_rl = actor_loss_rl - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
-                # Critic Loss
-                # Critic 使用 critic_inputs
+                # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
+                if actor_outputs['bern'] is not None:
+                    bern_logits = actor_outputs['bern']
+                    # 仅对绝对值超出阈值的部分施加平缓增加的惩罚：
+                    # over = max(|logit| - 4, 0)，惩罚 (over)^2 的均值
+                    over = F.relu(torch.abs(bern_logits) - 4.0)
+                    logit_loss = (over ** 2).mean()
+                    actor_loss_rl = actor_loss_rl + alpha_logit_reg * logit_loss
+
                 v_pred = self.critic(mb_critic_inputs)
                 if clip_vf:
                     v_pred_old_batch = v_pred_old[batch_idx]
@@ -1373,7 +1361,6 @@ class PPOHybrid:
                     vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
                     critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
                 else:
-                    #  reduction='none' 使得我们可以应用 mask
                     critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
                 
                 critic_loss_rl = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
@@ -1463,6 +1450,7 @@ class PPOHybrid:
                     entropy_bern_list.append(entropy_details['bern'].mean().item())
 
         # =====================================================================
+       
         # Part D: 更新统计指标
         # =====================================================================
         self.actor_loss = np.mean(actor_loss_list)

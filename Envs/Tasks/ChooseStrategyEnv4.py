@@ -4,8 +4,6 @@
 子策略暂时使用规则智能体，留下使用神经网络的接口
 
 加入导弹发生相关奖励，区分主要奖励和辅助奖励
-
-env21是env2的再训练环境，env2的奖励更适合打固定对手作为预训练
 '''
 
 import numpy as np
@@ -51,20 +49,22 @@ from Algorithms.Rules import *
 # 通过类的组合获取各子策略的观测量裁剪
 
 action_options = {
-                    0: "track",
-                    1: "30track",
-                    2: "60track",
-                    3: "-30track",
-                    4: "-60track",
-                    5: "+-30crank",
-                    6: "+-60crank",
-                    7: "snake",
-                    8: "splitS",
-                    9: "39",
-                    10: "slowTurn",
-                    11: "fastTurn",
-                    12: "-30turn",
-                    13: "-60turn",
+                    0: "直航",
+                    1: "30无转弯",
+                    2: "-30无转弯",
+                    3: "60无转弯",
+                    4: "-60无转弯",
+                    5: "左转0",
+                    6: "左转30",
+                    7: "左转-30",
+                    8: "左转60",
+                    9: "左转-60",
+                    10: "右转0",
+                    11: "右转30",
+                    12: "右转-30",
+                    13: "右转60",
+                    14: "右转-60",
+                    15: "破s"
                 }
 
 class ChooseStrategyEnv(Battle):
@@ -84,7 +84,7 @@ class ChooseStrategyEnv(Battle):
             "border",  # 2
         ]
         self.obs_dim = 1*6+8+7+1+4+2
-        self.fly_act_dim = [14]
+        self.fly_act_dim = [len(action_options)]
         self.fire_dim = 1
         
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
@@ -115,16 +115,7 @@ class ChooseStrategyEnv(Battle):
         flat_obs = flatten_obs(full_obs, self.key_order_1v1)
         return flat_obs, full_obs
 
-
     def maneuver14(self, UAV, action):
-        # # debug
-        # # 动作太多？那就砍掉一些
-        # if 0<= action <=4:
-        #     action = 0
-        # if 5<=action<=7:
-        #     action = 6
-        # if 8<=action<=13:
-        #     action = 11
         
         # 输入动作与动力运动学状态
         uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
@@ -199,7 +190,7 @@ class ChooseStrategyEnv(Battle):
         # 破s
         if action == 8:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = sub_of_radian(delta_psi, pi)
+            delta_psi_cmd = sub_of_radian(delta_psi_temp, pi)
             delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
             speed_cmd = 300
 
@@ -237,6 +228,107 @@ class ChooseStrategyEnv(Battle):
             delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
             delta_height_cmd = -5000/3*2
             speed_cmd = 400
+        return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
+
+    def maneuver16(self, UAV, action):
+        
+        # 输入动作与动力运动学状态
+        uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        delta_theta = uav_obs["target_information"][2]
+        distance = uav_obs["target_information"][3] * 10e3
+        d_hor, leftright = uav_obs["border"]
+        # state = self.get_state(UAV.side)
+        speed = uav_obs["ego_main"][0]
+        alt = uav_obs["ego_main"][1]
+        cos_delta_psi = uav_obs["target_information"][0]
+        sin_delta_psi = uav_obs["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        delta_psi_threat = atan2(uav_obs["threat"][1], uav_obs["threat"][0])
+
+        move_action = np.zeros(3)
+
+        # 直航
+        if action == 0:
+            delta_psi_cmd = 0
+            delta_height_cmd = 0
+            speed_cmd = 400
+        # 直30
+        if action == 1:
+            delta_psi_cmd = 0
+            delta_height_cmd = 5000/3
+            speed_cmd = 400
+        # 直-30
+        if action == 2:
+            delta_psi_cmd = 0
+            delta_height_cmd = -5000/3
+            speed_cmd = 350
+        # 直60
+        if action == 3:
+            delta_psi_cmd = 0
+            delta_height_cmd = 5000/3*2
+            speed_cmd = 400
+        # 直-60
+        if action == 4:
+            delta_psi_cmd = 0
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 300
+        # 左0
+        if action == 5:
+            delta_psi_cmd = -pi/2
+            delta_height_cmd = 0
+            speed_cmd = 400
+        # 左30
+        if action == 6:
+            delta_psi_cmd = -pi/2
+            delta_height_cmd = 5000/3
+            speed_cmd = 400
+        # 左-30
+        if action == 7:
+            delta_psi_cmd = -pi/2
+            delta_height_cmd = -5000/3
+            speed_cmd = 350
+        # 左60
+        if action == 8:
+            delta_psi_cmd = -pi/2
+            delta_height_cmd = 5000/3*2
+            speed_cmd = 400
+        # 左-60
+        if action == 9:
+            delta_psi_cmd = -pi/2
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 300
+        # 右0
+        if action == 10:
+            delta_psi_cmd = pi/2
+            delta_height_cmd = 0
+            speed_cmd = 400
+        # 右30
+        if action == 11:
+            delta_psi_cmd = pi/2
+            delta_height_cmd = 5000/3
+            speed_cmd = 400
+        # 右-30
+        if action == 12:
+            delta_psi_cmd = pi/2
+            delta_height_cmd = -5000/3
+            speed_cmd = 350
+        # 右60
+        if action == 13:
+            delta_psi_cmd = pi/2
+            delta_height_cmd = 5000/3*2
+            speed_cmd = 400
+        # 右-60
+        if action == 14:
+            delta_psi_cmd = pi/2
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 300
+        # 破s
+        if action == 15:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi_temp, pi)
+            delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
+            speed_cmd = 300
+            
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
     
 
@@ -304,7 +396,6 @@ class ChooseStrategyEnv(Battle):
         
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
-        threat_distance = ego_states["threat"][3]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
 
         d_hor = ego_states["border"][0]
@@ -364,19 +455,19 @@ class ChooseStrategyEnv(Battle):
         # 假设制导过程持续较长，将每步奖励设为极小值，防止刷分。
         # 例如：0.05 * 100步 = 5分。
         if missile_in_mid_term:
-            reward_main += 0.4
+            reward_main += 0.4 # 0.05
 
         # [修改] 锁定目标
         if ego_states["target_locked"]: #  and not last_target_locked:
-            reward_main += 0.6
+            reward_main += 0.6 # 0.03
 
         # [修改] 被目标锁定
         if strict_locked_by_target: # and not last_strict_locked_by_target:
-            reward_main -= 0.5
+            reward_main -= 0.5 # 0.03
 
         # [修改] 收到导弹警告
         if warning: # and not last_warning:
-            reward_main -= 0.6
+            reward_main -= 0.6 # 0.3
 
         # [修改] 导弹锁定目标 (对手收到警告)
         if enm_states["warning"]: # and not last_enm_warning:
@@ -384,43 +475,27 @@ class ChooseStrategyEnv(Battle):
 
         # 逃脱导弹 (保持原逻辑，这通常由escape_once标志位控制，本身就是一次性的)
         if ego.escape_once:
-            reward_main += 50
+            reward_main += 50 # 10  --1210新增
 
         # 导弹被逃脱 (保持原逻辑)
-        escape_penalty = 50
+        escape_penalty = 50  # 10  --1210新增
         if enm.escape_once:
             reward_main -= escape_penalty
 
         # 死了也当剩下导弹全被逃脱处理
         if wasted>0:
-            reward_main -= escape_penalty*wasted
+            reward_main -= escape_penalty*wasted # --1210新增
         
-        # # 发射惩罚 12.16 上午
-        # if shoot >= 1:
-        #     if alpha*180/pi > 15 or distance > 50e3:
-        #         reward_main -= 50*shoot # 10  --1216
-        #     elif alpha*180/pi < 30 and distance < 20e3:  # 近距瞄准开火给奖励 --1216
-        #         reward_main += 20
-        #     else:
-        #         reward_main -= 10*shoot # 8  --1216
-
-        #     if len(alive_ally_missiles)>1:
-        #         if missile_time_since_shoot > 30 and shoot==1: # 30s后重复发射不再额外扣分
-        #             pass
-        #         else:
-        #             reward_main -= 80*shoot # 30 --1216
-                    
-        # 发射惩罚 12.15 17:58 奖励函数
+        # 发射惩罚
         if shoot >= 1:
-            if alpha*180/pi > 10 or distance > 50e3:
-                reward_main -= 10*shoot if shoot==1 else 0
+            if alpha*180/pi > 10:
+                reward_main -= 50*shoot # 10  --1210新增
             else:
-                reward_main += 10*shoot if shoot==1 else 0
-
+                reward_main -= 40*shoot # 8  --1210新增
+                
             if len(alive_ally_missiles)>1:
-                reward_main -= 30*shoot # 30 --1210 新增
-        
-        
+                reward_main -= 80*shoot # 30 --1210 新增
+            
             if not ego.dead:
                 reward_assisted += 3 * (pi/3-alpha)/(pi/3)
                 reward_assisted += 3 * (abs(AA_hor)/pi-1)
@@ -463,7 +538,7 @@ class ChooseStrategyEnv(Battle):
             reward_assisted += 0.5 - alpha / pi
         
         # # 有warning时alpha越大越好
-        if warning and threat_distance<=24e3:
+        if warning:
             reward_assisted += 0.8 * abs(delta_psi_threat) / pi
 
         # 迎角惩罚

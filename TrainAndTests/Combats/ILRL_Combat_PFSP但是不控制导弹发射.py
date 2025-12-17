@@ -1,3 +1,5 @@
+# 机动由agent决定，发射判决由规则控制
+
 import os
 import sys
 import numpy as np
@@ -7,18 +9,18 @@ import argparse
 import glob
 import copy
 import json
-import re
-import time  # 确保引入 time 模块
+import re  # [Fix] 引入正则模块
 from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-from BasicRules import *
-from Envs.Tasks.ChooseStrategyEnv2 import *
-from Algorithms.PPOHybrid2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+
+
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
-
+from BasicRules import * # [Fix] 确保引入规则函数
+from Envs.Tasks.ChooseStrategyEnv2 import *
 
 def get_current_file_dir():
     try:
@@ -168,16 +170,16 @@ parser.add_argument("--R-cage", type=float, default=55e3, help="")
 args = parser.parse_args()
 
 # 超参数
-actor_lr = 1e-3 # 4 1e-3
-critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
-max_steps = 165e4
+actor_lr = 1e-4
+critic_lr = actor_lr * 5
+IL_epoches= 0  # 80
+max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.95
 lmbda = 0.95
 epochs = 10
 eps = 0.2
-k_entropy = 0.05 # 1 # 
+k_entropy = 0.01
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -185,7 +187,7 @@ state_dim = env.obs_dim
 # 动作空间定义 (需要与 BasicRules 产生的数据对应)
 # cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
 # bern: 攻击动作头 (env.fire_dim 通常是 1)
-action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
+action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': 0}
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 action_bound = None
 
@@ -225,7 +227,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'ILRL_combat_打rule0带导弹'
+    mission_name = 'RL_combat_no_shoot'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -260,7 +262,26 @@ if __name__ == "__main__":
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
-    print("Training Finished.")
+    # print("Training Finished.")
+    
+    # 加载打靶预训练的智能体
+    from Utilities.LocateDirAndAgents2 import *
+    pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
+    pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "ILRL_combat_打rule0带导弹")
+    pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
+    
+    if pre_train_agent_path:
+        print(f"Loading Actor from: {pre_train_agent_path}")
+        # [Fix] 添加 strict=False 以兼容旧权重文件（忽略缺失的 log_temp 参数）
+        actor_wrapper.load_state_dict(torch.load(pre_train_agent_path, map_location=device, weights_only=1), strict=False)
+    
+    # 加载 critic
+    critic_path = os.path.join(pre_train_latest_log_dir, "critic.pt")
+    if os.path.exists(critic_path):
+        print(f"Loading Critic from: {critic_path}")
+        student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device, weights_only=1), strict=False)
+    else:
+        print(f"Warning: Critic file {critic_path} not found.")
 
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -272,19 +293,8 @@ if __name__ == "__main__":
     # critic_lr = scale_learning_rate(critic_lr, student_agent.critic)
     # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
-    # tacview_input = input("Enable tacview visualization? (0=no, 1=yes) [default 0]: ").strip()
-    tacview_input= 0
-    
-    if tacview_input == "":
-        tacview_show = 0
-    else:
-        try:
-            tacview_show = 1 if int(tacview_input) != 0 else 0
-        except Exception:
-            tacview_show = 0
-    print(f"tacview_show={tacview_show}")
-    env = ChooseStrategyEnv(args, tacview_show=tacview_show)
-    env.shielded = 1 # 不得不全程带上，否则对手也会撞地
+    env = ChooseStrategyEnv(args, tacview_show=0)
+    env.shielded = 1 # 不得不全程带上
     env.dt_move = 0.05 # 仿真跑得快点
     
     t_bias = 0
@@ -310,15 +320,79 @@ if __name__ == "__main__":
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 
 
-    # --- [Modification] 移除 ELO 相关的所有逻辑 ---
-    # K_FACTOR = 32
-    # INITIAL_ELO = 1200
-    # elo_ratings = {}
-    # elo_json_path = os.path.join(log_dir, "elo_ratings.json")
-    # main_agent_elo = INITIAL_ELO
-    # ... (所有 ELO 函数和加载逻辑均被移除)
+    # --- [Fix] 初始化 ELO 变量与辅助函数 ---
+    K_FACTOR = 32
+    INITIAL_ELO = 1200
+    
+    # 初始化 ELO 字典，包含基础规则智能体
+    elo_ratings = {
+        "Rule_0": INITIAL_ELO,
+        # "Rule_1": INITIAL_ELO,
+        # "Rule_2": INITIAL_ELO
+    }
+    elo_json_path = os.path.join(log_dir, "elo_ratings.json")
+    
+    # 尝试加载已有的 ELO 记录
+    if os.path.exists(elo_json_path):
+        with open(elo_json_path, 'r', encoding='utf-8') as f:
+            elo_ratings = json.load(f)
+            
+    # 主智能体当前的 ELO
+    main_agent_elo = INITIAL_ELO
+
+    # [新增] 如果没有历史对手（例如第一次运行且屏蔽了规则），保存当前初始策略作为 actor_rein0
+    if not elo_ratings:
+        init_opponent_name = "actor_rein0"
+        init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
+        torch.save(student_agent.actor.state_dict(), init_opponent_path)
+        elo_ratings[init_opponent_name] = INITIAL_ELO
+        print(f"Initialized {init_opponent_name} as the first opponent.")
+
+    def calculate_expected_score(player_elo, opponent_elo):
+        """计算期望得分"""
+        return 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
+
+    def update_elo(player_elo, opponent_elo, score):
+        """更新ELO分数. score: 1 for win, 0 for loss, 0.5 for draw."""
+        expected = calculate_expected_score(player_elo, opponent_elo)
+        return player_elo + K_FACTOR * (score - expected)
+
+    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400):
+        """返回与 elo_ratings.keys() 顺序对应的概率数组。
+        - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
+        - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。
+        """
+        keys = list(elo_ratings.keys())
+        if len(keys) == 0:
+            return np.array([]), keys # 返回 keys 以便索引
+        elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+
+        if target_elo is None:
+            target_elo = np.mean(elos)
+
+        # 以高斯核度量相似度（基于差的平方）
+        diffs = elos - float(target_elo)
+        # 数值稳定性：将 exponent 的常数项减去 max
+        scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+        probs = scores / (scores.sum() + 1e-12)
+        return probs, keys # 修改为返回 probs 和 keys
+    
+    '''
+    通过高斯核与elo分确定对手概率
+    Δ = 200 (1σ = 200)：≈ 0.7597 → 75.97% ： 相似度 ≈ 0.6065，区域内概率0.683
+    Δ = 400 (2σ = 400)：≈ 0.9091 → 90.91% ： 相似度 ≈ 0.1353，区域内概率0.955
+    Δ = 600 (3σ = 600)：≈ 0.9693 → 96.93% ： 相似度 ≈ 0.0111，区域内概率0.997
+    '''
+
+    # 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
+    def shorten_actor_key(path_or_name):
+        base = os.path.basename(path_or_name)
+        name, _ = os.path.splitext(base)
+        m = re.search(r'(actor_rein\d+)', name) # [Fix] regex 修正匹配 rein
+        if m: return m.group(1)
+        return name
 
     # 循环变量初始化
     i_episode = 0 
@@ -337,13 +411,35 @@ if __name__ == "__main__":
     
     while total_steps < int(max_steps):
         i_episode += 1
-        # [Modification] 移除了 actor_key 的提前定义，只在保存时定义
         
-        # --- [Modification] 对手选择逻辑 (PFSP) ---
-        # 强制对手为 Rule 0
-        adv_is_rule = True
+        # --- [Fix] 对手选择逻辑 (PFSP) ---
+        probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
+        selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+        
+        adv_is_rule = False
         rule_num = 0
-        print(f"Eps {i_episode}: Opponent is Rule {rule_num}")
+        
+        # 判断对手类型并加载
+        if "Rule" in selected_opponent_name:
+            adv_is_rule = True
+            # 解析 "Rule_1" -> 1
+            try:
+                rule_num = int(selected_opponent_name.split('_')[1])
+            except:
+                rule_num = 0
+            print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
+        else:
+            adv_is_rule = False
+            # 尝试找到对应的权重文件
+            # 假设 selected_opponent_name 格式为 "actor_rein10"
+            adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
+            if os.path.exists(adv_path):
+                adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device, weights_only=1), strict=False)
+                print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
+            else:
+                print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_0.")
+                adv_is_rule = True
+                rule_num = 0
         
         episode_return = 0
 
@@ -398,7 +494,7 @@ if __name__ == "__main__":
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                 if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
                     # 修改：传入 last_decision_obs 和 last_decision_state
-                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward-b_reward_assisted, b_state_global, False)
+                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, b_state_global, False)
                     
                     '''需要引入 active_mask以应对“死后还在做决策”的极端情况'''
 
@@ -418,28 +514,20 @@ if __name__ == "__main__":
                     # [Fix] NN 对手决策
                     r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
                     r_action_label = r_action_exec['cat'][0]
-                    r_fire = r_action_exec['bern'][0] # 网络控制开火
+                    _, r_fire = basic_rules(r_state_check, 1, last_action=last_r_action_label)
                 last_r_action_label = r_action_label
-                r_m_id = None
                 if r_fire:
-                    r_m_id = launch_missile_immediately(env, 'r')
+                    launch_missile_immediately(env, 'r')
 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
                 # 修改：Actor 依然使用 b_obs (局部观测) 进行决策
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                 b_action_label = b_action_exec['cat'][0]
-                b_fire = b_action_exec['bern'][0]
-
-                b_m_id = None
+                _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
+                last_b_action_label = b_action_label
                 if b_fire:
-                    b_m_id = launch_missile_immediately(env, 'b')
-                    # print(b_m_id)
-                if b_m_id is not None:
-                    m_fired += 1
-
-                # if i_episode % 2 == 0:
-                #     b_action_label = 12 # debug
+                    launch_missile_immediately(env, 'b')
                 
                 # print("机动概率分布", b_action_check['cat'])
                 # print("开火概率", b_action_check['bern'][0])
@@ -447,15 +535,13 @@ if __name__ == "__main__":
                 decide_steps_after_update += 1
                 
                 b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-                current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                
-                
+                current_action = {'cat': b_action_exec['cat']}
 
             r_maneuver = env.maneuver14(env.RUAV, r_action_label)
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
 
             env.step(r_maneuver, b_maneuver)
-            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
+            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_fire)
             done = done
 
             # Accumulate rewards between student_agent decisions
@@ -482,7 +568,7 @@ if __name__ == "__main__":
         if last_decision_state is not None:
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
             # 修改：传入最后时刻的 next_b_state_global 作为 Next State
-            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward-b_reward_assisted, next_b_state_global, True)
+            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, next_b_state_global, True)
             episode_return += b_reward
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
@@ -496,13 +582,21 @@ if __name__ == "__main__":
         if env.crash(env.BUAV):
             print('b 撞地')
             
+        # --- [Fix] ELO 更新逻辑 ---
+        actual_score = 0.5 # Default draw
+        if env.win: actual_score = 1.0
+        elif env.lose: actual_score = 0.0
         
+        # 更新主智能体ELO (临时变量)
+        prev_main_elo = main_agent_elo
+        adv_elo = elo_ratings[selected_opponent_name]
         
-        # --- [Modification] 移除 ELO 更新逻辑 ---
-        # actual_score = 0.5 # Default draw
-        # if env.win: actual_score = 1.0
-        # elif env.lose: actual_score = 0.0
-        # ... (所有 ELO 更新代码均被移除)
+        main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
+        # 更新对手ELO (写入字典)
+        new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
+        elo_ratings[selected_opponent_name] = new_adv_elo
+        
+        print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
         
         # 有没有试图发射过导弹
         logger.add("special/0 发射的导弹数量", m_fired, total_steps)
@@ -515,7 +609,7 @@ if __name__ == "__main__":
         
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            student_agent.update(transition_dict, adv_normed=1)  # 优势归一化 debug
+            student_agent.update(transition_dict, adv_normed=1, mini_batch_size=128)  # 优势归一化 debug
             decide_steps_after_update = 0
 
             # [Modification] 保留原有梯度监控代码
@@ -553,18 +647,85 @@ if __name__ == "__main__":
         print()
 
         
-        # --- [Modification] 保存模型，actor不覆盖 ---
+        
+        # --- 保存模型与 ELO 维护 ---
         if i_episode % 10 == 0:
-            # 1. 保存 Critic (可以覆盖)
             torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
             
-            # 2. 保存带回合数的 Actor 文件，不覆盖
-            actor_name = f"actor_rein{i_episode}.pt"
+            actor_name = f"actor_rein{i_episode}.pt" # 物理文件名
+            actor_key = f"actor_rein{i_episode}"     # ELO 字典 Key
+            
+            # 保存权重
             torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, actor_name))
             print(f"Saved critic.pt and {actor_name} at episode {i_episode}")
 
-        # --- [Modification] 移除 ELO 日志记录 ---
+            # 将当前主智能体作为一个新的历史快照加入 ELO 列表
+            # 新快照继承当前主智能体的 ELO
+            elo_ratings[actor_key] = main_agent_elo
+            
+            # 保存 ELO JSON
+            try:
+                tmp_path = elo_json_path + ".tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    # 同时保存 current main agent elo 以便断点续传
+                    save_data = copy.deepcopy(elo_ratings)
+                    save_data["__CURRENT_MAIN__"] = main_agent_elo 
+                    json.dump(save_data, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, elo_json_path)
+            except Exception as e:
+                print(f"Warning: failed to save elo json: {e}")
 
+            # --- [Fix] Logging ELOs (Sorted) ---
+            # 过滤掉特殊 Key
+            valid_elos = {k: v for k, v in elo_ratings.items() if not k.startswith("__")}
+            if valid_elos:
+                mean_elo = np.mean(list(valid_elos.values()))
+                # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
+                # 这里为了简单，直接遍历
+                sorted_keys = sorted(valid_elos.keys())
+                
+                # 记录主智能体
+                logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
+                logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps)
+
+                # 记录主智能体在当前所有 ELO 中的归一化排名位置：
+                # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
+                min_elo = np.min(list(valid_elos.values()))
+                max_elo = np.max(list(valid_elos.values()))
+                denom = float(max_elo - min_elo)
+                if denom == 0.0:
+                    rank_pos = 0.5
+                else:
+                    rank_pos = float((main_agent_elo - min_elo) / denom)
+                # 现有日志
+                logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                
+                # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
+                elo_spread = float(max_elo - min_elo)
+                print('elo分极差：', elo_spread)
+                logger.add("Elo/Spread", elo_spread, total_steps)
+                
+                # 只记录所有规则智能体和最新保存的智能体（actor_key）
+                rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
+                keys_to_log = list(sorted(rule_keys))
+                # actor_key 在本代码块上方已定义为当前保存的快照名
+                if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
+                    keys_to_log.append(actor_key)
+                
+                for k in keys_to_log:
+                    # 如果是规则智能体，使用其自身名字
+                    if k.startswith("Rule_"):
+                        raw_tag = f"Elo_Raw/{k}"
+                        centered_tag = f"Elo_Centered/{k}"
+                    # 否则，认为是最新智能体，使用固定标签 "Latest"
+                    else:
+                        raw_tag = "Elo_Raw/Latest"
+                        centered_tag = "Elo_Centered/Latest"
+                    
+                    logger.add(raw_tag, valid_elos[k], total_steps)
+                    logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
+
+        
     # End Training
     training_end_time = time.time()
     env.end_render()

@@ -41,22 +41,9 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='ILRL_combat_打rule0带导弹', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_no_shoot', help="Mission name to find the log directory.")
     args = parser.parse_args()
-    
 
-    'MARWIL_combat_有辅助奖励'
-    'MARWIL_combat_无辅助奖励'
-    'RL_combat_有辅助奖励'
-    'RL_combat_无辅助奖励'
-    'RL_combat_打rule0'
-    'ILRL_combat_打rule1'
-    'ILRL_combat_打rule0带导弹'
-    'RL_combat_PFSP'
-    'RL_combat_PFSP_熵裁剪'
-    'RL_combat_PFSP_SAC熵'
-    'RL_combat_PFSP_简单熵'
-    
     
 
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -138,26 +125,25 @@ if __name__ == "__main__":
                         launch_missile_immediately(env, 'r')
 
                     # 蓝方 (RL 智能体)
-                    # -- 规则
-                    # b_state_check = env.unscale_state(b_check_obs)
-                    # b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
-                    # last_b_action_label = b_action_label
-                    # -- 训练
-                    with torch.no_grad():
-                        # **修正点：使用正确的、已加载权重的 actor_wrapper**
-                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, bern_threshold= 0.33) # , bern_threshold= 1e-4
-                        
-                    b_action_label = b_action_exec['cat'][0]
-                    b_fire = b_action_exec['bern'][0]
-                    print("开火概率", b_action_check['bern'][0])
+                    # [修改] 机动由网络控制，开火由规则控制
+                    b_state_check = env.unscale_state(b_check_obs)
                     
-                    # b_action_label = np.random.choice([4,6,13])
+                    # 1. 使用网络获取机动动作
+                    with torch.no_grad():
+                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, 
+                                    explore={'cont':0, 'cat':0, 'bern':0}, 
+                                    check_obs=b_check_obs, 
+                                    bern_threshold=0.33)
+                    b_action_label = b_action_exec['cat'][0]
+
+                    # 2. 使用规则获取开火决策 (这里使用 Rule 1 作为开火逻辑)
+                    _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
+                    last_b_action_label = b_action_label # 更新上一机动，供规则使用
 
                     if b_fire:
-                        launch_missile_immediately(env, 'b', tabu=0)
+                        launch_missile_immediately(env, 'b', tabu=1)
                     
-                    # print(f"Time: {env.t:.1f}s, Blue Action Probs: Maneuver={b_action_check['cat']}, Fire={b_action_check['bern'][0]:.2f}")
+                    # print(f"Time: {env.t:.1f}s, Blue Action: Maneuver={b_action_label}, Fire Rule Active={b_fire}")
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14(env.RUAV, r_action_label)
