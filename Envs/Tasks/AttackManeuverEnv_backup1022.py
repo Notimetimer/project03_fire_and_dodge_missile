@@ -13,17 +13,7 @@ import copy
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 获取project目录
 def get_current_file_dir():
-    # 判断是否在 Jupyter Notebook 环境
-    try:
-        shell = get_ipython().__class__.__name__  # ← 误报，不用管
-        if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
-            # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
-            return os.getcwd()
-        else:  # 其他 shell
-            return os.path.dirname(os.path.abspath(__file__))
-    except NameError:
-        # 普通 Python 脚本
-        return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.abspath(__file__))
 
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
