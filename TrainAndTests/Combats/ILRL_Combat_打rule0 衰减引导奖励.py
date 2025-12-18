@@ -226,7 +226,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫—衰减奖励' # '打莽夫—强密集奖励'
+    mission_name = '打莽夫—不衰减奖励' # '打莽夫—强密集奖励'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -465,7 +465,8 @@ if __name__ == "__main__":
             reward_for_show = b_rew_event + b_rew_constraint
             
             weight_reward = weight_reward_0
-            weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
+            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
+            weight_reward[2] = 1
             
             reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
             
