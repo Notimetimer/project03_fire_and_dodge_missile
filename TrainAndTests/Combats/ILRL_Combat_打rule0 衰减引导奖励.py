@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
-    print("Training Finished.")
+    print("IL Training Finished.")
 
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -274,7 +274,7 @@ if __name__ == "__main__":
     # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
     # tacview_input = input("Enable tacview visualization? (0=no, 1=yes) [default 0]: ").strip()
-    tacview_input= 0
+    tacview_input = 0
     
     if tacview_input == "":
         tacview_show = 0
