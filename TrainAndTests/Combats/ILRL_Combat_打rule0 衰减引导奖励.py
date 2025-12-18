@@ -11,19 +11,12 @@ import re
 import time  # 确保引入 time 模块
 from datetime import datetime
 
-'''
-PPOHybrid23_0的action_mask与本main函数不适配：
-1、get_action 作为推理接口有内置动作mask，且不针对batch分别计算，
-2、evaluate_action作为训练接口没有内置动作mask
-
-完成修改前禁止训练！！！
-'''
-
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules import *
-from Envs.Tasks.ChooseStrategyEnv2_for_mask_in_action import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+# from Envs.Tasks.ChooseStrategyEnv20 import * # 1217-205333前
+from Envs.Tasks.ChooseStrategyEnv21_new import * # 1218-104003
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-205333
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
@@ -181,11 +174,11 @@ critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
-gamma = 0.95
-lmbda = 0.95
+gamma = 0.995
+lmbda = 0.995
 epochs = 10
 eps = 0.2
-k_entropy = {'cont':0.01, 'cat':0.01, 'bern':0.8} # 0.05 # 1 # 
+k_entropy = 0.05 # 1 # 
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -233,7 +226,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_打rule0带导弹mask_in_actor'
+    mission_name = '打莽夫—衰减奖励' # '打莽夫—强密集奖励'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -317,8 +310,9 @@ if __name__ == "__main__":
                                     }
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
+    action_cycle_multiplier = 40 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_capacity = 2 * env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Modification] 移除 ELO 相关的所有逻辑 ---
     # K_FACTOR = 32
@@ -339,6 +333,8 @@ if __name__ == "__main__":
     
     r_action_list = []
     b_action_list = []
+    
+    weight_reward_0 = np.array([1,1,10])
     
     # 修改：初始化增加 'obs' 键
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
@@ -368,7 +364,7 @@ if __name__ == "__main__":
         last_decision_state = None
         
         current_action = None
-        b_reward = None
+        b_rew_event, b_rew_constraint, b_rew_shaping = 0,0,0
         
         # 新增：每回合的死亡查询表（0 表示存活，1 表示已记录死亡瞬间）
         dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
@@ -406,7 +402,7 @@ if __name__ == "__main__":
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                 if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
                     # 修改：传入 last_decision_obs 和 last_decision_state
-                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward-b_reward_assisted, b_state_global, False)
+                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False)
                     
                     '''需要引入 active_mask以应对“死后还在做决策”的极端情况'''
 
@@ -424,7 +420,7 @@ if __name__ == "__main__":
                     r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
                 else:
                     # [Fix] NN 对手决策
-                    r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1, check_obs=r_check_obs)
+                    r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
@@ -435,7 +431,7 @@ if __name__ == "__main__":
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
                 # 修改：Actor 依然使用 b_obs (局部观测) 进行决策
-                b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1, check_obs=b_check_obs)
+                b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                 b_action_label = b_action_exec['cat'][0]
                 b_fire = b_action_exec['bern'][0]
 
@@ -463,13 +459,20 @@ if __name__ == "__main__":
             b_maneuver = env.maneuver14(env.BUAV, b_action_label)
 
             env.step(r_maneuver, b_maneuver)
-            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None)
+            done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
             done = done
-
+            
+            reward_for_show = b_rew_event + b_rew_constraint
+            
+            weight_reward = weight_reward_0
+            weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
+            
+            reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
+            
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
-                episode_return += b_reward
-                # print(b_reward-b_reward_assisted, b_reward_assisted)
+                episode_return += reward_for_show
+                # print(b_rew_event, b_rew_constraint, b_rew_shaping)
                 # print()
             
             if dead_dict['b'] == 0:
@@ -490,8 +493,8 @@ if __name__ == "__main__":
         if last_decision_state is not None:
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
             # 修改：传入最后时刻的 next_b_state_global 作为 Next State
-            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward-b_reward_assisted, next_b_state_global, True)
-            episode_return += b_reward
+            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True)
+            episode_return += reward_for_show
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
         print('r 发射时间:', env.RUAV.missile_launch_time)
@@ -523,7 +526,7 @@ if __name__ == "__main__":
         
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
+            student_agent.update(transition_dict, adv_normed=1, mini_batch_size=32)  # 优势归一化 debug
             decide_steps_after_update = 0
 
             # [Modification] 保留原有梯度监控代码

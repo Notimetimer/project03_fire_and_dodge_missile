@@ -486,7 +486,7 @@ class ChooseStrategyEnv(Battle):
             threat_directio_n = np.array([cos(delta_theta_threat)*cos(delta_psi_threat), 
                                          sin(delta_theta_threat), 
                                          cos(delta_theta_threat)*sin(delta_psi_threat)])
-            if threat_distance<=24e3:
+            if threat_distance<=30e3:
                 reward_assisted += reward_weights['defensive_angle_close'] * abs(delta_psi_threat) / pi
                 reward_assisted += np.dot(ego.vel_,threat_directio_n)/340 * reward_weights['defensive_run_close']
             else:

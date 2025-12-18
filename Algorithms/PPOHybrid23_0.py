@@ -185,6 +185,12 @@ class HybridActorWrapper(nn.Module):
             actions_exec: dict (numpy), 用于环境执行
             actions_raw: dict (numpy/tensor), 用于存入 buffer
             next_h: hidden state (预留接口)
+            
+        注意： 仅在推理时传入check_obs, 训练时禁止传入!!!
+        1、目前 get_action 中的 mask 生成只处理单个 check_obs（推理时），
+            并把同一 mask 广播到整个 batch；如果要对 batch 内每个样本分别判断需扩展生成逻辑。
+        2、evaluate_actions（训练/计算 log_prob）默认未把 action_masks 传给 net ,
+            若希望训练时也应用 mask，需要在 evaluate_actions 调用 net 时传入 action_masks。
         """
         #  增强的 Batch 检测逻辑
         is_batch = False
@@ -228,20 +234,35 @@ class HybridActorWrapper(nn.Module):
                     # ATA = check_obs["target_information"][4]
                     # ata_condition = (ATA <= 60 * np.pi / 180)
                     ata_condition = 1
+                    can_fire = can_fire and ata_condition
                     
-                    # # 2. Target Locked == 1
-                    # locked = check_obs["target_locked"]
-                    # locked_condition = (locked == 1)
-                    locked_condition = 1
+                    # 2. Target Locked == 1
+                    locked = check_obs["target_locked"]
+                    locked_condition = (locked == 1)
+                    # locked_condition = 1
+                    can_fire = can_fire and locked_condition
                     
-                    # # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
-                    # ammo = check_obs["ego_main"][6]
-                    # ammo_condition = (ammo > 0)
+                    # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
+                    ammo = check_obs["ego_main"][6]
+                    ammo_condition = (ammo > 0)
                     ammo_condition = 1
+                    can_fire = can_fire and ammo_condition
                     
-                    # 综合判定
-                    if not (ata_condition and locked_condition and ammo_condition):
-                        can_fire = False
+                    distance = check_obs["target_information"][3] * 10e3
+                    # 4. 超远距离尾追不打
+                    AA_hor = check_obs["target_information"][6]
+                    if distance > 30e3 and AA_hor < 1-np.pi/6:
+                        can_fire = 0
+                    
+                    # 5. 30km 外 12s内禁止重复发射第二枚
+                    if (distance > 30e3 and check_obs["weapon"]*120 < 12)\
+                        or check_obs["missile_in_mid_term"]:
+                            can_fire = 0
+                    
+                    
+                    # # 综合判定
+                    # if not (ata_condition and locked_condition and ammo_condition):
+                    #     can_fire = False
                         
                 except Exception as e:
                     print(f"Warning: Mask generation failed: {e}")

@@ -14,8 +14,8 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules import *
-from Envs.Tasks.ChooseStrategyEnv20 import *
-# from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-182327
+from Envs.Tasks.ChooseStrategyEnv20 import * # 1217-205333前
+# 已废弃 from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-182327
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-205333
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -226,7 +226,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫—全密集奖励'
+    mission_name = '打莽夫—强密集奖励'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)

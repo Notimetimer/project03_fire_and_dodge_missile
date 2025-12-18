@@ -1,5 +1,6 @@
 '''
 相比于21，给mixed_update 也加上minibatch
+调并行的时候用
 '''
 
 import numpy as np

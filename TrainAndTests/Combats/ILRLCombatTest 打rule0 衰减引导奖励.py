@@ -12,9 +12,9 @@ import datetime
 # --- 1. 项目路径和模块导入 ---
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-
-from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
 from BasicRules import basic_rules
+# from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv21_new import * # 1218-104003
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 
@@ -43,8 +43,6 @@ if __name__ == "__main__":
     parser.add_argument("--mission-name", type=str, default='打莽夫—衰减奖励', help="Mission name to find the log directory.")
     args = parser.parse_args()
 
-    '打rule1—时间相关结果奖励'
-    '打莽夫—强密集奖励'
     '打莽夫—衰减奖励'
     
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -134,7 +132,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         # **修正点：使用正确的、已加载权重的 actor_wrapper**
                         b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, bern_threshold= 0.69) # , bern_threshold= 1e-4
+                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.69) # , bern_threshold= 1e-4
                         
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
@@ -151,7 +149,7 @@ if __name__ == "__main__":
                 r_maneuver = env.maneuver14(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14(env.BUAV, b_action_label)
                 env.step(r_maneuver, b_maneuver)
-                done, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_fire)
+                done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)
                 done = done
                 env.render(t_bias=t_bias)
 
