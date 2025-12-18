@@ -259,7 +259,7 @@ if __name__ == "__main__":
     # 加载打靶预训练的智能体
     from Utilities.LocateDirAndAgents2 import *
     pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
-    pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫-强密集奖励")
+    pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫—强密集奖励")
     pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
     
     if pre_train_agent_path:
@@ -608,7 +608,7 @@ if __name__ == "__main__":
             
             weight_reward = weight_reward_0
             # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
-            weight_reward[2] = 1
+            weight_reward[2] = 0.0
             
             reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
             
