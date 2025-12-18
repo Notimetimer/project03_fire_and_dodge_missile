@@ -17,14 +17,7 @@ from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
 def get_current_file_dir():
-    try:
-        shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':
-            return os.getcwd()
-        else:
-            return os.path.dirname(os.path.abspath(__file__))
-    except NameError:
-        return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.abspath(__file__))
 
 cur_dir = get_current_file_dir()
 

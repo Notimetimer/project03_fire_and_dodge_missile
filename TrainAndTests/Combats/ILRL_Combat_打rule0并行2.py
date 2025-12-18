@@ -24,14 +24,7 @@ from datetime import datetime
 from math import pi
 
 def get_current_file_dir():
-    try:
-        shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':
-            return os.getcwd()
-        else:
-            return os.path.dirname(os.path.abspath(__file__))
-    except NameError:
-        return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.abspath(__file__))
 cur_dir = get_current_file_dir()
 project_root = os.path.dirname(os.path.dirname(cur_dir))
 sys.path.append(project_root)
