@@ -465,7 +465,7 @@ if __name__ == "__main__":
             reward_for_show = b_rew_event + b_rew_constraint
             
             weight_reward = weight_reward_0
-            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
+            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2]) # 0.5
             weight_reward[2] = 1
             
             reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
