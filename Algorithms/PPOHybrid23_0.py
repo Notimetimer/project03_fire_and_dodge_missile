@@ -59,7 +59,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # 为每一个独立的离散头 (Head) 创建一个温度参数
             # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
             # 初始化为 0 (即 temp=1.0)，保持原网络特性，让网络自己学去增大熵
-            self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
+            # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
 
         # 3. 伯努利动作头 (Bernoulli)
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
@@ -71,7 +71,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temp=1.0)
-            self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
+            # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
     # [修改] 增加 action_masks 参数
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None):
@@ -98,7 +98,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
-            temps = torch.exp(self.log_temp_cat) 
+            temps = 1.0  # use scalar temp (or replace with tensor if per-head temps are needed)
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
             # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
@@ -106,7 +106,8 @@ class PolicyNetHybrid(torch.nn.Module):
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
                 # 对应的温度: temps[i]
-                scaled_logits = logits / (temps[i] + 1e-8)
+                # scaled_logits = logits / (temps[i] + 1e-8)
+                scaled_logits = logits / (temps + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
             
             outputs['cat'] = final_probs_list
@@ -122,25 +123,11 @@ class PolicyNetHybrid(torch.nn.Module):
                 # mask == 0 代表禁止开火，设为极小值
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
-            temps = torch.exp(self.log_temp_bern)
-            if bern_logits.dim() > 1:
-                temps = temps.unsqueeze(0)
-            
+            # use scalar temp (no tensor ops on plain number)
+            temps = 1.0 # torch.exp(self.log_temp_bern)
             scaled_bern_logits = bern_logits / (temps + 1e-8)
             outputs['bern'] = scaled_bern_logits
             
-            # [原有]
-            # # 获取温度并广播
-            # # temps 形状: (bern_dim, )
-            # temps = torch.exp(self.log_temp_bern)
-            # if bern_logits.dim() > 1:
-            #     temps = temps.unsqueeze(0) # (1, bern_dim)
-            
-            # # 应用温度缩放
-            # scaled_bern_logits = bern_logits / (temps + 1e-8)
-            
-            # outputs['bern'] = scaled_bern_logits
-
         return outputs
 
 # =============================================================================
@@ -605,10 +592,10 @@ class PPOHybrid:
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = True
-        if hasattr(self.actor.net, 'log_temp_cat'):
-            self.actor.net.log_temp_cat.requires_grad = False
-        if hasattr(self.actor.net, 'log_temp_bern'):
-            self.actor.net.log_temp_bern.requires_grad = False
+        # if hasattr(self.actor.net, 'log_temp_cat'):
+        #     self.actor.net.log_temp_cat.requires_grad = False
+        # if hasattr(self.actor.net, 'log_temp_bern'):
+        #     self.actor.net.log_temp_bern.requires_grad = False
 
         #  6. 智能数据转换：如果已经是 np.ndarray (来自 HybridReplayBuffer)，直接转 Tensor
         # 否则 (来自 list append)，先转 np 再转 Tensor
@@ -1015,10 +1002,10 @@ class PPOHybrid:
         # 冻结分布参数，只训练均值/Logits
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = False
-        if hasattr(self.actor.net, 'log_temp_cat'):
-            self.actor.net.log_temp_cat.requires_grad = False
-        if hasattr(self.actor.net, 'log_temp_bern'):
-            self.actor.net.log_temp_bern.requires_grad = False
+        # if hasattr(self.actor.net, 'log_temp_cat'):
+        #     self.actor.net.log_temp_cat.requires_grad = False
+        # if hasattr(self.actor.net, 'log_temp_bern'):
+        #     self.actor.net.log_temp_bern.requires_grad = False
 
         # 1. 提取全量数据并转为 Tensor
         states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
@@ -1140,10 +1127,10 @@ class PPOHybrid:
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = True
-        if hasattr(self.actor.net, 'log_temp_cat'):
-            self.actor.net.log_temp_cat.requires_grad = False
-        if hasattr(self.actor.net, 'log_temp_bern'):
-            self.actor.net.log_temp_bern.requires_grad = False
+        # if hasattr(self.actor.net, 'log_temp_cat'):
+        #     self.actor.net.log_temp_cat.requires_grad = False
+        # if hasattr(self.actor.net, 'log_temp_bern'):
+        #     self.actor.net.log_temp_bern.requires_grad = False
 
         def to_tensor(x, dtype):
             if isinstance(x, np.ndarray):
