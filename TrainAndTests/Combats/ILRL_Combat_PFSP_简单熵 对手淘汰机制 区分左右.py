@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     # 加载打靶预训练的智能体
     from Utilities.LocateDirAndAgents2 import *
     pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
-    pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫—强密集奖励")
+    pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫_强密集奖励_左右")
     pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
     
     if pre_train_agent_path:
@@ -507,12 +507,9 @@ if __name__ == "__main__":
         
         current_action = None
         b_rew_event, b_rew_constraint, b_rew_shaping = 0,0,0
-
-        ego = env.BUAV
-        adv = env.RUAV
         
         # 新增：每回合的死亡查询表（0 表示存活，1 表示已记录死亡瞬间）
-        dead_dict = {'r': int(bool(adv.dead)), 'b': int(bool(ego.dead))}
+        dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
 
         done = False
 
@@ -565,8 +562,7 @@ if __name__ == "__main__":
                     r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
                 else:
                     # [Fix] NN 对手决策
-                    # [新增] 对手策略开火mask，提供持续性压力
-                    r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1, check_obs=r_check_obs)
+                    r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
@@ -600,9 +596,12 @@ if __name__ == "__main__":
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
                 
+            if adv_is_rule:
+                r_maneuver = env.maneuver14(env.RUAV, r_action_label)
+            else:
+                r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
 
-            r_maneuver = env.maneuver14(adv, r_action_label)
-            b_maneuver = env.maneuver14(ego, b_action_label)
+            b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
 
             env.step(r_maneuver, b_maneuver)
             done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
@@ -626,7 +625,7 @@ if __name__ == "__main__":
                 # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储
                 next_b_obs, next_b_check_obs = env.obs_1v1('b', pomdp=1)
                 next_b_state_global, _ = env.obs_1v1('b', reward_fn=1) # 获取全局Next State
-                if ego.dead:
+                if env.BUAV.dead:
                     dead_dict['b'] = 1
 
             total_steps += 1
@@ -643,20 +642,20 @@ if __name__ == "__main__":
             transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True)
             episode_return += reward_for_show
             
-        print('r 剩余导弹数量:', adv.ammo)
-        print('r 发射时间:', adv.missile_launch_time)
+        print('r 剩余导弹数量:', env.RUAV.ammo)
+        print('r 发射时间:', env.RUAV.missile_launch_time)
         
-        print('b 剩余导弹数量:', ego.ammo)
-        print('b 发射时间:', ego.missile_launch_time)
+        print('b 剩余导弹数量:', env.BUAV.ammo)
+        print('b 发射时间:', env.BUAV.missile_launch_time)
         
-        if env.crash(adv):
+        if env.crash(env.RUAV):
             print('r 撞地')
-        if env.crash(ego):
+        if env.crash(env.BUAV):
             print('b 撞地')
             
-        if env.crash(adv):
+        if env.crash(env.RUAV):
             print('r 撞地')
-        if env.crash(ego):
+        if env.crash(env.BUAV):
             print('b 撞地')
 
         # --- [Optimized] ELO 更新与策略池清洗逻辑 ---
@@ -676,26 +675,14 @@ if __name__ == "__main__":
             简单粗暴的对手筛选策略：
             1、撞地
             2、零开火失败
-            3、对着空气开火的对手(任1枚导弹在角度>pi/3或者所有导弹均在70km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
+            3、对着空气开火的对手(任1枚导弹在角度>pi/3或者4枚以上导弹均在40km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
             4、
             '''
-            cond_crash = env.crash(adv) # 撞地
-            r_fired_count = 6 - adv.ammo
+            cond_crash = env.crash(env.RUAV) # 撞地
+            r_fired_count = 6 - env.RUAV.ammo
             cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
-            fool_adv = 0
-            # [新增] 傻对手淘汰机制
-            if r_fired_count > 0: # 打过弹，乱打的也出局
-                adv_launch_states = np.array(adv.launch_states)
-                adv_ATAs = adv_launch_states[:,0]
-                adv_distances = adv_launch_states[:,1]
-                adv_target_lockeds = adv_launch_states[:,3]
-                adv_tgos = adv_launch_states[:,4]
-                # 如果有两枚以上导弹都是没锁定就打的，出局。
-                # 如果所有导弹都是在70km以外打的，出局。
-                if sum(adv_target_lockeds) <= r_fired_count-2 or min(adv_distances) >= 70e3:
-                    fool_adv = 1
             
-            if cond_crash or cond_coward or fool_adv:
+            if cond_crash or cond_coward:
                 is_kicked_opponent = True
                 print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name} (Crash={cond_crash}, Coward={cond_coward})")
 

@@ -175,6 +175,8 @@ class Battle(object):
             UAV.state_memory = None
             UAV.last_state = None
             UAV.current_state = None
+            UAV.launch_states = []
+            UAV.launch_states_order = None
             UAV.init_ammo = red_init_ammo
             UAV.ammo = red_init_ammo
             UAV.id = i + 1
@@ -207,6 +209,8 @@ class Battle(object):
             UAV.state_memory = None
             UAV.last_state = None
             UAV.current_state = None
+            UAV.launch_states = []
+            UAV.launch_states_order = None
             UAV.init_ammo = blue_init_ammo
             UAV.ammo = blue_init_ammo
             UAV.id = i + 201
@@ -1304,6 +1308,8 @@ def launch_missile_immediately(env, side='r', tabu=0):
 
     ego_state = env.get_state(uav.side)
     ATA = ego_state["target_information"][4]
+    distance = ego_state["target_information"][3]
+    AA_hor = ego_state["target_information"][6]
     target_locked = ego_state["target_locked"]
 
     # 发射导弹
@@ -1312,6 +1318,11 @@ def launch_missile_immediately(env, side='r', tabu=0):
                 target_locked and ego_state["weapon"]>=0.1 and ATA<=60 *pi/180:
             new_missile = uav.launch_missile(target, env.t, missile_class)
             uav.ammo -= 1
+
+            # 记录导弹发射瞬间的 ATA、distance 和 AA_hor
+            uav.launch_states_order = ['ATA', 'distance', 'AA_hor', 'target_locked', 't_go']
+            uav.launch_states.append(np.array([ATA, distance, AA_hor, target_locked, ego_state["weapon"]]))
+
             new_missile.side = 'r' if side == 'r' else 'b'
             new_missile_id = new_missile.id
             if side == 'r':

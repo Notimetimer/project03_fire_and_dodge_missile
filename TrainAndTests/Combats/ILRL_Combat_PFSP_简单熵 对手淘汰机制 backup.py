@@ -565,8 +565,7 @@ if __name__ == "__main__":
                     r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
                 else:
                     # [Fix] NN 对手决策
-                    # [新增] 对手策略开火mask，提供持续性压力
-                    r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1, check_obs=r_check_obs)
+                    r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0] # 网络控制开火
                 last_r_action_label = r_action_label
@@ -683,7 +682,6 @@ if __name__ == "__main__":
             r_fired_count = 6 - adv.ammo
             cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
             fool_adv = 0
-            # [新增] 傻对手淘汰机制
             if r_fired_count > 0: # 打过弹，乱打的也出局
                 adv_launch_states = np.array(adv.launch_states)
                 adv_ATAs = adv_launch_states[:,0]
@@ -692,7 +690,7 @@ if __name__ == "__main__":
                 adv_tgos = adv_launch_states[:,4]
                 # 如果有两枚以上导弹都是没锁定就打的，出局。
                 # 如果所有导弹都是在70km以外打的，出局。
-                if sum(adv_target_lockeds) <= r_fired_count-2 or min(adv_distances) >= 70e3:
+                if sum(adv_target_lockeds) < r_fired_count-1 or min(adv_distances) >= 70e3:
                     fool_adv = 1
             
             if cond_crash or cond_coward or fool_adv:

@@ -210,8 +210,8 @@ class HybridActorWrapper(nn.Module):
         # =====================================================================
         action_masks = None
         can_fire = True
-        # 仅在传入了单个 dict 类型的 check_obs 且对伯努利不进行探索（explore_opts['bern'] 为 False 或 0）时启用 mask
-        if (check_obs is not None) and isinstance(check_obs, dict) and (not explore_opts['bern']):
+        # 当且仅当传入了单个 dict 类型的 check_obs 时启用 mask
+        if (check_obs is not None) and isinstance(check_obs, dict):  # and (not explore_opts['bern']):
             # 默认允许开火，下面按规则逐项收敛（保留注释）
             can_fire = True
             # 如果是Batch训练模式，通常check_obs会增加维度，这里只在推理的时候启用
