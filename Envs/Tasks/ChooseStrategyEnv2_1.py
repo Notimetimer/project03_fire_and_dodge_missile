@@ -30,8 +30,8 @@ from Envs.Tasks.AttackManeuverEnv import *
 from Envs.Tasks.CrankManeuverEnv import *
 from Envs.Tasks.EscapeManeuverEnv import *
 from Algorithms.Rules import *
-from ChooseStrategyEnv2_0 import ChooseStrategyEnv as BaseChooseStrategyEnv
-from ChooseStrategyEnv2_0 import action_options, action_optionsLR
+from .ChooseStrategyEnv2_0 import ChooseStrategyEnv as BaseChooseStrategyEnv
+from .ChooseStrategyEnv2_0 import action_options, action_optionsLR
 
 # 通过继承构建观测空间、奖励函数和终止条件
 # 通过类的组合获取各子策略的观测量裁剪

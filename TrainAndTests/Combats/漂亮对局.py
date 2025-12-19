@@ -9,9 +9,13 @@ from math import pi
 import time
 import datetime
 
-# --- 1. 项目路径和模块导入 ---
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(project_root)
+# # --- 1. 项目路径和模块导入 ---
+
+# project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# sys.path.append(project_root)
+
+from _context import *
+
 from BasicRules import basic_rules
 # from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
 from Envs.Tasks.ChooseStrategyEnv2_2 import * # 1218-104003
