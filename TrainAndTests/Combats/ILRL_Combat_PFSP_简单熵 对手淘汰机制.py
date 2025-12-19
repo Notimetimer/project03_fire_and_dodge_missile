@@ -672,7 +672,8 @@ if __name__ == "__main__":
             简单粗暴的对手筛选策略：
             1、撞地
             2、零开火失败
-            3、todo
+            3、对着空气开火的对手(任1枚导弹在角度>pi/3或者4枚以上导弹均在40km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
+            4、
             '''
             cond_crash = env.crash(env.RUAV) # 撞地
             r_fired_count = 6 - env.RUAV.ammo

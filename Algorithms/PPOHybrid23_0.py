@@ -222,51 +222,39 @@ class HybridActorWrapper(nn.Module):
         # [新增] 解析 check_obs 并构建 Action Mask
         # =====================================================================
         action_masks = None
-        if check_obs is not None:
-            # 默认允许开火 (mask=0)
+        can_fire = True
+        # 仅在传入了单个 dict 类型的 check_obs 且对伯努利不进行探索（explore_opts['bern'] 为 False 或 0）时启用 mask
+        if (check_obs is not None) and isinstance(check_obs, dict) and (not explore_opts['bern']):
+            # 默认允许开火，下面按规则逐项收敛（保留注释）
             can_fire = True
-            
-            # 只有当 check_obs 是单个字典时 (Inference 模式) 进行处理
-            # 如果是 Batch 训练模式，通常 check_obs 会比较复杂，这里暂只处理推理
-            if isinstance(check_obs, dict):
-                try:
-                    # 1. ATA <= 60度 (0.523 rad)
-                    # ATA = check_obs["target_information"][4]
-                    # ata_condition = (ATA <= 60 * np.pi / 180)
-                    ata_condition = 1
-                    can_fire = can_fire and ata_condition
-                    
-                    # 2. Target Locked == 1
-                    locked = check_obs["target_locked"]
-                    locked_condition = (locked == 1)
-                    # locked_condition = 1
-                    can_fire = can_fire and locked_condition
-                    
-                    # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
-                    ammo = check_obs["ego_main"][6]
-                    ammo_condition = (ammo > 0)
-                    ammo_condition = 1
-                    can_fire = can_fire and ammo_condition
-                    
-                    distance = check_obs["target_information"][3] * 10e3
-                    # 4. 超远距离尾追不打
-                    AA_hor = check_obs["target_information"][6]
-                    if distance > 30e3 and AA_hor < 1-np.pi/6:
-                        can_fire = 0
-                    
-                    # 5. 30km 外 12s内禁止重复发射第二枚
-                    if (distance > 30e3 and check_obs["weapon"]*120 < 12)\
-                        or check_obs["missile_in_mid_term"]:
-                            can_fire = 0
-                    
-                    
-                    # # 综合判定
-                    # if not (ata_condition and locked_condition and ammo_condition):
-                    #     can_fire = False
-                        
-                except Exception as e:
-                    print(f"Warning: Mask generation failed: {e}")
-                    can_fire = True # 出错则不mask
+            # 如果是Batch训练模式，通常check_obs会增加维度，这里只在推理的时候启用
+
+            # 1. ATA <= 60度 (0.5236 rad)
+            # ATA 在 check_obs["target_information"][4]
+            ata = check_obs["target_information"][4]
+            ata_condition = (ata <= 60 * np.pi / 180)
+            can_fire = can_fire and ata_condition
+
+            # 2. Target Locked == 1
+            locked = check_obs["target_locked"]
+            locked_condition = (locked == 1)
+            can_fire = can_fire and locked_condition
+
+            # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
+            ammo = check_obs["ego_main"][6]
+            ammo_condition = (ammo > 0)
+            can_fire = can_fire and ammo_condition
+
+            # 4. 超远距离尾追不打（使用 AA_hor 判断尾追）
+            distance = check_obs["target_information"][3]
+            AA_hor = check_obs["target_information"][6]
+            if (distance > 30e3) and (abs(AA_hor) < np.pi/6):
+                can_fire = False
+
+            # 5. 30km 外12s内禁止重复发射第二枚 或 mid-term 有在飞导弹
+            # weapon 计时单位兼容原逻辑
+            if (distance > 30e3 and check_obs["weapon"] * 120 < 12) or check_obs.get("missile_in_mid_term", False):
+                can_fire = False
 
             # 构建 Tensor Mask: (Batch_Size, Bern_Dim) -> (1, 1)
             # 1.0 表示允许 (保留 Logits)，0.0 表示禁止 (Logits -> -inf)
