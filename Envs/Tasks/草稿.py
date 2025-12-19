@@ -1,192 +1,314 @@
-def _compute_altitude_reward(self, aircraft: Aircraft):
-        """
-        计算高度奖励（实际为惩罚）。
-        惩罚危险的低空飞行和不经济的超高空飞行。
-        """
-        # 1. 获取飞机当前的高度 (y坐标) 和垂直速度
-        altitude_m = aircraft.pos[1]
-        v_vertical_ms = aircraft.get_velocity_vector()[1]
-        # --- 低空惩罚逻辑  ---
-        # 2. 计算速度惩罚 (Pv)
-        Pv = 0.0
-        if altitude_m <= self.SAFE_ALTITUDE_M and v_vertical_ms < 0:
-            descent_speed = abs(v_vertical_ms)
-            penalty_factor = (descent_speed / self.KV_MS) * ((self.SAFE_ALTITUDE_M - altitude_m) / self.SAFE_ALTITUDE_M)
-            Pv = -np.clip(penalty_factor, 0.0, 1.0)
-        # 3. 计算绝对高度惩罚 (PH)
-        PH = 0.0
-        if altitude_m <= self.DANGER_ALTITUDE_M:
-            PH = np.clip(altitude_m / self.DANGER_ALTITUDE_M, 0.0, 1.0) - 1.0
-        # --- 新增：超高空惩罚逻辑 ---
-        # 4. 计算超高空惩罚 (P_over)
-        P_over = 0.0
-        if altitude_m > self.MAX_ALTITUDE_M:
-            # 惩罚值与超出高度成正比
-            # 例如，在13000米时，惩罚为 -(13000-12000)/1000 * 0.5 = -0.5
-            # 这样设计可以平滑地增加惩罚
-            P_over = -((altitude_m - self.MAX_ALTITUDE_M) / 1000.0) * self.OVER_ALTITUDE_PENALTY_FACTOR
-        # 5. 合并所有惩罚项，并乘以全局缩放系数
-        #    将低空惩罚和高空惩罚相加
+'''
+增加开火惩罚
+三元组奖励
+'''
 
-        return Pv + PH + P_over
+import numpy as np
+from random import random
+import random
+from gym import spaces
+import copy
+import jsbsim
+import sys
+import os
+import importlib
+import copy
+from math import *
 
 
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 获取project目录
+def get_current_file_dir():
+    return os.path.dirname(os.path.abspath(__file__))
 
-    def escape_terminate_and_reward(self, side): # 逃逸策略训练与奖励
-        # copy了进攻的，还没改
-        terminate = False
-        state = self.get_state(side)
-        speed = state["ego_main"][0]
-        alt = state["ego_main"][1]
-        target_alt = alt+state["target_information"][0]
-        delta_psi = state["target_information"][1]
-        delta_theta = state["target_information"][2]
-        dist = state["target_information"][3]
-        alpha = state["target_information"][4]
-        threat_delta_psi, threat_delta_theta, threat_distance =\
-            state["threat"]
 
-        RWR = state["warning"]
-        obs = self.base_obs(side)
-        d_hor = obs["border"][0]
+current_dir = get_current_file_dir()
+sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
+from Envs.battle6dof1v1_missile0919 import *
+from Envs.Tasks.AttackManeuverEnv import *
+from Envs.Tasks.CrankManeuverEnv import *
+from Envs.Tasks.EscapeManeuverEnv import *
+from Algorithms.Rules import *
+from ChooseStrategyEnv2_0 import ChooseStrategyEnv as BaseChooseStrategyEnv
+from ChooseStrategyEnv2_0 import action_options, action_optionsLR
+
+# 通过继承构建观测空间、奖励函数和终止条件
+# 通过类的组合获取各子策略的观测量裁剪
+
+class ChooseStrategyEnv(BaseChooseStrategyEnv):
+    """
+    Inherit everything from ChooseStrategyEnv2_0 except override
+    combat_terminate_and_reward (keeps other definitions/vars from base).
+    """
+    
+    def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30):
+        # --- 1. 参数初始化与状态获取 ---
+        # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
+        reward_weights = {
+            'base_survival': 0.0,
+            'missile_guidance': 0.04,
+            'target_locked': 0.06,
+            'locked_by_target': 0.05,
+            'missile_warning': 0.06,
+            'enemy_gets_warning': 0.05,
+            'alt_limit_penalty': 1.0,
+            'border_penalty_scale': 0.2,
+            'border_reward': 1.0,
+            'angle_advantage': 1.0,
+            'height_advantage': 0.1,
+            'defensive_angle_close': 0.5,
+            'defensive_run_close': 0.5,
+            'defensive_angle_far': 0.2,
+            'defensive_crank_penalty': 0.3,
+            'aoa_penalty': 0.02,
+            'pitch_penalty': 0.02,
+        }
+
+        self.close_range_kill() # 允许跑刀
+        self.update_missile_state()
+        
         if side == 'r':
             ego = self.RUAV
-            ego_missile = self.Rmissiles[0] if self.Rmissiles else None
             enm = self.BUAV
-            alive_own_missiles = self.alive_r_missiles
             alive_enm_missiles = self.alive_b_missiles
+            alive_ally_missiles = self.alive_r_missiles
         if side == 'b':
             ego = self.BUAV
-            ego_missile = self.Bmissiles[0] if self.Bmissiles else None
             enm = self.RUAV
             alive_enm_missiles = self.alive_r_missiles
-            alive_own_missiles = self.alive_b_missiles
+            alive_ally_missiles = self.alive_b_missiles
+
+        # --- 2. 终止判定 ---
+        done = 0
         
-        '''
-        逃逸机动训练
-        目标机从不可逃逸区外~40km向本机发射一枚导弹并对本机做纯追踪，
-        本机被导弹命中有惩罚，除此之外根据和导弹的ATA和提供密集奖励
-        '''
-        self.close_range_kill() # 加入近距杀
-
-        # 被命中判为失败
-        if ego.got_hit:
-            terminate = True
-            self.lose = 1
-
-        # 高度出界失败
-        if not self.min_alt<=alt<=self.max_alt:
-            terminate = True
-            self.lose = 1
-
-        # 飞出水平边界失败
-        if self.out_range(ego):
-            terminate = True
-            self.lose = 1
-        
-        # 导弹规避成功
-        if self.t > self.game_time_limit \
-            and not ego.dead and enm.ammo==0 and \
-                len(alive_enm_missiles)==0:
+        # --简单判定法--
+        # 严格回合时间限制
+        if self.t > self.game_time_limit:
+            done = 1
+        # 双杀
+        if enm.dead and ego.dead:
+            done = 1
+        # 如果敌方和敌方所有导弹都没了，且我方存活，判定为胜
+        if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
             self.win = 1
-            terminate = True
-        
-        # 水平角度奖励， 奖励和敌机在同一高度层的置尾机动(√)
+            done = 1
+        # 如果友方和友方的所有导弹都没了，且敌方存活，判定为负
+        elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
+            self.lose = 1
+            done = 1
+        # 双杀双活时间到，就是平局
+        elif done: 
+            self.draw = 1
+            
+        # # --原有判定法--
+        # if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
+        #     self.win = 1
+        #     done = 1
+        # # 如果友方和友方的所有导弹都没了，且敌方飞机还在，判定为负
+        # elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
+        #     self.lose = 1
+        #     done = 1
+            
+        # # 如果友方和敌方打光导弹且都存活，或双方飞机都没了，判定为平
+        # elif ego.ammo == 0 and enm.ammo == 0 and (not ego.dead) and (not enm.dead) or \
+        #         (ego.dead and enm.dead):
+        #     self.draw = 1
+        #     done = 1
+        # else:
+        #     done = 0
+        # if self.t > self.game_time_limit:
+        #     done = 1
+        #     # 如果超时，我方打光导弹，导弹全自爆，对手导弹还有剩，且存活，判定为负
+        #     if ego.ammo + len(alive_ally_missiles) == 0 and \
+        #         enm.ammo + len(alive_enm_missiles) > 0 and not enm.dead:
+        #         self.lose = 1
+        #     # 如果超时，对手打光导弹，导弹全自爆，我方导弹还有剩，且存活，判定为胜
+        #     elif enm.ammo + len(alive_enm_missiles) == 0 and \
+        #         ego.ammo + len(alive_ally_missiles) > 0 and not ego.dead:
+        #         self.win = 1                
+        #     # 如果超时，双方均未打光导弹/仍有导弹在空中飞，且双方均存活, 或者双方都死，判定为平
+        #     else:
+        #         self.draw = 1
 
-        r_angle = alpha / pi
-        # r_angle_h = abs(delta_psi)/pi
-        # r_angle_v = 1-abs(obs["target_information"][2])/pi*2 # 不对
-        r_angle_v = 1-abs(ego.theta/pi*2)
+        # ego_states = self.get_state(side)
+        # enm_states = self.get_state(enm.side)
+        # --- 3. 基础变量计算 ---
+        ego_states = ego.current_state
+        enm_states = enm.current_state
+        dist_enm2ego = norm(ego.pos_ - enm.pos_)
         
-        L_ = enm.pos_-ego.pos_
-        delta_v_ = enm.vel_-ego.vel_
-        dist_dot = np.dot(delta_v_, L_)/dist
-        self.dist_dot = dist_dot
+        cos_ATA_enm = np.dot(enm.vel_, (ego.pos_ - enm.pos_)) / (norm(enm.vel_) * dist_enm2ego + 1e-3)
+        ATA_enm = np.arccos(np.clip(cos_ATA_enm, -1, 1))
+        delta_theta = ego_states["target_information"][2]
+        distance = ego_states["target_information"][3]
+        speed = ego_states["ego_main"][0]
+        alt = ego_states["ego_main"][1]
+        cos_delta_psi = ego_states["target_information"][0]
+        sin_delta_psi = ego_states["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        alpha = ego_states["target_information"][4]
+        # 严格被锁判定
+        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= pi/3)
+        
+        AA_hor = ego_states["target_information"][-2]
+        warning = ego_states["warning"]
+        missile_in_mid_term = ego_states["missile_in_mid_term"]
+        missile_time_since_shoot = ego_states["weapon"]
+        
+        cos_delta_psi_threat = ego_states["threat"][0]
+        sin_delta_psi_threat = ego_states["threat"][1]
+        threat_distance = ego_states["threat"][3]
+        delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
+        delta_theta_threat = ego_states["threat"][2]
+        
+        # 奖励项初始化
+        r_event = 0.0      # 结果奖励
+        r_constraint = 0.0 # 约束与代价
+        r_shaping = 0.0    # 战术引导
 
-        # 速度奖励
-        if self.last_dist_dot is None:
-            dist_dot2 = 0
+        # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
+        # 高度限制奖励/惩罚
+        r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+                        (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
+        
+        # 靠近边界惩罚
+        o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
+        ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
+        d_hor = ego_states["border"][0]
+        if d_hor <= 50e3:
+            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
         else:
-            dist_dot2 = (self.dist_dot-self.last_dist_dot)/self.dt_maneuver
-        self.last_dist_dot = self.dist_dot
-
-        r_v = dist_dot2/9.8
-
-        # temp = abs(threat_delta_psi)/pi # 远离度,对头时候最好是0.8Ma，置尾的时候越快越好
-        # v_opt = (0.8+(2-0.8)*temp)*340
-        # r_v = 1 - np.abs(speed-v_opt)/(2*340)
-
-        # r_v = dist_dot/(2*340) # 远离给奖励，接近给惩罚
+            r_constraint += reward_weights['border_reward']
         
-        # 高度奖励
-        # 爬升下降率惩罚
-        r_vu = 0
-        if alt <= self.min_alt_safe:
-            r_vu = np.clip(ego.vu / 100 * (self.min_alt_safe - alt) / (self.min_alt_safe-self.min_alt), 0., 1.)
-        if alt >= self.max_alt_safe:
-            r_vu = -np.clip(ego.vu / 100 * (alt - self.max_alt_safe) / (self.max_alt-self.max_alt_safe), 0., 1.)
+        # 迎角惩罚
+        r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
+                                                         (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
+        # 俯仰角惩罚
+        r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
-        # 绝对高度惩罚
-        r_abs_h = 0
-        if alt <= self.min_alt_danger:
-            r_abs_h = np.clip(alt / self.min_alt_danger, 0., 1.) - 1.
-        if alt >= self.max_alt_danger:
-            r_abs_h = np.clip((self.max_alt-alt) / (self.max_alt-self.max_alt_danger), 0., 1.) - 1.
+        # 开火代价控制
+        shoot = action_shoot
+        wasted = 0
+        is_dead_now = ego.dead or self.out_range(ego)
+        if is_dead_now and not getattr(ego, 'last_dead', False):
+            shoot = ego.ammo
+            wasted = ego.ammo
+            ego.last_dead = True
+        elif is_dead_now:
+            shoot = 0 # 已经死过了，不再重复扣除
 
-        # r_alt = (alt<=self.min_alt_safe) * (alt-self.min_alt)/(self.min_alt_safe-self.min_alt) + \
-        #         (alt>=self.max_alt_safe) * (alt-self.max_alt)/(self.max_alt_safe-self.max_alt)
-        # 相对高度奖励, 关于敌机或导弹
-        r_rel_h = 0
+        if shoot >= 1:
+            # 发射惩罚 (硬编码)
+            if alpha*180/pi > 10:
+                r_constraint -= 4 * shoot
+            else:
+                r_constraint -= 3 * shoot
+            
+            if len(alive_ally_missiles) > 1:
+                r_constraint -= 10 * shoot
+            
+            # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
+            if not ego.dead:
+                r_constraint += 1.0 * (pi/3 - alpha)/(pi/3)
+                r_constraint += 0.6 * (abs(AA_hor)/pi - 1)
+                r_constraint += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射
+                
+                # 发射距离惩罚
+                if distance > 60e3:
+                    r_constraint += -5 * (distance - 60e3)/20e3
 
-        r_alt = r_vu + r_abs_h + r_rel_h
+        # --- 5. 引导奖励计算 (r_shaping) - 外部随步数衰减 ---
+        # 为导弹提供制导
+        if missile_in_mid_term:
+            r_shaping += reward_weights['missile_guidance']
 
-        # r_alt = (alt<=self.min_alt_safe) * np.clip(ego.vu/100, -1, 1) + \
-        #         (alt>=self.max_alt_safe) * np.clip(-ego.vu/100, -1, 1)
+        # 锁定目标
+        if ego_states["target_locked"]:
+            r_shaping += reward_weights['target_locked']
 
-        # pre_alt_opt = self.min_alt_safe + 1e3 # 比最小安全高度高1000m
-        # alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
-        # r_alt = (alt<=alt_opt)*(alt-self.min_alt)/(alt_opt-self.min_alt),
-        #             (alt>alt_opt)*(1-(alt-alt_opt)/(self.max_alt-alt_opt))
+        # 被目标锁定
+        if strict_locked_by_target:
+            r_shaping -= reward_weights['locked_by_target']
+
+        # 被导弹导引头锁住
+        if warning and threat_distance <= 20e3:
+            r_shaping -= reward_weights['missile_warning']
+
+        # 导弹锁定目标
+        if enm_states["warning"] and enm_states["threat"][3] <= 20e3:
+            r_shaping += reward_weights['enemy_gets_warning']
+
+        # 优势度引导
+        if len(alive_ally_missiles) == 0 and ego.ammo > 0 and not warning:
+            # 角度优势度
+            r_shaping += (ATA_enm / pi - alpha / pi) * reward_weights['angle_advantage']
+            # 高度优势度
+            r_shaping += (alt - enm.alt)/5000 * reward_weights['height_advantage']
+
+        # 防御引导
+        if warning:
+            threat_directio_n = np.array([cos(delta_theta_threat)*cos(delta_psi_threat), 
+                                         sin(delta_theta_threat), 
+                                         cos(delta_theta_threat)*sin(delta_psi_threat)])
+            if threat_distance <= 30e3:
+                r_shaping += reward_weights['defensive_angle_close'] * abs(delta_psi_threat) / pi
+                r_shaping += np.dot(ego.vel_, threat_directio_n)/340 * reward_weights['defensive_run_close']
+            else:
+                r_shaping += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
+                if missile_in_mid_term:
+                    r_shaping -= reward_weights['defensive_crank_penalty'] * abs(alpha-pi/3)/(pi/3)
+
+        # [加回] 开火引导逻辑 (Should fire vs Shoot)
+        should_fire_missile = False
+        if distance < 60e3 and alpha < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+            if missile_time_since_shoot >= 20 and not missile_in_mid_term and not (distance > 12e3 and abs(AA_hor) < 30*pi/180):
+                should_fire_missile = True
         
-        # 距离奖励，和目标机之间的距离
-        r_dist = -1+np.clip(dist/30e3, -1, 1)
-
-        # # 水平边界奖励
-        self.dhor = d_hor
-        if self.last_dhor is None:
-            d_hor_dot = 0
-        else:
-            d_hor_dot = (self.dhor-self.last_dhor)/self.dt_maneuver
-        self.last_dhor = self.dhor
-        r_border = d_hor_dot /340*50e3
-        # r_border = 0
-
-        # # 稀疏奖励
-        # 失败惩罚
-        if self.lose:
-            r_event = -20
-        # 取胜奖励
-        elif self.win:
-            r_event = 20
-        else:
-            r_event = 0
-        # r_event = 0
-
-        w_angle =  1 # d_hor**2
-        w_border = 2 # 1-w_angle
-
-        reward = np.sum([
-            w_angle * r_angle ,
-            1 * r_angle_v ,
-            1 * r_v ,
-            2 * r_alt ,
-            1 * r_event ,
-            w_border * r_border , # 10
-            0.5 * r_dist,
-            ])
+        reward_shoot_coach = 0
+        if shoot == 1:
+            if should_fire_missile:
+                reward_shoot_coach += 10
+            else:
+                reward_shoot_coach -= 10
+        if shoot == 0:
+            if should_fire_missile:
+                reward_shoot_coach -= 10
+            else:
+                reward_shoot_coach += 0.01
         
-        if terminate:
-            self.running = False
-        
-        return terminate, reward, r_event
+        r_shaping += reward_shoot_coach # 归入引导奖励
+
+        # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
+        # 逃脱导弹
+        if ego.escape_once:
+            r_event += 20
+        # 导弹被逃脱
+        if enm.escape_once:
+            r_event -= 20
+            
+        # 死了也当剩下导弹全被逃脱处理 (自杀代价补偿)
+        if wasted > 0:
+            r_event -= 20 * wasted
+
+        if done:
+            time_left = self.game_time_limit - self.t
+            steps_left = time_left / action_cycle_multiplier
+            total_shaping_sum = sum(reward_weights.values())
+
+            if self.win:
+                r_event += 100 + steps_left * total_shaping_sum
+            elif self.lose:
+                r_event -= 100 + steps_left * total_shaping_sum
+                if self.out_range(ego) or ego.alt < self.min_alt:
+                    r_event -= 50
+            elif self.draw:
+                r_event -= 50
+            
+            # 打印详细奖励组成，方便调试
+            print(f"--- Episode Done ---")
+            print(f"Side: {side} | Result: {'Win' if self.win else 'Lose' if self.lose else 'Draw'}")
+            print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
+
+        # 返回 done 和三个分项奖励
+        return done, r_event, r_constraint, r_shaping

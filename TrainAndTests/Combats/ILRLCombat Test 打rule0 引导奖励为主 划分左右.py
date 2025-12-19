@@ -40,12 +40,8 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='打莽夫—衰减奖励', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='打莽夫_强密集奖励_左右', help="Mission name to find the log directory.")
     args = parser.parse_args()
-
-    '打rule1—时间相关结果奖励'
-    '打莽夫—强密集奖励'
-    '打莽夫—衰减奖励'
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
@@ -148,8 +144,8 @@ if __name__ == "__main__":
                     # print(f"Time: {env.t:.1f}s, Blue Action Probs: Maneuver={b_action_check['cat']}, Fire={b_action_check['bern'][0]:.2f}")
 
                 # 执行机动并步进
-                r_maneuver = env.maneuver14(env.RUAV, r_action_label)
-                b_maneuver = env.maneuver14(env.BUAV, b_action_label)
+                r_maneuver = env.maneuver14(env.RUAV, r_action_label) # 规则智能体不分左右
+                b_maneuver = env.maneuver14LR(env.BUAV, b_action_label) # 强化学习智能体区分左右
                 env.step(r_maneuver, b_maneuver)
                 done, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_fire)
                 done = done

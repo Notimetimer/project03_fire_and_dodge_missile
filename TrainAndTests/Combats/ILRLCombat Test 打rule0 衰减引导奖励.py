@@ -14,7 +14,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules import basic_rules
 # from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
-from Envs.Tasks.ChooseStrategyEnv21_new import * # 1218-104003
+from Envs.Tasks.ChooseStrategyEnv2_2 import * # 1218-104003
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 

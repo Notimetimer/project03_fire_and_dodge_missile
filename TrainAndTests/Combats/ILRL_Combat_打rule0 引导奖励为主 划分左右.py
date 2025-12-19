@@ -14,8 +14,8 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules import *
-# from Envs.Tasks.ChooseStrategyEnv20 import * # 1217-205333前
-from Envs.Tasks.ChooseStrategyEnv2_2 import * # 1218-104003
+from Envs.Tasks.ChooseStrategyEnv2_0 import * # 1217-205333前
+# 已废弃 from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-182327
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-205333
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫—不衰减奖励' # '打莽夫—强密集奖励'
+    mission_name = '打莽夫_强密集奖励_左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -254,7 +254,7 @@ if __name__ == "__main__":
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
-    print("IL Training Finished.")
+    print("Training Finished.")
 
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -267,7 +267,7 @@ if __name__ == "__main__":
     # student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
     # tacview_input = input("Enable tacview visualization? (0=no, 1=yes) [default 0]: ").strip()
-    tacview_input = 0
+    tacview_input= 0
     
     if tacview_input == "":
         tacview_show = 0
@@ -305,7 +305,7 @@ if __name__ == "__main__":
 
     action_cycle_multiplier = 40 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = 2 * env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Modification] 移除 ELO 相关的所有逻辑 ---
     # K_FACTOR = 32
@@ -326,8 +326,6 @@ if __name__ == "__main__":
     
     r_action_list = []
     b_action_list = []
-    
-    weight_reward_0 = np.array([1,1,10])
     
     # 修改：初始化增加 'obs' 键
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
@@ -357,7 +355,7 @@ if __name__ == "__main__":
         last_decision_state = None
         
         current_action = None
-        b_rew_event, b_rew_constraint, b_rew_shaping = 0,0,0
+        b_reward = None
         
         # 新增：每回合的死亡查询表（0 表示存活，1 表示已记录死亡瞬间）
         dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
@@ -395,7 +393,7 @@ if __name__ == "__main__":
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                 if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
                     # 修改：传入 last_decision_obs 和 last_decision_state
-                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False)
+                    transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, b_state_global, False)
                     
                     '''需要引入 active_mask以应对“死后还在做决策”的极端情况'''
 
@@ -448,25 +446,17 @@ if __name__ == "__main__":
                 
                 
 
-            r_maneuver = env.maneuver14(env.RUAV, r_action_label)
-            b_maneuver = env.maneuver14(env.BUAV, b_action_label)
+            r_maneuver = env.maneuver14(env.RUAV, r_action_label) # 规则智能体不分左右
+            b_maneuver = env.maneuver14LR(env.BUAV, b_action_label) # 强化学习智能体区分左右
 
             env.step(r_maneuver, b_maneuver)
-            done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+            done, b_reward, b_reward_assisted = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
             done = done
-            
-            reward_for_show = b_rew_event + b_rew_constraint
-            
-            weight_reward = weight_reward_0
-            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2]) # 0.5
-            weight_reward[2] = 1
-            
-            reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
-            
+
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
-                episode_return += reward_for_show
-                # print(b_rew_event, b_rew_constraint, b_rew_shaping)
+                episode_return += b_reward
+                # print(b_reward-b_reward_assisted, b_reward_assisted)
                 # print()
             
             if dead_dict['b'] == 0:
@@ -487,8 +477,8 @@ if __name__ == "__main__":
         if last_decision_state is not None:
             # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
             # 修改：传入最后时刻的 next_b_state_global 作为 Next State
-            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True)
-            episode_return += reward_for_show
+            transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, b_reward, next_b_state_global, True)
+            episode_return += b_reward
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
         print('r 发射时间:', env.RUAV.missile_launch_time)
@@ -520,7 +510,7 @@ if __name__ == "__main__":
         
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            student_agent.update(transition_dict, adv_normed=1, mini_batch_size=32)  # 优势归一化 debug
+            student_agent.update(transition_dict, adv_normed=1)  # 优势归一化 debug
             decide_steps_after_update = 0
 
             # [Modification] 保留原有梯度监控代码

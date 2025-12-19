@@ -1,5 +1,6 @@
 '''
 增加开火惩罚
+三元组奖励
 '''
 
 import numpy as np

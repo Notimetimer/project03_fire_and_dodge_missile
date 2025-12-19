@@ -1,5 +1,7 @@
 '''
-增加开火惩罚
+先过程奖励后结果奖励
+
+动作空间更改，crank从30度和60度的区分改为左右的区分
 '''
 
 import numpy as np
@@ -34,6 +36,7 @@ from Algorithms.Rules import *
 # 通过继承构建观测空间、奖励函数和终止条件
 # 通过类的组合获取各子策略的观测量裁剪
 
+# 参考论文中的动作划分
 action_options = {
                     0: "track",
                     1: "30track",
@@ -46,6 +49,23 @@ action_options = {
                     8: "splitS",
                     9: "39",
                     10: "slowTurn",
+                    11: "fastTurn",
+                    12: "-30turn",
+                    13: "-60turn",
+                }
+# 区分左右的动作划分
+action_optionsLR = {
+                    0: "track",
+                    1: "30track",
+                    2: "60track",
+                    3: "-30track",
+                    4: "-60track",
+                    5: "L60crank",
+                    6: "R60crank",
+                    7: "snake",
+                    8: "splitS",
+                    9: "3",
+                    10: "9",
                     11: "fastTurn",
                     12: "-30turn",
                     13: "-60turn",
@@ -99,17 +119,8 @@ class ChooseStrategyEnv(Battle):
         flat_obs = flatten_obs(full_obs, self.key_order_1v1)
         return flat_obs, full_obs
 
-
+    # 旧动作空间（无左右分别）
     def maneuver14(self, UAV, action):
-        # # debug
-        # # 动作太多？那就砍掉一些
-        # if 0<= action <=4:
-        #     action = 0
-        # if 5<=action<=7:
-        #     action = 6
-        # if 8<=action<=13:
-        #     action = 11
-        
         # 输入动作与动力运动学状态
         uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
         delta_theta = uav_obs["target_information"][2]
@@ -156,13 +167,13 @@ class ChooseStrategyEnv(Battle):
 
         # ±30°水平偏移
         if action == 5:
-            delta_psi_cmd = delta_psi - np.sign(delta_psi)*pi/6
+            delta_psi_cmd = sub_of_radian(delta_psi - np.sign(delta_psi)*pi/6, 0)
             delta_height_cmd = 0
             speed_cmd = 350
 
         # ±60°水平偏移
         if action == 6:
-            delta_psi_cmd = delta_psi - np.sign(delta_psi) * 55 * pi/180
+            delta_psi_cmd = sub_of_radian(delta_psi - np.sign(delta_psi) * 55 * pi/180, 0)
             delta_height_cmd = 0
             speed_cmd = 350
 
@@ -189,7 +200,7 @@ class ChooseStrategyEnv(Battle):
         # 水平三九线机动
         if action == 9:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = delta_psi_temp - np.sign(delta_psi)*pi/2
+            delta_psi_cmd = sub_of_radian(delta_psi_temp - np.sign(delta_psi)*pi/2, 0)
             delta_height_cmd = 0
             speed_cmd = 400
 
@@ -199,6 +210,120 @@ class ChooseStrategyEnv(Battle):
             delta_psi_cmd = -np.sign(delta_psi)*np.clip((1-abs(delta_psi_temp)/pi) * 2, 0, 1) * 10*pi/180
             delta_height_cmd = 0
             speed_cmd = 600
+
+        # 水平快置尾
+        if action == 11:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_height_cmd = -500 if abs(delta_psi_temp)<pi/2 else 0
+            speed_cmd = 400
+
+        # 水平快置尾后-30°俯冲
+        if action == 12:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_height_cmd = -5000/3
+            speed_cmd = 400
+
+        # 水平快置尾后-60°俯冲
+        if action == 13:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 400
+        return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
+    
+    # 新动作空间（区分左右）
+    def maneuver14LR(self, UAV, action):        
+        # 输入动作与动力运动学状态
+        uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        delta_theta = uav_obs["target_information"][2]
+        distance = uav_obs["target_information"][3] * 10e3
+        d_hor, leftright = uav_obs["border"]
+        speed = uav_obs["ego_main"][0]
+        alt = uav_obs["ego_main"][1]
+        cos_delta_psi = uav_obs["target_information"][0]
+        sin_delta_psi = uav_obs["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        delta_psi_threat = atan2(uav_obs["threat"][1], uav_obs["threat"][0])
+
+        move_action = np.zeros(3)
+
+        # 水平跟踪
+        if action == 0:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = 0
+            speed_cmd = 400
+
+        # 30°爬升加速
+        if action == 1:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = 2500
+            speed_cmd = 400
+
+        # 60°爬升加速
+        if action == 2:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = 5000
+            speed_cmd = 400
+
+        # -30°俯冲跟踪
+        if action == 3:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = -5000/3
+            speed_cmd = 400
+
+        # -60°俯冲跟踪
+        if action == 4:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+            delta_height_cmd = -5000/3*2
+            speed_cmd = 400
+
+        # 左60°水平偏移
+        if action == 5:
+            delta_psi_cmd = sub_of_radian(delta_psi - 55 * pi/180, 0)
+            delta_height_cmd = 0
+            speed_cmd = 350
+
+        # 右60°水平偏移
+        if action == 6:
+            delta_psi_cmd = sub_of_radian(delta_psi + 55 * pi/180, 0)
+            delta_height_cmd = 0
+            speed_cmd = 350
+
+        # 水平蛇形机动
+        if action == 7:
+            if delta_psi > 50 * pi/180:
+                delta_psi_cmd = sub_of_radian(delta_psi, 0)
+            if delta_psi < -50 * pi/180:
+                delta_psi_cmd = sub_of_radian(delta_psi, 0)
+            elif UAV.phi>=0:
+                delta_psi_cmd = sub_of_radian(delta_psi+pi/3, 0)
+            else:
+                delta_psi_cmd = sub_of_radian(delta_psi-pi/3, 0)
+            delta_height_cmd = 0
+            speed_cmd = 350
+
+        # 破s
+        if action == 8:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi, pi)
+            delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
+            speed_cmd = 300
+
+        # 水平3线机动
+        if action == 9:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi_temp - pi/2, 0)
+            delta_height_cmd = 0
+            speed_cmd = 400
+
+        # 水平9线机动
+        if action == 10:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi_temp + pi/2, 0)
+            delta_height_cmd = 0
+            speed_cmd = 400
 
         # 水平快置尾
         if action == 11:
@@ -407,41 +532,38 @@ class ChooseStrategyEnv(Battle):
                 reward_shoot -= 10
             else:
                 reward_shoot += 0.01
-        
+        reward_assisted += reward_shoot
 
         if should_fire_missile==1:
             nobody = 1
         if should_fire_missile==0 and shoot==1:
             nobody = 2
 
-        if shoot >= 1:
-            if alpha*180/pi > 10:
-                reward_event -= 4*shoot
-            else:
-                reward_event -= 3*shoot
+        # if shoot >= 1:
+        #     if alpha*180/pi > 10:
+        #         reward_event -= 50*shoot # 10  --1210新增
+        #     else:
+        #         reward_event -= 40*shoot # 8  --1210新增
                 
-            if len(alive_ally_missiles)>1:
-                reward_event -= 10*shoot
+        #     if len(alive_ally_missiles)>1:
+        #         reward_event -= 80*shoot # 30 --1210 新增
             
-            if not ego.dead:
-                reward_shoot += 1 * (pi/3-alpha)/(pi/3)
-                reward_shoot += 0.6 * (abs(AA_hor)/pi-1)
-                reward_shoot += 1 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
+        #     if not ego.dead:
+        #         reward_shoot += 3 * (pi/3-alpha)/(pi/3)
+        #         reward_shoot += 3 * (abs(AA_hor)/pi-1)
+        #         reward_shoot += 3 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
                 
-                # 发射距离惩罚
-                if distance > 60e3:
-                    reward_shoot += -5 * (distance-60e3)/(20e3)
+        #         # # 发射距离奖励
+        #         # if distance > 30e3:
+        #         #     reward_shoot += 5 * (1-(distance-30e3)/(50e3))
 
-                # # 发射间隔奖励 
-                # reward_shoot += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
+        #         reward_shoot += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
 
         #  --1210新增 ，原先非注释
         # if done and ego.ammo == ego.init_ammo:
-        #     reward_shoot -= 300 # 一发都不打必须重罚 100
+        #     reward_event -= 300 # 一发都不打必须重罚 100
         # if done and ego.ammo < ego.init_ammo:
-        #     reward_shoot += 20 # 至少打了一枚
-        
-        reward_assisted += reward_shoot
+        #     reward_event += 20 # 至少打了一枚
 
         # 高度限制奖励/惩罚
         reward_assisted += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \

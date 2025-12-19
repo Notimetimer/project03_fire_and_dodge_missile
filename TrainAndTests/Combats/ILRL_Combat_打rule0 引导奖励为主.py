@@ -14,7 +14,7 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules import *
-from Envs.Tasks.ChooseStrategyEnv20 import * # 1217-205333前
+from Envs.Tasks.ChooseStrategyEnv2_0 import * # 1217-205333前
 # 已废弃 from Algorithms.PPOHybrid21 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-182327
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper # 1217-205333
 from Algorithms.MLP_heads import ValueNet
