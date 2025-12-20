@@ -1,7 +1,7 @@
 '''
-使用简单熵正则项的备份
+使用简单熵正则项
 
-现在给伯努利分布加入actor内mask
+加入GRU和通道注意力
 '''
 
 import numpy as np
