@@ -394,7 +394,13 @@ class Battle(object):
                     missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
-                if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
+                # 第一个漂亮结果之前的导弹慢速自爆逻辑
+                # if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
+                #     missile.dead = True
+                # 新导弹慢速自爆逻辑
+                if vmt1 < missile.speed_min \
+                    and missile.t > 0.5 + missile.stage1_time + missile.stage2_time \
+                        and last_pmt_[1] < 3000:
                     missile.dead = True
                 if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
                     missile.dead = True
