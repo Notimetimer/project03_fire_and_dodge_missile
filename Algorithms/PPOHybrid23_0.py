@@ -217,9 +217,9 @@ class HybridActorWrapper(nn.Module):
             # 如果是Batch训练模式，通常check_obs会增加维度，这里只在推理的时候启用
 
             # 1. ATA <= 60度 (0.5236 rad)
-            # ATA 在 check_obs["target_information"][4]
+            ata_hor = np.arccos(check_obs["target_information"][0])
             ata = check_obs["target_information"][4]
-            ata_condition = (ata <= 60 * np.pi / 180)
+            ata_condition = (ata <= 60 * np.pi / 180 and ata_hor <= 20 * np.pi / 180)
             can_fire = can_fire and ata_condition
 
             # 2. Target Locked == 1
