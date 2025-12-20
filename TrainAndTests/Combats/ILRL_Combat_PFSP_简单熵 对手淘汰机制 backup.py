@@ -681,17 +681,7 @@ if __name__ == "__main__":
             cond_crash = env.crash(adv) # 撞地
             r_fired_count = 6 - adv.ammo
             cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
-            fool_adv = 0
-            if r_fired_count > 0: # 打过弹，乱打的也出局
-                adv_launch_states = np.array(adv.launch_states)
-                adv_ATAs = adv_launch_states[:,0]
-                adv_distances = adv_launch_states[:,1]
-                adv_target_lockeds = adv_launch_states[:,3]
-                adv_tgos = adv_launch_states[:,4]
-                # 如果有两枚以上导弹都是没锁定就打的，出局。
-                # 如果所有导弹都是在70km以外打的，出局。
-                if sum(adv_target_lockeds) < r_fired_count-1 or min(adv_distances) >= 70e3:
-                    fool_adv = 1
+            fool_adv = 0 # 第一个漂亮的结果并不排除傻对手
             
             if cond_crash or cond_coward or fool_adv:
                 is_kicked_opponent = True

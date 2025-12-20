@@ -218,6 +218,7 @@ class HybridActorWrapper(nn.Module):
             ata_hor = np.arccos(check_obs["target_information"][0])
             ata = check_obs["target_information"][4]
             ata_condition = (ata <= 60 * np.pi / 180 and ata_hor <= 20 * np.pi / 180)
+            # [新增] ata_hor 是第一个漂亮结果后新增的mask项
             can_fire = can_fire and ata_condition
 
             # 2. Target Locked == 1
