@@ -76,28 +76,30 @@ class HybridReplayBuffer:
             print("Buffer overflow! Clear before adding.")
             return
 
-        self.obs[self.ptr] = obs
-        self.states[self.ptr] = state
-        self.next_states[self.ptr] = next_state
-        self.rewards[self.ptr] = reward
-        self.dones[self.ptr] = done
+        idx = self.ptr
+        
+        self.obs[idx] = obs
+        self.states[idx] = state
+        self.next_states[idx] = next_state
+        self.rewards[idx] = reward
+        self.dones[idx] = done
         
         if self.use_truncs and trunc is not None:
-            self.truncs[self.ptr] = trunc
+            self.truncs[idx] = trunc
             
         if self.use_active_masks and active_mask is not None:
-            self.active_masks[self.ptr] = active_mask
+            self.active_masks[idx] = active_mask
 
         # 动作填入
         for k, v in action_dict.items():
             if k in self.actions:
-                self.actions[k][self.ptr] = v
+                self.actions[k][idx] = v
 
         # RNN 状态填入
         if self.actor_hidden is not None and actor_h is not None:
-            self.actor_hidden[self.ptr] = actor_h
+            self.actor_hidden[idx] = actor_h
         if self.critic_hidden is not None and critic_h is not None:
-            self.critic_hidden[self.ptr] = critic_h
+            self.critic_hidden[idx] = critic_h
 
         self.ptr += 1
         if self.ptr >= self.buffer_size:
@@ -139,17 +141,17 @@ class HybridReplayBuffer:
         gae = 0.0
         
         for t in reversed(range(T)):
+            mask = 1.0 - dones[t]
             # 核心：不同环境 N 之间是独立的 element-wise 运算
             if truncs is not None:
                 # 如果被截断，该步的 value 不传递，视为引导价值
                 # 但这里简化处理，通常 PPO 处理截断的方式是 next_val * (1-done)
                 # 如果 done=False 但 trunc=True，我们应当用 next_value 引导
                 # 这里的 dones 应该代表 terminated
-                mask = 1.0 - dones[t]
+                
                 # 如果发生截断，GAE 需要重置，因为时间序列断了
                 mask_gae = mask * (1.0 - truncs[t]) 
             else:
-                mask = 1.0 - dones[t]
                 mask_gae = mask
 
             delta = rewards[t] + gamma * next_values[t] * mask - values[t]
@@ -181,15 +183,16 @@ class HybridReplayBuffer:
             flat_actions[k] = v.reshape(-1, v.shape[-1])
         flatten_dict['actions'] = flat_actions
 
-        # 隐藏状态展平 (如果存在)
-        if self.actor_hidden is not None:
-            # (T, Layers, N, D) -> (T*N, Layers, D) ? 
-            # 这里的展平方式取决于 RNN PPO 的实现。通常 PPO 训练时如果切片，需要保留 N 的独立性
-            # 但既然我们是 flatten 为 batch 训练，且假设不使用 recurrent slice update (普通 MLP PPO):
-            # 简单的 reshape 即可。如果是真正的 RNN PPO，这里的 flatten 方式需要配合 DataGenerator
-            pass 
+        # # 隐藏状态展平 (如果存在)
+        # if self.actor_hidden is not None:
+        #     # (T, Layers, N, D) -> (T*N, Layers, D) ? 
+        #     # 这里的展平方式取决于 RNN PPO 的实现。通常 PPO 训练时如果切片，需要保留 N 的独立性
+        #     # 但既然我们是 flatten 为 batch 训练，且假设不使用 recurrent slice update (普通 MLP PPO):
+        #     # 简单的 reshape 即可。如果是真正的 RNN PPO，这里的 flatten 方式需要配合 DataGenerator
+        #     pass 
 
         return flatten_dict
+
 
 # --- 5. 测试代码 ---
 if __name__ == '__main__':
