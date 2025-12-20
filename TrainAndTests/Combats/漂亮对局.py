@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     env = ChooseStrategyEnv(env_args, tacview_show=1)
     env.shielded = 1
-    env.no_out = 1
+    env.no_out = 0 # 允许/不允许出界
     
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2]
