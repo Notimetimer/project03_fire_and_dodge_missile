@@ -15,128 +15,134 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
-from Algorithms.MLP_heads import ValueNet
+# from Algorithms.MLP_heads import ValueNet
 
 # =============================================================================
 # 1. 神经网络定义 (保持不变，只负责 forward 计算)
 # =============================================================================
+from SharedLayers import ChannelAttention # 调用已定义的通道注意力
 
+# ========
+# 策略网络
+# ========
 class PolicyNetHybrid(torch.nn.Module):
-    """
-    支持混合动作空间的策略网络 (纯 MLP)。
-    引入了可学习的温度参数来控制离散和伯努利动作的熵。
-    """
     def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
         
-        # 共享主干网络
+        # 1. 通道注意力 (128 -> 128)
+        self.attention = ChannelAttention(state_dim)
+        
+        # 2. MLP 主干 (提取空间特征)
         layers = []
         prev_size = state_dim
-        for layer_size in hidden_dims:
-            layers.append(nn.Linear(prev_size, layer_size))
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_size, h))
             layers.append(nn.ReLU())
-            prev_size = layer_size
-        self.net = nn.Sequential(*layers)
+            prev_size = h
+        self.backbone = nn.Sequential(*layers)
 
-        # 1. 连续动作头 (Continuous)
-        # 参数: log_std (控制高斯分布宽度)
-        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            cont_dim = self.action_dims['cont']
-            self.fc_mu = nn.Linear(prev_size, cont_dim)
-            # 这里的 log_std 依然是状态无关的，对应 PPO 的标准做法
-            self.log_std_cont = nn.Parameter(torch.log(torch.ones(cont_dim) * init_std))
+        # 3. GRU 层 (提取时序特征, 128 -> 128)
+        # 使用 batch_first=True 适配 (Batch, SeqLen, Dim)
+        self.gru = nn.GRU(prev_size, prev_size, batch_first=True)
 
-        # 2. 离散动作头 (Categorical)
-        # 参数: log_temp_cat (控制 Softmax 温度)
-        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            self.cat_dims = self.action_dims['cat']  # list, e.g., [4, 10]
-            total_cat_dim = sum(self.cat_dims)
-            self.fc_cat = nn.Linear(prev_size, total_cat_dim)
-            
-            # 为每一个独立的离散头 (Head) 创建一个温度参数
-            # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
-            # 初始化为 0 (即 temp=1.0)，保持原网络特性，让网络自己学去增大熵
-            # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
+        # 4. 动作头 (Heads)
+        if 'cont' in self.action_dims:
+            self.fc_mu = nn.Linear(prev_size, self.action_dims['cont'])
+            self.log_std_cont = nn.Parameter(torch.log(torch.ones(self.action_dims['cont']) * init_std))
 
-        # 3. 伯努利动作头 (Bernoulli)
-        # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            bern_dim = self.action_dims['bern']
-            self.fc_bern = nn.Linear(prev_size, bern_dim)
-            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
+        if 'cat' in self.action_dims:
+            self.cat_dims = self.action_dims['cat']
+            self.fc_cat = nn.Linear(prev_size, sum(self.cat_dims))
+
+        if 'bern' in self.action_dims:
+            self.fc_bern = nn.Linear(prev_size, self.action_dims['bern'])
+            # 伯努利头特殊初始化：使初始开火概率偏低
             nn.init.constant_(self.fc_bern.bias, -2.0)
-            
-            # 为每一个伯努利动作维度创建一个温度参数
-            # 初始化为 0 (即 temp=1.0)
-            # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
-    
-    # [修改] 增加 action_masks 参数
-    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None):
-        shared_features = self.net(x)
+            torch.nn.init.normal_(self.fc_bern.weight, mean=0.0, std=1e-3)
+
+    def forward(self, x, h_in=None, max_std=1.0, action_masks=None):
+        # 适配维度：如果输入是 2D (B, D)，增加 SeqLen 维度变为 3D (B, 1, D)
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+        B, S, D = x.shape
+
+        # Step 1: Channel Attention (作用于每一帧)
+        x_att, _ = self.attention(x.reshape(B * S, D))
+        
+        # Step 2: MLP Backbone
+        features = self.backbone(x_att).view(B, S, -1)
+        
+        # Step 3: GRU 自动递归 (h_in 为序列起始状态)
+        # gru_out 形状: (B, S, 128)
+        gru_out, h_out = self.gru(features, h_in)
+        
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
-        # --- Continuous ---
-        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            mu = self.fc_mu(shared_features)
-            # 计算 std
-            std = torch.exp(self.log_std_cont)
-            std = torch.clamp(std, min=min_std, max=max_std)
-            # 扩展维度以匹配 batch
-            if mu.dim() > 1:
-                std = std.unsqueeze(0).expand_as(mu)
+        # --- Heads 分发 ---
+        if 'cont' in self.action_dims:
+            mu = self.fc_mu(gru_out)
+            std = torch.exp(self.log_std_cont).expand_as(mu).clamp(max=max_std)
             outputs['cont'] = (mu, std)
 
-        # --- Categorical ---
-        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            cat_logits_all = self.fc_cat(shared_features)
-            
-            # 1. 切分 Logits
-            cat_logits_list = torch.split(cat_logits_all, self.cat_dims, dim=-1)
-            
-            # 2. 获取温度 (Temp = exp(log_temp))
-            # temp_cat 形状: (num_heads, )
-            temps = 1.0  # use scalar temp (or replace with tensor if per-head temps are needed)
-            
-            # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
-            # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
-            # 较低的 Temp -> Logits 数值差距拉大 -> Softmax 后分布趋向 One-hot (熵减小)
-            final_probs_list = []
-            for i, logits in enumerate(cat_logits_list):
-                # 对应的温度: temps[i]
-                # scaled_logits = logits / (temps[i] + 1e-8)
-                scaled_logits = logits / (temps + 1e-8)
-                final_probs_list.append(F.softmax(scaled_logits, dim=-1))
-            
-            outputs['cat'] = final_probs_list
+        if 'cat' in self.action_dims:
+            logits_all = self.fc_cat(gru_out)
+            logits_list = torch.split(logits_all, self.cat_dims, dim=-1)
+            outputs['cat'] = [F.softmax(l, dim=-1) for l in logits_list]
 
-        # --- Bernoulli (核心修改区域) ---
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            bern_logits = self.fc_bern(shared_features)
-            # [新增] Action Masking 逻辑
-            # 如果提供了 mask，将 mask 为 0 (False) 的位置的 logit 设为 -1e9
+        if 'bern' in self.action_dims:
+            bern_logits = self.fc_bern(gru_out)
             if action_masks is not None and 'bern' in action_masks:
-                mask = action_masks['bern']
-                # 确保 mask 和 logits 维度匹配 (Batch, Dim)
-                # mask == 0 代表禁止开火，设为极小值
-                bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
+                # 训练时 mask 需匹配 3D 维度 (B, S, 1)
+                m = action_masks['bern']
+                if m.dim() == 2: m = m.unsqueeze(1) 
+                bern_logits = bern_logits.masked_fill(m == 0, -1e9)
+            outputs['bern'] = bern_logits
 
-            # use scalar temp (no tensor ops on plain number)
-            temps = 1.0 # torch.exp(self.log_temp_bern)
-            scaled_bern_logits = bern_logits / (temps + 1e-8)
-            outputs['bern'] = scaled_bern_logits
-            
-        return outputs
+        return outputs, h_out
+
+# =======
+# 价值网络
+# =======
+
+class ValueNet(nn.Module):
+    def __init__(self, state_dim, hidden_dims):
+        super(ValueNet, self).__init__()
+        self.attention = ChannelAttention(state_dim)
+        
+        layers = []
+        prev_size = state_dim
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_size, h))
+            layers.append(nn.ReLU())
+            prev_size = h
+        self.backbone = nn.Sequential(*layers)
+        
+        self.gru = nn.GRU(prev_size, prev_size, batch_first=True)
+        self.fc_out = nn.Linear(prev_size, 1)
+
+    def forward(self, x, h_in=None):
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+        B, S, D = x.shape
+        
+        x_att, _ = self.attention(x.reshape(B * S, D))
+        features = self.backbone(x_att).view(B, S, -1)
+        
+        gru_out, h_out = self.gru(features, h_in)
+        values = self.fc_out(gru_out) # (B, S, 1)
+        
+        return values, h_out
 
 # =============================================================================
-# 2. Actor 适配器 (Wrapper) - 核心重构点
+# 2. Actor 适配器 (Wrapper) - 显式支持隐藏状态
 # =============================================================================
 
 class HybridActorWrapper(nn.Module):
     """
     统一接口适配器。
     将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get_action 和 evaluate_actions 接口。
-    未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
+    显式支持 GRU 隐藏状态的传递。
     """
     def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu'):
         super(HybridActorWrapper, self).__init__()
@@ -144,9 +150,8 @@ class HybridActorWrapper(nn.Module):
         self.action_dims = action_dims_dict
         self.device = device
         
-        # 处理 Action Bounds
+        # 处理 Action Bounds (保持原样)
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
-            # 如果有连续动作，必须提供 action_bounds
             if action_bounds is None:
                 raise ValueError("Continuous action space requires action_bounds")
             self.register_buffer('action_bounds', torch.tensor(action_bounds, dtype=torch.float, device=device))
@@ -157,27 +162,21 @@ class HybridActorWrapper(nn.Module):
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    # [修改] 增加 check_obs 参数，默认为 None
     def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5):
         """
         推理接口。
         Args:
-            state: numpy array or tensor
-            h: hidden state (预留接口，目前未使用)
-            explore: bool or dict. If bool, applies to all action types.
-                     If dict, e.g., {'cont': True, 'cat': False, 'bern': True}, controls exploration for each type.
+            state: numpy array or tensor (1, Dim) or (Batch, Dim)
+            h: hidden state (num_layers, Batch, HiddenDim)
+            explore: bool or dict
+            check_obs: 用于生成动作 mask 的原始观测字典
         Returns:
             actions_exec: dict (numpy), 用于环境执行
             actions_raw: dict (numpy/tensor), 用于存入 buffer
-            next_h: hidden state (预留接口)
-            
-        注意： 仅在推理时传入check_obs, 训练时禁止传入!!!
-        1、目前 get_action 中的 mask 生成只处理单个 check_obs（推理时），
-            并把同一 mask 广播到整个 batch；如果要对 batch 内每个样本分别判断需扩展生成逻辑。
-        2、evaluate_actions（训练/计算 log_prob）默认未把 action_masks 传给 net ,
-            若希望训练时也应用 mask，需要在 evaluate_actions 调用 net 时传入 action_masks。
+            next_h: GRU 输出的下一时刻隐藏状态
+            actions_dist_check: 诊断输出 (概率分布等)
         """
-        #  增强的 Batch 检测逻辑
+        # 增强的 Batch 检测逻辑 (保持原样)
         is_batch = False
         if not isinstance(state, torch.Tensor):
             if isinstance(state, np.ndarray) and state.ndim > 1:
@@ -189,7 +188,7 @@ class HybridActorWrapper(nn.Module):
             if state.dim() > 1:
                 is_batch = True
         
-        # [修改] 处理 explore 参数，使其支持字典
+        # 处理 explore 参数 (保持原样)
         if isinstance(explore, bool):
             explore_opts = {'cont': explore, 'cat': explore, 'bern': explore}
         elif isinstance(explore, dict):
@@ -203,18 +202,11 @@ class HybridActorWrapper(nn.Module):
             # 对于其他意外的输入类型，默认全部探索
             explore_opts = {'cont': True, 'cat': True, 'bern': True}
 
-        # =====================================================================
-        # [新增] 解析 check_obs 并构建 Action Mask
-        # =====================================================================
+        # 解析 check_obs 并构建 Action Mask (保持原样)
         action_masks = None
         can_fire = True
-        # 当且仅当传入了单个 dict 类型的 check_obs 时启用 mask
-        if (check_obs is not None) and isinstance(check_obs, dict):  # and (not explore_opts['bern']):
-            # 默认允许开火，下面按规则逐项收敛（保留注释）
+        if (check_obs is not None) and isinstance(check_obs, dict):
             can_fire = True
-            # 如果是Batch训练模式，通常check_obs会增加维度，这里只在推理的时候启用
-
-            # 1. ATA <= 60度 (0.5236 rad)
             ata_hor = np.arccos(check_obs["target_information"][0])
             ata = check_obs["target_information"][4]
             ata_condition = (ata <= 60 * np.pi / 180 and ata_hor <= 20 * np.pi / 180)
@@ -251,21 +243,21 @@ class HybridActorWrapper(nn.Module):
             mask_tensor = torch.full((batch_size, 1), mask_val, device=self.device, dtype=torch.float)
             
             action_masks = {'bern': mask_tensor}
-        # =====================================================================
 
-        # [修改] 调用网络时传入 action_masks
-        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks)
-        
-        # # [原有] 调用网络
-        # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
+        # 调用网络，显式传递和接收隐藏状态 [修改]
+        # 注意：网络内部会将 2D 输入转为 3D 进行单步递归
+        actor_outputs, next_h = self.net(state, h_in=h, max_std=max_std, action_masks=action_masks)
         
         actions_exec = {}
         actions_raw = {}
-        actions_dist_check = {} #  诊断输出
+        actions_dist_check = {} 
 
         # --- Cont ---
         if actor_outputs['cont'] is not None:
             mu, std = actor_outputs['cont']
+            # mu, std 形状为 (B, 1, Dim) -> squeeze(1) 还原为采样维度
+            mu = mu.squeeze(1)
+            std = std.squeeze(1)
             dist = SquashedNormal(mu, std)
             if explore_opts['cont']:
                 a_norm, u = dist.sample()
@@ -293,6 +285,7 @@ class HybridActorWrapper(nn.Module):
             cat_probs_check_list = [] #  记录 Cat 概率
             
             for probs in cat_probs_list:
+                probs = probs.squeeze(1)
                 dist = Categorical(probs=probs)
                 idx = dist.sample() if explore_opts['cat'] else torch.argmax(dist.probs, dim=-1)
                 
@@ -319,6 +312,7 @@ class HybridActorWrapper(nn.Module):
         # --- Bern ---
         if actor_outputs['bern'] is not None:
             bern_logits = actor_outputs['bern']
+            bern_logits = bern_logits.squeeze(1)
             dist = Bernoulli(logits=bern_logits)
             bern_action = dist.sample() if explore_opts['bern'] else (dist.probs > bern_threshold).float()
             
@@ -331,25 +325,30 @@ class HybridActorWrapper(nn.Module):
                 actions_raw['bern'] = actions_exec['bern']
                 actions_dist_check['bern'] = dist.probs[0].cpu().detach().numpy().flatten()
 
-        return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
+        return actions_exec, actions_raw, next_h, actions_dist_check 
 
     def evaluate_actions(self, states, actions_raw, h=None, max_std=None):
         """
-        训练接口。计算 log_probs 和 entropy。
+        训练接口。计算整个序列块的 log_probs 和 entropy。
         Args:
-            states: tensor (B, D)
-            actions_raw: dict of tensors
+            states: tensor (Batch, SeqLen, Dim)
+            actions_raw: dict of tensors (Batch, SeqLen, ActionDim)
+            h: 序列起始隐藏状态 (num_layers, Batch, HiddenDim)
         Returns:
-            log_probs: tensor (B, 1)
-            entropy: tensor (B, 1)
-            next_h: None
-            actor_outputs: dict (raw outputs from net) [新增]
+            log_probs, entropy, entropy_details, actor_outputs, next_h
         """
-        actor_outputs = self.net(states, max_std=max_std)
-        log_probs = torch.zeros(states.size(0), 1).to(self.device)
-        entropy = torch.zeros(states.size(0), 1).to(self.device)
+        # 调用网络 [修改]
+        actor_outputs, next_h = self.net(states, h_in=h, max_std=max_std)
         
-        #  用于记录分项 Entropy 的字典
+        # 初始化 log_probs 和 entropy，适配 3D (B, S, 1) 或 2D (B, 1)
+        if states.dim() == 3:
+            B, S, _ = states.shape
+            log_probs = torch.zeros(B, S, 1, device=self.device)
+            entropy = torch.zeros(B, S, 1, device=self.device)
+        else:
+            log_probs = torch.zeros(states.size(0), 1, device=self.device)
+            entropy = torch.zeros(states.size(0), 1, device=self.device)
+        
         entropy_details = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Cont ---
@@ -357,13 +356,11 @@ class HybridActorWrapper(nn.Module):
             mu, std = actor_outputs['cont']
             dist = SquashedNormal(mu, std)
             u = actions_raw['cont']
+            # log_prob 返回 (B, S, Dim), 求和得到 (B, S, 1)
             log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
-            entropy += dist.entropy().unsqueeze(-1) # 近似熵
-            
-            #  单独记录 cont entropy
             e_cont = dist.entropy().unsqueeze(-1)
             entropy += e_cont
-            entropy_details['cont'] = e_cont # [修改] 保持 Tensor 用于 Loss 计算
+            entropy_details['cont'] = e_cont
 
         # --- Cat ---
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
@@ -374,8 +371,9 @@ class HybridActorWrapper(nn.Module):
             e_cat_sum = torch.zeros_like(entropy)
             
             for i, probs in enumerate(cat_probs_list):
-                act_i = cat_action[:, i].unsqueeze(-1)
-                log_probs += torch.log(probs.gather(1, act_i) + 1e-8)
+                # act_i 为 (B, S, 1), probs 为 (B, S, HeadDim)
+                act_i = cat_action[..., i].unsqueeze(-1) # ...表示前面所有维度
+                log_probs += torch.log(probs.gather(-1, act_i) + 1e-8)
                 dist = Categorical(probs=probs)
                 
                 # 累加每个离散头的熵
@@ -384,7 +382,7 @@ class HybridActorWrapper(nn.Module):
                 e_cat_sum += e_head
             
             #  记录 cat entropy
-            entropy_details['cat'] = e_cat_sum # [修改] 保持 Tensor 用于 Loss 计算
+            entropy_details['cat'] = e_cat_sum
 
         # --- Bern ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
@@ -398,8 +396,7 @@ class HybridActorWrapper(nn.Module):
             entropy += e_bern
             entropy_details['bern'] = e_bern # [修改] 保持 Tensor 用于 Loss 计算
 
-        # [修改] 返回 actor_outputs 以便外部访问 logits
-        return log_probs, entropy, entropy_details, actor_outputs, None
+        return log_probs, entropy, entropy_details, actor_outputs, next_h
     
     def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
         """
@@ -535,7 +532,7 @@ class PPOHybrid:
         self.eps = eps
         self.device = device
         
-        # [修改] 解析 k_entropy，支持字典输入
+        # 解析 k_entropy，支持字典输入
         if isinstance(k_entropy, dict):
             self.k_entropy = k_entropy
         else:
@@ -579,7 +576,7 @@ class PPOHybrid:
         # actions_exec, actions_raw, _ = self.actor.get_action(state, h=h0, explore=explore, max_std=max_s)
         # return actions_exec, actions_raw
         
-        # [修改] 透传 check_obs
+        # 显式返回 next_h
         actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(
             state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs
         )
@@ -587,7 +584,9 @@ class PPOHybrid:
         return actions_exec, actions_raw, h_state, actions_dist_check
 
     def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
-
+        # 0. 确定是否使用递归模式
+        use_rnn = 'init_h_actor' in transition_dict
+        
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = True
