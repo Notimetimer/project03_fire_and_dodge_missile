@@ -491,12 +491,16 @@ class PPOHybrid:
 
         # 1. 基础数据准备 (若是 RNN 模式，此处数据已由 Buffer 整理为 3D: [Batch, SeqLen, Dim])
         states = to_tensor(transition_dict['states'], torch.float)
-        next_states = to_tensor(transition_dict['next_states'], torch.float)
+        # 统一提取 next_values 并根据模式处理维度
+        raw_next_vals = to_tensor(transition_dict['next_values'], torch.float)
         
         # 维度适配：RNN模式下 Buffer 已经准备好了 3D (B, S, Dim)，直接扩维对齐掩码
         if use_rnn:
             dones = to_tensor(transition_dict['dones'], torch.float).unsqueeze(-1)
             rewards = to_tensor(transition_dict['rewards'], torch.float).unsqueeze(-1)
+            mb_next_values = raw_next_vals.unsqueeze(-1)
+            init_h_actor = to_tensor(transition_dict['init_h_actor'], torch.float).transpose(0, 1).contiguous()
+            init_h_critic = to_tensor(transition_dict['init_h_critic'], torch.float).transpose(0, 1).contiguous()
             if 'active_masks' in transition_dict:
                 active_masks = to_tensor(transition_dict['active_masks'], torch.float).unsqueeze(-1)
             else:
@@ -505,6 +509,9 @@ class PPOHybrid:
         else:
             dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
             rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
+            mb_next_values = raw_next_vals.view(-1, 1)
+            init_h_actor = None
+            init_h_critic = None
             if 'active_masks' in transition_dict:
                 active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
             else:
@@ -514,10 +521,9 @@ class PPOHybrid:
         # 处理 obs (如果存在)
         if 'obs' in transition_dict:
             actor_inputs = to_tensor(transition_dict['obs'], torch.float)
-            critic_inputs = states
         else:
             actor_inputs = states
-            critic_inputs = states
+        critic_inputs = states
         
         # 动作处理 (转为 3D Tensor)
         actions_from_buffer = transition_dict['actions']
@@ -525,14 +531,6 @@ class PPOHybrid:
         for key, val in actions_from_buffer.items():
             dtype = torch.long if key == 'cat' else torch.float
             actions_on_device[key] = to_tensor(val, dtype)
-
-        # 初始隐藏状态准备 [针对 RNN 模式的新逻辑]
-        init_h_actor = None
-        init_h_critic = None
-        if use_rnn:
-            # Buffer 存储格式为 (Batch, Layers, Dim) -> GRU 期望 (Layers, Batch, Dim)
-            init_h_actor = to_tensor(transition_dict['init_h_actor'], torch.float).transpose(0, 1).contiguous()
-            init_h_critic = to_tensor(transition_dict['init_h_critic'], torch.float).transpose(0, 1).contiguous()
 
         # 2. 获取 Advantage (优先使用 Buffer 算好的)
         if 'advantages' in transition_dict and 'td_targets' in transition_dict:
@@ -544,33 +542,65 @@ class PPOHybrid:
                 td_target = to_tensor(transition_dict['td_targets'], torch.float).view(-1, 1)
         else:
             # 现场计算 GAE (不推荐用于并行展平后的数据)
-            #  处理 truncs
-            if 'truncs' in transition_dict:
-                # 适配维度：RNN模式 [B, S, 1]，MLP模式 [T*N, 1]
-                truncs = to_tensor(transition_dict['truncs'], torch.float).view(-1, 1)
-            else:
-                truncs = None # 或者 torch.zeros_like(dones)
+            # #  处理 truncs
+            # if 'truncs' in transition_dict:
+            #     # 适配维度：RNN模式 [B, S, 1]，MLP模式 [T*N, 1]
+            #     truncs = to_tensor(transition_dict['truncs'], torch.float).view(-1, 1)
+            # else:
+            #     truncs = None # 或者 torch.zeros_like(dones)
 
             # 以下为公共部分
             # 如果没有预计算，则现场计算 (注意：如果是并行数据直接展平进来的，这里计算会有偏差)
-            with torch.no_grad(): 错误
-                # Critic 使用全局 next_states 计算 Target
-                # 注意：对于截断的步，next_value 应该是 V(s_t+1) 而不是 0
-                next_vals = self.critic(next_states)
+            with torch.no_grad():
+                # 计算当前 V
+                if use_rnn:
+                    v_res_curr, _ = self.critic(critic_inputs, h_in=init_h_critic)
+                else:
+                    v_res_curr = self.critic(critic_inputs)
+                
+                # 兼容 Tuple 和 Tensor 返回值
+                if isinstance(v_res_curr, tuple):
+                    v_curr = v_res_curr[0]
+                else:
+                    v_curr = v_res_curr
+                
                 # td_target的计算不应考虑truncs。仅当dones=1时，next_value才为0。
                 # truncs的影响由compute_advantage函数内部处理。
-                td_target = rewards + self.gamma * next_vals * (1 - dones)
+                td_target = rewards + self.gamma * mb_next_values * (1 - dones)
+                td_delta = td_target - v_curr
+                
+                # 准备进入 compute_advantage，如果是 RNN，需转置时间维到第一维
+                if use_rnn:
+                    # 转置时间维至第1维以适配 compute_advantage
+                    # (B, S, 1) -> (S, B, 1)
+                    delta_gae = td_delta.transpose(0, 1)
+                    dones_gae = dones.transpose(0, 1)
+                    truncs_gae = None
+                    if 'truncs' in transition_dict:
+                        # 补齐 truncs 序列化掩码
+                        t_raw = to_tensor(transition_dict['truncs'], torch.float)
+                        truncs_gae = t_raw.unsqueeze(-1).transpose(0, 1)
 
-                # Critic 使用全局 states 计算当前 Value
-                td_delta = td_target - self.critic(critic_inputs)
-                advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
+                    adv_res = compute_advantage(self.gamma, self.lmbda, delta_gae.cpu(), dones_gae.cpu(), truncs_gae.cpu() if truncs_gae is not None else None)
+                    advantage = adv_res.transpose(0, 1).to(self.device)
+                else:
+                    truncs = None
+                    if 'truncs' in transition_dict:
+                        truncs = to_tensor(transition_dict['truncs'], torch.float).view(-1, 1)
+                    advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
+                
+                # 最终更新为 GAE 目标
+                td_target = advantage + v_curr
                 
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)
             # [修改] 接收 5 个返回值
             old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=init_h_actor, max_std=self.max_std)
-            v_res_old = self.critic(critic_inputs, h_in=init_h_critic)
+            if use_rnn : 
+                v_res_old, _ = self.critic(critic_inputs, h_in=init_h_critic)
+            else:
+                v_res_old = self.critic(critic_inputs)
             # Critic 使用 critic_inputs (全局 states)
             v_pred_old = v_res_old[0] if isinstance(v_res_old, tuple) else v_res_old
 
@@ -696,12 +726,15 @@ class PPOHybrid:
                     # 仅对绝对值超出阈值的部分施加平缓增加的惩罚：
                     # over = max(|logit| - 4, 0)，惩罚 (over)^2 的均值
                     over = F.relu(torch.abs(bern_logits) - 4.0)
-                    logit_loss = (over ** 2).mean()
+                    logit_loss = (over ** 2 * mb_active_masks).sum() / (mb_active_masks.sum() + mask_eps)
                     actor_loss = actor_loss + alpha_logit_reg * logit_loss
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
-                v_pred = self.critic(mb_critic_inputs)
+                if use_rnn :
+                    v_pred, _ = self.critic(critic_inputs, h_in=init_h_critic)
+                else:
+                    v_pred = self.critic(critic_inputs)
                 if clip_vf:
                     v_pred_old_batch = v_pred_old[batch_idx]
                     v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - clip_range, v_pred_old_batch + clip_range)

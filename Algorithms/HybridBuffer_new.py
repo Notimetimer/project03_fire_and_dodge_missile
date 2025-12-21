@@ -141,19 +141,31 @@ class HybridReplayBuffer:
         dones = self.dones[:T, :, None]
         truncs = self.truncs[:T, :, None] if self.use_truncs else None
 
-        # 4. GAE 计算
+        # 4. GAE 计算 (Numpy 实现，分环境独立计算)
         advantages = np.zeros_like(rewards)
         gae = 0.0
+        
         for t in reversed(range(T)):
             mask = 1.0 - dones[t]
-            mask_gae = mask * (1.0 - truncs[t]) if self.use_truncs else mask
+            # 核心：不同环境 N 之间是独立的 element-wise 运算
+            if truncs is not None:
+                # 如果被截断，该步的 value 不传递，视为引导价值
+                # 但这里简化处理，通常 PPO 处理截断的方式是 next_val * (1-done)
+                # 如果 done=False 但 trunc=True，我们应当用 next_value 引导
+                # 这里的 dones 应该代表 terminated
+                
+                # 如果发生截断，GAE 需要重置，因为时间序列断了
+                mask_gae = mask * (1.0 - truncs[t]) 
+            else:
+                mask_gae = mask
+
             delta = rewards[t] + gamma * next_values[t] * mask - values[t]
             gae = delta + gamma * lmbda * mask_gae * gae
             advantages[t] = gae
             
         td_targets = advantages + values
 
-        # 5. 展平并打包
+        # 5. 展平并打包 (Flatten) -> (T*N, ...)
         flatten_dict = {
             'states': self.states[:T].reshape(-1, S_Dim),
             'obs': self.obs[:T].reshape(-1, self.obs.shape[-1]),
@@ -177,6 +189,7 @@ class HybridReplayBuffer:
     def get_recurrent_data(self, critic_net, seq_len, gamma, lmbda):
         """
         专门为带 GRU 的网络整备序列数据。
+        逻辑：按环境识别回合，倒序切块（确保尾部完整），丢弃头部不足 seq_len 的部分。
         """
         T = self.ptr
         N = self.n_envs
@@ -209,7 +222,12 @@ class HybridReplayBuffer:
             gae = 0
             for t in reversed(range(T)):
                 mask = 1.0 - self.dones[t, n]
-                mask_gae = mask * (1.0 - self.truncs[t, n]) if self.use_truncs else mask
+                # trunc 截断：断开优势流传递，但保留 next_value 引导
+                if self.use_truncs:
+                    mask_gae = mask * (1.0 - self.truncs[t, n])
+                else:
+                    mask_gae = mask
+                
                 delta = self.rewards[t, n] + gamma * next_values[t, n] * mask - values[t, n]
                 gae = delta + gamma * lmbda * mask_gae * gae
                 advantages[t, n] = gae
@@ -217,11 +235,13 @@ class HybridReplayBuffer:
         td_targets = advantages + values
 
         # --- Step 2: 序列整备 (按环境回合倒序切块) ---
-        valid_seq_starts = []
+        valid_seq_starts = []  # 存储 (env_id, start_idx)
+
         for n in range(N):
             done_indices = np.where(self.dones[:T, n] == 1)[0]
             ep_ends = list(done_indices)
-            if (T - 1) not in ep_ends: ep_ends.append(T - 1)
+            if (T - 1) not in ep_ends:
+                ep_ends.append(T - 1)
             
             curr_start = 0
             for ep_end in ep_ends:
@@ -229,6 +249,7 @@ class HybridReplayBuffer:
                 if ep_len < seq_len:
                     print(f"[Buffer Hint] Env {n} Episode len {ep_len} < {seq_len}, discarding head data.")
                 else:
+                    # 倒序切分：确保尾部完整，丢弃头部余数
                     for block_end in range(ep_end, curr_start + seq_len - 2, -seq_len):
                         block_start = block_end - seq_len + 1
                         valid_seq_starts.append((n, block_start))
@@ -239,6 +260,8 @@ class HybridReplayBuffer:
 
         # --- Step 3: 显式组装 3D 张量 ---
         num_seqs = len(valid_seq_starts)
+        
+        # 初始化返回字典
         final_data = {
             'obs': np.zeros((num_seqs, seq_len, self.obs.shape[-1]), dtype=np.float32),
             'states': np.zeros((num_seqs, seq_len, self.states.shape[-1]), dtype=np.float32),
@@ -250,19 +273,24 @@ class HybridReplayBuffer:
             'actions': {}
         }
 
-        if self.use_truncs: final_data['truncs'] = np.zeros((num_seqs, seq_len), dtype=np.float32)
-        if self.use_active_masks: final_data['active_masks'] = np.zeros((num_seqs, seq_len), dtype=np.float32)
+        if self.use_truncs:
+            final_data['truncs'] = np.zeros((num_seqs, seq_len), dtype=np.float32) # 修复：改为3D
+            
+        if self.use_active_masks:
+            final_data['active_masks'] = np.zeros((num_seqs, seq_len), dtype=np.float32)
 
         # 显式初始化动作 3D 容器
         if 'cont' in self.actions: final_data['actions']['cont'] = np.zeros((num_seqs, seq_len, self.actions['cont'].shape[-1]), dtype=np.float32)
         if 'cat' in self.actions: final_data['actions']['cat'] = np.zeros((num_seqs, seq_len, self.actions['cat'].shape[-1]), dtype=np.int64)
         if 'bern' in self.actions: final_data['actions']['bern'] = np.zeros((num_seqs, seq_len, self.actions['bern'].shape[-1]), dtype=np.float32)
 
+        # 初始隐藏状态：(Batch, Layers, Dim)
         final_data['init_h_actor'] = np.zeros((num_seqs, self.actor_hidden.shape[1], self.actor_hidden.shape[3]), dtype=np.float32)
         final_data['init_h_critic'] = np.zeros((num_seqs, self.critic_hidden.shape[1], self.critic_hidden.shape[3]), dtype=np.float32)
 
         for i, (env_id, s_ptr) in enumerate(valid_seq_starts):
             e_ptr = s_ptr + seq_len
+            
             final_data['obs'][i] = self.obs[s_ptr:e_ptr, env_id]
             final_data['states'][i] = self.states[s_ptr:e_ptr, env_id]
             final_data['next_values'][i] = self.next_values[s_ptr:e_ptr, env_id] # [修改]
@@ -271,12 +299,18 @@ class HybridReplayBuffer:
             final_data['advantages'][i] = advantages[s_ptr:e_ptr, env_id]
             final_data['td_targets'][i] = td_targets[s_ptr:e_ptr, env_id]
             
-            if self.use_truncs: final_data['truncs'][i] = self.truncs[s_ptr:e_ptr, env_id]
-            if self.use_active_masks: final_data['active_masks'][i] = self.active_masks[s_ptr:e_ptr, env_id]
+            if self.use_truncs:
+                final_data['truncs'][i] = self.truncs[s_ptr:e_ptr, env_id]
+            if self.use_active_masks:
+                final_data['active_masks'][i] = self.active_masks[s_ptr:e_ptr, env_id]
             
+            # 拷贝动作
+            # --- 修正点：直接向预分配好的 final_data['actions'] 写入数据 ---
             for k in self.actions:
                 final_data['actions'][k][i] = self.actions[k][s_ptr:e_ptr, env_id]
             
+            # 记录序列起始时刻之前的隐藏状态
+            # 注意：s_ptr 对应的是该序列第一帧进入 GRU 之前的状态
             final_data['init_h_actor'][i] = self.actor_hidden[s_ptr, :, env_id, :]
             final_data['init_h_critic'][i] = self.critic_hidden[s_ptr, :, env_id, :]
 
@@ -290,8 +324,10 @@ if __name__ == '__main__':
     n_envs = 2
     buffer_capacity = 30
     seq_len = 8
-    obs_d, state_d = 4, 6
-    a_hidden_dim, c_hidden_dim = (1, 128), (1, 128)
+    obs_d = 4
+    state_d = 6
+    a_hidden_dim = (1, 128)
+    c_hidden_dim = (1, 128)
     act_dims = {'cont': 2, 'cat': [3], 'bern': 1}
     
     class MockCritic(torch.nn.Module):
