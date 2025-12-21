@@ -603,15 +603,17 @@ class PPOHybrid:
             else:
                 return torch.tensor(np.array(x), dtype=dtype).to(self.device)
 
+        # 1. 基础数据准备 (若是 RNN 模式，此处数据已由 Buffer 整理为 3D: [Batch, SeqLen, Dim])
         states = to_tensor(transition_dict['states'], torch.float)
         next_states = to_tensor(transition_dict['next_states'], torch.float)
-        dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
-        rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
+        # dones/rewards/masks 对应扩维为 [B, S, 1]
+        dones = to_tensor(transition_dict['dones'], torch.float).unsqueeze(-1)
+        rewards = to_tensor(transition_dict['rewards'], torch.float).unsqueeze(-1)
 
         #  处理 active_masks (可选输入)
         # 如果 transition_dict 中没有 active_masks，则默认所有样本均有效
         if 'active_masks' in transition_dict:
-            active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
+            active_masks = to_tensor(transition_dict['active_masks'], torch.float).unsqueeze(-1)
         else:
             # 创建与 dones 形状一致的全 1 张量
             active_masks = torch.ones_like(dones)
@@ -624,39 +626,25 @@ class PPOHybrid:
             actor_inputs = states
             critic_inputs = states
         
-        # 1. 准备动作数据
+        # 动作处理 (转为 3D Tensor)
         actions_from_buffer = transition_dict['actions']
-        
-        # todo action_mask 防止“死后动作”干扰决策
-        # todo truncs
-        # todo global states，适配集中式Critic
-
-        # 1. 准备动作数据 (转 Tensor)
         actions_on_device = {}
-        
-        # Buffer 传来的 actions 已经是 dict of arrays
-        if isinstance(actions_from_buffer, dict):
-            for key, val in actions_from_buffer.items():
-                if key == 'cat':
-                    actions_on_device[key] = to_tensor(val, torch.long)
-                else:
-                    actions_on_device[key] = to_tensor(val, torch.float)
-        else:
-            # 兼容旧代码 (list of dicts)
-            # 旧逻辑：List of Dicts (较慢)
-            all_keys = actions_from_buffer[0].keys()
-            for key in all_keys:
-                vals = [d[key] for d in actions_from_buffer]
-                if key == 'cat':
-                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
-                else:
-                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
+        for key, val in actions_from_buffer.items():
+            dtype = torch.long if key == 'cat' else torch.float
+            actions_on_device[key] = to_tensor(val, dtype)
 
+        # 初始隐藏状态准备 [针对 RNN 模式的新逻辑]
+        init_h_actor = None
+        init_h_critic = None
+        if use_rnn:
+            # Buffer 存储格式为 (Batch, Layers, Dim) -> GRU 期望 (Layers, Batch, Dim)
+            init_h_actor = to_tensor(transition_dict['init_h_actor'], torch.float).transpose(0, 1).contiguous()
+            init_h_critic = to_tensor(transition_dict['init_h_critic'], torch.float).transpose(0, 1).contiguous()
 
         # 2. 获取 Advantage (优先使用 Buffer 算好的)
         if 'advantages' in transition_dict and 'td_targets' in transition_dict:
-            advantage = to_tensor(transition_dict['advantages'], torch.float).view(-1, 1)
-            td_target = to_tensor(transition_dict['td_targets'], torch.float).view(-1, 1)
+            advantage = to_tensor(transition_dict['advantages'], torch.float).unsqueeze(-1)
+            td_target = to_tensor(transition_dict['td_targets'], torch.float).unsqueeze(-1)
         else:
             # 现场计算 GAE (不推荐用于并行展平后的数据)
             
@@ -684,10 +672,10 @@ class PPOHybrid:
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)
             # [修改] 接收 5 个返回值
-            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=init_h_actor, max_std=self.max_std)
             # Critic 使用 critic_inputs (全局 states)
-            v_pred_old = self.critic(critic_inputs)
-            
+            v_pred_old, _ = self.critic(critic_inputs, h_in=init_h_critic)
+
         # --- [2. 优势归一化 - 适配 active_masks] ---
         if adv_normed:
             #  仅使用 active 的数据计算统计量
