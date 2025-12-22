@@ -26,10 +26,14 @@ from Algorithms.SharedLayers import ChannelAttention # 调用已定义的通道�
 # 策略网络
 # ========
 class PolicyNetHybrid(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, reduction_ratio=16, num_layers=1, use_channel_attention=True):
+    def __init__(self, state_dim, hidden_dims, 
+                 action_dims_dict, init_std=0.5, 
+                 reduction_ratio=16, num_layers=1, 
+                 use_channel_attention=True, use_gru=True):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
         self.use_channel_attention = use_channel_attention
+        self.use_gru = use_gru # 记录开关状态
         
         # 1. 通道注意力 (128 -> 128)
         # 只有在开关开启时才初始化
@@ -45,10 +49,21 @@ class PolicyNetHybrid(torch.nn.Module):
             prev_size = h
         self.backbone = nn.Sequential(*layers)
 
-        # 3. GRU 层 (提取时序特征, 128 -> 128)
-        # 使用 batch_first=True 适配 (Batch, SeqLen, Dim)
-        # 修改点：传入 num_layers
-        self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
+        # 只有开启时才定义 GRU
+        if self.use_gru:
+            # 3. GRU 层 (提取时序特征, 128 -> 128)
+            # 使用 batch_first=True 适配 (Batch, SeqLen, Dim)
+            # 修改点：传入 num_layers
+            self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
+
+            # 正交初始化 GRU 权重（weight_hh 使用正交，weight_ih 使用 xavier，bias 清零）
+            for name, param in self.gru.named_parameters():
+                if 'weight_hh' in name:
+                    nn.init.orthogonal_(param.data)
+                elif 'weight_ih' in name:
+                    nn.init.xavier_uniform_(param.data)
+                elif 'bias' in name:
+                    nn.init.constant_(param.data, 0.0)
 
         # 4. 动作头 (Heads)
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -81,9 +96,14 @@ class PolicyNetHybrid(torch.nn.Module):
         # Step 2: MLP Backbone
         features = self.backbone(x_att).view(B, S, -1)
         
-        # Step 3: GRU 自动递归 (h_in 为序列起始状态)
-        # gru_out 形状: (B, S, 128)
-        gru_out, h_out = self.gru(features, h_in)
+        if self.use_gru:
+            # Step 3: GRU 自动递归 (h_in 为序列起始状态)
+            # gru_out 形状: (B, S, 128)
+            gru_out, h_out = self.gru(features, h_in)
+        else:
+            # “假 GRU”流程：直接透传特征
+            gru_out = features
+            h_out = h_in
         
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -114,11 +134,16 @@ class PolicyNetHybrid(torch.nn.Module):
 # =======
 
 class ValueNet(nn.Module):
-    def __init__(self, state_dim, hidden_dims, reduction_ratio=16, num_layers=1, use_channel_attention=True):
+    def __init__(self, state_dim, hidden_dims, 
+                 reduction_ratio=16, num_layers=1, 
+                 use_channel_attention=True, use_gru=True):
         super(ValueNet, self).__init__()
         self.use_channel_attention = use_channel_attention
+        self.use_gru = use_gru # 记录开关状态
+        
         if self.use_channel_attention:
             self.attention = ChannelAttention(state_dim, reduction_ratio)
+
         layers = []
         prev_size = state_dim
         for h in hidden_dims:
@@ -127,7 +152,18 @@ class ValueNet(nn.Module):
             prev_size = h
         self.backbone = nn.Sequential(*layers)
         
-        self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
+        # 只有开启时才定义 GRU
+        if self.use_gru:
+            self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
+            # 对 GRU 权重做正交初始化（weight_hh 正交，weight_ih xavier，bias 清零）
+            for name, param in self.gru.named_parameters():
+                if 'weight_hh' in name:
+                    nn.init.orthogonal_(param.data)
+                elif 'weight_ih' in name:
+                    nn.init.xavier_uniform_(param.data)
+                elif 'bias' in name:
+                    nn.init.constant_(param.data, 0.0)
+
         self.fc_out = nn.Linear(prev_size, 1)
 
     def forward(self, x, h_in=None):
@@ -150,7 +186,12 @@ class ValueNet(nn.Module):
 
         features = self.backbone(x_att).view(B, S, -1)
         
-        gru_out, h_out = self.gru(features, h_in)
+        if self.use_gru:
+            gru_out, h_out = self.gru(features, h_in)
+        else:
+            gru_out = features
+            h_out = h_in
+            
         values = self.fc_out(gru_out) # (B, S, 1)
         
         return values, h_out
@@ -518,7 +559,7 @@ class PPOHybrid:
         # 统一提取 next_values 并根据模式处理维度
         raw_next_vals = to_tensor(transition_dict['next_values'], torch.float)
         
-        # 维度适配：RNN模式下 Buffer 已经准备好了 3D (B, S, Dim)，直接扩维对齐掩码
+        # 维度适配：RNN模式下 Buffer 已经准备好了 3D (B, S, 128)，MLP模式下是展平后的 2D (T*N, 128)
         if use_rnn:
             dones = to_tensor(transition_dict['dones'], torch.float).unsqueeze(-1)
             rewards = to_tensor(transition_dict['rewards'], torch.float).unsqueeze(-1)
@@ -770,10 +811,21 @@ class PPOHybrid:
                     v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - clip_range, v_pred_old_batch + clip_range)
                     vf_loss1 = (v_pred - mb_td_target).pow(2)
                     vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
+                    
+                    '''hubber loss 防止均方误差带来的梯度过大'''
+                    # # 改为:
+                    # vf_loss1 = F.smooth_l1_loss(v_pred, mb_td_target, reduction='none', beta=1.0)
+                    # vf_loss2 = F.smooth_l1_loss(v_pred_clipped, mb_td_target, reduction='none', beta=1.0)
+                    
                     critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
                 else:
                     #  reduction='none' 使得我们可以应用 mask
                     critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
+                    
+                    '''huber loss 防止均方误差带来的梯度过大'''
+                    # # 修改为 Huber Loss (或者 Smooth L1 Loss)
+                    # # beta=1.0 表示误差小于1时用平方，大于1时用线性
+                    # critic_loss_per_sample = F.smooth_l1_loss(v_pred, mb_td_target, reduction='none', beta=1.0) 
                 
                 #  Critic Loss 使用 mask 加权
                 critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)

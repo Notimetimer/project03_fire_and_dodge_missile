@@ -179,12 +179,13 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 action_bound = None
 
 # 1. 创建神经网络
+# critic 不使用GRU
 actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, 
                             reduction_ratio=16, num_layers=a_h_dim[0],
-                            use_channel_attention=use_attention).to(device)
+                            use_channel_attention=use_attention, use_gru=1).to(device)
 critic_net = ValueNet(state_dim, hidden_dim, reduction_ratio=16, 
                       num_layers=c_h_dim[0],
-                      use_channel_attention=use_attention).to(device)
+                      use_channel_attention=use_attention, use_gru=0).to(device)
 
 # 2. Wrapper
 actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
