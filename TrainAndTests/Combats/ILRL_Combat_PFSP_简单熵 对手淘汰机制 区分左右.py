@@ -139,8 +139,8 @@ def append_b_experience(td, obs, state, action, reward, next_state, done):
 # 加载数据
 il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
-    "il_transitions_combat.pkl",
-    "transition_dict_combat.pkl"
+    "il_transitions_combat_LR.pkl",
+    "transition_dict_combat_LR.pkl"
 )
 
 # --- 关键步骤：执行数据重构 ---
