@@ -26,12 +26,15 @@ from Algorithms.SharedLayers import ChannelAttention # 调用已定义的通道�
 # 策略网络
 # ========
 class PolicyNetHybrid(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, reduction_ratio=16, num_layers=1):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, reduction_ratio=16, num_layers=1, use_channel_attention=True):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
+        self.use_channel_attention = use_channel_attention
         
         # 1. 通道注意力 (128 -> 128)
-        self.attention = ChannelAttention(state_dim, reduction_ratio)
+        # 只有在开关开启时才初始化
+        if self.use_channel_attention:
+            self.attention = ChannelAttention(state_dim, reduction_ratio)
         
         # 2. MLP 主干 (提取空间特征)
         layers = []
@@ -48,15 +51,15 @@ class PolicyNetHybrid(torch.nn.Module):
         self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
 
         # 4. 动作头 (Heads)
-        if 'cont' in self.action_dims:
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             self.fc_mu = nn.Linear(prev_size, self.action_dims['cont'])
             self.log_std_cont = nn.Parameter(torch.log(torch.ones(self.action_dims['cont']) * init_std))
 
-        if 'cat' in self.action_dims:
+        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             self.cat_dims = self.action_dims['cat']
             self.fc_cat = nn.Linear(prev_size, sum(self.cat_dims))
 
-        if 'bern' in self.action_dims:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             self.fc_bern = nn.Linear(prev_size, self.action_dims['bern'])
             # 伯努利头特殊初始化：使初始开火概率偏低
             nn.init.constant_(self.fc_bern.bias, -2.0)
@@ -69,7 +72,11 @@ class PolicyNetHybrid(torch.nn.Module):
         B, S, D = x.shape
 
         # Step 1: Channel Attention (作用于每一帧)
-        x_att, _ = self.attention(x.reshape(B * S, D))
+        x_reshaped = x.reshape(B * S, D)
+        if self.use_channel_attention:
+            x_att, _ = self.attention(x_reshaped)
+        else:
+            x_att = x_reshaped # 不使用注意力，直接透传
         
         # Step 2: MLP Backbone
         features = self.backbone(x_att).view(B, S, -1)
@@ -81,17 +88,17 @@ class PolicyNetHybrid(torch.nn.Module):
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Heads 分发 ---
-        if 'cont' in self.action_dims:
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             mu = self.fc_mu(gru_out)
             std = torch.exp(self.log_std_cont).expand_as(mu).clamp(max=max_std)
             outputs['cont'] = (mu, std)
 
-        if 'cat' in self.action_dims:
+        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             logits_all = self.fc_cat(gru_out)
             logits_list = torch.split(logits_all, self.cat_dims, dim=-1)
             outputs['cat'] = [F.softmax(l, dim=-1) for l in logits_list]
 
-        if 'bern' in self.action_dims:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_logits = self.fc_bern(gru_out)
             if action_masks is not None and 'bern' in action_masks:
                 # 训练时 mask 需匹配 3D 维度 (B, S, 1)
@@ -107,9 +114,11 @@ class PolicyNetHybrid(torch.nn.Module):
 # =======
 
 class ValueNet(nn.Module):
-    def __init__(self, state_dim, hidden_dims, reduction_ratio=16, num_layers=1):
+    def __init__(self, state_dim, hidden_dims, reduction_ratio=16, num_layers=1, use_channel_attention=True):
         super(ValueNet, self).__init__()
-        self.attention = ChannelAttention(state_dim, reduction_ratio)
+        self.use_channel_attention = use_channel_attention
+        if self.use_channel_attention:
+            self.attention = ChannelAttention(state_dim, reduction_ratio)
         layers = []
         prev_size = state_dim
         for h in hidden_dims:
@@ -133,7 +142,12 @@ class ValueNet(nn.Module):
         # 此时 x 统一为 3D: (Batch, SeqLen, Dim)
         B, S, D = x.shape
         
-        x_att, _ = self.attention(x.reshape(B * S, D))
+        x_reshaped = x.reshape(B * S, D)
+        if self.use_channel_attention:
+            x_att, _ = self.attention(x_reshaped)
+        else:
+            x_att = x_reshaped
+
         features = self.backbone(x_att).view(B, S, -1)
         
         gru_out, h_out = self.gru(features, h_in)

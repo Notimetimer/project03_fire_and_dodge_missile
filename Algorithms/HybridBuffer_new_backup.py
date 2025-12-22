@@ -1,4 +1,4 @@
-# 如果超出容量，丢弃数据
+# 如果超出容量，经验池扩容
 
 import numpy as np
 import torch
@@ -187,7 +187,7 @@ class HybridReplayBuffer:
         flatten_dict['actions'] = flat_actions
 
         return flatten_dict
-   
+
     def get_recurrent_data(self, critic_net, seq_len, gamma, lmbda):
         """
         专门为带 GRU 的网络整备序列数据。

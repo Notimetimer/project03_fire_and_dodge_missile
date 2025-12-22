@@ -156,11 +156,12 @@ max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
-epochs = 10
+epochs = 10  # 可能需要更小一些 10
 eps = 0.2
 k_entropy = 0.05 # 1 # 
 seqlen = 3 # GRU 序列长度
 n_envs = 1
+use_attention = 0 
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -178,8 +179,12 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 action_bound = None
 
 # 1. 创建神经网络
-actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, reduction_ratio=16, num_layers=a_h_dim[0]).to(device)
-critic_net = ValueNet(state_dim, hidden_dim, reduction_ratio=16, num_layers=c_h_dim[0]).to(device)
+actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, 
+                            reduction_ratio=16, num_layers=a_h_dim[0],
+                            use_channel_attention=use_attention).to(device)
+critic_net = ValueNet(state_dim, hidden_dim, reduction_ratio=16, 
+                      num_layers=c_h_dim[0],
+                      use_channel_attention=use_attention).to(device)
 
 # 2. Wrapper
 actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
@@ -503,6 +508,14 @@ if __name__ == "__main__":
                 # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储
                 next_b_obs, next_b_check_obs = env.obs_1v1('b', pomdp=1)
                 next_b_state_global, _ = env.obs_1v1('b', reward_fn=1) # 获取全局Next State
+                with torch.no_grad():
+                    # 使用最后时刻更新后的 next_b_state_global 和 h_critic
+                    # 注意：h_critic 在循环最后已经更新为 h_critic_next 了，正好对应下一时刻
+                    val_tensor, _ = student_agent.critic(
+                        torch.tensor(next_b_state_global, dtype=torch.float).to(device),
+                        h_in=h_critic 
+                    )
+                    current_v = val_tensor.item()
                 if ego.dead:
                     dead_dict['b'] = 1
 

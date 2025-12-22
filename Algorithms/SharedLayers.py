@@ -31,6 +31,10 @@ class SharedGruBackbone(nn.Module):
         return features_per_step, h_n
 
 # 通道注意力
+'''
+todo
+给每个通道的权重加上归一化/缩放/限幅，不过不能打破梯度传播的途径
+'''
 class ChannelAttention(nn.Module):
     def __init__(self, feature_dim, reduction_ratio=16):
         super(ChannelAttention, self).__init__()

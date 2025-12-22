@@ -1,3 +1,5 @@
+# 如果超出容量，丢弃数据
+
 import numpy as np
 import torch
 from _context import *  # 获取项目根目录
