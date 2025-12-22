@@ -20,18 +20,18 @@ from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_ad
 # =============================================================================
 # 1. 神经网络定义 (保持不变，只负责 forward 计算)
 # =============================================================================
-from SharedLayers import ChannelAttention # 调用已定义的通道注意力
+from Algorithms.SharedLayers import ChannelAttention # 调用已定义的通道注意力
 
 # ========
 # 策略网络
 # ========
 class PolicyNetHybrid(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, reduction_ratio=16, num_layers=1):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
         
         # 1. 通道注意力 (128 -> 128)
-        self.attention = ChannelAttention(state_dim)
+        self.attention = ChannelAttention(state_dim, reduction_ratio)
         
         # 2. MLP 主干 (提取空间特征)
         layers = []
@@ -44,7 +44,8 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # 3. GRU 层 (提取时序特征, 128 -> 128)
         # 使用 batch_first=True 适配 (Batch, SeqLen, Dim)
-        self.gru = nn.GRU(prev_size, prev_size, batch_first=True)
+        # 修改点：传入 num_layers
+        self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
 
         # 4. 动作头 (Heads)
         if 'cont' in self.action_dims:
@@ -106,10 +107,9 @@ class PolicyNetHybrid(torch.nn.Module):
 # =======
 
 class ValueNet(nn.Module):
-    def __init__(self, state_dim, hidden_dims):
+    def __init__(self, state_dim, hidden_dims, reduction_ratio=16, num_layers=1):
         super(ValueNet, self).__init__()
-        self.attention = ChannelAttention(state_dim)
-        
+        self.attention = ChannelAttention(state_dim, reduction_ratio)
         layers = []
         prev_size = state_dim
         for h in hidden_dims:
@@ -118,12 +118,19 @@ class ValueNet(nn.Module):
             prev_size = h
         self.backbone = nn.Sequential(*layers)
         
-        self.gru = nn.GRU(prev_size, prev_size, batch_first=True)
+        self.gru = nn.GRU(prev_size, prev_size, num_layers=num_layers, batch_first=True)
         self.fc_out = nn.Linear(prev_size, 1)
 
     def forward(self, x, h_in=None):
-        if x.dim() == 2:
+        # --- 增强的维度适配逻辑 [修改部分] ---
+        # 1. 如果是 1D (Dim,) -> 变为 (1, 1, Dim)
+        if x.dim() == 1:
+            x = x.unsqueeze(0).unsqueeze(0)
+        # 2. 如果是 2D (Batch, Dim) -> 变为 (Batch, 1, Dim)
+        elif x.dim() == 2:
             x = x.unsqueeze(1)
+
+        # 此时 x 统一为 3D: (Batch, SeqLen, Dim)
         B, S, D = x.shape
         
         x_att, _ = self.attention(x.reshape(B * S, D))
@@ -253,7 +260,8 @@ class HybridActorWrapper(nn.Module):
         actions_dist_check = {} 
 
         # --- Cont ---
-        if actor_outputs['cont'] is not None:
+        # if actor_outputs['cont'] is not None:
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             mu, std = actor_outputs['cont']
             # mu, std 形状为 (B, 1, Dim) -> squeeze(1) 还原为采样维度
             mu = mu.squeeze(1)
@@ -278,7 +286,8 @@ class HybridActorWrapper(nn.Module):
                 actions_dist_check['cont'] = u[0].cpu().detach().numpy().flatten()
 
         # --- Cat ---
-        if actor_outputs['cat'] is not None:
+        # if actor_outputs['cat'] is not None:
+        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             cat_probs_list = actor_outputs['cat']
             cat_exec_list = []      # 用于 actions_exec
             cat_indices_raw_list = [] # 用于 actions_raw
@@ -310,7 +319,8 @@ class HybridActorWrapper(nn.Module):
             actions_dist_check['cat'] = cat_probs_check_list
 
         # --- Bern ---
-        if actor_outputs['bern'] is not None:
+        # if actor_outputs['bern'] is not None:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_logits = actor_outputs['bern']
             bern_logits = bern_logits.squeeze(1)
             dist = Bernoulli(logits=bern_logits)
@@ -814,18 +824,19 @@ class PPOHybrid:
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
         # 这里使用 numpy 计算以防 tensor 维度广播问题
         #  explained_var 最好也只看 active 的，但为了简单起见，这里先保持原样或简单过滤
-        mask_bool = active_masks.squeeze(-1).bool().cpu().numpy()
+        mask_bool = active_masks.flatten().bool().cpu().numpy()
+        # mask_bool = active_masks.squeeze(-1).bool().cpu().numpy()
         y_true = td_target.flatten().cpu().numpy()[mask_bool]
         y_pred = v_pred_old.flatten().cpu().numpy()[mask_bool] # 比较更新前的 Value 网络预测能力
         
         if len(y_true) > 1:
             var_y = np.var(y_true)
-            if var_y == 0:
-                self.explained_var = np.nan
+            if var_y < 1e-8:
+                self.explained_var = 0.0
             else:
                 self.explained_var = 1 - np.var(y_true - y_pred) / var_y
         else:
-            self.explained_var = 0
+            self.explained_var = 0.0
 
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")

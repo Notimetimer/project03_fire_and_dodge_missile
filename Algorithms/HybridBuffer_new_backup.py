@@ -1,7 +1,11 @@
+# 如果超出容量，丢弃数据
+
 import numpy as np
 import torch
 from _context import *  # 获取项目根目录
 from Algorithms.Utils import compute_advantage
+
+# 不再接收next_states，统一使用next_values
 
 class HybridReplayBuffer:
     def __init__(self, n_envs, buffer_size, obs_dim, state_dim, action_dims_dict, 
@@ -31,7 +35,8 @@ class HybridReplayBuffer:
         # 1. 基础数据预分配 (Time, Envs, Dim) - Numpy Array 存储
         self.obs = np.zeros((buffer_size, n_envs, obs_dim), dtype=np.float32)
         self.states = np.zeros((buffer_size, n_envs, state_dim), dtype=np.float32)
-        self.next_states = np.zeros((buffer_size, n_envs, state_dim), dtype=np.float32)
+        # [修改] 使用 next_values 代替 next_states
+        self.next_values = np.zeros((buffer_size, n_envs), dtype=np.float32)
         self.rewards = np.zeros((buffer_size, n_envs), dtype=np.float32)
         self.dones = np.zeros((buffer_size, n_envs), dtype=np.float32)
         
@@ -58,28 +63,29 @@ class HybridReplayBuffer:
         
         if actor_hidden_dim is not None:
             # actor_hidden_dim 应该是一个元组 (num_layers, hidden_size)
-            self.actor_hidden = np.zeros((buffer_size, *actor_hidden_dim[0:1], n_envs, actor_hidden_dim[1]), dtype=np.float32)
+            self.actor_hidden = np.zeros((buffer_size, actor_hidden_dim[0], n_envs, actor_hidden_dim[1]), dtype=np.float32)
         
         if critic_hidden_dim is not None:
-            self.critic_hidden = np.zeros((buffer_size, *critic_hidden_dim[0:1], n_envs, critic_hidden_dim[1]), dtype=np.float32)
+            self.critic_hidden = np.zeros((buffer_size, critic_hidden_dim[0], n_envs, critic_hidden_dim[1]), dtype=np.float32)
 
     def clear(self):
         """重置指针，数据无需清零，下次覆盖即可"""
         self.ptr = 0
         self.full = False
 
-    def add(self, obs, state, action_dict, reward, done, next_state, 
+    def add(self, obs, state, action_dict, reward, done, next_value, 
             trunc=None, active_mask=None, actor_h=None, critic_h=None):
         """添加一步采样数据，输入均为 (N_Envs, ...) 形状的 numpy 数组"""
+        # 动态扩容：若 ptr 超过当前容量则扩容（至少翻倍）
         if self.ptr >= self.buffer_size:
-            print("Buffer overflow! Clear before adding.")
-            return
-
+            self._expand_capacity(min_needed=1)
+ 
         idx = self.ptr
         
         self.obs[idx] = obs
         self.states[idx] = state
-        self.next_states[idx] = next_state
+        # [修改] 存储 next_value
+        self.next_values[idx] = next_value
         self.rewards[idx] = reward
         self.dones[idx] = done
         
@@ -106,24 +112,33 @@ class HybridReplayBuffer:
 
     def compute_estimates_and_flatten(self, critic_net, gamma, lmbda):
         """兼容 MLP 模式的扁平化方法"""
-        if self.ptr < self.buffer_size:
-            print(f"Warning: Buffer not full ({self.ptr}/{self.buffer_size}), calculating on partial data.")
-
-        # 1. 准备数据转 Tensor
-        # 展平前两个维度 (T*N, D) 以便 Critic 批量推理
-        # 注意：这里我们只是为了 Critic 推理方便，GAE 计算时还需要 reshape 回去
-        T, N, S_Dim = self.states.shape
+        T = self.ptr
+        N = self.n_envs
+        S_Dim = self.states.shape[-1]
         
-        # 2. Critic 推理 Values
+        # 1. 准备数据转 Tensor 并计算 Values
         with torch.no_grad():
-            flat_s = torch.tensor(self.states[:T].reshape(-1, S_Dim), dtype=torch.float, device=self.device)
-            flat_ns = torch.tensor(self.next_states[:T].reshape(-1, S_Dim), dtype=torch.float, device=self.device)
-            v_res = critic_net(flat_s)
-            nv_res = critic_net(flat_ns)
-            values = v_res[0].view(T, N, 1).cpu().numpy() if isinstance(v_res, tuple) else v_res.view(T, N, 1).cpu().numpy()
-            next_values = nv_res[0].view(T, N, 1).cpu().numpy() if isinstance(nv_res, tuple) else nv_res.view(T, N, 1).cpu().numpy()
+            states_tensor = torch.tensor(self.states[:T], dtype=torch.float, device=self.device)
+            
+            if self.critic_hidden is not None:
+                # RNN 模式：使用存储的每一帧 h_in 计算 V(s_t)
+                flat_states = states_tensor.reshape(-1, 1, S_Dim)
+                h_in = torch.tensor(self.critic_hidden[:T], dtype=torch.float, device=self.device)
+                # 维度变换: (T, L, N, H) -> (L, T*N, H)
+                h_in = h_in.permute(1, 0, 2, 3).reshape(h_in.shape[1], -1, h_in.shape[-1]).contiguous()
+                # [修改] 带上隐藏状态接收，确保 GRU 模式正常
+                v_res, _ = critic_net(flat_states, h_in=h_in)
+                values = v_res.view(T, N, 1).cpu().numpy()
+            else:
+                # MLP 模式
+                # [修改] 移除 [0] 索引，接收完整的 values Tensor
+                v_res = critic_net(states_tensor.reshape(-1, S_Dim))
+                values = v_res.view(T, N, 1).cpu().numpy()
+                
+            # [修改] 直接使用存储的 next_values
+            next_values = self.next_values[:T, :, None]
 
-        # 提取 numpy 数据
+        # 提取 numpy 数据用于 GAE
         rewards = self.rewards[:T, :, None]
         dones = self.dones[:T, :, None]
         truncs = self.truncs[:T, :, None] if self.use_truncs else None
@@ -154,38 +169,25 @@ class HybridReplayBuffer:
 
         # 5. 展平并打包 (Flatten) -> (T*N, ...)
         flatten_dict = {
-            'states': self.states.reshape(-1, self.states.shape[-1]),
-            'obs': self.obs.reshape(-1, self.obs.shape[-1]),
-            'next_states': self.next_states.reshape(-1, self.next_states.shape[-1]),
-            'rewards': self.rewards.reshape(-1), # 1D
-            'dones': self.dones.reshape(-1),     # 1D
-            'advantages': advantages.reshape(-1), # 1D
-            'td_targets': td_targets.reshape(-1)  # 1D
+            'states': self.states[:T].reshape(-1, S_Dim),
+            'obs': self.obs[:T].reshape(-1, self.obs.shape[-1]),
+            'next_values': self.next_values[:T].reshape(-1), # [修改]
+            'rewards': self.rewards[:T].reshape(-1),
+            'dones': self.dones[:T].reshape(-1),
+            'advantages': advantages.reshape(-1),
+            'td_targets': td_targets.reshape(-1)
         }
         
-        if self.use_truncs:
-            flatten_dict['truncs'] = self.truncs.reshape(-1)
-            
-        if self.use_active_masks:
-            flatten_dict['active_masks'] = self.active_masks.reshape(-1)
+        if self.use_truncs: flatten_dict['truncs'] = self.truncs[:T].reshape(-1)
+        if self.use_active_masks: flatten_dict['active_masks'] = self.active_masks[:T].reshape(-1)
 
-        # 动作字典展平
         flat_actions = {}
         for k, v in self.actions.items():
-            flat_actions[k] = v.reshape(-1, v.shape[-1])
+            flat_actions[k] = v[:T].reshape(-1, v.shape[-1])
         flatten_dict['actions'] = flat_actions
-
-        # # 隐藏状态展平 (如果存在)
-        # if self.actor_hidden is not None:
-        #     # (T, Layers, N, D) -> (T*N, Layers, D) ? 
-        #     # 这里的展平方式取决于 RNN PPO 的实现。通常 PPO 训练时如果切片，需要保留 N 的独立性
-        #     # 但既然我们是 flatten 为 batch 训练，且假设不使用 recurrent slice update (普通 MLP PPO):
-        #     # 简单的 reshape 即可。如果是真正的 RNN PPO，这里的 flatten 方式需要配合 DataGenerator
-        #     pass 
 
         return flatten_dict
    
-    
     def get_recurrent_data(self, critic_net, seq_len, gamma, lmbda):
         """
         专门为带 GRU 的网络整备序列数据。
@@ -193,20 +195,29 @@ class HybridReplayBuffer:
         """
         T = self.ptr
         N = self.n_envs
+        S_Dim = self.states.shape[-1]
         
         # --- Step 1: 计算 Advantage 和 TD-Target (GAE 断流逻辑) ---
         with torch.no_grad():
-            # 这里推理使用当前步的物理状态，暂不涉及训练时的 BPTT 展开
-            states_tensor = torch.tensor(self.states[:T].reshape(-1, self.states.shape[-1]), 
-                                         dtype=torch.float, device=self.device)
-            next_states_tensor = torch.tensor(self.next_states[:T].reshape(-1, self.states.shape[-1]), 
-                                              dtype=torch.float, device=self.device)
+            states_tensor = torch.tensor(self.states[:T], dtype=torch.float, device=self.device)
             
-            # v_out 处理 (兼容可能返回的 tuple)
-            v_res = critic_net(states_tensor)
-            nv_res = critic_net(next_states_tensor)
-            values = v_res[0].view(T, N).cpu().numpy() if isinstance(v_res, tuple) else v_res.view(T, N).cpu().numpy()
-            next_values = nv_res[0].view(T, N).cpu().numpy() if isinstance(nv_res, tuple) else nv_res.view(T, N).cpu().numpy()
+            if self.critic_hidden is not None:
+                # RNN 模式：利用存储的 h_in 计算 V(s_t) [修改]
+                flat_states = states_tensor.reshape(-1, 1, S_Dim)
+                h_in = torch.tensor(self.critic_hidden[:T], dtype=torch.float, device=self.device)
+                # 维度变换: (T, L, N, H) -> (L, T*N, H)
+                h_in = h_in.permute(1, 0, 2, 3).reshape(h_in.shape[1], -1, h_in.shape[-1]).contiguous()
+                # [修改] 显式接收两个返回值
+                v_res, _ = critic_net(flat_states, h_in=h_in)
+                values = v_res.view(T, N).cpu().numpy()
+            else:
+                # MLP 模式
+                # [修改] 移除 [0] 索引，确保拿到所有 Batch 样本的 Value
+                v_res = critic_net(states_tensor.reshape(-1, S_Dim))
+                values = v_res.view(T, N).cpu().numpy()
+                
+            # [修改] 直接使用存储的 next_values
+            next_values = self.next_values[:T]
 
         advantages = np.zeros((T, N), dtype=np.float32)
         for n in range(N):
@@ -256,9 +267,9 @@ class HybridReplayBuffer:
         final_data = {
             'obs': np.zeros((num_seqs, seq_len, self.obs.shape[-1]), dtype=np.float32),
             'states': np.zeros((num_seqs, seq_len, self.states.shape[-1]), dtype=np.float32),
-            'next_states': np.zeros((num_seqs, seq_len, self.next_states.shape[-1]), dtype=np.float32), # 修复：改为3D
-            'rewards': np.zeros((num_seqs, seq_len), dtype=np.float32),      # 修复：改为3D
-            'dones': np.zeros((num_seqs, seq_len), dtype=np.float32),        # 修复：改为3D
+            'next_values': np.zeros((num_seqs, seq_len), dtype=np.float32), # [修改]
+            'rewards': np.zeros((num_seqs, seq_len), dtype=np.float32),
+            'dones': np.zeros((num_seqs, seq_len), dtype=np.float32),
             'advantages': np.zeros((num_seqs, seq_len), dtype=np.float32),
             'td_targets': np.zeros((num_seqs, seq_len), dtype=np.float32),
             'actions': {}
@@ -284,9 +295,9 @@ class HybridReplayBuffer:
             
             final_data['obs'][i] = self.obs[s_ptr:e_ptr, env_id]
             final_data['states'][i] = self.states[s_ptr:e_ptr, env_id]
-            final_data['next_states'][i] = self.next_states[s_ptr:e_ptr, env_id] # 填充序列
-            final_data['rewards'][i] = self.rewards[s_ptr:e_ptr, env_id]         # 填充序列
-            final_data['dones'][i] = self.dones[s_ptr:e_ptr, env_id]             # 填充序列
+            final_data['next_values'][i] = self.next_values[s_ptr:e_ptr, env_id] # [修改]
+            final_data['rewards'][i] = self.rewards[s_ptr:e_ptr, env_id]
+            final_data['dones'][i] = self.dones[s_ptr:e_ptr, env_id]
             final_data['advantages'][i] = advantages[s_ptr:e_ptr, env_id]
             final_data['td_targets'][i] = td_targets[s_ptr:e_ptr, env_id]
             
@@ -307,11 +318,46 @@ class HybridReplayBuffer:
 
         return final_data
 
+    def _expand_capacity(self, min_needed=1):
+        """内部：扩展 buffer_size，至少满足 min_needed 新槽位（默认翻倍策略）。"""
+        new_cap = max(self.buffer_size * 2 if self.buffer_size > 0 else 1, self.buffer_size + min_needed)
+        extra = new_cap - self.buffer_size
+        if extra <= 0:
+            return
+
+        # 扩展基础数组
+        self.obs = np.concatenate([self.obs, np.zeros((extra, self.n_envs, self.obs_dim), dtype=self.obs.dtype)], axis=0)
+        self.states = np.concatenate([self.states, np.zeros((extra, self.n_envs, self.state_dim), dtype=self.states.dtype)], axis=0)
+        self.next_values = np.concatenate([self.next_values, np.zeros((extra, self.n_envs), dtype=self.next_values.dtype)], axis=0)
+        self.rewards = np.concatenate([self.rewards, np.zeros((extra, self.n_envs), dtype=self.rewards.dtype)], axis=0)
+        self.dones = np.concatenate([self.dones, np.zeros((extra, self.n_envs), dtype=self.dones.dtype)], axis=0)
+
+        if self.use_truncs:
+            self.truncs = np.concatenate([self.truncs, np.zeros((extra, self.n_envs), dtype=self.truncs.dtype)], axis=0)
+        if self.use_active_masks:
+            self.active_masks = np.concatenate([self.active_masks, np.ones((extra, self.n_envs), dtype=self.active_masks.dtype)], axis=0)
+
+        # 扩展动作字典
+        for k, arr in list(self.actions.items()):
+            tail_shape = (extra, self.n_envs, arr.shape[-1])
+            pad = np.zeros(tail_shape, dtype=arr.dtype)
+            self.actions[k] = np.concatenate([arr, pad], axis=0)
+
+        # 扩展隐藏状态缓存 (如果存在)
+        if self.actor_hidden is not None:
+            ah = np.zeros((extra, self.actor_hidden.shape[1], self.n_envs, self.actor_hidden.shape[3]), dtype=self.actor_hidden.dtype)
+            self.actor_hidden = np.concatenate([self.actor_hidden, ah], axis=0)
+        if self.critic_hidden is not None:
+            ch = np.zeros((extra, self.critic_hidden.shape[1], self.n_envs, self.critic_hidden.shape[3]), dtype=self.critic_hidden.dtype)
+            self.critic_hidden = np.concatenate([self.critic_hidden, ch], axis=0)
+
+        self.buffer_size = new_cap
+
 # =============================================================================
 # 5. 测试代码
 # =============================================================================
 if __name__ == '__main__':
-    print("Testing HybridReplayBuffer with Recurrent Names and Explicit Actions...")
+    print("Testing HybridReplayBuffer with next_values logic...")
     n_envs = 2
     buffer_capacity = 30
     seq_len = 8
@@ -322,7 +368,9 @@ if __name__ == '__main__':
     act_dims = {'cont': 2, 'cat': [3], 'bern': 1}
     
     class MockCritic(torch.nn.Module):
-        def forward(self, x):
+        def forward(self, x, h_in=None):
+            # 模拟 RNN 输出 (B, S, 1)
+            if x.dim() == 3: return torch.sum(x, dim=-1, keepdim=True) * 0.1, h_in
             return torch.sum(x, dim=-1, keepdim=True) * 0.1, None
 
     buffer = HybridReplayBuffer(n_envs, buffer_capacity, obs_d, state_d, act_dims, 
@@ -332,35 +380,24 @@ if __name__ == '__main__':
     for i in range(buffer_capacity):
         o = np.random.randn(n_envs, obs_d)
         s = np.random.randn(n_envs, state_d)
-        ns = np.random.randn(n_envs, state_d)
-        a = {
-            'cont': np.random.randn(n_envs, 2),
-            'cat': np.random.randint(0, 3, (n_envs, 1)),
-            'bern': np.random.randint(0, 2, (n_envs, 1))
-        }
-        r = np.random.randn(n_envs)
-        d = np.zeros(n_envs)
-        if i == 15: d[0] = 1 # 环境0在第15步结束
+        # [修改] 模拟在 main 中计算出的 next_value
+        nv = np.random.randn(n_envs)
+        a = {'cont': np.random.randn(n_envs, 2), 'cat': np.random.randint(0, 3, (n_envs, 1)), 'bern': np.random.randint(0, 2, (n_envs, 1))}
+        r, d = np.random.randn(n_envs), np.zeros(n_envs)
+        if i == 15: d[0] = 1
         
         h_a = np.random.randn(a_hidden_dim[0], n_envs, a_hidden_dim[1])
         h_c = np.random.randn(c_hidden_dim[0], n_envs, c_hidden_dim[1])
         
-        buffer.add(o, s, a, r, d, ns, actor_h=h_a, critic_h=h_c)
+        buffer.add(o, s, a, r, d, nv, actor_h=h_a, critic_h=h_c)
         
     print(f"Buffer ptr: {buffer.ptr}")
     
     try:
         data = buffer.get_recurrent_data(critic, seq_len=seq_len, gamma=0.99, lmbda=0.95)
         print("\nRecurrent Data Keys:", data.keys())
-        print("Batch Size (Num Seqs):", data['obs'].shape[0])
-        print("Sequence Length:", data['obs'].shape[1])
-        print("Init Actor Hidden Shape (Expected (N, 1, 128)):", data['init_h_actor'].shape)
-        
-        if 'cont' in data['actions']:
-            print("Cont Action Shape:", data['actions']['cont'].shape)
-        if 'cat' in data['actions']:
-            print("Cat Action Shape:", data['actions']['cat'].shape)
-            
-        print("\nTest Passed: HybridReplayBuffer logic verified.")
+        print("Next Values Shape (Expected (6, 8)):", data['next_values'].shape)
+        print("Init Critic Hidden Shape:", data['init_h_critic'].shape)
+        print("\nTest Passed: next_values logic verified.")
     except Exception as e:
         print(f"\nTest Failed: {e}")

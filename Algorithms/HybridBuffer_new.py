@@ -76,6 +76,7 @@ class HybridReplayBuffer:
         """添加一步采样数据，输入均为 (N_Envs, ...) 形状的 numpy 数组"""
         if self.ptr >= self.buffer_size:
             print("Buffer overflow! Clear before adding.")
+            # numpy数组预先分配空间，不能动态添加
             return
 
         idx = self.ptr
