@@ -235,50 +235,62 @@ if __name__ == "__main__":
     
     print("Start MARWIL Training...")
 
-    # 训练循环
-    # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
-    # 能够被 MARWIL_update 里的 items() 正常遍历
-    for epoch in range(IL_epoches): 
-        avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
-            il_transition_dict, 
-            beta=1.0, 
-            batch_size=128, # 显存如果够大可以适当调大
-            label_smoothing=0.3
-        )
+    # # === 二选一 模仿训练循环 ===
+    # # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
+    # # 能够被 MARWIL_update 里的 items() 正常遍历
+    # for epoch in range(IL_epoches): 
+    #     avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
+    #         il_transition_dict, 
+    #         beta=1.0, 
+    #         batch_size=128, # 显存如果够大可以适当调大
+    #         label_smoothing=0.3
+    #     )
         
-        # 记录
-        if epoch % 1 == 0:
-            logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)
-            logger.add("il_train/avg_critic_loss", avg_critic_loss, epoch)
-            # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
+    #     # 记录
+    #     if epoch % 1 == 0:
+    #         logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)
+    #         logger.add("il_train/avg_critic_loss", avg_critic_loss, epoch)
+    #         # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
 
-            print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
+    #         print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
-    print("IL Training Finished.")
+    # print("IL Training Finished.")
+    # === ===
     
-    # 加载打靶预训练的智能体
-    from Utilities.LocateDirAndAgents2 import *
-    pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
-    pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫_强密集奖励_左右")
-    pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
+    # === 二选一 加载打靶预训练的智能体 ===
+    # from Utilities.LocateDirAndAgents2 import *
+    # pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
+    # pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫_强密集奖励_左右")
+    # pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
     
-    if pre_train_agent_path:
-        print(f"Loading Actor from: {pre_train_agent_path}")
-        # [Fix] 添加 strict=False 以兼容旧权重文件（忽略缺失的 log_temp 参数）
-        actor_wrapper.load_state_dict(torch.load(pre_train_agent_path, map_location=device, weights_only=1), strict=False)
+    # if pre_train_agent_path:
+    #     print(f"Loading Actor from: {pre_train_agent_path}")
+    #     # [Fix] 添加 strict=False 以兼容旧权重文件（忽略缺失的 log_temp 参数）
+    #     actor_wrapper.load_state_dict(torch.load(pre_train_agent_path, map_location=device, weights_only=1), strict=False)
     
-    # 加载 critic
-    critic_path = os.path.join(pre_train_latest_log_dir, "critic.pt")
-    if os.path.exists(critic_path):
-        print(f"Loading Critic from: {critic_path}")
-        student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device, weights_only=1), strict=False)
-    else:
-        print(f"Warning: Critic file {critic_path} not found.")
-
+    # # 加载 critic
+    # critic_path = os.path.join(pre_train_latest_log_dir, "critic.pt")
+    # if os.path.exists(critic_path):
+    #     print(f"Loading Critic from: {critic_path}")
+    #     student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device, weights_only=1), strict=False)
+    # else:
+    #     print(f"Warning: Critic file {critic_path} not found.")
+    
+    # === ===
+    
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
     # ==============================================================================
     
+    # 设置随机数种子
+    seed = 42
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        
     # # 根据参数数量缩放学习率
     # from Math_calculates.ScaleLearningRate import scale_learning_rate
     # actor_lr = scale_learning_rate(actor_lr, student_agent.actor)
