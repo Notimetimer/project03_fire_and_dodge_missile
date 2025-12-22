@@ -566,7 +566,7 @@ class PPOHybrid:
                 
                 # td_target的计算不应考虑truncs。仅当dones=1时，next_value才为0。
                 # truncs的影响由compute_advantage函数内部处理。
-                td_target = rewards + self.gamma * mb_next_values * (1 - dones)
+                td_target = rewards + self.gamma * mb_next_values * (1 - dones)  # 均为 (B, S, 1) 或 (T*N, 1)
                 td_delta = td_target - v_curr
                 
                 # 准备进入 compute_advantage，如果是 RNN，需转置时间维到第一维
@@ -666,7 +666,7 @@ class PPOHybrid:
                 mb_td_target = td_target[batch_idx]
                 mb_old_log_probs = old_log_probs[batch_idx]
                 mb_active_masks = active_masks[batch_idx]
-                # v_pred_old_batch = v_pred_old[batch_idx] # 如果需要用到旧 Value
+                v_pred_old_batch = v_pred_old[batch_idx]
                 
                 # 切片隐藏状态 (取对应 Batch 的起始 H) [新增]
                 mb_h_a = init_h_actor[:, batch_idx, :] if use_rnn else None
@@ -731,12 +731,18 @@ class PPOHybrid:
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
-                if use_rnn :
-                    v_pred, _ = self.critic(critic_inputs, h_in=init_h_critic)
+                if use_rnn:
+                    # 使用当前 mini-batch 的状态和对应的初始隐藏状态进行递归推理
+                    v_res_batch, _ = self.critic(mb_critic_inputs, h_in=mb_h_c)
+                    v_pred = v_res_batch[0] if isinstance(v_res_batch, tuple) else v_res_batch
                 else:
-                    v_pred = self.critic(critic_inputs)
+                    # MLP 模式：仅输入当前 mini-batch 的状态
+                    v_res_batch = self.critic(mb_critic_inputs)
+                    v_pred = v_res_batch[0] if isinstance(v_res_batch, tuple) else v_res_batch
+                
+                # --- 价值损失 (Critic Loss) 计算 ---
+                # v_pred_old_batch 是在循环开始处通过 v_pred_old[batch_idx] 得到的，这没问题
                 if clip_vf:
-                    v_pred_old_batch = v_pred_old[batch_idx]
                     v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - clip_range, v_pred_old_batch + clip_range)
                     vf_loss1 = (v_pred - mb_td_target).pow(2)
                     vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
