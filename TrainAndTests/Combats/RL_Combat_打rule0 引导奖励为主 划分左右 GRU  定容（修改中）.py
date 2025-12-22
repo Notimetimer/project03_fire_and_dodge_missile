@@ -213,7 +213,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫_左右_GRU'
+    mission_name = '打莽夫_左右_GRU_经验池定容'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -333,8 +333,112 @@ if __name__ == "__main__":
     r_action_list = []
     b_action_list = []
     
+    # --- 初始化环境与重置 ---
+    DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
+    env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, red_init_ammo=6, blue_init_ammo=6)
+
+    # 回合级变量初始化
+    h_actor = torch.zeros(a_h_dim[0], 1, a_h_dim[1]).to(device)
+    h_critic = torch.zeros(c_h_dim[0], 1, c_h_dim[1]).to(device)
+    episode_return = 0
+    m_fired = 0
     
     while total_steps < int(max_steps):
+        if not replay_buffer.full:
+            # A. 获取决策时刻的状态
+            b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+            b_state_global, _ = env.obs_1v1('b', reward_fn=1)
+            
+            # B. 记录“旧”状态和隐藏状态以便存储
+            last_decision_obs = b_obs
+            last_decision_state = b_state_global
+            last_h_actor = h_actor.detach().cpu().numpy()
+            last_h_critic = h_critic.detach().cpu().numpy()
+            
+            # C. Actor 决策 (产生动作和更新 h_actor)
+            b_action_exec, b_action_raw, h_actor_next, _ = student_agent.take_action(
+                b_obs, h0=h_actor, explore=True
+            )
+            current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
+            
+            # D. 对手决策 (Rule 0)
+            r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
+            r_state_check = env.unscale_state(r_check_obs)
+            r_action_label, r_fire = basic_rules(r_state_check, 0)
+            if r_fire: launch_missile_immediately(env, 'r')
+            
+            # E. 执行动作周期
+            cycle_reward = 0
+            cycle_done = False
+            
+            for _ in range(action_cycle_multiplier):
+                r_maneuver = env.maneuver14(env.RUAV, r_action_label)
+                b_maneuver = env.maneuver14LR(env.BUAV, b_action_exec['cat'][0])
+                env.step(r_maneuver, b_maneuver)
+                
+                total_steps += 1
+                env.render(t_bias=t_bias)
+                
+                # 判断终止及奖励
+                term, rew, _ = env.combat_terminate_and_reward('b', b_action_exec['cat'][0], b_action_exec['bern'][0], action_cycle_multiplier)
+                cycle_reward += rew
+                if term:
+                    cycle_done = True
+                    break
+            
+            episode_return += cycle_reward
+            
+            # F. 计算 Next Value (在动作执行后)
+            b_state_next, _ = env.obs_1v1('b', reward_fn=1)
+            # 注意：这里必须传入当前的 h_critic 来获取 next_v
+            next_v_tensor, h_critic_next = student_agent.critic(
+                torch.tensor(b_state_next, dtype=torch.float).to(device), 
+                h_in=h_critic
+            )
+            current_next_v = next_v_tensor.item() if not cycle_done else 0.0
+            
+            # G. 存入经验池
+            replay_buffer.add(
+                obs=last_decision_obs, state=last_decision_state, action_dict=current_action,
+                reward=cycle_reward, done=cycle_done, next_value=current_next_v,
+                actor_h=last_h_actor, critic_h=last_h_critic
+            )
+            
+            # H. 更新隐藏状态指针
+            h_actor = h_actor_next
+            h_critic = h_critic_next
+            
+            # I. 处理回合重置逻辑
+            if cycle_done:
+                # Logger 记录 (0~2, 11)
+                logger.add("train/1 episode_return", episode_return, total_steps)
+                logger.add("train/2 win", env.win, total_steps)
+                # ... 其余日志 ...
+                
+                # 重置环境与隐状态
+                env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE)
+                h_actor = torch.zeros(a_h_dim[0], 1, a_h_dim[1]).to(device)
+                h_critic = torch.zeros(c_h_dim[0], 1, c_h_dim[1]).to(device)
+                episode_return = 0
+
+        # J. 启动学习
+        if replay_buffer.full:
+            transition_data = replay_buffer.get_recurrent_data(student_agent.critic, seq_len=seqlen, gamma=gamma, lmbda=lmbda)
+            student_agent.update(transition_data, adv_normed=True)
+            
+            # Logger 记录 (5~10)
+            logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
+            # ... 其余更新后日志 ...
+            
+            replay_buffer.clear()
+        
+        
+        
+        
+        '''
+        以下为废弃代码
+        根据需要向上搬
+        '''
         i_episode += 1
         # --- 修改：回合开始，重置 GRU 隐藏状态 ---
         # 显式初始化为全零，形状：(Layers, Batch=1, Dim)
