@@ -163,7 +163,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 80  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'IL_RL_combat_PFSP_简单熵_区分左右' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -235,26 +235,26 @@ if __name__ == "__main__":
     
     print("Start MARWIL Training...")
 
-    # # === 二选一 模仿训练循环 ===
-    # # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
-    # # 能够被 MARWIL_update 里的 items() 正常遍历
-    # for epoch in range(IL_epoches): 
-    #     avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
-    #         il_transition_dict, 
-    #         beta=1.0, 
-    #         batch_size=128, # 显存如果够大可以适当调大
-    #         label_smoothing=0.3
-    #     )
+    # === 二选一 模仿训练循环 ===
+    # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
+    # 能够被 MARWIL_update 里的 items() 正常遍历
+    for epoch in range(IL_epoches): 
+        avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
+            il_transition_dict, 
+            beta=1.0, 
+            batch_size=128, # 显存如果够大可以适当调大
+            label_smoothing=0.3
+        )
         
-    #     # 记录
-    #     if epoch % 1 == 0:
-    #         logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)
-    #         logger.add("il_train/avg_critic_loss", avg_critic_loss, epoch)
-    #         # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
+        # 记录
+        if epoch % 1 == 0:
+            logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)
+            logger.add("il_train/avg_critic_loss", avg_critic_loss, epoch)
+            # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
 
-    #         print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
+            print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
-    # print("IL Training Finished.")
+    print("IL Training Finished.")
     # === ===
     
     # === 二选一 加载打靶预训练的智能体 ===
