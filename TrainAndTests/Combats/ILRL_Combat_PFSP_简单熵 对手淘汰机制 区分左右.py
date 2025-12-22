@@ -163,7 +163,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 80  # 80 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 180  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
