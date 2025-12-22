@@ -76,7 +76,7 @@ def basic_rules(state_check, rules_num, last_action=0):
                 action_number = 11 # 水平回转
             # fire_missile = False # 防御时不发射
         elif on_guiding: # 如果本回合决定发射导弹
-            action_number = random.choice([5,6]) # 立刻crank
+            action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         else:
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
@@ -87,7 +87,7 @@ def basic_rules(state_check, rules_num, last_action=0):
             action_number = 8 # 立刻 split-S
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
-            action_number = 6 # 直接射击并crank
+            action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
             if last_action != 2: # 如果上一动作为非爬升
                 action_number = 2 # 则本回合执行爬升
