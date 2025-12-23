@@ -169,7 +169,7 @@ max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
-epochs = 10
+epochs = 4 # 10
 eps = 0.2
 k_entropy = 0.05 # 1 # 
 
