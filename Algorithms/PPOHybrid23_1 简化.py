@@ -3,7 +3,7 @@
 
 加入GRU和通道注意力
 '''
-
+import math
 import numpy as np
 import torch
 from torch import nn
@@ -713,6 +713,14 @@ class PPOHybrid:
         num_samples = actor_inputs.size(0)
         if mini_batch_size is None:
             mini_batch_size = num_samples
+
+        # 如果 transition_dict 带有序列维度 (seq_len)，则确保 mini_batch_size 为 seq_len 的整数倍（向上取整）
+        if use_rnn and mini_batch_size is not None:
+            seq_len = np.array(transition_dict['dones']).shape[-1]
+            if seq_len > 1:
+                units = int(math.ceil(mini_batch_size / float(seq_len)))
+                mini_batch_size = min(units, num_samples)
+
 
         for _ in range(self.epochs):
             
