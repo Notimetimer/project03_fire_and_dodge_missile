@@ -32,6 +32,15 @@ class HybridReplayBuffer:
         self.use_truncs = use_truncs
         self.use_active_masks = use_active_masks
         
+        # [修改] 使用字典存储各个 Key 的时间戳 List
+        self.timestamps_dict = {
+            'states': [],
+            'actions': [],
+            'rewards': [],
+            'next_values': [],
+            'dones': []
+        }
+        
         # 1. 基础数据预分配 (Time, Envs, Dim) - Numpy Array 存储
         self.obs = np.zeros((buffer_size, n_envs, obs_dim), dtype=np.float32)
         self.states = np.zeros((buffer_size, n_envs, state_dim), dtype=np.float32)
@@ -72,6 +81,10 @@ class HybridReplayBuffer:
         """重置指针，数据无需清零，下次覆盖即可"""
         self.ptr = 0
         self.full = False
+        
+        # [修改] 清空 List
+        for k in self.timestamps_dict:
+            self.timestamps_dict[k].clear()
 
     def add(self, obs, state, action_dict, reward, done, next_value, 
             trunc=None, active_mask=None, actor_h=None, critic_h=None):
@@ -165,7 +178,11 @@ class HybridReplayBuffer:
             gae = delta + gamma * lmbda * mask_gae * gae
             advantages[t] = gae
             
-        td_targets = advantages + values
+        # td_targets = advantages + values
+        
+        # [回归老版逻辑] 直接使用 1-step TD Target
+        # 老版公式：td_target = rewards + gamma * next_vals * (1 - dones)
+        td_targets = self.rewards[:T, :, None] + gamma * next_values * (1.0 - self.dones[:T, :, None])
 
         # 5. 展平并打包 (Flatten) -> (T*N, ...)
         flatten_dict = {
@@ -175,7 +192,7 @@ class HybridReplayBuffer:
             'rewards': self.rewards[:T].reshape(-1),
             'dones': self.dones[:T].reshape(-1),
             'advantages': advantages.reshape(-1),
-            'td_targets': td_targets.reshape(-1)
+            'td_targets': td_targets.reshape(-1),
         }
         
         if self.use_truncs: flatten_dict['truncs'] = self.truncs[:T].reshape(-1)
@@ -234,7 +251,10 @@ class HybridReplayBuffer:
                 gae = delta + gamma * lmbda * mask_gae * gae
                 advantages[t, n] = gae
         
-        td_targets = advantages + values
+        # td_targets = advantages + values
+        
+        # [回归老版逻辑] 1-step TD Target
+        td_targets_raw = self.rewards[:T] + gamma * self.next_values[:T] * (1.0 - self.dones[:T])
 
         # --- Step 2: 序列整备 (按环境回合倒序切块) ---
         valid_seq_starts = []  # 存储 (env_id, start_idx)
@@ -247,6 +267,8 @@ class HybridReplayBuffer:
             
             curr_start = 0
             for ep_end in ep_ends:
+
+                # 丢弃头部过短的序列
                 ep_len = ep_end - curr_start + 1
                 if ep_len < seq_len:
                     print(f"[Buffer Hint] Env {n} Episode len {ep_len} < {seq_len}, discarding head data.")
@@ -256,6 +278,13 @@ class HybridReplayBuffer:
                         block_start = block_end - seq_len + 1
                         valid_seq_starts.append((n, block_start))
                 curr_start = ep_end + 1
+                
+                # # 无论回合多短，至少提取一个序列块 -- 不太可行，会导致短的实际序列无法写入长的固定seqlen序列 --
+                # # 即使 ep_len < seq_len，我们也从 curr_start 开始提取
+                # for block_start in range(curr_start, ep_end + 1, seq_len):
+                #     # 如果 block_start + seq_len 超过了 ep_end，说明是尾部短块
+                #     valid_seq_starts.append((n, block_start, ep_end))
+                # curr_start = ep_end + 1
 
         if not valid_seq_starts:
             raise RuntimeError("No valid sequences found! Sequence length is too long.")
@@ -290,8 +319,15 @@ class HybridReplayBuffer:
         final_data['init_h_actor'] = np.zeros((num_seqs, self.actor_hidden.shape[1], self.actor_hidden.shape[3]), dtype=np.float32)
         final_data['init_h_critic'] = np.zeros((num_seqs, self.critic_hidden.shape[1], self.critic_hidden.shape[3]), dtype=np.float32)
 
+        
         for i, (env_id, s_ptr) in enumerate(valid_seq_starts):
             e_ptr = s_ptr + seq_len
+        
+        # # 不丢弃长度不足的数组，不太可行
+        # for i, (env_id, s_ptr, ep_end) in enumerate(valid_seq_starts):
+        #     # 计算实际可用的长度
+        #     actual_len = min(seq_len, ep_end - s_ptr + 1)
+        #     e_ptr = s_ptr + actual_len
             
             final_data['obs'][i] = self.obs[s_ptr:e_ptr, env_id]
             final_data['states'][i] = self.states[s_ptr:e_ptr, env_id]
@@ -299,7 +335,10 @@ class HybridReplayBuffer:
             final_data['rewards'][i] = self.rewards[s_ptr:e_ptr, env_id]
             final_data['dones'][i] = self.dones[s_ptr:e_ptr, env_id]
             final_data['advantages'][i] = advantages[s_ptr:e_ptr, env_id]
-            final_data['td_targets'][i] = td_targets[s_ptr:e_ptr, env_id]
+            # 丢弃长度不足的经验
+            final_data['td_targets'][i] = td_targets_raw[s_ptr:e_ptr, env_id]
+            # # 不丢弃长度不足的经验
+            # final_data['td_targets'][i, :actual_len] = td_targets_raw[s_ptr:e_ptr, env_id]
             
             if self.use_truncs:
                 final_data['truncs'][i] = self.truncs[s_ptr:e_ptr, env_id]

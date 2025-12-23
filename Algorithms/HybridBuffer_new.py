@@ -166,7 +166,11 @@ class HybridReplayBuffer:
             gae = delta + gamma * lmbda * mask_gae * gae
             advantages[t] = gae
             
-        td_targets = advantages + values
+        # td_targets = advantages + values
+        
+        # [回归老版逻辑] 直接使用 1-step TD Target
+        # 老版公式：td_target = rewards + gamma * next_vals * (1 - dones)
+        td_targets = self.rewards[:T, :, None] + gamma * next_values * (1.0 - self.dones[:T, :, None])
 
         # 5. 展平并打包 (Flatten) -> (T*N, ...)
         flatten_dict = {
@@ -176,7 +180,7 @@ class HybridReplayBuffer:
             'rewards': self.rewards[:T].reshape(-1),
             'dones': self.dones[:T].reshape(-1),
             'advantages': advantages.reshape(-1),
-            'td_targets': td_targets.reshape(-1)
+            'td_targets': td_targets.reshape(-1),
         }
         
         if self.use_truncs: flatten_dict['truncs'] = self.truncs[:T].reshape(-1)
@@ -188,7 +192,7 @@ class HybridReplayBuffer:
         flatten_dict['actions'] = flat_actions
 
         return flatten_dict
-   
+
     def get_recurrent_data(self, critic_net, seq_len, gamma, lmbda):
         """
         专门为带 GRU 的网络整备序列数据。
@@ -235,7 +239,10 @@ class HybridReplayBuffer:
                 gae = delta + gamma * lmbda * mask_gae * gae
                 advantages[t, n] = gae
         
-        td_targets = advantages + values
+        # td_targets = advantages + values
+        
+        # [回归老版逻辑] 1-step TD Target
+        td_targets_raw = self.rewards[:T] + gamma * self.next_values[:T] * (1.0 - self.dones[:T])
 
         # --- Step 2: 序列整备 (按环境回合倒序切块) ---
         valid_seq_starts = []  # 存储 (env_id, start_idx)
@@ -248,6 +255,8 @@ class HybridReplayBuffer:
             
             curr_start = 0
             for ep_end in ep_ends:
+
+                # 丢弃头部过短的序列
                 ep_len = ep_end - curr_start + 1
                 if ep_len < seq_len:
                     print(f"[Buffer Hint] Env {n} Episode len {ep_len} < {seq_len}, discarding head data.")
@@ -291,6 +300,7 @@ class HybridReplayBuffer:
         final_data['init_h_actor'] = np.zeros((num_seqs, self.actor_hidden.shape[1], self.actor_hidden.shape[3]), dtype=np.float32)
         final_data['init_h_critic'] = np.zeros((num_seqs, self.critic_hidden.shape[1], self.critic_hidden.shape[3]), dtype=np.float32)
 
+        
         for i, (env_id, s_ptr) in enumerate(valid_seq_starts):
             e_ptr = s_ptr + seq_len
             
@@ -300,8 +310,9 @@ class HybridReplayBuffer:
             final_data['rewards'][i] = self.rewards[s_ptr:e_ptr, env_id]
             final_data['dones'][i] = self.dones[s_ptr:e_ptr, env_id]
             final_data['advantages'][i] = advantages[s_ptr:e_ptr, env_id]
-            final_data['td_targets'][i] = td_targets[s_ptr:e_ptr, env_id]
-            
+            # 丢弃长度不足的经验
+            final_data['td_targets'][i] = td_targets_raw[s_ptr:e_ptr, env_id]
+
             if self.use_truncs:
                 final_data['truncs'][i] = self.truncs[s_ptr:e_ptr, env_id]
             if self.use_active_masks:

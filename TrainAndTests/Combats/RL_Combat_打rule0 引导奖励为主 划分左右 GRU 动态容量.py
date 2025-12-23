@@ -393,8 +393,11 @@ if __name__ == "__main__":
         
         m_fired = 0
         
+        last_decision_time = 0.0 # 初始化
+        
         # --- Episode Loop ---
         for count in range(round(args.max_episode_len / dt_maneuver)):
+            current_time = env.t
             current_t = count * dt_maneuver
             steps_of_this_eps += 1
             if env.running == False or done:
@@ -431,13 +434,17 @@ if __name__ == "__main__":
                         next_value=current_v, 
                         active_mask=not ego.dead,
                         actor_h=last_h_actor, 
-                        critic_h=last_h_critic
+                        critic_h=last_h_critic,
                     )
+                    # 时间戳检查
+                    replay_buffer.timestamps_dict['states'].append(last_decision_time)
+                    replay_buffer.timestamps_dict['next_values'].append(current_time)
+                    last_decision_time = current_time # 为下一周期更新起点
 
                 # 3. 记录本次决策前的状态，作为新周期的起始记忆
                 # 更新 obs 和 state 两个变量
-                last_decision_obs = b_obs
-                last_decision_state = b_state_global
+                last_decision_obs = b_obs.copy()
+                last_decision_state = b_state_global.copy()
                 # 记录产生此动作前的隐藏状态，以便存入 Buffer 保持时序对齐
                 last_h_actor = h_actor.detach().cpu().numpy()
                 last_h_critic = h_critic.detach().cpu().numpy()
@@ -539,9 +546,14 @@ if __name__ == "__main__":
                         done=True, 
                         next_value=current_v, 
                         actor_h=last_h_actor, 
-                        critic_h=last_h_critic
+                        critic_h=last_h_critic,
                     )
             episode_return += b_reward
+            
+            # 时间戳检查
+            replay_buffer.timestamps_dict['states'].append(last_decision_time)
+            replay_buffer.timestamps_dict['next_values'].append(current_time)
+            last_decision_time = current_time # 为下一周期更新起点
             
         print('r 剩余导弹数量:', enm.ammo)
         print('r 发射时间:', enm.missile_launch_time)
