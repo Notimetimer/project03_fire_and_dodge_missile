@@ -200,6 +200,7 @@ class Battle(object):
             lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
+            UAV.got_hit = False
             UAV.escape_once = 0
             self.RUAVs.append(UAV)
             self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
@@ -231,6 +232,7 @@ class Battle(object):
             lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
             UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
                       theta0=UAV.theta, o00=o00)
+            UAV.got_hit = False
             UAV.escape_once = 0
             self.BUAVs.append(UAV)
             self.BUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}

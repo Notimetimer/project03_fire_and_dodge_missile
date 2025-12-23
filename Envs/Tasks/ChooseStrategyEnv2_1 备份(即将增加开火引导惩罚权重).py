@@ -240,24 +240,24 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         if shoot >= 1:
             if alpha*180/pi > 10:
-                reward_event -= 30*shoot
+                reward_event -= 4*shoot
             else:
-                reward_event -= 25*shoot
+                reward_event -= 3*shoot
                 
             if len(alive_ally_missiles)>1:
-                reward_event -= 50*shoot # 重复发射惩罚
+                reward_event -= 10*shoot # 重复发射惩罚
             
             if not ego.dead:
-                reward_shoot += 10 * (pi/3-alpha)/(pi/3)
-                reward_shoot += 6 * (abs(AA_hor)/pi-1)
-                reward_shoot += 10 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
+                reward_shoot += 1 * (pi/3-alpha)/(pi/3)
+                reward_shoot += 0.6 * (abs(AA_hor)/pi-1)
+                reward_shoot += 1 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
                 
                 # 发射距离惩罚
-                if distance > 30e3:
-                    reward_shoot += -25 * (distance-30e3)/(80e3-30e3)
+                if distance > 60e3:
+                    reward_shoot += -5 * (distance-60e3)/(20e3)
 
                 # 发射间隔奖励 
-                reward_shoot += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
+                reward_shoot += 3 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
 
         
         reward_assisted += reward_shoot
