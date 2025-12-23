@@ -149,19 +149,19 @@ parser.add_argument("--R-cage", type=float, default=55e3, help="")
 args = parser.parse_args()
 
 # 超参数
-actor_lr = 1e-3 # 4 1e-3
+actor_lr = 0.5e-3 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 # IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
-epochs = 10  # 可能需要更小一些 10 4
+epochs = 4  # 可能需要更小一些 10 4
 eps = 0.2
 k_entropy = 0.05 # 1 # 
 seqlen = 3 # GRU 序列长度
 n_envs = 1
-use_attention = 0 # 是否使用通道注意力 1
+use_attention = 1 # 是否使用通道注意力 1
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫_左右_GRU'
+    mission_name = '打莽夫_左右_GRU_4epochs'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)

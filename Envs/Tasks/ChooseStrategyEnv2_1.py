@@ -240,7 +240,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 reward_event -= 3*shoot
                 
             if len(alive_ally_missiles)>1:
-                reward_event -= 10*shoot
+                reward_event -= 10*shoot # 重复发射惩罚
             
             if not ego.dead:
                 reward_shoot += 1 * (pi/3-alpha)/(pi/3)
@@ -251,14 +251,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 if distance > 60e3:
                     reward_shoot += -5 * (distance-60e3)/(20e3)
 
-                # # 发射间隔奖励 
-                # reward_shoot += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
+                # 发射间隔奖励 
+                reward_shoot += 3 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
 
-        #  --1210新增 ，原先非注释
-        # if done and ego.ammo == ego.init_ammo:
-        #     reward_shoot -= 300 # 一发都不打必须重罚 100
-        # if done and ego.ammo < ego.init_ammo:
-        #     reward_shoot += 20 # 至少打了一枚
         
         reward_assisted += reward_shoot
 
@@ -331,7 +326,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 回合结束奖励 (硬编码)
         if self.win:
-            reward_event += 100 + steps_left * total_shaping_weight
+            reward_event += 100 + steps_left * total_shaping_weight + ego.ammo * 20 # 增加节省弹药的奖励
         if self.lose:
             reward_event += -100 - steps_left * total_shaping_weight
             if self.out_range(ego) or ego.alt < self.min_alt:

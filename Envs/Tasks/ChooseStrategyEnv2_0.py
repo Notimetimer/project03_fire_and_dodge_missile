@@ -539,32 +539,6 @@ class ChooseStrategyEnv(Battle):
         if should_fire_missile==0 and shoot==1:
             nobody = 2
 
-        # if shoot >= 1:
-        #     if alpha*180/pi > 10:
-        #         reward_event -= 50*shoot # 10  --1210新增
-        #     else:
-        #         reward_event -= 40*shoot # 8  --1210新增
-                
-        #     if len(alive_ally_missiles)>1:
-        #         reward_event -= 80*shoot # 30 --1210 新增
-            
-        #     if not ego.dead:
-        #         reward_shoot += 3 * (pi/3-alpha)/(pi/3)
-        #         reward_shoot += 3 * (abs(AA_hor)/pi-1)
-        #         reward_shoot += 3 * (np.clip(ego.theta/(pi/3), -1, 1)-1)  # 鼓励抛射
-                
-        #         # # 发射距离奖励
-        #         # if distance > 30e3:
-        #         #     reward_shoot += 5 * (1-(distance-30e3)/(50e3))
-
-        #         reward_shoot += 10 * np.clip((missile_time_since_shoot-30)/30, -1,1)  # 过30s发射就可以奖励了
-
-        #  --1210新增 ，原先非注释
-        # if done and ego.ammo == ego.init_ammo:
-        #     reward_event -= 300 # 一发都不打必须重罚 100
-        # if done and ego.ammo < ego.init_ammo:
-        #     reward_event += 20 # 至少打了一枚
-
         # 高度限制奖励/惩罚
         reward_assisted += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
@@ -634,7 +608,7 @@ class ChooseStrategyEnv(Battle):
 
         # 回合结束奖励 (硬编码)
         if self.win:
-            reward_event += 100 + steps_left * total_shaping_weight
+            reward_event += 100 + steps_left * total_shaping_weight + ego.ammo * 20 # 增加节省弹药的奖励
         if self.lose:
             reward_event += -100 - steps_left * total_shaping_weight
             if self.out_range(ego) or ego.alt < self.min_alt:
