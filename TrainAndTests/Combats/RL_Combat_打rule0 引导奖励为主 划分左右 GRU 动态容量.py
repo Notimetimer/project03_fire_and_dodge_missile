@@ -156,12 +156,12 @@ max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
-epochs = 4  # 可能需要更小一些 10
+epochs = 10  # 可能需要更小一些 10 4
 eps = 0.2
 k_entropy = 0.05 # 1 # 
 seqlen = 3 # GRU 序列长度
 n_envs = 1
-use_attention = 1 # 是否使用通道注意力 
+use_attention = 0 # 是否使用通道注意力 1
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
