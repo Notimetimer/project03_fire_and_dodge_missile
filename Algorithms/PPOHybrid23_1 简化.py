@@ -3,7 +3,7 @@
 
 加入GRU和通道注意力
 '''
-
+import math
 import numpy as np
 import torch
 from torch import nn
@@ -654,8 +654,12 @@ class PPOHybrid:
                         truncs = to_tensor(transition_dict['truncs'], torch.float).view(-1, 1)
                     advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
                 
-                # 最终更新为 GAE 目标
-                td_target = advantage + v_curr
+                # # 最终更新为 GAE 目标
+                # td_target = advantage + v_curr
+                
+                # [回归老版逻辑] 丢弃 Buffer 算好的 Lambda-Target，在更新时重新计算 1-step TD Target
+                # 这确保了与老版 MLP 逻辑在数学上的绝对对齐
+                mb_td_target = rewards + self.gamma * mb_next_values * (1.0 - dones)
                 
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
@@ -709,6 +713,14 @@ class PPOHybrid:
         num_samples = actor_inputs.size(0)
         if mini_batch_size is None:
             mini_batch_size = num_samples
+
+        # 如果 transition_dict 带有序列维度 (seq_len)，则确保 mini_batch_size 为 seq_len 的整数倍（向上取整）
+        if use_rnn and mini_batch_size is not None:
+            seq_len = np.array(transition_dict['dones']).shape[-1]
+            if seq_len > 1:
+                units = int(math.ceil(mini_batch_size / float(seq_len)))
+                mini_batch_size = min(units, num_samples)
+
 
         for _ in range(self.epochs):
             
