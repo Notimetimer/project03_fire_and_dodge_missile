@@ -38,9 +38,12 @@ def create_initial_state():
 
 # --- 3. 主程序 ---
 if __name__ == "__main__":
+    mission_name = '打莽夫_左右_GRU'
+    '打莽夫_左右_GRU_4epochs'
+    
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='打莽夫_左右_GRU', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default=mission_name, help="Mission name to find the log directory.")
     args = parser.parse_args()
     
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -80,7 +83,7 @@ if __name__ == "__main__":
     c_h_dim = (1, 128)
     
     # 1. 创建神经网络
-    use_attention = 
+    use_attention = 0
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, 
                                 reduction_ratio=16, num_layers=a_h_dim[0],
                                 use_channel_attention=use_attention
