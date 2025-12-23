@@ -169,7 +169,7 @@ max_steps = 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
-epochs = 10 # 10
+epochs = 2 # 10
 eps = 0.2
 k_entropy = 0.05 # 1 # 
 
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫_左右_env21_10epoch'
+    mission_name = '打莽夫_左右_env21_2epoch'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
