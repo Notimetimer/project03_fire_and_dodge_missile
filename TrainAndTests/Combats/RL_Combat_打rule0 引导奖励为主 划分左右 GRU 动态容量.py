@@ -584,7 +584,9 @@ if __name__ == "__main__":
         logger.add("train/11 episode/step", i_episode, total_steps)
         
         # --- RL Update ---
-        if replay_buffer.full: 
+        
+        # if replay_buffer.full:  # 仅在并行无扩容的情况下使用
+        if replay_buffer.ptr >= transition_dict_capacity:
             # 准备序列数据
             transition_data = replay_buffer.get_recurrent_data(
                 student_agent.critic, 
