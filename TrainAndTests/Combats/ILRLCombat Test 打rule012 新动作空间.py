@@ -44,10 +44,11 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='IL_RL_combat_PFSP_简单熵_区分左右', help="Mission name to find the log directory.")
     args = parser.parse_args()
 
     'RL_combat_PFSP_简单熵_区分左右'
+    'IL_RL_combat_PFSP_简单熵_区分左右'
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)

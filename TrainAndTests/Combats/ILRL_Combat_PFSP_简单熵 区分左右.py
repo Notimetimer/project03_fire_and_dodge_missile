@@ -163,7 +163,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180  # 80 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 0  # 180 检查一下，这个模仿学习可能有问题!!!
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'IL_RL_combat_PFSP_简单熵_区分左右_无淘汰机制' # 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)

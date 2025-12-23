@@ -15,7 +15,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules import *
 from Envs.Tasks.ChooseStrategyEnv2_0 import * # 1217-205333前
-from Algorithms.HybridBuffer_new_backup import HybridReplayBuffer
+from Algorithms.HybridBuffer_rnn_expandable import HybridReplayBuffer
 from Algorithms.PPOHybrid23_1 import PPOHybrid, ValueNet, PolicyNetHybrid, HybridActorWrapper # 1217-205333
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
