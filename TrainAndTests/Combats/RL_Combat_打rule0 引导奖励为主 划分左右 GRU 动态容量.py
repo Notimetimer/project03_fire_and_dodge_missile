@@ -149,7 +149,7 @@ parser.add_argument("--R-cage", type=float, default=55e3, help="")
 args = parser.parse_args()
 
 # 超参数
-actor_lr = 0.5e-3 # 4 1e-3
+actor_lr = 1e-3 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 # IL_epoches= 0  # 80 检查一下，这个模仿学习可能有问题!!!
 max_steps = 165e4
@@ -159,7 +159,7 @@ lmbda = 0.995
 epochs = 4  # 可能需要更小一些 10 4
 eps = 0.2
 k_entropy = 0.05 # 1 # 
-seqlen = 1 # GRU 序列长度 3
+seqlen = 10 # GRU 序列长度 3
 n_envs = 1
 use_attention = 0 # 是否使用通道注意力 1
 
@@ -182,10 +182,10 @@ action_bound = None
 # critic 不使用GRU
 actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, 
                             reduction_ratio=16, num_layers=a_h_dim[0],
-                            use_channel_attention=use_attention, use_gru=0).to(device)
+                            use_channel_attention=use_attention, use_gru=1).to(device)
 critic_net = ValueNet(state_dim, hidden_dim, reduction_ratio=16, 
                       num_layers=c_h_dim[0],
-                      use_channel_attention=use_attention, use_gru=0).to(device)
+                      use_channel_attention=use_attention, use_gru=1).to(device)
 
 # 2. Wrapper
 actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
@@ -303,7 +303,7 @@ if __name__ == "__main__":
                                     }
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
-    action_cycle_multiplier = 40 # 8s 决策一次
+    action_cycle_multiplier = 30 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
     transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
 
