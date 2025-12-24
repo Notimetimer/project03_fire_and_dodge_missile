@@ -324,7 +324,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 补齐自杀惩罚
         time_left = self.game_time_limit-self.t
         # 没走完的步数
-        steps_left = time_left / action_cycle_multiplier
+        steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
 
         # 计算所有 shaping 权重之和（用于步数缩放）
         total_shaping_weight = float(sum(reward_weights.values()))

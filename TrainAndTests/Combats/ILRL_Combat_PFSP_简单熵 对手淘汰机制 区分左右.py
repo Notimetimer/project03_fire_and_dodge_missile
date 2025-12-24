@@ -163,12 +163,12 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180  # 80 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 0  # 180 检查一下，这个模仿学习可能有问题!!!
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
-epochs = 10
+epochs = 4 # 10
 eps = 0.2
 # k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了

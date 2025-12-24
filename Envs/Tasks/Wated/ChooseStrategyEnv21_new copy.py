@@ -448,7 +448,7 @@ class ChooseStrategyEnv(Battle):
 
         if done:
             time_left = self.game_time_limit - self.t
-            steps_left = time_left / action_cycle_multiplier
+            steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             # 这里的 total_weight 建议只包含 shaping 权重之和，用于平滑过渡
             total_shaping_sum = sum(weights.values())
 

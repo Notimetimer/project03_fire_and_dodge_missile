@@ -293,7 +293,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         if done:
             time_left = self.game_time_limit - self.t
-            steps_left = time_left / action_cycle_multiplier
+            steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())
 
             if self.win:
