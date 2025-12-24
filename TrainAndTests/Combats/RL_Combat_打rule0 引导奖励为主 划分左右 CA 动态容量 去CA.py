@@ -162,7 +162,7 @@ eps = 0.2
 k_entropy = 0.05 # 1 # 
 seqlen = 1 # GRU 序列长度 3 最小是1了，再小buffer就不可用了
 n_envs = 1
-use_attention = 1 # 是否使用通道注意力 1
+use_attention = 0 # 是否使用通道注意力 1
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -220,7 +220,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = '打莽夫_左右_CA_4epochs'
+    mission_name = '打莽夫_左右_noCA_4epochs'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
