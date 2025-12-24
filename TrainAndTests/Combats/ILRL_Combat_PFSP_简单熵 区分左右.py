@@ -436,6 +436,7 @@ if __name__ == "__main__":
         
         # --- 新增：测试模式判断与设置 ---
         is_testing = False
+        # -- 测试模式 --
         if total_steps >= trigger:
             is_testing = True
             print(f"\n--- Entering TEST MODE (Run {test_run+1}/3) ---")
@@ -449,13 +450,14 @@ if __name__ == "__main__":
                 # 修改：直接指定，不加入 ELO 池
                 selected_opponent_name = "Rule_2"
             
-            adv_is_rule = True
             try:
                 rule_num = int(selected_opponent_name.split('_')[1])
             except:
                 rule_num = 0
+            adv_is_rule = True
             print(f"Eps {i_episode}: Test Opponent is {selected_opponent_name}")
 
+        # -- 训练模式 --
         else: # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
             # 1. 计算当前排位 rank_pos
             valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
@@ -472,40 +474,38 @@ if __name__ == "__main__":
                 else:
                     rank_pos = float((main_agent_elo - min_elo) / denom)
 
-        # 2. 根据 rank_pos 决定选择策略
-        # 确保 Rule_0 在列表中，否则无法执行特定逻辑（虽然初始化时肯定有）
-        if "Rule_0" not in elo_ratings:
-            elo_ratings["Rule_0"] = 1200
-            
-        if rank_pos < 0.4:
-            # 策略 A: 排名过低 (<0.4)，强制只打 Rule_0，无视 Elo 概率
-            selected_opponent_name = "Rule_0"
-            probs = np.array([1.0]) # 仅作日志或调试用
-            opponent_keys = ["Rule_0"]
-            print(f"Eps {i_episode}: Rank {rank_pos:.2f} < 0.4. FORCED match against Rule_0.")
-            
-        else:
-            # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
-            probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
-            
-            if rank_pos < 0.7:
-                # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
-                # 概率线性插值：rank=0.4 -> prob=1.0 (理论上会被上面截断); rank=0.7 -> prob=0.0 (无额外加成)
-                target_rule0_prob = max(0, (0.7 - rank_pos) / 0.3)
+            # 2. 根据 rank_pos 决定选择策略
+            # 确保 Rule_0 在列表中，否则无法执行特定逻辑（虽然初始化时肯定有）
+            if "Rule_0" not in elo_ratings:
+                elo_ratings["Rule_0"] = 1200
                 
-                if "Rule_0" in opponent_keys:
-                    rule0_idx = opponent_keys.index("Rule_0")
-                    # 取 max(原Elo概率, 目标加权概率)
-                    probs[rule0_idx] = max(target_rule0_prob, probs[rule0_idx])
-                    # 重新归一化
-                    probs = probs / (probs.sum() + 1e-12)
-                    # print(f"  Rank {rank_pos:.2f}. Boosted Rule_0 prob to {probs[rule0_idx]:.2f}")
-            
-            # 最终根据概率采样
-            selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+            if rank_pos < 0.4:
+                # 策略 A: 排名过低 (<0.4)，强制只打 Rule_0，无视 Elo 概率
+                selected_opponent_name = "Rule_0"
+                probs = np.array([1.0]) # 仅作日志或调试用
+                opponent_keys = ["Rule_0"]
+                print(f"Eps {i_episode}: Rank {rank_pos:.2f} < 0.4. FORCED match against Rule_0.")
+                
+            else:
+                # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
+                probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
+                
+                if rank_pos < 0.7:
+                    # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
+                    # 概率线性插值：rank=0.4 -> prob=1.0 (理论上会被上面截断); rank=0.7 -> prob=0.0 (无额外加成)
+                    target_rule0_prob = max(0, (0.7 - rank_pos) / 0.3)
+                    
+                    if "Rule_0" in opponent_keys:
+                        rule0_idx = opponent_keys.index("Rule_0")
+                        # 取 max(原Elo概率, 目标加权概率)
+                        probs[rule0_idx] = max(target_rule0_prob, probs[rule0_idx])
+                        # 重新归一化
+                        probs = probs / (probs.sum() + 1e-12)
+                        # print(f"  Rank {rank_pos:.2f}. Boosted Rule_0 prob to {probs[rule0_idx]:.2f}")
+                
+                # 最终根据概率采样
+                selected_opponent_name = np.random.choice(opponent_keys, p=probs)
         
-        adv_is_rule = False
-        rule_num = 0
         
         # 判断对手类型并加载
         if "Rule" in selected_opponent_name:
@@ -515,7 +515,11 @@ if __name__ == "__main__":
                 rule_num = int(selected_opponent_name.split('_')[1])
             except:
                 rule_num = 0
-            print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
+            # 在测试模式下 Rule_1/Rule_2 可能不在 elo_ratings 中，避免直接索引导致 KeyError
+            if selected_opponent_name in elo_ratings:
+                print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
+            else:
+                print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (test-only, no ELO entry)")
         else:
             adv_is_rule = False
             # 尝试找到对应的权重文件
@@ -703,10 +707,10 @@ if __name__ == "__main__":
 
         # --- 新增：测试回合结束后的处理 ---
         if is_testing:
-            # 记录独立的测试日志（已记录为 0/1 布尔型）
-            logger.add(f"test/0 win_vs_rule{rule_num}", env.win, total_steps)
-            logger.add(f"test/1 lose_vs_rule{rule_num}", env.lose, total_steps)
-            logger.add(f"test/2 draw_vs_rule{rule_num}", env.draw, total_steps)
+            # # 记录独立的测试日志（已记录为 0/1 布尔型）
+            # logger.add(f"test/0 win_vs_rule{rule_num}", env.win, total_steps)
+            # logger.add(f"test/1 lose_vs_rule{rule_num}", env.lose, total_steps)
+            # logger.add(f"test/2 draw_vs_rule{rule_num}", env.draw, total_steps)
             
             # 不再计算 numeric actual_score，直接以字符串输出结果
             if env.win:
