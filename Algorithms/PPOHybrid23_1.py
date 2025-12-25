@@ -1021,6 +1021,15 @@ class PPOHybrid:
         y_true = td_target.flatten().cpu().numpy()[mask_bool]
         y_pred = v_pred_old.flatten().cpu().numpy()[mask_bool] # 比较更新前的 Value 网络预测能力
         
+        # if len(y_true) > 1:
+        #     var_y = np.var(y_true)
+        #     if var_y == 0:
+        #         self.explained_var = np.nan
+        #     else:
+        #         self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+        # else:
+        #     self.explained_var = 0
+
         if len(y_true) > 1:
             var_y = np.var(y_true)
             if var_y < 1e-8:
@@ -1613,6 +1622,15 @@ class PPOHybrid:
         y_true = rl_td_target.flatten().cpu().numpy()[mask_bool]
         y_pred = v_pred_old.flatten().cpu().numpy()[mask_bool] 
         
+        # if len(y_true) > 1:
+        #     var_y = np.var(y_true)
+        #     if var_y == 0:
+        #         self.explained_var = np.nan
+        #     else:
+        #         self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+        # else:
+        #     self.explained_var = 0
+
         if len(y_true) > 1:
             var_y = np.var(y_true)
             if var_y < 1e-8:

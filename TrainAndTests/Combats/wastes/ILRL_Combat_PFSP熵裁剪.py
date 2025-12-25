@@ -14,7 +14,7 @@ from datetime import datetime
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Algorithms.PPOHybrid24 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.Wasted.PPOHybrid24 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from BasicRules import *

@@ -163,7 +163,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0  # 180 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 180  # 180 检查一下，这个模仿学习可能有问题!!!
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制' # 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -803,8 +803,36 @@ if __name__ == "__main__":
         
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
+            
+            #===========================================
+            # 混合强化学习与模仿学习
+            # 1. 定义 IL 衰减的最大轮次
+            # 使用浮点数以确保计算精度
+            MAX_IL_EPISODE = 500 # 100.0 
+            # 2. 计算当前 IL 权重 alpha_il (线性衰减，确保不小于 0)
+            # 当 i_episode = 0 时，alpha_il = 1.0
+            # 当 i_episode = 100 时，alpha_il = 0.0
+            alpha_il = max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
+
+            # 3. 调用混合更新函数，传入计算出的 alpha
+            student_agent.mixed_update(
+                transition_dict,          # RL 数据
+                il_transition_dict,       # IL 数据
+                adv_normed=True,          # 沿用 RL 实例中的优势归一化
+                il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
+                label_smoothing=0.3,      # 沿用 IL 实例中的标签平滑
+                alpha=alpha_il,           # 核心：传入随时间衰减的权重
+                beta=1.0,                  # 沿用 IL 实例中的 beta
+                mini_batch_size = 64
+            )
             decide_steps_after_update = 0
+            #===========================================
+            
+            #====================
+            # 原有强化学习部分
+            # student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
+            # decide_steps_after_update = 0
+            #====================
 
             # [Modification] 保留原有梯度监控代码
             actor_grad_norm = student_agent.actor_grad

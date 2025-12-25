@@ -15,8 +15,9 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
-from Algorithms.MLP_heads import ValueNet
+# from Algorithms.MLP_heads import ValueNet
+# from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0_1 import PPOHybrid, ValueNet, PolicyNetHybrid, HybridActorWrapper
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
 
@@ -172,6 +173,7 @@ epochs = 4 # 10
 eps = 0.2
 # k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+use_attention = 1 # 是否使用通道注意力 1
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -184,8 +186,12 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 action_bound = None
 
 # 1. 创建神经网络
-actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-critic_net = ValueNet(state_dim, hidden_dim).to(device)
+actor_net = PolicyNetHybrid(
+    state_dim, hidden_dim, action_dims_dict,
+    use_attention=use_attention).to(device)
+critic_net = ValueNet(
+    state_dim, hidden_dim,
+    use_attention=use_attention).to(device)
 
 # 2. Wrapper
 actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
@@ -219,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制' # 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_CA' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -785,11 +791,11 @@ if __name__ == "__main__":
                 print(f"Warning: Opponent {selected_opponent_name} not found in ELO dict. ELO not updated.")
 
 
-            # # 3. 执行踢出操作
-            # if is_kicked_opponent:
-            #     if selected_opponent_name in elo_ratings:
-            #         del elo_ratings[selected_opponent_name]
-            #         print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
+            # 3. 执行踢出操作
+            if is_kicked_opponent:
+                if selected_opponent_name in elo_ratings:
+                    del elo_ratings[selected_opponent_name]
+                    print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
 
 
             # 有没有试图发射过导弹

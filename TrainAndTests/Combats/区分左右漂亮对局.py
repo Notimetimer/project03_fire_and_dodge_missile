@@ -44,16 +44,9 @@ def create_initial_state():
 # --- 3. 主程序 ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
-    parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右_无淘汰机制', help="Mission name to find the log directory.")
-    args = parser.parse_args()
-
-    'RL_combat_PFSP_简单熵_区分左右'
-    'IL_RL_combat_PFSP_简单熵_区分左右'
-    'RL_combat_PFSP_简单熵_区分左右_无淘汰机制'
-    '打莽夫_左右_noCA_4epochs'
-    '打莽夫_左右_CA_4epochs'
-    
+    parser.add_argument("--agent-id", type=int, default=2895, help="Specific agent ID to test. If None, loads the latest.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右', help="Mission name to find the log directory.")
+    args = parser.parse_args()   
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
@@ -68,7 +61,8 @@ if __name__ == "__main__":
 
     # --- 查找并加载模型 ---
     logs_root_dir = os.path.join(project_root, "logs/combat")
-    latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
+    # latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
+    latest_log_dir = os.path.join(logs_root_dir, 'RL_combat_PFSP_简单熵_区分左右-run-20251224-231021')
     
     # 如果要硬编码为本地绝对路径，使用原始字符串并检查存在性
     # hardcoded = r'D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\RL_combat_PFSP-run-20251215-175820'
@@ -143,7 +137,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         # **修正点：使用正确的、已加载权重的 actor_wrapper**
                         b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.38) # , bern_threshold= 1e-4
+                                    explore={'cont':0, 'cat':0, 'bern':0}, check_obs=b_check_obs, bern_threshold=0.38) # , bern_threshold= 1e-4
                         
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]

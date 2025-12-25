@@ -4,6 +4,8 @@
 分动作头接收entropy_loss
 
 现在给伯努利分布加入actor内mask
+
+增加通道注意力机制（非递归）
 '''
 
 import numpy as np
@@ -17,65 +19,84 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
-from Algorithms.MLP_heads import ValueNet
+# from Algorithms.MLP_heads import ValueNet
+from Algorithms.SharedLayers import ChannelAttention
 
 # =============================================================================
-# 1. 神经网络定义 (保持不变，只负责 forward 计算)
+# 1. 策略网络 (集成 Embedding, Attention 与正交初始化)
 # =============================================================================
-
 class PolicyNetHybrid(torch.nn.Module):
-    """
-    支持混合动作空间的策略网络 (纯 MLP)。
-    引入了可学习的温度参数来控制离散和伯努利动作的熵。
-    """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, 
+                 reduction_ratio=16, use_attention=True):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
+        self.use_attention = use_attention
         
-        # 共享主干网络
+        # 1. 嵌入层：将状态映射到第一个隐藏层维度
+        self.embed = nn.Linear(state_dim, hidden_dims[0])
+        
+        # 2. 通道注意力层
+        if self.use_attention:
+            self.attention = ChannelAttention(hidden_dims[0], reduction_ratio)
+
+        # 3. 共享主干网络 (MLP)
         layers = []
-        prev_size = state_dim
+        prev_size = hidden_dims[0]
         for layer_size in hidden_dims:
             layers.append(nn.Linear(prev_size, layer_size))
             layers.append(nn.ReLU())
             prev_size = layer_size
-        self.net = nn.Sequential(*layers)
+        self.backbone = nn.Sequential(*layers)
 
-        # 1. 连续动作头 (Continuous)
-        # 参数: log_std (控制高斯分布宽度)
+        # 4. 动作头定义
+        # 连续动作头 (Continuous)
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             cont_dim = self.action_dims['cont']
             self.fc_mu = nn.Linear(prev_size, cont_dim)
-            # 这里的 log_std 依然是状态无关的，对应 PPO 的标准做法
             self.log_std_cont = nn.Parameter(torch.log(torch.ones(cont_dim) * init_std))
 
-        # 2. 离散动作头 (Categorical)
-        # 参数: log_temp_cat (控制 Softmax 温度)
+        # 离散动作头 (Categorical)
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            self.cat_dims = self.action_dims['cat']  # list, e.g., [4, 10]
-            total_cat_dim = sum(self.cat_dims)
-            self.fc_cat = nn.Linear(prev_size, total_cat_dim)
-            
-            # 为每一个独立的离散头 (Head) 创建一个温度参数
-            # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
-            # 初始化为 0 (即 temp=1.0)，保持原网络特性，让网络自己学去增大熵
-            # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
+            self.cat_dims = self.action_dims['cat']
+            self.fc_cat = nn.Linear(prev_size, sum(self.cat_dims))
 
-        # 3. 伯努利动作头 (Bernoulli)
-        # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
+        # 伯努利动作头 (Bernoulli)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            bern_dim = self.action_dims['bern']
-            self.fc_bern = nn.Linear(prev_size, bern_dim)
-            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
+            self.fc_bern = nn.Linear(prev_size, self.action_dims['bern'])
+
+        # --- 5. 权重初始化 (强化学习推荐方案) ---
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                # 使用正交初始化
+                nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+                # 防御性判断：只有当 bias 存在时才初始化为 0
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        # 针对动作头做微调初始化
+        if hasattr(self, 'fc_mu'):
+            nn.init.orthogonal_(self.fc_mu.weight, gain=0.01) # 初始 mu 接近 0
+        
+        if hasattr(self, 'fc_bern'):
+            # 关键：手动设置负偏置，使初始开火概率较低 (约 0.12)
             nn.init.constant_(self.fc_bern.bias, -2.0)
-            
-            # 为每一个伯努利动作维度创建一个温度参数
-            # 初始化为 0 (即 temp=1.0)
-            # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
-    
-    # [修改] 增加 action_masks 参数
+            nn.init.normal_(self.fc_bern.weight, std=0.01)
+        
+        # 离散动作 (fc_cat)：不需要特殊技巧
+        # 保持上面的 orthogonal_(gain=sqrt(2)) 即可。
+        # 如果你希望初始分布更“均匀”一点，可以用 gain=1.0，但 sqrt(2) 也是完全没问题的。
+
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None):
-        shared_features = self.net(x)
+        # Step 1: Embedding
+        x_f = self.embed(x)
+        
+        # Step 2: Attention (判断逻辑)
+        if self.use_attention:
+            x_f, _ = self.attention(x_f)
+        
+        # Step 3: MLP Backbone
+        shared_features = self.backbone(x_f)
+        
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Continuous ---
@@ -115,8 +136,7 @@ class PolicyNetHybrid(torch.nn.Module):
         # --- Bernoulli (核心修改区域) ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_logits = self.fc_bern(shared_features)
-            # [新增] Action Masking 逻辑
-            # 如果提供了 mask，将 mask 为 0 (False) 的位置的 logit 设为 -1e9
+            # Action Masking 逻辑
             if action_masks is not None and 'bern' in action_masks:
                 mask = action_masks['bern']
                 # 确保 mask 和 logits 维度匹配 (Batch, Dim)
@@ -129,6 +149,48 @@ class PolicyNetHybrid(torch.nn.Module):
             outputs['bern'] = scaled_bern_logits
             
         return outputs
+
+# =============================================================================
+# 2. 价值网络 (非递归版本，结构与 PolicyNet 对称)
+# =============================================================================
+class ValueNet(nn.Module):
+    def __init__(self, state_dim, hidden_dims, reduction_ratio=16, use_attention=True):
+        super(ValueNet, self).__init__()
+        self.use_attention = use_attention
+        
+        self.embed = nn.Linear(state_dim, hidden_dims[0])
+        
+        if self.use_attention:
+            self.attention = ChannelAttention(hidden_dims[0], reduction_ratio)
+        
+        layers = []
+        prev_size = hidden_dims[0]
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_size, h))
+            layers.append(nn.ReLU())
+            prev_size = h
+        self.backbone = nn.Sequential(*layers)
+        
+        # 最终输出一个标量 Value
+        self.fc_out = nn.Linear(prev_size, 1)
+
+        # 权重初始化
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        # Value 输出层通常使用较小的增益
+        nn.init.orthogonal_(self.fc_out.weight, gain=1.0)
+
+    def forward(self, x):
+        x_f = self.embed(x)
+        if self.use_attention:
+            x_f, _ = self.attention(x_f)
+        
+        features = self.backbone(x_f)
+        return self.fc_out(features)
 
 # =============================================================================
 # 2. Actor 适配器 (Wrapper) - 核心重构点
