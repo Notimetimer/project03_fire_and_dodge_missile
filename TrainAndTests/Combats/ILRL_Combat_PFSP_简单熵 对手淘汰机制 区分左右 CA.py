@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右_CA' # 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_CA_变熵' # 'RL_combat_PFSP_简单熵_区分左右_CA' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -439,6 +439,10 @@ if __name__ == "__main__":
     
     while total_steps < int(max_steps):
         i_episode += 1
+        
+        # -- 新增：熵系数变化 --
+        k_entropy['bern'] = max(-0.001, 0.1 - total_steps/2e6 * (0.1+0.001))
+        # ----
         
         # --- 新增：测试模式判断与设置 ---
         is_testing = False
