@@ -345,8 +345,8 @@ if __name__ == "__main__":
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = {
         "Rule_0": INITIAL_ELO,
-        # "Rule_1": INITIAL_ELO,
-        # "Rule_2": INITIAL_ELO
+        "Rule_1": INITIAL_ELO,
+        "Rule_2": INITIAL_ELO
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
@@ -435,7 +435,8 @@ if __name__ == "__main__":
         i_episode += 1
         
         # -- 新增：熵系数变化 --
-        k_entropy['bern'] = max(-0.001, 0.1 - total_steps/2e6 * (0.1+0.001))
+        direction = 1 if total_steps<=2e6 else -1
+        k_entropy['bern'] = max(0.0001, 0.1 - total_steps/2e6 * (0.1-0.0001)) * direction
         # ----
         
         # --- 新增：测试模式判断与设置 ---
