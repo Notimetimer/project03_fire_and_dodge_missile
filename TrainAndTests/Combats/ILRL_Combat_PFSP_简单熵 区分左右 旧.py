@@ -170,10 +170,8 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-
-# k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 原有
-
-k_entropy={'cont':0.01, 'cat':0.01, 'bern': - 0.001} # 开火负熵正则项
+# k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -221,7 +219,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_开火负熵' # 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)

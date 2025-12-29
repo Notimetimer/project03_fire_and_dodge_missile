@@ -170,8 +170,10 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-# k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+
+# k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 原有
+
+k_entropy={'cont':0.01, 'cat':0.01, 'bern': - 0.001} # 开火负熵正则项
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -219,7 +221,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制' # 'RL_combat_PFSP_简单熵_区分左右'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_开火负熵_强者优先' # 'RL_combat_PFSP_简单熵_区分左右'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -488,7 +490,7 @@ if __name__ == "__main__":
                 
             else:
                 # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
-                probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
+                probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=max_elo)
                 
                 if rank_pos < 0.7:
                     # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
@@ -729,7 +731,7 @@ if __name__ == "__main__":
                 test_run += 1
             else: # test_run == 2, 测试全部完成
                 test_run = 0
-                trigger += 50e3
+                trigger += 20e3 # 50e3
                 print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
             
             # ELO 在测试回合不更新 (移除原有的打印语句)
@@ -880,7 +882,7 @@ if __name__ == "__main__":
                 
                 # 记录主智能体
                 logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
-                logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps)
+                # logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps) # 重复了
 
                 # 记录主智能体在当前所有 ELO 中的归一化排名位置：
                 # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
