@@ -352,7 +352,7 @@ if __name__ == "__main__":
     elo_ratings = {
         "Rule_0": INITIAL_ELO,
         "Rule_1": INITIAL_ELO,
-        "Rule_2": INITIAL_ELO
+        "Rule_2": INITIAL_ELO,
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
@@ -442,7 +442,8 @@ if __name__ == "__main__":
         
         # -- 新增：熵系数变化 --
         direction = 1 if total_steps<=2e6 else -1
-        k_entropy['bern'] = max(0.0001, 0.1 - total_steps/2e6 * (0.1-0.0001)) * direction
+        # k_entropy['bern'] = max(0.0001, 0.1 - total_steps/2e6 * (0.1-0.0001)) * direction
+        k_entropy['bern'] = 0
         # ----
         
         # --- 新增：测试模式判断与设置 ---
@@ -740,7 +741,7 @@ if __name__ == "__main__":
                 test_run += 1
             else: # test_run == 2, 测试全部完成
                 test_run = 0
-                trigger += 50e3
+                trigger += 20e3 # 50e3
                 print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
             
             # ELO 在测试回合不更新 (移除原有的打印语句)
@@ -891,7 +892,7 @@ if __name__ == "__main__":
                 
                 # 记录主智能体
                 logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
-                logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps)
+                # logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps) # 重复了
 
                 # 记录主智能体在当前所有 ELO 中的归一化排名位置：
                 # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
@@ -930,7 +931,20 @@ if __name__ == "__main__":
                     logger.add(raw_tag, valid_elos[k], total_steps)
                     logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
 
-        
+                # --- 插入: 记录 Latest(当前保存的 actor_key) 相对于所有存在的 Rule_* 的 ELO 差值 ---
+                if 'actor_key' in locals() and actor_key in valid_elos:
+                    latest_elo = float(valid_elos[actor_key])
+                    rule_keys_present = [rk for rk in valid_elos.keys() if rk.startswith("Rule_")]
+                    # diffs = []
+                    for rk in rule_keys_present:
+                        diff = latest_elo - float(valid_elos[rk])
+                        # diffs.append(diff)
+                        logger.add(f"Elo_Diff/Latest_vs_{rk}", diff, total_steps)
+                    # if diffs:
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Mean", float(np.mean(diffs)), total_steps)
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Min", float(np.min(diffs)), total_steps)
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Max", float(np.max(diffs)), total_steps)
+    
     # End Training
     training_end_time = time.time()
     env.end_render()

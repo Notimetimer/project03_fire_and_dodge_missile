@@ -442,7 +442,8 @@ if __name__ == "__main__":
         
         # -- 新增：熵系数变化 --
         direction = 1 if total_steps<=2e6 else -1
-        k_entropy['bern'] = max(0.0001, 0.1 - total_steps/2e6 * (0.1-0.0001)) * direction
+        # k_entropy['bern'] = max(0.0001, 0.1 - total_steps/2e6 * (0.1-0.0001)) * direction
+        k_entropy['bern'] = 0
         # ----
         
         # --- 新增：测试模式判断与设置 ---
@@ -740,7 +741,7 @@ if __name__ == "__main__":
                 test_run += 1
             else: # test_run == 2, 测试全部完成
                 test_run = 0
-                trigger += 50e3
+                trigger += 20e3 # 50e3
                 print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
             
             # ELO 在测试回合不更新 (移除原有的打印语句)
