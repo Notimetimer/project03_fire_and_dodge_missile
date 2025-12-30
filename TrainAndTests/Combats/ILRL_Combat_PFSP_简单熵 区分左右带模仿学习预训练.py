@@ -359,7 +359,7 @@ if __name__ == "__main__":
     main_agent_elo = INITIAL_ELO
 
     # [新增] 如果没有历史对手（例如第一次运行且屏蔽了规则），保存当前初始策略作为 actor_rein0
-    if not elo_ratings:
+    if (not elo_ratings) or IL_epoches>0:
         init_opponent_name = "actor_rein0"
         init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
         torch.save(student_agent.actor.state_dict(), init_opponent_path)
