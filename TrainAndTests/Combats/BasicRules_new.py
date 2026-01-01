@@ -66,7 +66,7 @@ def basic_rules(state_check, rules_num, last_action=0):
         action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
 
-    elif rules_num == 1:
+    elif rules_num in [1, 3]:
         # 规则1: 带防御机动
         if RWR: # 受到威胁
             # 优先俯冲回转至5000m以下
@@ -81,7 +81,7 @@ def basic_rules(state_check, rules_num, last_action=0):
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
 
-    elif rules_num == 2:
+    elif rules_num in [2, 4]:
         # 规则2: Loft爬升射击序列
         if RWR: # 受到威胁
             action_number = 8 # 立刻 split-S
@@ -100,6 +100,11 @@ def basic_rules(state_check, rules_num, last_action=0):
 
     # if fire_missile_affirmative:
     #     launch_missile_immediately(env, side)
+    
+    if rules_num in [3, 4]:
+        # 不准出界
+        if d_hor < 8e3:
+            action_number = base_offensive_action
 
     return action_number, fire_missile_affirmative
 
@@ -163,7 +168,7 @@ if __name__=='__main__':
         b_action_list = []
         
         # 采集不同轨迹的动作
-        for i_episode in range(3):
+        for i_episode in range(5):
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -179,7 +184,7 @@ if __name__=='__main__':
             b_action_label=0
             last_decision_state = None
             current_action = None
-            # b_reward = None
+            b_reward = None
 
             done = False
 

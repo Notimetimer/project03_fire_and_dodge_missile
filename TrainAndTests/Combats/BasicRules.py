@@ -18,7 +18,7 @@ from Math_calculates.sub_of_angles import *
 import re
 
 use_tacview = 1  # 是否可视化
-action_cycle_multiplier = 20
+action_cycle_multiplier = 30
 
 def basic_rules(state_check, rules_num, last_action=0):
     '''
@@ -170,7 +170,7 @@ if __name__=='__main__':
         r_action_list = []
         b_action_list = []
         
-        # 强化学习训练
+        # 采集不同轨迹的动作
         for i_episode in range(5):
 
             last_r_action_label = 0

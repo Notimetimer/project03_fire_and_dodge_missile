@@ -68,7 +68,7 @@ if __name__=='__main__':
         il_transition_dict = {'states':[], 'actions': [], 'returns': []}
         
         # 示范数据采集
-        for i_episode in range(3):
+        for i_episode in range(5):
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -136,7 +136,7 @@ if __name__=='__main__':
 
                     # 蓝方维持最优规则
                     b_state_check = env.unscale_state(b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, 2, last_action=last_b_action_label)
+                    b_action_label, b_fire = basic_rules(b_state_check, 4, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')
