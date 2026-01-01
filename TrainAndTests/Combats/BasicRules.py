@@ -26,6 +26,8 @@ def basic_rules(state_check, rules_num, last_action=0):
     rules_num = 1: 保持和目标相同高度进攻(0,1,3), 发射完导弹立马crank(6), 受到威胁立刻回转至5000m高度以下(11水平回转, 12俯冲回转), 威胁结束后回归进攻
     rules_num = 2: 保持和目标相同高度打首轮进攻(0,1,3), 在距离40km以外先爬升60°(2), 一个决策回合后射击, 否则直接射击，设计后立刻crank(6)，
         收到威胁立刻splitS(8), 威胁解除后回转进攻(0,1,3)
+    rules_num = 3: 1+不准出界
+    rules_num = 4: 2+不准出界
     '''
 
     delta_theta = state_check["target_information"][2] # 目标相对俯仰角
@@ -67,7 +69,7 @@ def basic_rules(state_check, rules_num, last_action=0):
         action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
 
-    elif rules_num == 1:
+    elif rules_num in [1, 3]:
         # 规则1: 带防御机动
         if RWR: # 受到威胁
             # 优先俯冲回转至5000m以下
@@ -82,7 +84,7 @@ def basic_rules(state_check, rules_num, last_action=0):
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
 
-    elif rules_num == 2:
+    elif rules_num in [2, 4]:
         # 规则2: Loft爬升射击序列
         if RWR: # 受到威胁
             action_number = 8 # 立刻 split-S
@@ -101,6 +103,11 @@ def basic_rules(state_check, rules_num, last_action=0):
 
     # if fire_missile_affirmative:
     #     launch_missile_immediately(env, side)
+    
+    if rules_num in [3, 4]:
+        # 不准出界
+        if d_hor < 8e3:
+            action_number = base_offensive_action
 
     return action_number, fire_missile_affirmative
 
@@ -164,7 +171,7 @@ if __name__=='__main__':
         b_action_list = []
         
         # 强化学习训练
-        for i_episode in range(3):
+        for i_episode in range(5):
 
             last_r_action_label = 0
             last_b_action_label = 0
