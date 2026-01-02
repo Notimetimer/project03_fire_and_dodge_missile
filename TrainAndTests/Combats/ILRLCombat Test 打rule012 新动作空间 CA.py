@@ -20,7 +20,7 @@ from BasicRules import basic_rules
 # from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
 from Envs.Tasks.ChooseStrategyEnv2_2 import * # 1218-104003
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
+from Algorithms.PPOHybrid23_0_1 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
 # from Algorithms.PPOHybrid23_2 import PPOHybrid, ValueNet, PolicyNetHybrid, HybridActorWrapper # 带通道注意力
 
 # --- [修正] 在此处直接定义缺失的常量 ---
@@ -45,7 +45,7 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右_无淘汰机制', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右_CA_变熵', help="Mission name to find the log directory.")
     args = parser.parse_args()
 
     'RL_combat_PFSP_简单熵_区分左右'
