@@ -297,7 +297,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if self.win:
-                r_event += 100 + steps_left * total_shaping_sum
+                r_event += 150 # 100 + steps_left * total_shaping_sum
             elif self.lose:
                 r_event -= 100 + steps_left * total_shaping_sum
                 if self.out_range(ego) or ego.alt < self.min_alt:
