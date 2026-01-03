@@ -1,6 +1,5 @@
 '''
-增加开火惩罚
-三元组奖励
+奖励函数表示为向量
 '''
 
 import numpy as np
@@ -41,11 +40,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     Inherit everything from ChooseStrategyEnv2_0 except override
     combat_terminate_and_reward (keeps other definitions/vars from base).
     """
-    
-    def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30):
-        # --- 1. 参数初始化与状态获取 ---
-        # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
-        reward_weights = {
+    def __init__(self, args, tacview_show=0):
+        super().__init__(args, tacview_show)
+        self.reward_weights = {
             'base_survival': 0.0,
             'missile_guidance': 0.04,
             'target_locked': 0.06,
@@ -64,7 +61,13 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'aoa_penalty': 0.02,
             'pitch_penalty': 0.02,
         }
-
+        self.num_dense_rewards = len(self.reward_weights.keys())
+    
+    def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30):
+        # --- 1. 参数初始化与状态获取 ---
+        # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
+        reward_weights = self.reward_weights
+        
         self.close_range_kill() # 允许跑刀
         self.update_missile_state()
         
@@ -101,38 +104,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         elif done: 
             self.draw = 1
             
-        # # --原有判定法--
-        # if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
-        #     self.win = 1
-        #     done = 1
-        # # 如果友方和友方的所有导弹都没了，且敌方飞机还在，判定为负
-        # elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
-        #     self.lose = 1
-        #     done = 1
-            
-        # # 如果友方和敌方打光导弹且都存活，或双方飞机都没了，判定为平
-        # elif ego.ammo == 0 and enm.ammo == 0 and (not ego.dead) and (not enm.dead) or \
-        #         (ego.dead and enm.dead):
-        #     self.draw = 1
-        #     done = 1
-        # else:
-        #     done = 0
-        # if self.t > self.game_time_limit:
-        #     done = 1
-        #     # 如果超时，我方打光导弹，导弹全自爆，对手导弹还有剩，且存活，判定为负
-        #     if ego.ammo + len(alive_ally_missiles) == 0 and \
-        #         enm.ammo + len(alive_enm_missiles) > 0 and not enm.dead:
-        #         self.lose = 1
-        #     # 如果超时，对手打光导弹，导弹全自爆，我方导弹还有剩，且存活，判定为胜
-        #     elif enm.ammo + len(alive_enm_missiles) == 0 and \
-        #         ego.ammo + len(alive_ally_missiles) > 0 and not ego.dead:
-        #         self.win = 1                
-        #     # 如果超时，双方均未打光导弹/仍有导弹在空中飞，且双方均存活, 或者双方都死，判定为平
-        #     else:
-        #         self.draw = 1
-
-        # ego_states = self.get_state(side)
-        # enm_states = self.get_state(enm.side)
         # --- 3. 基础变量计算 ---
         ego_states = ego.current_state
         enm_states = enm.current_state
@@ -163,6 +134,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_theta_threat = ego_states["threat"][2]
         
         # 奖励项初始化
+        reward = np.zeros([])
+        
         r_event = 0.0      # 结果奖励
         r_constraint = 0.0 # 约束与代价
         r_shaping = 0.0    # 战术引导
@@ -257,7 +230,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             else:
                 r_shaping += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
                 if missile_in_mid_term:
-                    r_shaping -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3) # alpha-pi/3
+                    r_shaping -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3)
 
         # [加回] 开火引导逻辑 (Should fire vs Shoot)
         should_fire_missile = False

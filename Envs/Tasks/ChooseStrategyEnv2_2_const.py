@@ -259,7 +259,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             else:
                 r_shaping += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
                 if missile_in_mid_term:
-                    r_shaping -= reward_weights['defensive_crank_penalty'] * abs(alpha-pi/3)/(pi/3)
+                    r_shaping -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3) # alpha-pi/3
 
         # [加回] 开火引导逻辑 (Should fire vs Shoot)
         should_fire_missile = False

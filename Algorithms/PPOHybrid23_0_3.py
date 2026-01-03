@@ -21,51 +21,90 @@ sys.path.append(project_root)
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
 # from Algorithms.MLP_heads import ValueNet
 from Algorithms.SharedLayers import ChannelAttention
+import torch.nn.functional as F
 
-# 空间多头自注意力
-class SpatialMultiHeadAttention(nn.Module):
-    def __init__(self, feature_dim, num_heads=4, head_dim=8):
-        super(SpatialMultiHeadAttention, self).__init__()
-        self.feature_dim = feature_dim
-        self.num_heads = num_heads
-        self.inner_dim = num_heads * head_dim  # 确保能被 heads 整除
+class RewardWeightAttentionNet(nn.Module):
+    def __init__(self, obs_dim, num_dense_rewards, num_heads=4):
+        super(RewardWeightAttentionNet, self).__init__()
+        self.num_dense = num_dense_rewards
         
-        # 投影层：(Batch, Dim, 1) -> (Batch, Dim, inner_dim)
-        self.project_in = nn.Linear(1, self.inner_dim)
-        
-        # 多头注意力层
+        # 直接使用 MHA 处理 (Batch, R-1, Obs_Dim)
+        # 这里把密集奖励的数量 (R-1) 视为序列长度
         self.mha = nn.MultiheadAttention(
-            embed_dim=self.inner_dim, 
+            embed_dim=obs_dim, 
             num_heads=num_heads, 
             batch_first=True
         )
         
-        # 输出投影：(Batch, Dim, inner_dim) -> (Batch, Dim, 1)
-        self.project_out = nn.Linear(self.inner_dim, 1)
+        # 最后的线性层将观测维度压缩为 1，从而为每个密集奖励生成一个权重
+        self.fc_weight = nn.Linear(obs_dim, 1)
         
-        # 层归一化，维持训练稳定
-        self.norm = nn.LayerNorm(1)
+        # 权重初始化：使初始权重接近均匀分布，避免训练初期某些奖励项直接消失
+        nn.init.orthogonal_(self.fc_weight.weight, gain=0.01)
+        nn.init.constant_(self.fc_weight.bias, 0)
 
     def forward(self, x):
-        # x 维度: (Batch, Feature_Dim)
+        """
+        Input x: (Batch, num_dense, obs_dim)
+        Output: (Batch, num_dense)
+        """
+        # 1. 计算自注意力：让不同奖励项之间通过观测信息进行“协商”
+        # attn_output: (Batch, num_dense, obs_dim)
+        attn_output, _ = self.mha(x, x, x)
         
-        # 1. 构造“伪时序”维度: (Batch, Feature_Dim, 1)
-        # 这里的 Feature_Dim 被视为序列长度 L
-        identity = x.unsqueeze(-1) 
+        # 2. 映射到标量权重
+        # logits: (Batch, num_dense, 1) -> (Batch, num_dense)
+        logits = self.fc_weight(attn_output).squeeze(-1)
         
-        # 2. 投影到高维 Embedding 空间
-        x_mapped = self.project_in(identity) # (Batch, L, Inner_Dim)
+        # 3. 归一化：确保 sum(weights) = 1
+        weights = F.softmax(logits, dim=-1)
+        return weights
+    
+    
+# # 空间多头自注意力
+# class SpatialMultiHeadAttention(nn.Module):
+#     def __init__(self, feature_dim, num_heads=4, head_dim=8):
+#         super(SpatialMultiHeadAttention, self).__init__()
+#         self.feature_dim = feature_dim
+#         self.num_heads = num_heads
+#         self.inner_dim = num_heads * head_dim  # 确保能被 heads 整除
         
-        # 3. 计算自注意力
-        # attn_output 维度: (Batch, L, Inner_Dim)
-        attn_output, _ = self.mha(x_mapped, x_mapped, x_mapped)
+#         # 投影层：(Batch, Dim, 1) -> (Batch, Dim, inner_dim)
+#         self.project_in = nn.Linear(1, self.inner_dim)
         
-        # 4. 投影回原始维度并进行残差连接
-        out = self.project_out(attn_output) # (Batch, L, 1)
-        out = self.norm(out + identity)
+#         # 多头注意力层
+#         self.mha = nn.MultiheadAttention(
+#             embed_dim=self.inner_dim, 
+#             num_heads=num_heads, 
+#             batch_first=True
+#         )
         
-        # 5. 还原维度: (Batch, Feature_Dim)
-        return out.squeeze(-1)
+#         # 输出投影：(Batch, Dim, inner_dim) -> (Batch, Dim, 1)
+#         self.project_out = nn.Linear(self.inner_dim, 1)
+        
+#         # 层归一化，维持训练稳定
+#         self.norm = nn.LayerNorm(1)
+
+#     def forward(self, x):
+#         # x 维度: (Batch, Feature_Dim)
+        
+#         # 1. 构造“伪时序”维度: (Batch, Feature_Dim, 1)
+#         # 这里的 Feature_Dim 被视为序列长度 L
+#         identity = x.unsqueeze(-1) 
+        
+#         # 2. 投影到高维 Embedding 空间
+#         x_mapped = self.project_in(identity) # (Batch, L, Inner_Dim)
+        
+#         # 3. 计算自注意力
+#         # attn_output 维度: (Batch, L, Inner_Dim)
+#         attn_output, _ = self.mha(x_mapped, x_mapped, x_mapped)
+        
+#         # 4. 投影回原始维度并进行残差连接
+#         out = self.project_out(attn_output) # (Batch, L, 1)
+#         out = self.norm(out + identity)
+        
+#         # 5. 还原维度: (Batch, Feature_Dim)
+#         return out.squeeze(-1)
 
 # =============================================================================
 # 1. 策略网络 (集成 Embedding, Attention 与正交初始化)
@@ -80,9 +119,9 @@ class PolicyNetHybrid(torch.nn.Module):
         # 1. 嵌入层：将状态映射到第一个隐藏层维度
         self.embed = nn.Linear(state_dim, hidden_dims[0])
         
-        # 2. 空间多头注意力层 (替换原来的 ChannelAttention)
-        if self.use_attention:
-            self.attention = SpatialMultiHeadAttention(hidden_dims[0], num_heads=num_heads)
+        # # 2. 空间多头注意力层 (替换原来的 ChannelAttention)
+        # if self.use_attention:
+        #     self.attention = SpatialMultiHeadAttention(hidden_dims[0], num_heads=num_heads)
 
         # 3. 共享主干网络 (MLP)
         layers = []
@@ -135,9 +174,9 @@ class PolicyNetHybrid(torch.nn.Module):
         # Step 1: Embedding
         x_f = self.embed(x)
         
-        # Step 2: Attention (判断逻辑)
-        if self.use_attention:
-            x_f = self.attention(x_f) # MHA 处理
+        # # Step 2: Attention (判断逻辑)
+        # if self.use_attention:
+        #     x_f = self.attention(x_f) # MHA 处理
         
         # Step 3: MLP Backbone
         shared_features = self.backbone(x_f)
@@ -205,8 +244,8 @@ class ValueNet(nn.Module):
         
         self.embed = nn.Linear(state_dim, hidden_dims[0])
         
-        if self.use_attention:
-            self.attention = SpatialMultiHeadAttention(hidden_dims[0], num_heads=num_heads)
+        # if self.use_attention:
+        #     self.attention = SpatialMultiHeadAttention(hidden_dims[0], num_heads=num_heads)
         
         layers = []
         prev_size = hidden_dims[0]
@@ -231,8 +270,8 @@ class ValueNet(nn.Module):
 
     def forward(self, x):
         x_f = self.embed(x)
-        if self.use_attention:
-            x_f = self.attention(x_f)
+        # if self.use_attention:
+        #     x_f = self.attention(x_f)
         
         features = self.backbone(x_f)
         return self.fc_out(features)
@@ -629,15 +668,21 @@ class HybridActorWrapper(nn.Module):
 # =============================================================================
 
 class PPOHybrid:
-    def __init__(self, actor, critic, actor_lr, critic_lr,
+    def __init__(self, actor, critic, reward_att_net, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
+                 obs_dim=None, num_dense_rewards=None, # 新增参数
+                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, k_att_entropy = 0, critic_max_grad=2, actor_max_grad=2, max_std=0.3, **kwargs):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
-
+        self.reward_att_net = reward_att_net
+        # 新增：注意力奖励网络
+        # reward_att_net = RewardWeightAttentionNet(obs_dim, num_dense_rewards).to(device)
+        self.att_optimizer = torch.optim.Adam(self.reward_att_net.parameters(), lr=actor_lr)
+        
+        self.num_dense = num_dense_rewards
         self.gamma = gamma
         self.lmbda = lmbda
         self.epochs = epochs
@@ -649,7 +694,9 @@ class PPOHybrid:
             self.k_entropy = k_entropy
         else:
             self.k_entropy = {'cont': k_entropy, 'cat': k_entropy, 'bern': k_entropy}
-            
+        
+        self.k_att_entropy = k_att_entropy
+        
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
         self.max_std = max_std
@@ -673,6 +720,12 @@ class PPOHybrid:
         self.entropy_bern = 0
         self.entropy_cont = 0
 
+        # Att net metrics
+        self.att_loss = 0
+        self.att_entropy = 0
+        self.att_grad = 0
+        self.pre_clip_att_grad = 0
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
@@ -695,7 +748,7 @@ class PPOHybrid:
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
+    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05, **kwargs):
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -716,7 +769,6 @@ class PPOHybrid:
         states = to_tensor(transition_dict['states'], torch.float)
         next_states = to_tensor(transition_dict['next_states'], torch.float)
         dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
-        rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
 
         #  处理 active_masks (可选输入)
         # 如果 transition_dict 中没有 active_masks，则默认所有样本均有效
@@ -737,9 +789,25 @@ class PPOHybrid:
         # 1. 准备动作数据
         actions_from_buffer = transition_dict['actions']
         
-        # todo action_mask 防止“死后动作”干扰决策
-        # todo truncs
-        # todo global states，适配集中式Critic
+        # 原始奖励数据：(Batch, num_rewards)
+        # 最后一列是结果奖励，前面是密集奖励
+        raw_rewards_all = to_tensor(transition_dict['rewards'], torch.float)
+        dense_rewards_raw = raw_rewards_all[:, :-1]  # (Batch, R-1)
+        sparse_reward = raw_rewards_all[:, -1:]      # (Batch, 1)
+        # 2. 奖励重塑 (Reward Shaping via Attention)
+        # 构造输入: (Batch, R-1, Obs_Dim)
+        att_input = states.unsqueeze(1).repeat(1, self.num_dense, 1)
+        
+        # 【关键点】带梯度计算权重 w
+        # weights: (Batch, R-1)
+        weights = self.reward_att_net(att_input)
+        
+        # 聚合奖励 r_grad (用于回传给 AM 网络)
+        combined_rewards_grad = torch.sum(dense_rewards_raw * weights, dim=-1, keepdim=True) + sparse_reward
+        
+        # 【关键点】创建奖励复制品 (用于计算 GAE，不带梯度)
+        combined_rewards_fixed = combined_rewards_grad.detach()
+        rewards = combined_rewards_fixed
 
         # 1. 准备动作数据 (转 Tensor)
         actions_on_device = {}
@@ -823,7 +891,13 @@ class PPOHybrid:
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
         actor_grad_list, critic_grad_list = [], []
         pre_clip_actor_grad, pre_clip_critic_grad = [], []
-
+ 
+        # Attention net monitoring lists
+        att_loss_list = []
+        att_entropy_list = []
+        att_grad_list = []
+        pre_clip_att_grad = []
+        
         #  监控列表
         kl_list = []
         clip_frac_list = []
@@ -935,19 +1009,51 @@ class PPOHybrid:
                 #  Critic Loss 使用 mask 加权
                 critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
                 
+                # --- Attention Network Loss (AM 更新的核心) ---
+                # 我们希望权重分配能让“带梯度的聚合奖励”在当前 Advantage 方向上最大化
+                # 使用负号是因为优化器执行的是梯度下降
+                # 重新建立 AM 网络与优势的梯度联系
+                # 注意使用 idx 索引确保 Batch 对应
+                current_mb_reward_grad = combined_rewards_grad[batch_idx] 
+
+                # 逻辑：如果优势 mb_advantage 为正，AM 应该调高对应的权重来进一步增大聚合奖励
+                # 我们使用 mb_advantage 作为系数，因为它代表了动作的“正确性”
+                att_loss = -(current_mb_reward_grad * mb_advantage.detach() * mb_active_masks).sum() / (active_sum + mask_eps)
+                
+                # AM 网络的熵正则项：鼓励权重分布不要太集中
+                # weights[idx] 维度是 (Batch, R-1)
+                att_entropy = -(weights[idx] * torch.log(weights[idx] + 1e-8)).sum(-1).mean()
+                k_att_entropy = self.k_att_entropy
+                # 再加上你设置的 AM 熵正则
+                att_loss = att_loss - k_att_entropy * att_entropy
+
+                # 记录当前 att_loss / att_entropy （值可在 step 前记录）
+                att_loss_list.append(att_loss.item())
+                att_entropy_list.append(att_entropy.item())
+                 
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
+                self.att_optimizer.zero_grad()
+                
                 actor_loss.backward()
                 critic_loss.backward()
+                att_loss.backward()
 
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
-                pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
+                pre_clip_critic_grad.append(model_grad_norm(self.critic))
+                # 记录 reward_att_net 在裁剪前的梯度范数
+                pre_clip_att_grad.append(model_grad_norm(self.reward_att_net))
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+                nn.utils.clip_grad_norm_(self.reward_att_net.parameters(), self.actor_max_grad)
 
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
-
+                self.att_optimizer.step()
+ 
+                # 记录 reward_att_net 更新后的梯度范数
+                att_grad_list.append(model_grad_norm(self.reward_att_net))
+ 
                 # Logging
                 actor_grad_list.append(model_grad_norm(self.actor))
                 critic_grad_list.append(model_grad_norm(self.critic))            
@@ -975,6 +1081,11 @@ class PPOHybrid:
         self.ratio_mean = np.mean(ratio_list)
         self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
         self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
+        # 记录 att 指标
+        self.att_loss = np.mean(att_loss_list) if len(att_loss_list) > 0 else 0
+        self.att_entropy = np.mean(att_entropy_list) if len(att_entropy_list) > 0 else 0
+        self.att_grad = np.mean(att_grad_list) if len(att_grad_list) > 0 else 0
+        self.pre_clip_att_grad = np.mean(pre_clip_att_grad) if len(pre_clip_att_grad) > 0 else 0
         
         #  记录 active 的 advantage 均值
         active_sum_total = active_masks.sum().item()

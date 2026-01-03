@@ -306,7 +306,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             else:
                 reward_assisted += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
                 if missile_in_mid_term:
-                    reward_assisted -= reward_weights['defensive_crank_penalty'] * abs(alpha-pi/3)/(pi/3)
+                    reward_assisted -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3) # alpha-pi/3
             
 
         # 迎角惩罚
