@@ -1,4 +1,5 @@
 '''
+向量形式奖励
 奖励函数表示为向量
 '''
 
@@ -61,7 +62,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'aoa_penalty': 0.02,
             'pitch_penalty': 0.02,
         }
-        self.num_dense_rewards = len(self.reward_weights.keys())
+        self.num_dense_rewards = 13 # len(self.reward_weights.keys())
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30):
         # --- 1. 参数初始化与状态获取 ---
@@ -134,7 +135,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_theta_threat = ego_states["threat"][2]
         
         # 奖励项初始化
-        reward = np.zeros([])
+        reward = np.zeros(self.num_dense_rewards)
         
         r_event = 0.0      # 结果奖励
         r_constraint = 0.0 # 约束与代价
@@ -195,29 +196,36 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 为导弹提供制导
         if missile_in_mid_term:
             r_shaping += reward_weights['missile_guidance']
+            reward[0] += reward_weights['missile_guidance']
 
         # 锁定目标
         if ego_states["target_locked"]:
             r_shaping += reward_weights['target_locked']
+            reward[1] += reward_weights['target_locked']
 
         # 被目标锁定
         if strict_locked_by_target:
             r_shaping -= reward_weights['locked_by_target']
+            reward[2] -= reward_weights['locked_by_target']
 
         # 被导弹导引头锁住
         if warning and threat_distance <= 20e3:
             r_shaping -= reward_weights['missile_warning']
+            reward[3] -= reward_weights['missile_warning']
 
         # 导弹锁定目标
         if enm_states["warning"] and enm_states["threat"][3] <= 20e3:
             r_shaping += reward_weights['enemy_gets_warning']
+            reward[4] += reward_weights['enemy_gets_warning']
 
         # 优势度引导
         if len(alive_ally_missiles) == 0 and ego.ammo > 0 and not warning:
             # 角度优势度
             r_shaping += (ATA_enm / pi - alpha / pi) * reward_weights['angle_advantage']
+            reward[5] += (ATA_enm / pi - alpha / pi) * reward_weights['angle_advantage']
             # 高度优势度
             r_shaping += (alt - enm.alt)/5000 * reward_weights['height_advantage']
+            reward[6] += (alt - enm.alt)/5000 * reward_weights['height_advantage']
 
         # 防御引导
         if warning:
@@ -226,11 +234,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                                          cos(delta_theta_threat)*sin(delta_psi_threat)])
             if threat_distance <= 30e3:
                 r_shaping += reward_weights['defensive_angle_close'] * abs(delta_psi_threat) / pi
+                reward[7] += reward_weights['defensive_angle_close'] * abs(delta_psi_threat) / pi
                 r_shaping += np.dot(ego.vel_, threat_directio_n)/340 * reward_weights['defensive_run_close']
+                reward[8] += np.dot(ego.vel_, threat_directio_n)/340 * reward_weights['defensive_run_close']
             else:
                 r_shaping += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
+                reward[9] += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
                 if missile_in_mid_term:
                     r_shaping -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3)
+                    reward[10] -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3)
 
         # [加回] 开火引导逻辑 (Should fire vs Shoot)
         should_fire_missile = False
@@ -251,6 +263,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 reward_shoot_coach += 0.01
         
         r_shaping += reward_shoot_coach # 归入引导奖励
+        reward[11] += reward_shoot_coach
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         # 逃脱导弹
@@ -284,4 +297,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
-        return done, r_event, r_constraint, r_shaping
+
+        reward[-1] = r_event + r_constraint
+        return done, reward, r_event + r_constraint + r_shaping

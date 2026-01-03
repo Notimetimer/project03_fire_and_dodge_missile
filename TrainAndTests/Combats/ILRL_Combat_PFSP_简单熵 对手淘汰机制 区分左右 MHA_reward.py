@@ -676,16 +676,18 @@ if __name__ == "__main__":
             b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
 
             env.step(r_maneuver, b_maneuver)
-            done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+            done, b_reward, reward_for_show = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
             done = done
             
-            reward_for_show = b_rew_event + b_rew_constraint
+            # reward_for_show = b_rew_event + b_rew_constraint
             
             weight_reward = weight_reward_0
             # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
             weight_reward[2] = 0.0
             
-            reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
+            # reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
+            
+            reward_for_learn = b_reward
             
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
