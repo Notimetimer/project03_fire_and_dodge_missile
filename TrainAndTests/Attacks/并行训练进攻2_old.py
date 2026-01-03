@@ -310,7 +310,7 @@ if __name__ == "__main__":
             # 1. 计算 GAE (在展平前)
             # 2. 展平所有数据 (States, Actions, Rewards...)
             # 3. 返回包含 'advantages' 和 'td_targets' 的字典
-            # transition_dict = agent.preprocess_parallel_buffer(transition_dict)
+
             # [修改] 使用 Buffer 计算 GAE 并导出为 Dict
             # 传入 critic 网络用于价值评估
             transition_dict = replay_buffer.compute_estimates_and_flatten(
