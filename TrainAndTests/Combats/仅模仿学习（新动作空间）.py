@@ -200,7 +200,7 @@ if __name__ == "__main__":
     # 训练循环
     # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
-    for epoch in range(180): 
+    for epoch in range(500): 
         avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
             il_transition_dict, 
             beta=1.0, 

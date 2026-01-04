@@ -915,10 +915,12 @@ class PPOHybrid:
 
 
     # --- 修改后的 MARWIL_update ---
-    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0):
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
+                      tau=0.8):
         """
         MARWIL 离线更新函数
         输入 actions 结构支持: [{'cat': array([v]), 'bern': array([v])}, ...]
+        tau: 非对称损失权重 (Expectile Regression). tau=0.5 为 MSE; tau>0.5 (如0.9) 倾向于高估 Value (拟合好样本)
         """
         # 可能的局部观测
         if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
@@ -1015,7 +1017,17 @@ class PPOHybrid:
 
             # C. Critic Loss
             v_pred = self.critic(s_batch)
+            
+            # 原有
             critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            
+            # # # [修改] 使用非对称损失 (Expectile Regression)
+            # # # 如果回报高于预估值（好样本），给予极大的权重（tau > 0.5）
+            # # # 如果回报低于预估值（差样本），给予较小的权重
+            # diff = r_batch - v_pred
+            # tau_t = torch.tensor(tau, device=self.device)
+            # weight = torch.where(diff > 0, tau_t, 1.0 - tau_t) # 条件，True取值，False取值
+            # critic_loss = (weight * (diff**2)).mean() * c_v
 
             # D. Optimize
             self.actor_optimizer.zero_grad()
