@@ -261,7 +261,7 @@ if __name__ == "__main__":
         r_action_list = []
         b_action_list = []
         
-        for i_episode in range(1):
+        for i_episode in range(5):
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -323,7 +323,7 @@ if __name__ == "__main__":
                     # 蓝方使用智能体
                     b_state_check = env.unscale_state(b_check_obs)
                     
-                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=0)
+                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=0) # , check_obs=b_check_obs)
                     b_action_label = b_action_exec['cat'][0] # 返回可能是一个数组
                     
                     # _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
