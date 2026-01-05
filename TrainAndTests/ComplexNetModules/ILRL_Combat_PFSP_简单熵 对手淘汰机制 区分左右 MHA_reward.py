@@ -351,7 +351,7 @@ if __name__ == "__main__":
                                     }
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
-    action_cycle_multiplier = 30 # 8s 决策一次
+    action_cycle_multiplier = 30 # 6s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
     # transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 # 训练用
     transition_dict_capacity = 0 # 调试用
@@ -828,6 +828,9 @@ if __name__ == "__main__":
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
             student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
+            
+            print('奖励权重', student_agent.mb_weights)
+            
             decide_steps_after_update = 0
 
             # [Modification] 保留原有梯度监控代码

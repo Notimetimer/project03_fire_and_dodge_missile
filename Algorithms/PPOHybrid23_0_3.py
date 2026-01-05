@@ -719,7 +719,11 @@ class PPOHybrid:
                 return torch.tensor(x, dtype=dtype).to(self.device)
             else:
                 return torch.tensor(np.array(x), dtype=dtype).to(self.device)
-
+            
+        # 【修复：IndexError 保护】空经验池保护
+        if len(transition_dict['dones']) == 0:
+            return
+        
         states = to_tensor(transition_dict['states'], torch.float)
         next_states = to_tensor(transition_dict['next_states'], torch.float)
         dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
@@ -988,6 +992,10 @@ class PPOHybrid:
                 k_att_entropy = self.k_att_entropy
                 # 再加上你设置的 AM 熵正则
                 att_loss = att_loss - k_att_entropy * att_entropy
+                
+                # # 调试
+                # att_loss = mb_weights.sum() * 100
+                # att_entropy = -(mb_weights * torch.log(mb_weights + 1e-8)).sum(-1).mean()
 
                 # 记录当前 att_loss / att_entropy （值可在 step 前记录）
                 att_loss_list.append(att_loss.item())
@@ -1035,6 +1043,8 @@ class PPOHybrid:
                 if entropy_details['bern'] is not None:
                     entropy_bern_list.append(entropy_details['bern'].mean().item())
 
+        self.mb_weights = mb_weights
+        
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
         self.critic_loss = np.mean(critic_loss_list)
