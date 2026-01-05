@@ -60,52 +60,6 @@ class RewardWeightAttentionNet(nn.Module):
         weights = F.softmax(logits, dim=-1)
         return weights
     
-    
-# # 空间多头自注意力
-# class SpatialMultiHeadAttention(nn.Module):
-#     def __init__(self, feature_dim, num_heads=4, head_dim=8):
-#         super(SpatialMultiHeadAttention, self).__init__()
-#         self.feature_dim = feature_dim
-#         self.num_heads = num_heads
-#         self.inner_dim = num_heads * head_dim  # 确保能被 heads 整除
-        
-#         # 投影层：(Batch, Dim, 1) -> (Batch, Dim, inner_dim)
-#         self.project_in = nn.Linear(1, self.inner_dim)
-        
-#         # 多头注意力层
-#         self.mha = nn.MultiheadAttention(
-#             embed_dim=self.inner_dim, 
-#             num_heads=num_heads, 
-#             batch_first=True
-#         )
-        
-#         # 输出投影：(Batch, Dim, inner_dim) -> (Batch, Dim, 1)
-#         self.project_out = nn.Linear(self.inner_dim, 1)
-        
-#         # 层归一化，维持训练稳定
-#         self.norm = nn.LayerNorm(1)
-
-#     def forward(self, x):
-#         # x 维度: (Batch, Feature_Dim)
-        
-#         # 1. 构造“伪时序”维度: (Batch, Feature_Dim, 1)
-#         # 这里的 Feature_Dim 被视为序列长度 L
-#         identity = x.unsqueeze(-1) 
-        
-#         # 2. 投影到高维 Embedding 空间
-#         x_mapped = self.project_in(identity) # (Batch, L, Inner_Dim)
-        
-#         # 3. 计算自注意力
-#         # attn_output 维度: (Batch, L, Inner_Dim)
-#         attn_output, _ = self.mha(x_mapped, x_mapped, x_mapped)
-        
-#         # 4. 投影回原始维度并进行残差连接
-#         out = self.project_out(attn_output) # (Batch, L, 1)
-#         out = self.norm(out + identity)
-        
-#         # 5. 还原维度: (Batch, Feature_Dim)
-#         return out.squeeze(-1)
-
 # =============================================================================
 # 1. 策略网络 (集成 Embedding, Attention 与正交初始化)
 # =============================================================================
@@ -114,7 +68,7 @@ class PolicyNetHybrid(torch.nn.Module):
                  num_heads=4, use_attention=True):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
-        self.use_attention = use_attention
+        # self.use_attention = use_attention
         
         # 1. 嵌入层：将状态映射到第一个隐藏层维度
         self.embed = nn.Linear(state_dim, hidden_dims[0])
@@ -240,7 +194,7 @@ class PolicyNetHybrid(torch.nn.Module):
 class ValueNet(nn.Module):
     def __init__(self, state_dim, hidden_dims, num_heads=4, use_attention=True):
         super(ValueNet, self).__init__()
-        self.use_attention = use_attention
+        # self.use_attention = use_attention
         
         self.embed = nn.Linear(state_dim, hidden_dims[0])
         
@@ -795,18 +749,20 @@ class PPOHybrid:
         dense_rewards_raw = raw_rewards_all[:, :-1]  # (Batch, R-1)
         sparse_reward = raw_rewards_all[:, -1:]      # (Batch, 1)
         # 2. 奖励重塑 (Reward Shaping via Attention)
-        # 构造输入: (Batch, R-1, Obs_Dim)
-        att_input = states.unsqueeze(1).repeat(1, self.num_dense, 1)
+        
         
         # 【关键点】带梯度计算权重 w
-        # weights: (Batch, R-1)
-        weights = self.reward_att_net(att_input)
         
-        # 聚合奖励 r_grad (用于回传给 AM 网络)
-        combined_rewards_grad = torch.sum(dense_rewards_raw * weights, dim=-1, keepdim=True) + sparse_reward
+        with torch.no_grad():
+            # 构造输入: (Batch, R-1, Obs_Dim)
+            initial_att_input = states.unsqueeze(1).repeat(1, self.num_dense, 1)
+            initial_weights = self.reward_att_net(initial_att_input) # weights: (Batch, R-1)
+        
+            # 聚合奖励 r_grad (用于回传给 AM 网络)
+            fixed_rewards = torch.sum(dense_rewards_raw * initial_weights, dim=-1, keepdim=True) + sparse_reward
         
         # 【关键点】创建奖励复制品 (用于计算 GAE，不带梯度)
-        combined_rewards_fixed = combined_rewards_grad.detach()
+        combined_rewards_fixed = fixed_rewards.detach()
         rewards = combined_rewards_fixed
 
         # 1. 准备动作数据 (转 Tensor)
@@ -935,6 +891,8 @@ class PPOHybrid:
                 mb_old_log_probs = old_log_probs[batch_idx]
                 mb_active_masks = active_masks[batch_idx]
                 # v_pred_old_batch = v_pred_old[batch_idx] # 如果需要用到旧 Value
+                mb_dense_rewards = dense_rewards_raw[batch_idx]
+                mb_sparse_reward = sparse_reward[batch_idx]
                 
                 # 切片 Actions (Dict 结构)
                 mb_actions = {}
@@ -1010,19 +968,23 @@ class PPOHybrid:
                 critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
                 
                 # --- Attention Network Loss (AM 更新的核心) ---
-                # 我们希望权重分配能让“带梯度的聚合奖励”在当前 Advantage 方向上最大化
-                # 使用负号是因为优化器执行的是梯度下降
                 # 重新建立 AM 网络与优势的梯度联系
-                # 注意使用 idx 索引确保 Batch 对应
-                current_mb_reward_grad = combined_rewards_grad[batch_idx] 
-
+                # 【核心修复】在循环内部实时计算权重以建立梯度路径，防止计算图重复使用报错
+                mb_att_input = mb_actor_inputs.unsqueeze(1).repeat(1, self.num_dense, 1)
+                mb_weights = self.reward_att_net(mb_att_input) # 这里产生带梯度的最新权重
+                
+                # mb_reward_grad 是关于 mb_weights 的函数，梯度可以传回 reward_att_net
+                # 注意：这里使用当前 Batch 的最新权重重新聚合奖励
+                mb_reward_grad = torch.sum(mb_dense_rewards * mb_weights, dim=-1, keepdim=True) + mb_sparse_reward
                 # 逻辑：如果优势 mb_advantage 为正，AM 应该调高对应的权重来进一步增大聚合奖励
                 # 我们使用 mb_advantage 作为系数，因为它代表了动作的“正确性”
-                att_loss = -(current_mb_reward_grad * mb_advantage.detach() * mb_active_masks).sum() / (active_sum + mask_eps)
+                # 注意：mb_advantage 必须 detach，确保 AM 网络只通过改变权重来优化，而不去干扰 Critic
+                att_loss = -(mb_reward_grad * mb_advantage.detach() * mb_active_masks).sum() / (active_sum + mask_eps)
                 
                 # AM 网络的熵正则项：鼓励权重分布不要太集中
-                # weights[idx] 维度是 (Batch, R-1)
-                att_entropy = -(weights[idx] * torch.log(weights[idx] + 1e-8)).sum(-1).mean()
+                # 【修复】直接使用当前 Batch 的 mb_weights，原先的 [idx] 会导致索引越界
+                att_entropy = -(mb_weights * torch.log(mb_weights + 1e-8)).sum(-1).mean()
+                
                 k_att_entropy = self.k_att_entropy
                 # 再加上你设置的 AM 熵正则
                 att_loss = att_loss - k_att_entropy * att_entropy

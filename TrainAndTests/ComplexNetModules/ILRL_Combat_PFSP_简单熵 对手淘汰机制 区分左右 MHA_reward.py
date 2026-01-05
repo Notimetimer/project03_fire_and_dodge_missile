@@ -172,8 +172,8 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 # k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了
-use_attention = 1 # 是否使用通道注意力 1
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -187,17 +187,15 @@ action_bound = None
 
 # 1. 创建神经网络
 actor_net = PolicyNetHybrid(
-    state_dim, hidden_dim, action_dims_dict,
-    use_attention=use_attention).to(device)
+    state_dim, hidden_dim, action_dims_dict).to(device)
 critic_net = ValueNet(
-    state_dim, hidden_dim,
-    use_attention=use_attention).to(device)
+    state_dim, hidden_dim).to(device)
 
 # 2. Wrapper
 actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
 
-# 定义密集奖励的数量 (例如：角度、速度、距离、避障，共 4 项)
-num_dense_rewards = env.num_dense_rewards
+# 定义密集奖励的数量
+num_dense_rewards = env.num_rewards-1
 
 # 1. 创建注意力奖励网络
 # 这里的 state_dim 对应 obs_dim
@@ -210,6 +208,7 @@ reward_att_net = RewardWeightAttentionNet(
 student_agent = PPOHybrid(
     actor=actor_wrapper, 
     critic=critic_net, 
+    reward_att_net=reward_att_net,
     actor_lr=actor_lr, 
     critic_lr=critic_lr,
     lmbda=lmbda, 
@@ -354,7 +353,8 @@ if __name__ == "__main__":
 
     action_cycle_multiplier = 30 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 
+    # transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 # 训练用
+    transition_dict_capacity = 0 # 调试用
 
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
     K_FACTOR = 32
@@ -440,7 +440,7 @@ if __name__ == "__main__":
     r_action_list = []
     b_action_list = []
     
-    weight_reward_0 = np.array([1,1,10])
+    weight_reward_0 = np.array([1,1,1])
     
     # 修改：初始化增加 'obs' 键
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
@@ -682,8 +682,6 @@ if __name__ == "__main__":
             # reward_for_show = b_rew_event + b_rew_constraint
             
             weight_reward = weight_reward_0
-            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
-            weight_reward[2] = 0.0
             
             # reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
             
@@ -854,6 +852,12 @@ if __name__ == "__main__":
             logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
             logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
             logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+            
+            # 注意力
+            logger.add("train_att/att_loss", student_agent.att_loss, total_steps)
+            logger.add("train_att/att_entropy", student_agent.att_entropy, total_steps)
+            logger.add("train_att/att_grad", student_agent.att_grad, total_steps)
+            logger.add("train_att/pre_clip_att_grad", student_agent.pre_clip_att_grad, total_steps)
             
             # 修改：重置 transition_dict 时保留 obs 键
             transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}

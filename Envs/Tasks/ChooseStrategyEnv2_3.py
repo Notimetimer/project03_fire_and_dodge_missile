@@ -62,7 +62,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'aoa_penalty': 0.02,
             'pitch_penalty': 0.02,
         }
-        self.num_dense_rewards = 13 # len(self.reward_weights.keys())
+        self.num_rewards = 13 # len(self.reward_weights.keys())
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30):
         # --- 1. 参数初始化与状态获取 ---
@@ -135,7 +135,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_theta_threat = ego_states["threat"][2]
         
         # 奖励项初始化
-        reward = np.zeros(self.num_dense_rewards)
+        reward = np.zeros(self.num_rewards)
         
         r_event = 0.0      # 结果奖励
         r_constraint = 0.0 # 约束与代价
