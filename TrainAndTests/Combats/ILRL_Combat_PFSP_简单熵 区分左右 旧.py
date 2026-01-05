@@ -170,8 +170,10 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-# k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+
+# k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 原有
+
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':  0.001} # 开火负熵正则项
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -422,7 +424,7 @@ if __name__ == "__main__":
     r_action_list = []
     b_action_list = []
     
-    weight_reward_0 = np.array([1,1,10])
+    weight_reward_0 = np.array([1,1,1])
     
     # 修改：初始化增加 'obs' 键
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
@@ -659,7 +661,7 @@ if __name__ == "__main__":
             
             weight_reward = weight_reward_0
             # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
-            weight_reward[2] = 0.0
+            # weight_reward[2] = 0.0
             
             reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
             
