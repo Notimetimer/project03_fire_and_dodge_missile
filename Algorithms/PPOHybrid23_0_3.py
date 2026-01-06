@@ -23,43 +23,102 @@ from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_ad
 from Algorithms.SharedLayers import ChannelAttention
 import torch.nn.functional as F
 
+# class RewardWeightAttentionNet(nn.Module):
+#     def __init__(self, obs_dim, num_dense_rewards, num_heads=4):
+#         super(RewardWeightAttentionNet, self).__init__()
+#         self.num_dense = num_dense_rewards
+        
+#         # 直接使用 MHA 处理 (Batch, R-1, Obs_Dim)
+#         # 这里把密集奖励的数量 (R-1) 视为序列长度
+#         self.mha = nn.MultiheadAttention(
+#             embed_dim=obs_dim, 
+#             num_heads=num_heads, 
+#             batch_first=True
+#         )
+        
+#         # 最后的线性层将观测维度压缩为 1，从而为每个密集奖励生成一个权重
+#         self.fc_weight = nn.Linear(obs_dim, 1)
+        
+#         # 权重初始化：使初始权重接近均匀分布，避免训练初期某些奖励项直接消失
+#         nn.init.orthogonal_(self.fc_weight.weight, gain=0.01)
+#         nn.init.constant_(self.fc_weight.bias, 0)
+
+#     def forward(self, x):
+#         """
+#         Input x: (Batch, num_dense, obs_dim)
+#         Output: (Batch, num_dense)
+#         """
+#         # 1. 计算自注意力：让不同奖励项之间通过观测信息进行“协商”
+#         # attn_output: (Batch, num_dense, obs_dim)
+#         attn_output, _ = self.mha(x, x, x)
+        
+#         # 2. 映射到标量权重
+#         # logits: (Batch, num_dense, 1) -> (Batch, num_dense)
+#         logits = self.fc_weight(attn_output).squeeze(-1)
+        
+#         # 3. 归一化：确保 sum(weights) = 1
+#         weights = F.softmax(logits, dim=-1)
+#         return weights
+
 class RewardWeightAttentionNet(nn.Module):
-    def __init__(self, obs_dim, num_dense_rewards, num_heads=4):
-        super(RewardWeightAttentionNet, self).__init__()
+    def __init__(self, obs_dim, num_dense_rewards, embed_dim=128, num_heads=4):
+        super().__init__()
         self.num_dense = num_dense_rewards
         
-        # 直接使用 MHA 处理 (Batch, R-1, Obs_Dim)
-        # 这里把密集奖励的数量 (R-1) 视为序列长度
+        # 1. 将 12 个奖励数值投影到高维 Query 空间
+        # 输入: (Batch, 12, 1) -> 输出: (Batch, 12, embed_dim)
+        self.query_proj = nn.Linear(1, embed_dim)
+        
+        # 2. 将状态投影到 Key/Value 空间
+        # 输入: (Batch, obs_dim) -> 输出: (Batch, 1, embed_dim)
+        self.kv_proj = nn.Linear(obs_dim, embed_dim)
+        
         self.mha = nn.MultiheadAttention(
-            embed_dim=obs_dim, 
+            embed_dim=embed_dim, 
             num_heads=num_heads, 
             batch_first=True
         )
         
-        # 最后的线性层将观测维度压缩为 1，从而为每个密集奖励生成一个权重
-        self.fc_weight = nn.Linear(obs_dim, 1)
+        # 3. 最终将混合了状态信息的奖励特征映射回标量权重
+        self.fc_weight = nn.Linear(embed_dim, 1)
         
-        # 权重初始化：使初始权重接近均匀分布，避免训练初期某些奖励项直接消失
+        # RL 惯例：使用较小的增益初始化，保持初始权重接近均匀
         nn.init.orthogonal_(self.fc_weight.weight, gain=0.01)
-        nn.init.constant_(self.fc_weight.bias, 0)
 
-    def forward(self, x):
+    def forward(self, state, dense_rewards_raw):
         """
-        Input x: (Batch, num_dense, obs_dim)
-        Output: (Batch, num_dense)
+        state: (Batch, obs_dim)
+        dense_rewards_raw: (Batch, 12)
         """
-        # 1. 计算自注意力：让不同奖励项之间通过观测信息进行“协商”
-        # attn_output: (Batch, num_dense, obs_dim)
-        attn_output, _ = self.mha(x, x, x)
+        batch_size = state.size(0)
         
-        # 2. 映射到标量权重
-        # logits: (Batch, num_dense, 1) -> (Batch, num_dense)
-        logits = self.fc_weight(attn_output).squeeze(-1)
+        # 构造 Query: (Batch, 12, embed_dim)
+        # 将原始奖励数值作为 Query 的原始特征
+        q_input = dense_rewards_raw.unsqueeze(-1) # (Batch, 12, 1)
+        queries = self.query_proj(q_input) 
         
-        # 3. 归一化：确保 sum(weights) = 1
+        # 构造 Key/Value: (Batch, 1, embed_dim)
+        # 将状态作为背景信息供奖励查询
+        kv_input = state.unsqueeze(1) # (Batch, 1, obs_dim)
+        keys = values = self.kv_proj(kv_input)
+        
+        # 注意力计算 (Cross-Attention)
+        # 因为 L_k=1, attn_output 实际上是 queries 对 keys 的线性响应
+        # 此时梯度可以顺畅地流回 q_input (dense_rewards_raw)
+        attn_output, _ = self.mha(queries, keys, values)
+        
+        # --- 核心改进：引入残差连接 ---
+        # 即使 MHA 的输出因为 Lk=1 而趋同，加上 queries 之后，
+        # 12 个槽位的特征就带上了原始奖励的差异性。
+        combined_output = attn_output # + queries
+        
+        # 映射到 Logits 并 Softmax
+        # logits: (Batch, 12)
+        logits = self.fc_weight(combined_output).squeeze(-1)
         weights = F.softmax(logits, dim=-1)
+        
         return weights
-    
+     
 # =============================================================================
 # 1. 策略网络 (集成 Embedding, Attention 与正交初始化)
 # =============================================================================
@@ -634,7 +693,7 @@ class PPOHybrid:
         self.reward_att_net = reward_att_net
         # 新增：注意力奖励网络
         # reward_att_net = RewardWeightAttentionNet(obs_dim, num_dense_rewards).to(device)
-        self.att_optimizer = torch.optim.Adam(self.reward_att_net.parameters(), lr=actor_lr)
+        self.att_optimizer = torch.optim.Adam(self.reward_att_net.parameters(), lr=actor_lr*10) # lr=actor_lr
         
         self.num_dense = num_dense_rewards
         self.gamma = gamma
@@ -759,11 +818,13 @@ class PPOHybrid:
         
         with torch.no_grad():
             # 构造输入: (Batch, R-1, Obs_Dim)
-            initial_att_input = states.unsqueeze(1).repeat(1, self.num_dense, 1)
-            initial_weights = self.reward_att_net(initial_att_input) # weights: (Batch, R-1)
+            # initial_att_input = states.unsqueeze(1).repeat(1, self.num_dense, 1)
+            # initial_weights = self.reward_att_net(initial_att_input) # weights: (Batch, R-1)
+            
+            initial_weights = self.reward_att_net(states, dense_rewards_raw)
         
             # 聚合奖励 r_grad (用于回传给 AM 网络)
-            fixed_rewards = torch.sum(dense_rewards_raw * initial_weights, dim=-1, keepdim=True) + sparse_reward
+            fixed_rewards = torch.sum(dense_rewards_raw * initial_weights, dim=-1, keepdim=True) * self.num_dense + sparse_reward
         
         # 【关键点】创建奖励复制品 (用于计算 GAE，不带梯度)
         combined_rewards_fixed = fixed_rewards.detach()
@@ -974,12 +1035,13 @@ class PPOHybrid:
                 # --- Attention Network Loss (AM 更新的核心) ---
                 # 重新建立 AM 网络与优势的梯度联系
                 # 【核心修复】在循环内部实时计算权重以建立梯度路径，防止计算图重复使用报错
-                mb_att_input = mb_actor_inputs.unsqueeze(1).repeat(1, self.num_dense, 1)
-                mb_weights = self.reward_att_net(mb_att_input) # 这里产生带梯度的最新权重
+                # mb_att_input = mb_actor_inputs.unsqueeze(1).repeat(1, self.num_dense, 1)
+                # mb_weights = self.reward_att_net(mb_att_input) # 这里产生带梯度的最新权重
+                mb_weights = self.reward_att_net(mb_actor_inputs, mb_dense_rewards)
                 
                 # mb_reward_grad 是关于 mb_weights 的函数，梯度可以传回 reward_att_net
                 # 注意：这里使用当前 Batch 的最新权重重新聚合奖励
-                mb_reward_grad = torch.sum(mb_dense_rewards * mb_weights, dim=-1, keepdim=True) + mb_sparse_reward
+                mb_reward_grad = torch.sum(mb_dense_rewards * mb_weights, dim=-1, keepdim=True)
                 # 逻辑：如果优势 mb_advantage 为正，AM 应该调高对应的权重来进一步增大聚合奖励
                 # 我们使用 mb_advantage 作为系数，因为它代表了动作的“正确性”
                 # 注意：mb_advantage 必须 detach，确保 AM 网络只通过改变权重来优化，而不去干扰 Critic
@@ -993,9 +1055,8 @@ class PPOHybrid:
                 # 再加上你设置的 AM 熵正则
                 att_loss = att_loss - k_att_entropy * att_entropy
                 
-                # # 调试
-                # att_loss = mb_weights.sum() * 100
-                # att_entropy = -(mb_weights * torch.log(mb_weights + 1e-8)).sum(-1).mean()
+                # # # 调试
+                # att_loss *= 100.0
 
                 # 记录当前 att_loss / att_entropy （值可在 step 前记录）
                 att_loss_list.append(att_loss.item())
