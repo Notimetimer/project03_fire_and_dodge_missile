@@ -1385,7 +1385,10 @@ class PPOHybrid:
                         c = torch.sqrt(self.c_sq)
                         
                         il_adv = residual / (c + 1e-8)
-                        il_weights = torch.clamp(torch.exp(beta * il_adv), max=max_weight)
+                        # 对负 advantage 强烈抑制权重：adv>0 正常放行，否则乘以 1e-6
+                        il_raw_weights = torch.exp(beta * il_adv)
+                        F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
+                        il_weights = torch.clamp(il_raw_weights * F_word, max=max_weight)
 
                     # compute_il_loss 接口不变
                     raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing)
