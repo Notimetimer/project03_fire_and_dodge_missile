@@ -13,12 +13,12 @@ from datetime import datetime
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-from BasicRules import *
+from BasicRules_new import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
-
+from Algorithms.Utils import compute_monte_carlo_returns
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +59,7 @@ def restructure_actions(actions_data):
     
     # 如果是列表且包含字典，进行转换
     if isinstance(actions_data, list) and len(actions_data) > 0:
-        print("Restructuring actions from List[Dict] to Dict[Array]...")
+        # print("Restructuring actions from List[Dict] to Dict[Array]...") # 频繁调用可注释掉以减少刷屏
         
         # 初始化容器
         new_actions = {'cat': [], 'bern': []}
@@ -73,10 +73,16 @@ def restructure_actions(actions_data):
             # 映射 'fly' -> 'cat' (离散机动)
             # 映射 'fire' -> 'bern' (开关开火)
             if isinstance(act, dict):
-                if 'fly' in act:
-                    new_actions['cat'].append(act['fly'])
-                if 'fire' in act:
-                    new_actions['bern'].append(act['fire'])
+                # 优先找 'fly'，找不到找 'cat'
+                val_cat = act.get('fly', act.get('cat'))
+                if val_cat is not None:
+                    new_actions['cat'].append(val_cat)
+                
+                # 优先找 'fire'，找不到找 'bern'
+                val_bern = act.get('fire', act.get('bern'))
+                if val_bern is not None:
+                    new_actions['bern'].append(val_bern)
+
             # 备用：如果数据意外变成了 list/tuple
             elif isinstance(act, (list, np.ndarray, tuple)) and len(act) >= 2:
                  new_actions['cat'].append(act[0])
@@ -123,7 +129,7 @@ def summarize(il_dict):
         else:
             print(f"  {k}: shape={getattr(v, 'shape', 'Unknown')}")
             
-def append_b_experience(td, obs, state, action, reward, next_state, done):
+def append_experience(td, obs, state, action, reward, next_state, done, active_mask):
     """
     统一把一次蓝方经验追加到 transition_dict。
     修改：增加 obs 输入，用于存储局部观测
@@ -132,25 +138,161 @@ def append_b_experience(td, obs, state, action, reward, next_state, done):
     td['states'].append(state) # 修改：这里存储Critic用的全局状态(pomdp=0)
     td['actions'].append(action)
     td['rewards'].append(reward)
-    td['next_states'].append(next_state) # 修改：这里存储Critic用的全局Next状态(pomdp=0)
+    td['next_states'].append(next_state)
     td['dones'].append(done)
+    td['active_masks'].append(active_mask) # 【新增】active_mask，转入多智能体
     return td
 
+# ==========================================
+# 新增：混合缓冲区类
+# ==========================================
+class IL_transition_buffer:
+    def __init__(self, init_dict, max_size=10000):
+        """
+        init_dict: 初始的专在该模仿学习数据 (dict of arrays)
+        max_size: addon_dict 的最大容量
+        """
+        self.init_dict = copy.deepcopy(init_dict)
+        self.max_size = max_size
+        
+        # 1. 确保 obs 存在 (如果只有 states，拷贝一份作为 obs)
+        if 'obs' not in self.init_dict and 'states' in self.init_dict:
+            self.init_dict['obs'] = self.init_dict['states'].copy()
+            print("[IL_transition_buffer] Copied 'states' to 'obs' for init_dict.")
+            
+        # 2. 初始化 addon_dict，结构必须与 init_dict 保持一致以便后续拼接
+        self.addon_dict = {}
+        for k, v in self.init_dict.items():
+            if k == 'actions':
+                # actions 此时应已是嵌套字典 {'cat': array, 'bern': array}
+                self.addon_dict[k] = {}
+                for sub_k, sub_v in v.items():
+                    # 创建形状为 (0, dim...) 的空数组
+                    shape = list(sub_v.shape)
+                    shape[0] = 0
+                    self.addon_dict[k][sub_k] = np.zeros(shape, dtype=sub_v.dtype)
+            else:
+                # 其他键 (states, obs, returns 等)
+                shape = list(v.shape)
+                shape[0] = 0
+                self.addon_dict[k] = np.zeros(shape, dtype=v.dtype)
+                
+    def add(self, data):
+        """
+        将新数据加入 buffer。保留最新的 max_size 条数据。
+        data: 包含 'obs', 'states', 'actions', 'returns' 的字典
+             actions 在传入时可能是 list of dicts，需转换
+        """
+        # 1. 数据预处理（转换格式）
+        processed_data = {}
+        
+        # 处理可能的 Numpy/List 数据
+        for key in ['obs', 'states', 'returns']:
+            if key in data:
+                processed_data[key] = np.array(data[key], dtype=np.float32)
+                
+        # 处理动作 (兼容 List[Dict] -> Dict[Array])
+        if 'actions' in data:
+            if isinstance(data['actions'], list):
+                # 调用脚本中已定义的 restructure_actions 函数进行转换
+                processed_data['actions'] = restructure_actions(data['actions'])
+            else:
+                processed_data['actions'] = data['actions']
+                
+        # 2. 存入 addon_dict 并进行容量剪裁
+        # 假设 batch 维度在第 0 维
+        for k in self.addon_dict:
+            if k not in processed_data:
+                continue
+                
+            if k == 'actions':
+                for sub_k in self.addon_dict[k]:
+                    if sub_k in processed_data[k]:
+                        old_arr = self.addon_dict[k][sub_k]
+                        new_arr = processed_data[k][sub_k]
+                        
+                        # 拼接
+                        concat_arr = np.concatenate([old_arr, new_arr], axis=0)
+                        
+                        # 剪裁（保留最新的 max_size 个）
+                        if len(concat_arr) > self.max_size:
+                            concat_arr = concat_arr[-self.max_size:]
+                            
+                        self.addon_dict[k][sub_k] = concat_arr
+            else:
+                old_arr = self.addon_dict[k]
+                new_arr = processed_data[k]
+                
+                concat_arr = np.concatenate([old_arr, new_arr], axis=0)
+                
+                if len(concat_arr) > self.max_size:
+                    concat_arr = concat_arr[-self.max_size:]
+                    
+                self.addon_dict[k] = concat_arr
+
+    def read(self, batch_size):
+        """
+        拼接 init_dict 和 addon_dict，然后随机采样 batch_size 大小的数据
+        """
+        # 1. 拼接 init 和 addon
+        combined = {}
+        # 为了获取总长度，找一个非字典的 key (如 states)
+        sample_key = 'states'
+        total_len = len(self.init_dict[sample_key]) + len(self.addon_dict[sample_key])
+        
+        # 2. 生成随机索引
+        # 如果请求大小超过总数据量，允许重复采样 (replace=True) 或仅返回全部 (视需求定，这里假设数据够多用 randint)
+        indices = np.random.randint(0, total_len, size=batch_size)
+        
+        # 3. 拼接并采样 (Full Concat -> Sample)
+        for k in self.init_dict:
+            if k == 'actions':
+                combined[k] = {}
+                sampled_sub = {}
+                for sub_k in self.init_dict[k]:
+                    # 拼接
+                    full_arr = np.concatenate([self.init_dict[k][sub_k], self.addon_dict[k][sub_k]], axis=0)
+                    # 采样
+                    sampled_sub[sub_k] = full_arr[indices]
+                combined[k] = sampled_sub
+            else:
+                full_arr = np.concatenate([self.init_dict[k], self.addon_dict[k]], axis=0)
+                combined[k] = full_arr[indices]
+                
+        return combined
+
+    def clear(self):
+        """
+        只清空 addon_dict，init_dict 保持不变
+        """
+        for k in self.addon_dict:
+            if k == 'actions':
+                for sub_k in self.addon_dict[k]:
+                    shape = list(self.addon_dict[k][sub_k].shape)
+                    shape[0] = 0 # 长度归零
+                    self.addon_dict[k][sub_k] = np.zeros(shape, dtype=self.addon_dict[k][sub_k].dtype)
+            else:
+                shape = list(self.addon_dict[k].shape)
+                shape[0] = 0
+                self.addon_dict[k] = np.zeros(shape, dtype=self.addon_dict[k].dtype)
+        print("[IL_transition_buffer] Addon buffer cleared.")
+
+
 # 加载数据
-il_transition_dict, transition_dict = load_il_and_transitions(
+original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
     "il_transitions_combat_LR.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
 # --- 关键步骤：执行数据重构 ---
-if il_transition_dict is not None:
+if original_il_transition_dict is not None:
     # 这里完成 (Batch, Key) -> (Key, Batch) 的转换
-    il_transition_dict['actions'] = restructure_actions(il_transition_dict['actions'])
+    original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict['actions'])
     
     # 顺便确保 states 和 returns 也是标准的 float32 numpy array
-    il_transition_dict['states'] = np.array(il_transition_dict['states'], dtype=np.float32)
-    il_transition_dict['returns'] = np.array(il_transition_dict['returns'], dtype=np.float32)
+    original_il_transition_dict['states'] = np.array(original_il_transition_dict['states'], dtype=np.float32)
+    original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
 
 # ------------------------------------------------------------------
 # 参数与环境配置
@@ -171,7 +313,8 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 # k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.1} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+il_batch_size = 100
 
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
@@ -211,11 +354,11 @@ adv_agent = copy.deepcopy(student_agent)
 
 if __name__ == "__main__":
     
-    if il_transition_dict is None:
+    if original_il_transition_dict is None:
         print("No il_transitions_combat file found.")
         sys.exit(1)
 
-    summarize(il_transition_dict)
+    summarize(original_il_transition_dict)
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
@@ -235,12 +378,12 @@ if __name__ == "__main__":
     
     print("Start MARWIL Training...")
 
-    # === 二选一 模仿训练循环 ===
-    # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
+    # === 模仿训练循环 ===
+    # 现在 original_il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
     for epoch in range(IL_epoches): 
         avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
-            il_transition_dict, 
+            original_il_transition_dict, 
             beta=1.0, 
             batch_size=128, # 显存如果够大可以适当调大
             label_smoothing=0.3
@@ -255,28 +398,13 @@ if __name__ == "__main__":
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
     print("IL Training Finished.")
-    # === ===
     
-    # === 二选一 加载打靶预训练的智能体 ===
-    # from Utilities.LocateDirAndAgents2 import *
-    # pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
-    # pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫_强密集奖励_左右")
-    # pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
-    
-    # if pre_train_agent_path:
-    #     print(f"Loading Actor from: {pre_train_agent_path}")
-    #     # [Fix] 添加 strict=False 以兼容旧权重文件（忽略缺失的 log_temp 参数）
-    #     actor_wrapper.load_state_dict(torch.load(pre_train_agent_path, map_location=device, weights_only=1), strict=False)
-    
-    # # 加载 critic
-    # critic_path = os.path.join(pre_train_latest_log_dir, "critic.pt")
-    # if os.path.exists(critic_path):
-    #     print(f"Loading Critic from: {critic_path}")
-    #     student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device, weights_only=1), strict=False)
-    # else:
-    #     print(f"Warning: Critic file {critic_path} not found.")
-    
-    # === ===
+    # --- 新增：实例化混合缓冲区 ---
+    il_transition_buffer = None
+    if IL_epoches > 0:
+        print("Initializing IL Transition Buffer...")
+        # addon_dict 大小限制，可根据显存调整，例如 20000
+        il_transition_buffer = IL_transition_buffer(original_il_transition_dict, max_size=20000)
     
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -345,8 +473,8 @@ if __name__ == "__main__":
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = {
         "Rule_0": INITIAL_ELO,
-        # "Rule_1": INITIAL_ELO,
-        # "Rule_2": INITIAL_ELO
+        "Rule_1": INITIAL_ELO,
+        "Rule_2": INITIAL_ELO
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
@@ -422,10 +550,10 @@ if __name__ == "__main__":
     r_action_list = []
     b_action_list = []
     
-    weight_reward_0 = np.array([1,1,10])
+    weight_reward_0 = np.array([1,1,1])
     
     # 修改：初始化增加 'obs' 键
-    transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
+    transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     
     # --- 新增：测试回合控制变量 ---
     trigger = 50e3
@@ -459,6 +587,9 @@ if __name__ == "__main__":
 
         # -- 训练模式 --
         else: # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
+            ego_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+            enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+            
             # 1. 计算当前排位 rank_pos
             valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
             if not valid_elo_values:
@@ -546,8 +677,11 @@ if __name__ == "__main__":
         # 修改：分别记录决策时的 Obs (Actor用) 和 State (Critic用)
         last_decision_obs = None 
         last_decision_state = None
+        last_enm_decision_obs = None
+        last_enm_decision_state = None
         
         current_action = None
+        current_enm_action = None
         b_rew_event, b_rew_constraint, b_rew_shaping = 0,0,0
         
         # 新增：每回合的死亡查询表（0 表示存活，1 表示已记录死亡瞬间）
@@ -574,9 +708,9 @@ if __name__ == "__main__":
                 break
             # 修改：同时获取局部观测(pomdp=1)和全局状态(pomdp=0)
             r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
-            
             b_obs, b_check_obs = env.obs_1v1('b', pomdp=1) # Actor Input
             b_state_global, _ = env.obs_1v1('b', reward_fn=1)  # Critic Input
+            r_state_global, _ = env.obs_1v1('r', reward_fn=1)
             
 
             # --- 智能体决策 ---
@@ -584,17 +718,24 @@ if __name__ == "__main__":
             if steps_of_this_eps % action_cycle_multiplier == 0:
                 # # **关键点 1: 完成并存储【上一个】动作周期的经验**
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
-                if steps_of_this_eps > 0 and not dead_dict['b']: # 临时接替一下 active mask
+                if steps_of_this_eps > 0: # and not dead_dict['b']:
                     # --- 新增：测试模式下不存储经验 ---
                     if not is_testing:
                         # 修改：传入 last_decision_obs 和 last_decision_state
-                        transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False)
+                        transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                        # 保存当前对局中的状态转移
+                        ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
                 # 1. 记录新周期的起始状态
                 # 修改：更新 obs 和 state 两个变量
                 last_decision_obs = b_obs
                 last_decision_state = b_state_global
+                
+                last_enm_decision_obs = r_obs
+                last_enm_decision_state = r_state_global
                 # 2. student_agent 产生一个动作
                 
                 # 红方(对手决策)
@@ -602,6 +743,9 @@ if __name__ == "__main__":
                 if adv_is_rule:
                     # [Fix] 传入选定的 rule_num
                     r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
+                    r_action_exec = {'cat': None, 'bern': None}
+                    r_action_exec['cat'] = np.array([r_action_label])
+                    r_action_exec['bern'] = np.array([r_fire], dtype=np.float32)
                 else:
                     # [Fix] NN 对手决策
                     r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
@@ -643,9 +787,10 @@ if __name__ == "__main__":
                 b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
+                current_enm_action = {'cat': r_action_exec['cat'], 'bern': r_action_exec['bern']}
                 
             if adv_is_rule:
-                r_maneuver = env.maneuver14(env.RUAV, r_action_label)
+                r_maneuver = env.maneuver14LR(env.RUAV, r_action_label) # 同步动作空间，现在都是区分左右
             else:
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
 
@@ -653,15 +798,15 @@ if __name__ == "__main__":
 
             env.step(r_maneuver, b_maneuver)
             done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
-            done = done
+            _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
             
             reward_for_show = b_rew_event + b_rew_constraint
             
             weight_reward = weight_reward_0
-            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
-            weight_reward[2] = 0.0
+            # weight_reward[2] = 0.0
             
             reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
+            reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * weight_reward)
             
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
@@ -669,12 +814,12 @@ if __name__ == "__main__":
                 # print(b_rew_event, b_rew_constraint, b_rew_shaping)
                 # print()
             
-            if dead_dict['b'] == 0:
-                # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储
-                next_b_obs, next_b_check_obs = env.obs_1v1('b', pomdp=1)
-                next_b_state_global, _ = env.obs_1v1('b', reward_fn=1) # 获取全局Next State
-                if env.BUAV.dead:
-                    dead_dict['b'] = 1
+            # if dead_dict['b'] == 0:
+            # 修改：在死亡检测时，如果存活，也需要同时更新 next_b_obs 和 next_b_state_global 用于回合结束时的存储
+            # next_b_obs, next_b_check_obs = env.obs_1v1('b', pomdp=1)
+            next_b_state_global, _ = env.obs_1v1('b', reward_fn=1) # 获取全局Next State
+            next_r_state_global, _ = env.obs_1v1('r', reward_fn=1)
+            dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
 
             # --- 新增：测试模式下不累加 total_steps ---
             if not is_testing:
@@ -691,7 +836,9 @@ if __name__ == "__main__":
             if not is_testing:
                 # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
                 # 修改：传入最后时刻的 next_b_state_global 作为 Next State
-                transition_dict = append_b_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True)
+                transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
             episode_return += reward_for_show
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
@@ -801,18 +948,43 @@ if __name__ == "__main__":
             logger.add("train/2 draw", env.draw, total_steps)
             logger.add("train/11 episode/step", i_episode, total_steps)
         
+        if is_testing == False:
+            # 添加当前回合回放信息和对手回放信息
+            # 自己
+            new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
+            new_il_transition_dict['obs'] = ego_transition_dict['obs']
+            new_il_transition_dict['states'] = ego_transition_dict['states']
+            new_il_transition_dict['actions'] = ego_transition_dict['actions']
+            # 将状态转移处理成蒙特卡洛回报形式
+            new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
+                                                                        ego_transition_dict['rewards'], \
+                                                                        ego_transition_dict['dones'])
+            il_transition_buffer.add(new_il_transition_dict)
+            
+            # 对手
+            new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
+            new_il_transition_dict['obs'] = enm_transition_dict['obs']
+            new_il_transition_dict['states'] = enm_transition_dict['states']
+            new_il_transition_dict['actions'] = enm_transition_dict['actions']
+            # 将状态转移处理成蒙特卡洛回报形式
+            new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
+                                                                        enm_transition_dict['rewards'], \
+                                                                        enm_transition_dict['dones'])
+            il_transition_buffer.add(new_il_transition_dict)
+
+
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            
             #===========================================
             # 混合强化学习与模仿学习
+            il_transition_dict = il_transition_buffer.read(il_batch_size)
             # 1. 定义 IL 衰减的最大轮次
             # 使用浮点数以确保计算精度
             MAX_IL_EPISODE = 500 # 100.0 
             # 2. 计算当前 IL 权重 alpha_il (线性衰减，确保不小于 0)
             # 当 i_episode = 0 时，alpha_il = 1.0
             # 当 i_episode = 100 时，alpha_il = 0.0
-            alpha_il = max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
+            alpha_il = 1.0 # max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
 
             # 3. 调用混合更新函数，传入计算出的 alpha
             student_agent.mixed_update(
