@@ -10,7 +10,6 @@ import json
 import re
 import time  # 确保引入 time 模块
 from datetime import datetime
-
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules_new import *
@@ -19,6 +18,29 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
+
+# 超参数
+actor_lr = 1e-4 # 4 1e-3
+critic_lr = actor_lr * 5 # * 5
+IL_epoches= 180  # 180 检查一下，这个模仿学习可能有问题!!!
+max_steps = 4 * 165e4
+hidden_dim = [128, 128, 128]
+gamma = 0.995
+lmbda = 0.995
+epochs = 4 # 10
+eps = 0.2
+# k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+il_batch_size = 100
+alpha_il = 1.0
+il_batch_size=128 # 模仿学习minibatch大小
+mini_batch_size_mixed = 64 # 混合更新minibatch大小
+beta_mixed = 1.0
+label_smoothing=0.3
+
+trigger0 = 50e3
+trigger_delta = 50e3
+
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -302,20 +324,6 @@ parser.add_argument("--max-episode-len", type=float, default=10*60, help="maximu
 parser.add_argument("--R-cage", type=float, default=55e3, help="")
 args = parser.parse_args()
 
-# 超参数
-actor_lr = 1e-4 # 4 1e-3
-critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180  # 180 检查一下，这个模仿学习可能有问题!!!
-max_steps = 4 * 165e4
-hidden_dim = [128, 128, 128]
-gamma = 0.995
-lmbda = 0.995
-epochs = 4 # 10
-eps = 0.2
-# k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
-il_batch_size = 100
-
 env = ChooseStrategyEnv(args)
 state_dim = env.obs_dim
 
@@ -384,9 +392,9 @@ if __name__ == "__main__":
     for epoch in range(IL_epoches): 
         avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
             original_il_transition_dict, 
-            beta=1.0, 
-            batch_size=128, # 显存如果够大可以适当调大
-            label_smoothing=0.3
+            beta=beta_mixed, 
+            batch_size=il_batch_size, # 显存如果够大可以适当调大
+            label_smoothing=label_smoothing
         )
         
         # 记录
@@ -556,7 +564,7 @@ if __name__ == "__main__":
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     
     # --- 新增：测试回合控制变量 ---
-    trigger = 50e3
+    trigger = trigger0
     test_run = 0
     
     while total_steps < int(max_steps):
@@ -876,7 +884,7 @@ if __name__ == "__main__":
                 test_run += 1
             else: # test_run == 2, 测试全部完成
                 test_run = 0
-                trigger += 50e3
+                trigger += trigger_delta
                 print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
             
             # ELO 在测试回合不更新 (移除原有的打印语句)
@@ -980,11 +988,11 @@ if __name__ == "__main__":
             il_transition_dict = il_transition_buffer.read(il_batch_size)
             # 1. 定义 IL 衰减的最大轮次
             # 使用浮点数以确保计算精度
-            MAX_IL_EPISODE = 500 # 100.0 
+            # MAX_IL_EPISODE = 500 # 100.0 
             # 2. 计算当前 IL 权重 alpha_il (线性衰减，确保不小于 0)
             # 当 i_episode = 0 时，alpha_il = 1.0
             # 当 i_episode = 100 时，alpha_il = 0.0
-            alpha_il = 1.0 # max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
+            # alpha_il = 1.0 # max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
 
             # 3. 调用混合更新函数，传入计算出的 alpha
             student_agent.mixed_update(
@@ -992,10 +1000,10 @@ if __name__ == "__main__":
                 il_transition_dict,       # IL 数据
                 adv_normed=True,          # 沿用 RL 实例中的优势归一化
                 il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
-                label_smoothing=0.3,      # 沿用 IL 实例中的标签平滑
+                label_smoothing=label_smoothing,      # 沿用 IL 实例中的标签平滑
                 alpha=alpha_il,           # 核心：传入随时间衰减的权重
-                beta=1.0,                  # 沿用 IL 实例中的 beta
-                mini_batch_size = 64
+                beta=beta_mixed,                  # 沿用 IL 实例中的 beta
+                mini_batch_size = mini_batch_size_mixed
             )
             decide_steps_after_update = 0
             #===========================================
