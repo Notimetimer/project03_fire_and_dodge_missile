@@ -725,7 +725,10 @@ class PPOHybrid:
         entropy_bern_list = []
         entropy_cont_list = []
         
-        #  防止除零的小数
+        # [新增] 初始化样本统计计数器 (包含重复更新累加)
+        ppo_samples_total = 0
+        ppo_valid_samples_total = 0
+
         mask_eps = 1e-5
         
         num_samples = actor_inputs.size(0)
@@ -786,6 +789,10 @@ class PPOHybrid:
                 surrogate_loss = -torch.min(surr1, surr2)
                 # active_sum 已经在上面计算过
                 
+                # [新增] 统计 PPO 样本
+                ppo_samples_total += mb_active_masks.numel()
+                ppo_valid_samples_total += mb_active_masks.sum().item()
+
                 actor_loss = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
                 # [修改] 分项 Entropy Loss 计算
@@ -1196,6 +1203,12 @@ class PPOHybrid:
         
         entropy_cat_list, entropy_bern_list, entropy_cont_list = [], [], []
 
+        # [新增] 初始化样本统计计数器 (包含重复更新累加)
+        ppo_samples_total = 0
+        ppo_valid_samples_total = 0
+        il_samples_total = 0
+        il_valid_samples_total = 0
+
         mask_eps = 1e-5
         rl_num_samples = rl_actor_inputs.size(0)
         if mini_batch_size is None:
@@ -1264,6 +1277,10 @@ class PPOHybrid:
                 surrogate_loss = -torch.min(surr1, surr2)
                 # active_sum 已经在上面计算过
                 
+                # [新增] 统计 PPO 样本
+                ppo_samples_total += mb_active_masks.numel()
+                ppo_valid_samples_total += mb_active_masks.sum().item()
+
                 actor_loss_rl = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
                 # [修改] 分项 Entropy Loss 计算 (Mixed Update)
@@ -1339,6 +1356,10 @@ class PPOHybrid:
                         il_raw_weights = torch.exp(beta * il_adv)
                         F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
                         il_weights = torch.clamp(il_raw_weights * F_word, max=max_weight)
+
+                        # [新增] 统计 IL 样本强度
+                        il_samples_total += curr_il_batch_size
+                        il_valid_samples_total += F_word.sum().item()
 
                     # compute_il_loss 接口不变
                     raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing)
@@ -1420,6 +1441,12 @@ class PPOHybrid:
         self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
         self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
+
+        # [新增] 赋值有效样本监控项
+        self.PPO_samples = ppo_samples_total
+        self.PPO_valid_samples = ppo_valid_samples_total
+        self.IL_samples = il_samples_total
+        self.IL_valid_samples = il_valid_samples_total
 
         # 计算 Explained Variance (对比 Value 更新前后)
         mask_bool = rl_active_masks.squeeze(-1).bool().cpu().numpy()

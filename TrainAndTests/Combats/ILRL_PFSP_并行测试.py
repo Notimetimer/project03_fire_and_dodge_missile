@@ -20,10 +20,13 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
+trigger0 = 5e3 # 50e3
+trigger_delta = 5e3 # 50e3
+
 # ==========================================
-# [新增] 并行测试 Worker 函数
+# [修改] 并行测试 Worker 函数 (增加了 dt_maneuver_val 参数)
 # ==========================================
-def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, action_dims_dict, device_name='cpu'):
+def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, action_dims_dict, dt_maneuver_val, device_name='cpu'):
     """
     在独立进程中运行一场对战。
     """
@@ -34,7 +37,7 @@ def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, act
     test_env = ChooseStrategyEnv(env_args, tacview_show=0)
     test_env.shielded = 1
     test_env.dt_move = 0.05
-    test_env.dt_maneuver = dt_maneuver # 确保 dt_maneuver 可访问
+    test_env.dt_maneuver = dt_maneuver_val # 使用传入的值，不依赖全局变量
     
     # 2. 局部初始化网络并加载权重
     net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
@@ -78,7 +81,7 @@ def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, act
         done, _, _, _ = test_env.combat_terminate_and_reward('b', b_action_label, False, action_cycle)
         steps += 1
         
-        if steps * dt_maneuver > env_args.max_episode_len: break
+        if steps * dt_maneuver_val > env_args.max_episode_len: break
 
     # 返回结果：1 赢, -1 输, 0 平
     result = 1 if test_env.win else (-1 if test_env.lose else 0)
@@ -280,8 +283,10 @@ adv_agent = copy.deepcopy(student_agent)
 
 if __name__ == "__main__":
     mp.set_start_method('spawn', force=True) # 重要：CUDA 环境下推荐使用 spawn
-    # 初始化进程池
-    test_pool = mp.Pool(processes=3) 
+    
+    # [修改] 使用 maxtasksperchild 防止内存泄漏 (如 JSBSim 未完全释放)
+    test_pool = mp.Pool(processes=3, maxtasksperchild=10) 
+    
     pending_tests = [] # 用于存放正在运行的测试任务
     
     if il_transition_dict is None:
@@ -308,7 +313,7 @@ if __name__ == "__main__":
     
     print("Start MARWIL Training...")
 
-    # === 二选一 模仿训练循环 ===
+    # === 模仿训练循环 ===
     # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
     for epoch in range(IL_epoches): 
@@ -328,28 +333,7 @@ if __name__ == "__main__":
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
     print("IL Training Finished.")
-    # === ===
     
-    # === 二选一 加载打靶预训练的智能体 ===
-    # from Utilities.LocateDirAndAgents2 import *
-    # pre_train_logs_root_dir = os.path.join(project_root, "logs/combat")
-    # pre_train_latest_log_dir = get_latest_log_dir(pre_train_logs_root_dir, "打莽夫_强密集奖励_左右")
-    # pre_train_agent_path = find_latest_agent_path(pre_train_latest_log_dir)
-    
-    # if pre_train_agent_path:
-    #     print(f"Loading Actor from: {pre_train_agent_path}")
-    #     # [Fix] 添加 strict=False 以兼容旧权重文件（忽略缺失的 log_temp 参数）
-    #     actor_wrapper.load_state_dict(torch.load(pre_train_agent_path, map_location=device, weights_only=1), strict=False)
-    
-    # # 加载 critic
-    # critic_path = os.path.join(pre_train_latest_log_dir, "critic.pt")
-    # if os.path.exists(critic_path):
-    #     print(f"Loading Critic from: {critic_path}")
-    #     student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device, weights_only=1), strict=False)
-    # else:
-    #     print(f"Warning: Critic file {critic_path} not found.")
-    
-    # === ===
     
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -483,7 +467,7 @@ if __name__ == "__main__":
         if m: return m.group(1)
         return name
 
-    # 循环变量初始化
+    # --- 循环变量初始化 ---
     i_episode = 0 
     total_steps = 0
     training_start_time = time.time()
@@ -495,13 +479,13 @@ if __name__ == "__main__":
     r_action_list = []
     b_action_list = []
     
-    weight_reward_0 = np.array([1,1,10])
+    weight_reward_0 = np.array([1,1,1])
     
     # 修改：初始化增加 'obs' 键
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
     
     # --- 新增：测试回合控制变量 ---
-    trigger = 50e3
+    trigger = trigger0
     test_run = 0
     
     while total_steps < int(max_steps):
@@ -523,26 +507,28 @@ if __name__ == "__main__":
             for r_idx in [0, 1, 2]:
                 res_obj = test_pool.apply_async(
                     test_worker, 
-                    args=(current_weights, r_idx, args, 'cpu')
+                    args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu') # [修改] 显式传入 dt_maneuver
                 )
                 pending_tests.append((res_obj, total_steps)) # 记录任务对象和触发时的步数
             
-            trigger += 50e3 # 更新下一次触发阈值
+            trigger += trigger_delta # 更新下一次触发阈值
 
         # --- 结果轮询记录 (非阻塞) ---
-        finished_tasks = []
-        for task in pending_tests:
-            res_obj, recorded_step = task
-            if res_obj.ready(): # 检查进程是否跑完
-                rule_num, outcome = res_obj.get()
-                # 在主进程的 Logger 中记录结果
-                logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
-                print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
-                finished_tasks.append(task)
-        
-        # 清理已完成的任务
-        for task in finished_tasks:
-            pending_tests.remove(task)
+        if len(pending_tests) > 0:
+            finished_tasks = []
+            for task in pending_tests:
+                res_obj, recorded_step = task
+                if res_obj.ready(): # 检查进程是否跑完
+                    # [修改] 直接获取结果，不再包裹 try-except
+                    rule_num, outcome = res_obj.get()
+                    # 在主进程的 Logger 中记录结果
+                    logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
+                    print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
+                    finished_tasks.append(task)
+            
+            # 清理已完成的任务
+            for task in finished_tasks:
+                pending_tests.remove(task)
             
 
         # -- 测试模式 --
@@ -750,8 +736,6 @@ if __name__ == "__main__":
             reward_for_show = b_rew_event + b_rew_constraint
             
             weight_reward = weight_reward_0
-            # weight_reward[2] = max(0.2, (1 - total_steps/500e3) * weight_reward_0[2])
-            weight_reward[2] = 0.0
             
             reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
             
@@ -797,101 +781,72 @@ if __name__ == "__main__":
         if env.crash(env.BUAV):
             print('b 撞地')
 
-        # --- 新增：测试回合结束后的处理 ---
-        if 0:
-            # # 记录独立的测试日志（已记录为 0/1 布尔型）
-            # logger.add(f"test/0 win_vs_rule{rule_num}", env.win, total_steps)
-            # logger.add(f"test/1 lose_vs_rule{rule_num}", env.lose, total_steps)
-            # logger.add(f"test/2 draw_vs_rule{rule_num}", env.draw, total_steps)
+        # --- [Optimized] ELO 更新与策略池清洗逻辑 (只在训练回合执行) ---
+        actual_score = 0.5 # Default draw
+        if env.win: actual_score = 1.0
+        elif env.lose: actual_score = 0.0
+        
+        prev_main_elo = main_agent_elo
+        
+        # 1. 判定对手是否为“待踢出”类型 (只针对非规则智能体)
+        is_rule_agent = "Rule" in selected_opponent_name
+        is_kicked_opponent = False
+        
+        # 踢出判定条件：
+        if not is_rule_agent:
+            '''
+            简单粗暴的对手筛选策略：
+            1、撞地
+            2、零开火失败
+            3、对着空气开火的对手(任1枚导弹在角度>pi/3或者4枚以上导弹均在40km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
+            4、
+            '''
+            cond_crash = env.crash(env.RUAV) # 撞地
+            r_fired_count = 6 - env.RUAV.ammo
+            cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
             
-            # 不再计算 numeric actual_score，直接以字符串输出结果
-            if env.win:
-                outcome = "WIN"
-                logger.add(f"test/agent_vs_rule{rule_num}", 1, total_steps)
-            elif env.lose:
-                outcome = "LOSE"
-                logger.add(f"test/agent_vs_rule{rule_num}", -1, total_steps)
-            else:
-                outcome = "DRAW"
-                logger.add(f"test/agent_vs_rule{rule_num}", 0, total_steps)
+            if cond_crash or cond_coward:
+                is_kicked_opponent = True
+                print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name} (Crash={cond_crash}, Coward={cond_coward})")
 
-            print(f"  Test Result vs {selected_opponent_name}: {outcome}. ELO not updated during testing.")
 
-            if test_run < 2:
-                test_run += 1
-            else: # test_run == 2, 测试全部完成
-                test_run = 0
-                trigger += 20e3 # 50e3
-                print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
+        # 2. ELO 更新与记录逻辑
+        if selected_opponent_name in elo_ratings and not is_kicked_opponent:
+            # A. 正常更新 ELO：对手合格，进行 ELO 结算
+            adv_elo = elo_ratings[selected_opponent_name]
+            main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
             
-            # ELO 在测试回合不更新 (移除原有的打印语句)
-
-        else: # --- [Optimized] ELO 更新与策略池清洗逻辑 (只在训练回合执行) ---
-            actual_score = 0.5 # Default draw
-            if env.win: actual_score = 1.0
-            elif env.lose: actual_score = 0.0
+            # 更新对手 ELO
+            new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
+            elo_ratings[selected_opponent_name] = new_adv_elo
             
-            prev_main_elo = main_agent_elo
+            print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
             
-            # 1. 判定对手是否为“待踢出”类型 (只针对非规则智能体)
-            is_rule_agent = "Rule" in selected_opponent_name
-            is_kicked_opponent = False
+        elif is_kicked_opponent:
+            # B. 忽略 ELO 更新：对手不合格，主智能体的 ELO 保持不变
+            # 保持 main_agent_elo == prev_main_elo
+            print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f} (No Change due to Opponent Filter).")
             
-            # 踢出判定条件：
-            if not is_rule_agent:
-                '''
-                简单粗暴的对手筛选策略：
-                1、撞地
-                2、零开火失败
-                3、对着空气开火的对手(任1枚导弹在角度>pi/3或者4枚以上导弹均在40km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
-                4、
-                '''
-                cond_crash = env.crash(env.RUAV) # 撞地
-                r_fired_count = 6 - env.RUAV.ammo
-                cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
-                
-                if cond_crash or cond_coward:
-                    is_kicked_opponent = True
-                    print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name} (Crash={cond_crash}, Coward={cond_coward})")
+        else:
+            # C. 极端情况
+            print(f"Warning: Opponent {selected_opponent_name} not found in ELO dict. ELO not updated.")
 
 
-            # 2. ELO 更新与记录逻辑
-            if selected_opponent_name in elo_ratings and not is_kicked_opponent:
-                # A. 正常更新 ELO：对手合格，进行 ELO 结算
-                adv_elo = elo_ratings[selected_opponent_name]
-                main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
-                
-                # 更新对手 ELO
-                new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
-                elo_ratings[selected_opponent_name] = new_adv_elo
-                
-                print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
-                
-            elif is_kicked_opponent:
-                # B. 忽略 ELO 更新：对手不合格，主智能体的 ELO 保持不变
-                # 保持 main_agent_elo == prev_main_elo
-                print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f} (No Change due to Opponent Filter).")
-                
-            else:
-                # C. 极端情况
-                print(f"Warning: Opponent {selected_opponent_name} not found in ELO dict. ELO not updated.")
+        # # 3. 执行踢出操作
+        # if is_kicked_opponent:
+        #     if selected_opponent_name in elo_ratings:
+        #         del elo_ratings[selected_opponent_name]
+        #         print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
 
 
-            # # 3. 执行踢出操作
-            # if is_kicked_opponent:
-            #     if selected_opponent_name in elo_ratings:
-            #         del elo_ratings[selected_opponent_name]
-            #         print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
-
-
-            # 有没有试图发射过导弹
-            logger.add("special/0 发射的导弹数量", m_fired, total_steps)
-            # 每一场胜负变化
-            logger.add("train/1 episode_return", episode_return, total_steps)
-            logger.add("train/2 win", env.win, total_steps)
-            logger.add("train/2 lose", env.lose, total_steps)
-            logger.add("train/2 draw", env.draw, total_steps)
-            logger.add("train/11 episode/step", i_episode, total_steps)
+        # 有没有试图发射过导弹
+        logger.add("special/0 发射的导弹数量", m_fired, total_steps)
+        # 每一场胜负变化
+        logger.add("train/1 episode_return", episode_return, total_steps)
+        logger.add("train/2 win", env.win, total_steps)
+        logger.add("train/2 lose", env.lose, total_steps)
+        logger.add("train/2 draw", env.draw, total_steps)
+        logger.add("train/11 episode/step", i_episode, total_steps)
         
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
@@ -1029,7 +984,17 @@ if __name__ == "__main__":
     training_end_time = time.time()
     env.end_render()
     print("Total Steps Reached. Training Finished.")
+    
+    # [新增] 训练结束后，如果还有未完成的测试，等待它们跑完（可选）
+    if len(pending_tests) > 0:
+        print(f"Waiting for {len(pending_tests)} pending tests to finish...")
+        for res_obj, recorded_step in pending_tests:
+            rule_num, outcome = res_obj.get() # 阻塞直至完成
+            logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
+            print(f"  [Finalizing Test] Rule_{rule_num}: {outcome}")
+
     logger.close()
     
+    # [修改] 关闭进程池
     test_pool.close()
     test_pool.join()

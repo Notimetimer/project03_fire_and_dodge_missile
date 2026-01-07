@@ -31,7 +31,6 @@ epochs = 4 # 10
 eps = 0.2
 # k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
-il_batch_size = 100
 alpha_il = 1.0
 il_batch_size=128 # 模仿学习minibatch大小
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
@@ -1036,6 +1035,10 @@ if __name__ == "__main__":
             logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
             logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
             logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+            
+            # IL-PPO信号强度对比
+            logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples, total_steps)
+            logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples, total_steps)
             
             # 修改：重置 transition_dict 时保留 obs 键
             transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': [], 'active_masks': []}
