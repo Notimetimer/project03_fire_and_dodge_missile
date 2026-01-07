@@ -1030,7 +1030,7 @@ if __name__ == "__main__":
             logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
             
             # 修改：重置 transition_dict 时保留 obs 键
-            transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': []}
+            transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': [], 'active_masks': []}
             
             
         return_list.append(episode_return)
