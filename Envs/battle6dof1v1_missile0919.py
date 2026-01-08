@@ -70,6 +70,7 @@ class Battle(object):
     def __init__(self, args, tacview_show=0):
         # super(Battle, self).__init__() 
         # self.p2p_control = False
+        self.ego_side = None  # 我到底在哪一边
         self.shielded = False
         self.no_out = False
         self.alive_b_missiles = None
@@ -131,8 +132,12 @@ class Battle(object):
             self.tacview = Tacview()
             self.tacview.handshake()
             self.visualize_cage()
-
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, seed=None, options=None,):  # 重置位置和状态
+            
+    def set_ego_side(self, side='b'):
+        self.ego_side = side
+        
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, seed=None, options=None, ego_side='b'):  # 重置位置和状态
+        self.set_ego_side(ego_side)
         
         # [新增] 如果需要支持随机种子控制，可以在这里设置
         if seed is not None:

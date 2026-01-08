@@ -91,29 +91,29 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             done = 1
         # 如果敌方和敌方所有导弹都没了，且我方存活，判定为胜
         if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
-            self.win = 1
+            ego_win = 1
             done = 1
         # 如果友方和友方的所有导弹都没了，且敌方存活，判定为负
         elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
-            self.lose = 1
+            ego_lose = 1
             done = 1
         # 双杀双活时间到，就是平局
         elif done: 
-            self.draw = 1
-            
+            ego_draw = 1
+
         # # --原有判定法--
         # if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
-        #     self.win = 1
+        #     ego_win = 1
         #     done = 1
         # # 如果友方和友方的所有导弹都没了，且敌方飞机还在，判定为负
         # elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
-        #     self.lose = 1
+        #     ego_lose = 1
         #     done = 1
             
         # # 如果友方和敌方打光导弹且都存活，或双方飞机都没了，判定为平
         # elif ego.ammo == 0 and enm.ammo == 0 and (not ego.dead) and (not enm.dead) or \
         #         (ego.dead and enm.dead):
-        #     self.draw = 1
+        #     ego_draw = 1
         #     done = 1
         # else:
         #     done = 0
@@ -122,15 +122,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     # 如果超时，我方打光导弹，导弹全自爆，对手导弹还有剩，且存活，判定为负
         #     if ego.ammo + len(alive_ally_missiles) == 0 and \
         #         enm.ammo + len(alive_enm_missiles) > 0 and not enm.dead:
-        #         self.lose = 1
+        #         ego_lose = 1
         #     # 如果超时，对手打光导弹，导弹全自爆，我方导弹还有剩，且存活，判定为胜
         #     elif enm.ammo + len(alive_enm_missiles) == 0 and \
         #         ego.ammo + len(alive_ally_missiles) > 0 and not ego.dead:
-        #         self.win = 1                
+        #         ego_win = 1                
         #     # 如果超时，双方均未打光导弹/仍有导弹在空中飞，且双方均存活, 或者双方都死，判定为平
         #     else:
-        #         self.draw = 1
+        #         ego_draw = 1
 
+        # 回合的胜负取决于ego_side
+        if ego.side == self.ego_side:
+            self.win = ego_win
+            self.loss = ego_lose
+            self.draw = ego_draw
+        
         # ego_states = self.get_state(side)
         # enm_states = self.get_state(enm.side)
         # --- 3. 基础变量计算 ---
@@ -296,18 +302,18 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())
 
-            if self.win:
+            if ego_win:
                 r_event += 150 # 100 + steps_left * total_shaping_sum
-            elif self.lose:
+            elif ego_lose:
                 r_event -= 100 + steps_left * total_shaping_sum
                 if self.out_range(ego) or ego.alt < self.min_alt:
                     r_event -= 50
-            elif self.draw:
+            elif ego_draw:
                 r_event -= 50
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
-            print(f"Side: {side} | Result: {'Win' if self.win else 'Lose' if self.lose else 'Draw'}")
+            print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
             print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
