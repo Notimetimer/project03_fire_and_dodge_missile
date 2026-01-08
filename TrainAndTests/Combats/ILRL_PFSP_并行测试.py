@@ -20,8 +20,8 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
-trigger0 = 5e3 # 50e3
-trigger_delta = 5e3 # 50e3
+trigger0 = 50e3
+trigger_delta = 50e3
 
 # ==========================================
 # [修改] 并行测试 Worker 函数 (增加了 dt_maneuver_val 参数)
