@@ -872,10 +872,10 @@ if __name__ == "__main__":
                 logger.add(f"test/agent_vs_rule{rule_num}", 1, total_steps)
             elif env.lose:
                 outcome = "LOSE"
-                logger.add(f"test/agent_vs_rule{rule_num}", -1, total_steps)
+                logger.add(f"test/agent_vs_rule{rule_num}", 0, total_steps)
             else:
                 outcome = "DRAW"
-                logger.add(f"test/agent_vs_rule{rule_num}", 0, total_steps)
+                logger.add(f"test/agent_vs_rule{rule_num}", 0.5, total_steps)
 
             print(f"  Test Result vs {selected_opponent_name}: {outcome}. ELO not updated during testing.")
 
