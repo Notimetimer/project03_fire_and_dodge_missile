@@ -8,12 +8,12 @@ import random
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from _context import *
+from _context import * # 包含 project_root
 from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
 # --- 2. 辅助函数 ---
-from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
+from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 
 
 # --- 1. 参数配置 ---
@@ -136,8 +136,8 @@ if __name__ == "__main__":
                     red_agent = random.choice(teams[j])  # 红方（列）
                     
                     # 加载权重
-                    actor_blue.load_state_dict(torch.load(blue_agent['path'], map_location=device))
-                    actor_red.load_state_dict(torch.load(red_agent['path'], map_location=device))
+                    actor_blue.load_state_dict(torch.load(blue_agent['path'], map_location=device, weights_only=True))
+                    actor_red.load_state_dict(torch.load(red_agent['path'], map_location=device, weights_only=True))
                     actor_blue.eval(); actor_red.eval()
                     
                     # 仿真：顺序固定为 (blue, red)，返回蓝方胜率
