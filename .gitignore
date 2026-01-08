@@ -46,3 +46,5 @@ __pycache__/
 /TrainAndTests/__pycache__
 /Envs/__pycache__
 *.pyc
+TrainAndTests/Combats/IL/il_transitions_combat_LR.pkl
+TrainAndTests/Combats/IL/transition_dict_combat_LR.pkl
