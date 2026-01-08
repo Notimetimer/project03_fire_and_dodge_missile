@@ -14,7 +14,7 @@ import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-from BasicRules import *
+from BasicRules_new import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
@@ -67,13 +67,14 @@ def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, act
             
             # 蓝方 (神经网络 - 确定性决策)
             with torch.no_grad():
-                # explore=0 或 {'cat':0, 'bern':1} 取决于你的实现，这里强制选择概率最大的
-                b_act_exec, _, _, _ = actor.take_action(b_obs, explore={'cont':0, 'cat':0, 'bern':1})
+                # [修复] 调用 actor.get_action 而不是 take_action
+                # get_action 返回 4 个值: actions_exec, actions_raw, h_state, actions_dist_check
+                b_act_exec, _, _, _ = actor.get_action(b_obs, explore={'cont':0, 'cat':0, 'bern':1})
                 b_action_label = b_act_exec['cat'][0]
                 if b_act_exec['bern'][0]: launch_missile_immediately(test_env, 'b')
 
         # 物理步
-        r_maneuver = test_env.maneuver14(test_env.RUAV, r_action_label)
+        r_maneuver = test_env.maneuver14LR(test_env.RUAV, r_action_label)
         b_maneuver = test_env.maneuver14LR(test_env.BUAV, b_action_label)
         test_env.step(r_maneuver, b_maneuver)
         
@@ -206,21 +207,21 @@ def append_b_experience(td, obs, state, action, reward, next_state, done):
     td['dones'].append(done)
     return td
 
-# 加载数据
-il_transition_dict, transition_dict = load_il_and_transitions(
-    os.path.join(cur_dir, "IL"),
-    "il_transitions_combat_LR.pkl",
-    "transition_dict_combat_LR.pkl"
-)
+# # 加载数据
+# il_transition_dict, transition_dict = load_il_and_transitions(
+#     os.path.join(cur_dir, "IL"),
+#     "il_transitions_combat_LR.pkl",
+#     "transition_dict_combat_LR.pkl"
+# )
 
-# --- 关键步骤：执行数据重构 ---
-if il_transition_dict is not None:
-    # 这里完成 (Batch, Key) -> (Key, Batch) 的转换
-    il_transition_dict['actions'] = restructure_actions(il_transition_dict['actions'])
+# # --- 关键步骤：执行数据重构 ---
+# if il_transition_dict is not None:
+#     # 这里完成 (Batch, Key) -> (Key, Batch) 的转换
+#     il_transition_dict['actions'] = restructure_actions(il_transition_dict['actions'])
     
-    # 顺便确保 states 和 returns 也是标准的 float32 numpy array
-    il_transition_dict['states'] = np.array(il_transition_dict['states'], dtype=np.float32)
-    il_transition_dict['returns'] = np.array(il_transition_dict['returns'], dtype=np.float32)
+#     # 顺便确保 states 和 returns 也是标准的 float32 numpy array
+#     il_transition_dict['states'] = np.array(il_transition_dict['states'], dtype=np.float32)
+#     il_transition_dict['returns'] = np.array(il_transition_dict['returns'], dtype=np.float32)
 
 # ------------------------------------------------------------------
 # 参数与环境配置
@@ -233,7 +234,7 @@ args = parser.parse_args()
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0  # 180 检查一下，这个模仿学习可能有问题!!!
+# IL_epoches= 0
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -289,12 +290,6 @@ if __name__ == "__main__":
     
     pending_tests = [] # 用于存放正在运行的测试任务
     
-    if il_transition_dict is None:
-        print("No il_transitions_combat file found.")
-        sys.exit(1)
-
-    summarize(il_transition_dict)
-
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
     mission_name = 'RL_combat_PFSP_简单熵_区分左右_常数奖励_无rule'
@@ -312,27 +307,6 @@ if __name__ == "__main__":
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
     
     print("Start MARWIL Training...")
-
-    # === 模仿训练循环 ===
-    # 现在 il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
-    # 能够被 MARWIL_update 里的 items() 正常遍历
-    for epoch in range(IL_epoches): 
-        avg_actor_loss, avg_critic_loss, c = student_agent.MARWIL_update(
-            il_transition_dict, 
-            beta=1.0, 
-            batch_size=128, # 显存如果够大可以适当调大
-            label_smoothing=0.3
-        )
-        
-        # 记录
-        if epoch % 1 == 0:
-            logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)
-            logger.add("il_train/avg_critic_loss", avg_critic_loss, epoch)
-            # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
-
-            print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
-
-    print("IL Training Finished.")
     
     
     # ==============================================================================
@@ -416,7 +390,7 @@ if __name__ == "__main__":
     main_agent_elo = INITIAL_ELO
 
     # [新增] 如果没有历史对手（例如第一次运行且屏蔽了规则），保存当前初始策略作为 actor_rein0
-    if (not elo_ratings) or IL_epoches>0:
+    if (not elo_ratings):
         init_opponent_name = "actor_rein0"
         init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
         torch.save(student_agent.actor.state_dict(), init_opponent_path)
