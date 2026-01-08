@@ -16,7 +16,7 @@ import datetime
 
 from _context import *
 
-from BasicRules import basic_rules
+from BasicRules_new import basic_rules
 # from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
 from Envs.Tasks.ChooseStrategyEnv2_2 import * # 1218-104003
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
@@ -45,7 +45,7 @@ def create_initial_state():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右_无淘汰机制_开火负熵', help="Mission name to find the log directory.")
+    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习', help="Mission name to find the log directory.")
     args = parser.parse_args()
 
     'RL_combat_PFSP_简单熵_区分左右'
@@ -54,6 +54,7 @@ if __name__ == "__main__":
     '打莽夫_左右_CA_4epochs'
     'RL_combat_PFSP_简单熵_区分左右_无淘汰机制'
     'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_开火负熵'
+    'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习'
     
     
     # --- 环境和模型参数 (必须与训练时一致) ---
@@ -100,7 +101,7 @@ if __name__ == "__main__":
     env.no_out = 0
     
     # --- 循环测试 ---
-    rule_opponents = [0, 1, 2]
+    rule_opponents = [0, 1, 2, 3, 4]
     t_bias = 0
 
     try:
@@ -158,7 +159,7 @@ if __name__ == "__main__":
                     # print(f"Time: {env.t:.1f}s, Blue Action Probs: Maneuver={b_action_check['cat']}, Fire={b_action_check['bern'][0]:.2f}")
 
                 # 执行机动并步进
-                r_maneuver = env.maneuver14(env.RUAV, r_action_label)
+                r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                 env.step(r_maneuver, b_maneuver)
                 done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)

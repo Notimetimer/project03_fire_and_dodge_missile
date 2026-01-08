@@ -18,28 +18,31 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
+from prepare_il_datas import run_rules
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180  # 180 检查一下，这个模仿学习可能有问题!!!
+IL_epoches= 180
 max_steps = 4 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-# k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
 alpha_il = 1.0
 il_batch_size=128 # 模仿学习minibatch大小
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
 beta_mixed = 1.0
 label_smoothing=0.3
-
+action_cycle_multiplier = 30 # 6s 决策一次
 trigger0 = 50e3
 trigger_delta = 50e3
+weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 
+# 现场产生奖励函数一致的示范数据
+run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier)
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -469,7 +472,6 @@ if __name__ == "__main__":
                                     }
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
-    action_cycle_multiplier = 30 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
     transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 
 
@@ -556,9 +558,7 @@ if __name__ == "__main__":
     
     r_action_list = []
     b_action_list = []
-    
-    weight_reward_0 = np.array([1,1,1])
-    
+        
     # 修改：初始化增加 'obs' 键
     transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     
