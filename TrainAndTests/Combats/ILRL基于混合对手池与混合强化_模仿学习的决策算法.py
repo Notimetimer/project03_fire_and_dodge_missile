@@ -1037,8 +1037,8 @@ if __name__ == "__main__":
             logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
             
             # IL-PPO信号强度对比
-            logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples, total_steps)
-            logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples, total_steps)
+            logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
+            logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
             
             # 修改：重置 transition_dict 时保留 obs 键
             transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': [], 'active_masks': []}
@@ -1091,7 +1091,7 @@ if __name__ == "__main__":
                 
                 # 记录主智能体
                 logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
-                logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps)
+                # logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps) # 重复了
 
                 # 记录主智能体在当前所有 ELO 中的归一化排名位置：
                 # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
@@ -1130,7 +1130,20 @@ if __name__ == "__main__":
                     logger.add(raw_tag, valid_elos[k], total_steps)
                     logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
 
-        
+                # --- 插入: 记录 Latest(当前保存的 actor_key) 相对于所有存在的 Rule_* 的 ELO 差值 ---
+                if 'actor_key' in locals() and actor_key in valid_elos:
+                    latest_elo = float(valid_elos[actor_key])
+                    rule_keys_present = [rk for rk in valid_elos.keys() if rk.startswith("Rule_")]
+                    # diffs = []
+                    for rk in rule_keys_present:
+                        diff = latest_elo - float(valid_elos[rk])
+                        # diffs.append(diff)
+                        logger.add(f"Elo_Diff/Latest_vs_{rk}", diff, total_steps)
+                    # if diffs:
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Mean", float(np.mean(diffs)), total_steps)
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Min", float(np.min(diffs)), total_steps)
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Max", float(np.max(diffs)), total_steps)
+    
     # End Training
     training_end_time = time.time()
     env.end_render()
