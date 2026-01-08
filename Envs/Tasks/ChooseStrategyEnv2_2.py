@@ -65,6 +65,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'pitch_penalty': 0.02,
         }
 
+        ego_win=0
+        ego_lose=0
+        ego_draw=0
+
         self.close_range_kill() # 允许跑刀
         self.update_missile_state()
         
