@@ -138,7 +138,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 回合的胜负取决于ego_side
         if ego.side == self.ego_side:
             self.win = ego_win
-            self.loss = ego_lose
+            self.lose = ego_lose
+            self.draw = ego_draw
+        else:
+            self.win = ego_lose
+            self.lose = ego_win
             self.draw = ego_draw
         
         # ego_states = self.get_state(side)

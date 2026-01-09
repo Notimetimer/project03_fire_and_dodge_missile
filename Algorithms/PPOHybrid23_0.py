@@ -1353,6 +1353,20 @@ class PPOHybrid:
                         
                         il_adv = residual / (c + 1e-8)
                         # 对负 advantage 强烈抑制权重：adv>0 正常放行，否则乘以 1e-6
+                        
+                        '''
+                        exp可能导致梯度爆炸，对此有以下解决方法（最新的梯度爆炸不是这个原因，代码仅做候补）
+                        # 1 数值归一化
+                        il_adv = (il_adv - il_adv.mean()) / (il_adv.std() + 1e-8)
+                        il_raw_weights = torch.exp(beta * il_adv)
+                        # 2 减去最大值 (Max-Subtraction Trick)
+                        il_adv_max = torch.max(il_adv)
+                        il_raw_weights = torch.exp(beta * (il_adv - il_adv_max))
+                        # 3 权重截断
+                        il_raw_weights = torch.exp(beta * il_adv)
+                        il_raw_weights = torch.clamp(il_raw_weights, max=100.0) # 限制单样本权重最大100倍
+                        '''
+                        
                         il_raw_weights = torch.exp(beta * il_adv)
                         F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
                         il_weights = torch.clamp(il_raw_weights * F_word, max=max_weight)

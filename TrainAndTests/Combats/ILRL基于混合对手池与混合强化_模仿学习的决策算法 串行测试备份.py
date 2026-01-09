@@ -42,8 +42,8 @@ trigger_delta = 50e3
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 2
 
-# 现场产生奖励函数一致的示范数据
-run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
+# # 现场产生奖励函数一致的示范数据
+# run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -954,6 +954,7 @@ if __name__ == "__main__":
             logger.add("train/2 win", env.win, total_steps)
             logger.add("train/2 lose", env.lose, total_steps)
             logger.add("train/2 draw", env.draw, total_steps)
+            logger.add("debug/胜负统计", env.win+env.lose+env.draw, total_steps)  # debug 和不为1
             logger.add("train/11 episode/step", i_episode, total_steps)
         
         if is_testing == False:

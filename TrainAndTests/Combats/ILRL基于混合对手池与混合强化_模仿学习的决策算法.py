@@ -11,6 +11,7 @@ import re
 import time  # 确保引入 time 模块
 from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
+import copy
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -578,7 +579,7 @@ if __name__ == "__main__":
         
     # 修改：初始化增加 'obs' 键
     empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-    transition_dict = empty_transition_dict.copy()
+    transition_dict = copy.deepcopy(empty_transition_dict)
     
     # --- 新增：测试回合控制变量 ---
     trigger = trigger0
@@ -957,6 +958,7 @@ if __name__ == "__main__":
             logger.add("train/2 win", env.win, total_steps)
             logger.add("train/2 lose", env.lose, total_steps)
             logger.add("train/2 draw", env.draw, total_steps)
+            logger.add("debug/胜负统计", env.win+env.lose+env.draw, total_steps)  # debug 和不为1
             logger.add("train/11 episode/step", i_episode, total_steps)
         
         if is_testing == False:
@@ -1045,7 +1047,7 @@ if __name__ == "__main__":
             logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
             
             # 修改：重置 transition_dict 时保留 obs 键
-            transition_dict = empty_transition_dict.copy()
+            transition_dict = copy.deepcopy(empty_transition_dict)
             
             
         return_list.append(episode_return)
