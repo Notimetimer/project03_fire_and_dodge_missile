@@ -24,7 +24,7 @@ from prepare_il_datas import run_rules
 from VsBaseline_while_training import test_worker
 
 
-mission_name = 'IL_and_PFSP_2元奖励' # 'RL_combat_PFSP_简单熵_区分左右'
+mission_name = 'IL_and_PFSP_并行测试' # 'RL_combat_PFSP_简单熵_区分左右'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
