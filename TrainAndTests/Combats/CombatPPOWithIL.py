@@ -24,46 +24,6 @@ from prepare_il_datas import run_rules
 from VsBaseline_while_training import test_worker
 
 
-mission_name = 'IL_and_PFSP_2元奖励' # 'RL_combat_PFSP_简单熵_区分左右'
-
-# 超参数
-actor_lr = 1e-4 # 4 1e-3
-critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
-max_steps = 4 * 165e4
-hidden_dim = [128, 128, 128]
-gamma = 0.995
-lmbda = 0.995
-epochs = 4 # 10
-eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1.0  # 设置为0就是纯强化学习
-il_batch_size=128 # 模仿学习minibatch大小
-mini_batch_size_mixed = 64 # 混合更新minibatch大小
-beta_mixed = 1.0
-label_smoothing=0.3
-action_cycle_multiplier = int(round(6/dt_maneuver)) # 6s 决策一次
-trigger0 = 50e3  #  / 10
-trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 初始模仿对象
-
-# 仿真环境参数
-no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 10*60 # 回合最长时间，单位s
-R_cage = 55e3 # 场地半径，单位m
-dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1 
-
-
-require_new_IL_data = 0 # 是否需要现场产生示范数据
-
-
-# # 现场产生奖励函数一致的示范数据
-if require_new_IL_data:
-    run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
-
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -339,51 +299,81 @@ if original_il_transition_dict is not None:
     original_il_transition_dict['states'] = np.array(original_il_transition_dict['states'], dtype=np.float32)
     original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
 
-# ------------------------------------------------------------------
-# 参数与环境配置
-# ------------------------------------------------------------------
-parser = argparse.ArgumentParser("UAV swarm confrontation")
-parser.add_argument("--max-episode-len", type=float, default=max_episode_duration, help="maximum episode time length")
-parser.add_argument("--R-cage", type=float, default=R_cage, help="")
-args = parser.parse_args()
-
-env = ChooseStrategyEnv(args)
-state_dim = env.obs_dim
-
-# 动作空间定义 (需要与 BasicRules 产生的数据对应)
-# cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
-# bern: 攻击动作头 (env.fire_dim 通常是 1)
-action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-action_bound = None
-
-# 1. 创建神经网络
-actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-critic_net = ValueNet(state_dim, hidden_dim).to(device)
-
-# 2. Wrapper
-actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
-
-# 3. student_agent
-student_agent = PPOHybrid(
-    actor=actor_wrapper, 
-    critic=critic_net, 
-    actor_lr=actor_lr, 
-    critic_lr=critic_lr,
-    lmbda=lmbda, 
-    epochs=epochs, 
-    eps=eps, 
-    gamma=gamma, 
-    device=device, 
-    k_entropy=k_entropy, 
-    max_std=label_smoothing
-)
-
-adv_agent = copy.deepcopy(student_agent)
 
 
+def run_MLP_simulation(
+    mission_name='无名',
+    actor_lr=1e-4,
+    critic_lr=5e-4,
+    IL_epoches=180,
+    max_steps=4 * 165e4,
+    hidden_dim=None,
+    gamma=0.995,
+    lmbda=0.995,
+    epochs=4,
+    eps=0.2,
+    k_entropy=None,
+    alpha_il=1.0,
+    il_batch_size=128,
+    mini_batch_size_mixed=64,
+    beta_mixed=1.0,
+    label_smoothing=0.3,
+    action_cycle_multiplier=30,
+    trigger0=50e3,
+    trigger_delta=50e3,
+    weight_reward_0=None,
+    IL_rule=2,
+    no_crash=1,
+    dt_move=0.05,
+    max_episode_duration=10*60,
+    R_cage=55e3,
+    dt_maneuver=0.2,
+    transition_dict_capacity=1000,
+):
 
-if __name__ == "__main__":
+    # ------------------------------------------------------------------
+    # 参数与环境配置
+    # ------------------------------------------------------------------
+    parser = argparse.ArgumentParser("UAV swarm confrontation")
+    parser.add_argument("--max-episode-len", type=float, default=max_episode_duration, help="maximum episode time length")
+    parser.add_argument("--R-cage", type=float, default=R_cage, help="")
+    args = parser.parse_args()
+
+    env = ChooseStrategyEnv(args)
+    state_dim = env.obs_dim
+
+    # 动作空间定义 (需要与 BasicRules 产生的数据对应)
+    # cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
+    # bern: 攻击动作头 (env.fire_dim 通常是 1)
+    action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    action_bound = None
+
+    # 1. 创建神经网络
+    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    critic_net = ValueNet(state_dim, hidden_dim).to(device)
+
+    # 2. Wrapper
+    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
+
+    # 3. student_agent
+    student_agent = PPOHybrid(
+        actor=actor_wrapper, 
+        critic=critic_net, 
+        actor_lr=actor_lr, 
+        critic_lr=critic_lr,
+        lmbda=lmbda, 
+        epochs=epochs, 
+        eps=eps, 
+        gamma=gamma, 
+        device=device, 
+        k_entropy=k_entropy, 
+        max_std=label_smoothing
+    )
+
+    adv_agent = copy.deepcopy(student_agent)
+
+    
     mp.set_start_method('spawn', force=True) # 重要：CUDA 环境下推荐使用 spawn
     
     # [修改] 使用 maxtasksperchild 防止内存泄漏 (如 JSBSim 未完全释放)

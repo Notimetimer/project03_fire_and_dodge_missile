@@ -8,7 +8,6 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-print("\n根目录为：", project_root, "\n")
 
 
 from Envs.battle6dof1v1_missile0919 import launch_missile_if_possible
@@ -110,6 +109,9 @@ def basic_rules(state_check, rules_num, last_action=0):
 
 
 if __name__=='__main__':
+    
+    print("\n根目录为：", project_root, "\n")
+    
     # 在这里调用规则(编号)下的策略
     parser = argparse.ArgumentParser("UAV swarm confrontation")
     # Environment
