@@ -1,6 +1,6 @@
 from CombatPPOWithIL import *
 
-mission_name = 'IL_and_PFSP_3元奖励_不分阶段' # 'RL_combat_PFSP_简单熵_区分左右'
+mission_name = 'IL_and_PFSP_3元奖励' # 'RL_combat_PFSP_简单熵_区分左右'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -13,7 +13,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1.0  # 设置为0就是纯强化学习
+alpha_il = 0.1  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
 beta_mixed = 1.0
