@@ -81,8 +81,8 @@ def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, act
         
         if steps * dt_maneuver_val > env_args.max_episode_len: break
 
-    # 返回结果：1 赢, -1 输, 0 平
-    result = 1 if test_env.win else (-1 if test_env.lose else 0)
+    # 返回结果：1 赢, 0 输, 0.5 平
+    result = 1 if test_env.win else (0 if test_env.lose else 0.5)
     return rule_num, result
 
 
