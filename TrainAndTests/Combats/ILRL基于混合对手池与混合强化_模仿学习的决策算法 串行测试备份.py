@@ -10,8 +10,6 @@ import json
 import re
 import time  # 确保引入 time 模块
 from datetime import datetime
-import torch.multiprocessing as mp  # 使用 torch 的多进程模块
-
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules_new import *
@@ -21,7 +19,6 @@ from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from prepare_il_datas import run_rules
-from VsBaseline_while_training import test_worker
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -33,22 +30,20 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
+k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
 alpha_il = 1.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
 beta_mixed = 1.0
 label_smoothing=0.3
-action_cycle_multiplier = int(round(6/dt_maneuver)) # 6s 决策一次
-trigger0 = 50e3  #  / 10
-trigger_delta = 50e3  #  / 10
+action_cycle_multiplier = 30 # 6s 决策一次
+trigger0 = 50e3
+trigger_delta = 50e3
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 初始模仿对象
+IL_rule = 2
 
-no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-# # 现场产生奖励函数一致的示范数据
-# run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
+# 现场产生奖励函数一致的示范数据
+run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -369,13 +364,13 @@ adv_agent = copy.deepcopy(student_agent)
 
 
 if __name__ == "__main__":
-    mp.set_start_method('spawn', force=True) # 重要：CUDA 环境下推荐使用 spawn
     
-    # [修改] 使用 maxtasksperchild 防止内存泄漏 (如 JSBSim 未完全释放)
-    test_pool = mp.Pool(processes=3, maxtasksperchild=10) 
-    
-    pending_tests = [] # 用于存放正在运行的测试任务
-    
+    if original_il_transition_dict is None:
+        print("No il_transitions_combat file found.")
+        sys.exit(1)
+
+    summarize(original_il_transition_dict)
+
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
     mission_name = 'IL_and_PFSP_2元奖励' # 'RL_combat_PFSP_简单熵_区分左右'
@@ -453,8 +448,8 @@ if __name__ == "__main__":
             tacview_show = 0
     print(f"tacview_show={tacview_show}")
     env = ChooseStrategyEnv(args, tacview_show=tacview_show)
-    env.shielded = no_crash # 不得不全程带上，否则对手也会撞地
-    env.dt_move = dt_move # 仿真跑得快点
+    env.shielded = 1 # 不得不全程带上，否则对手也会撞地
+    env.dt_move = 0.05 # 仿真跑得快点
     
     t_bias = 0
     
@@ -489,7 +484,7 @@ if __name__ == "__main__":
     elo_ratings = {
         "Rule_0": INITIAL_ELO,
         "Rule_1": INITIAL_ELO,
-        "Rule_2": INITIAL_ELO,
+        "Rule_2": INITIAL_ELO
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
@@ -566,8 +561,7 @@ if __name__ == "__main__":
     b_action_list = []
         
     # 修改：初始化增加 'obs' 键
-    empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-    transition_dict = empty_transition_dict.copy()
+    transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     
     # --- 新增：测试回合控制变量 ---
     trigger = trigger0
@@ -580,41 +574,25 @@ if __name__ == "__main__":
         is_testing = False
         # -- 测试模式 --
         if total_steps >= trigger:
-            print(f"\n>>> Triggering Parallel Test at steps {total_steps}...")
-            # 1. 深度拷贝当前 Actor 权重到 CPU 内存
-            current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
+            is_testing = True
+            print(f"\n--- Entering TEST MODE (Run {test_run+1}/3) ---")
+            # 强制选择对手
+            if test_run == 0:
+                selected_opponent_name = "Rule_0"
+            elif test_run == 1:
+                # 修改：直接指定，不加入 ELO 池
+                selected_opponent_name = "Rule_1"
+            else: # test_run == 2
+                # 修改：直接指定，不加入 ELO 池
+                selected_opponent_name = "Rule_2"
             
-            # 2. 异步启动 3 个对战
-            for r_idx in [0, 1, 2, 3, 4]:
-                res_obj = test_pool.apply_async(
-                    test_worker, 
-                    args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu') # [修改] 显式传入 dt_maneuver
-                )
-                pending_tests.append((res_obj, total_steps)) # 记录任务对象和触发时的步数
-            
-            trigger += trigger_delta # 更新下一次触发阈值
+            try:
+                rule_num = int(selected_opponent_name.split('_')[1])
+            except:
+                rule_num = 0
+            adv_is_rule = True
+            print(f"Eps {i_episode}: Test Opponent is {selected_opponent_name}")
 
-        # --- 结果轮询记录 (非阻塞) ---
-        if len(pending_tests) > 0:
-            finished_tasks = []
-            for task in pending_tests:
-                res_obj, recorded_step = task
-                if res_obj.ready(): # 检查进程是否跑完
-                    # [修改] 直接获取结果，不再包裹 try-except
-                    rule_num, outcome = res_obj.get()
-                    # 在主进程的 Logger 中记录结果
-                    logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
-                    print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
-                    finished_tasks.append(task)
-            
-            # 清理已完成的任务
-            for task in finished_tasks:
-                pending_tests.remove(task)
-            
-
-        # -- 测试模式 --
-        if 0:
-            pass
         # -- 训练模式 --
         else: # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
             ego_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
@@ -750,7 +728,7 @@ if __name__ == "__main__":
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                 if steps_of_this_eps > 0: # and not dead_dict['b']:
                     # --- 新增：测试模式下不存储经验 ---
-                    if 1:
+                    if not is_testing:
                         # 修改：传入 last_decision_obs 和 last_decision_state
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
@@ -792,6 +770,8 @@ if __name__ == "__main__":
                 
                 # --- 新增：测试模式下使用确定性动作 ---
                 explore_rate = 1
+                if is_testing:
+                    explore_rate = {'cont':0, 'cat':0, 'bern':1}
 
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=explore_rate)
                 b_action_label = b_action_exec['cat'][0]
@@ -850,7 +830,7 @@ if __name__ == "__main__":
             dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
 
             # --- 新增：测试模式下不累加 total_steps ---
-            if 1:
+            if not is_testing:
                 total_steps += 1
             '''显示运行轨迹'''
             # 可视化
@@ -861,7 +841,7 @@ if __name__ == "__main__":
         # 循环结束，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
         if last_decision_state is not None:
             # --- 新增：测试模式下不存储经验 ---
-            if 1:
+            if not is_testing:
                 # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
                 # 修改：传入最后时刻的 next_b_state_global 作为 Next State
                 transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
@@ -879,8 +859,36 @@ if __name__ == "__main__":
             print('r 撞地')
         if env.crash(env.BUAV):
             print('b 撞地')
-        if 0:
-            pass
+
+        # --- 新增：测试回合结束后的处理 ---
+        if is_testing:
+            # # 记录独立的测试日志（已记录为 0/1 布尔型）
+            # logger.add(f"test/0 win_vs_rule{rule_num}", env.win, total_steps)
+            # logger.add(f"test/1 lose_vs_rule{rule_num}", env.lose, total_steps)
+            # logger.add(f"test/2 draw_vs_rule{rule_num}", env.draw, total_steps)
+            
+            # 不再计算 numeric actual_score，直接以字符串输出结果
+            if env.win:
+                outcome = "WIN"
+                logger.add(f"test/agent_vs_rule{rule_num}", 1, total_steps)
+            elif env.lose:
+                outcome = "LOSE"
+                logger.add(f"test/agent_vs_rule{rule_num}", 0, total_steps)
+            else:
+                outcome = "DRAW"
+                logger.add(f"test/agent_vs_rule{rule_num}", 0.5, total_steps)
+
+            print(f"  Test Result vs {selected_opponent_name}: {outcome}. ELO not updated during testing.")
+
+            if test_run < 2:
+                test_run += 1
+            else: # test_run == 2, 测试全部完成
+                test_run = 0
+                trigger += trigger_delta
+                print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
+            
+            # ELO 在测试回合不更新 (移除原有的打印语句)
+
         else: # --- [Optimized] ELO 更新与策略池清洗逻辑 (只在训练回合执行) ---
             actual_score = 0.5 # Default draw
             if env.win: actual_score = 1.0
@@ -1034,7 +1042,7 @@ if __name__ == "__main__":
             logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
             
             # 修改：重置 transition_dict 时保留 obs 键
-            transition_dict = empty_transition_dict.copy()
+            transition_dict = {'obs': [], 'states': [], 'actions': [], 'rewards': [], 'next_states': [], 'dones': [], 'active_masks': []}
             
             
         return_list.append(episode_return)
@@ -1141,17 +1149,4 @@ if __name__ == "__main__":
     training_end_time = time.time()
     env.end_render()
     print("Total Steps Reached. Training Finished.")
-    
-    # [新增] 训练结束后，如果还有未完成的测试，等待它们跑完（可选）
-    if len(pending_tests) > 0:
-        print(f"Waiting for {len(pending_tests)} pending tests to finish...")
-        for res_obj, recorded_step in pending_tests:
-            rule_num, outcome = res_obj.get() # 阻塞直至完成
-            logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
-            print(f"  [Finalizing Test] Rule_{rule_num}: {outcome}")
-
     logger.close()
-    
-    # [修改] 关闭进程池
-    test_pool.close()
-    test_pool.join()

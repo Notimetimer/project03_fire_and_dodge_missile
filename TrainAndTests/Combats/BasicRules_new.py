@@ -105,6 +105,17 @@ def basic_rules(state_check, rules_num, last_action=0):
         # 不准出界
         if d_hor < 8e3:
             action_number = base_offensive_action
+    
+    # 防撞地规则
+    if alt < 3000:
+        if action_number in [1, 4, 5]:
+            action_number = 2
+        if action_number in [9,12,13,14]:
+            action_number = 12
+    # 防破升限
+    if alt > 12000:
+        if action_number in [2,3]:
+            action_number = 1
 
     return action_number, fire_missile_affirmative
 
@@ -123,7 +134,7 @@ if __name__=='__main__':
     # test
     env.dt_move = 0.05
 
-    env.shielded = 1
+    env.shielded = 1 # 0 # 有防撞地就可以不要这个
 
     r_action_spaces, b_action_spaces = env.r_action_spaces, env.b_action_spaces
 

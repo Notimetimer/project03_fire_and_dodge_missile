@@ -210,7 +210,7 @@ class HybridActorWrapper(nn.Module):
         # =====================================================================
         action_masks = None
         can_fire = True
-        # 当且仅当传入了单个 dict 类型的 check_obs 时启用 mask
+        # 当且仅当传入了单个 dict 类型的 check_obs 时启用 mask, 不受explore影响
         if (check_obs is not None) and isinstance(check_obs, dict):  # and (not explore_opts['bern']):
             # 默认允许开火，下面按规则逐项收敛（保留注释）
             can_fire = True

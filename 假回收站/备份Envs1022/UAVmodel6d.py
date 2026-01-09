@@ -177,6 +177,10 @@ class UAVModel(object):
         return cd / 10
 
     def move(self, target_height, delta_heading, target_speed, relevant_height=False, relevant_speed=False, with_theta_req=False, p2p=False):
+        # cheat 无限燃油，设置失败
+        self.sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
+        self.sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
+
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
             self.set_height = target_height

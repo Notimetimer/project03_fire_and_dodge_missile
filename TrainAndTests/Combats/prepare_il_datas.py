@@ -2,7 +2,7 @@
 from BasicRules_new import *  # 可以直接读同一级目录
 from Algorithms.Utils import compute_monte_carlo_returns
 
-def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multiplier=30, shielded=1):
+def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multiplier=30, shielded=1, current_rule=2):
     gamma = gamma
     
     # 在这里调用规则(编号)下的策略
@@ -106,7 +106,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
 
                     # 蓝方维持最优规则
                     b_state_check = env.unscale_state(b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, 4, last_action=last_b_action_label)
+                    b_action_label, b_fire = basic_rules(b_state_check, current_rule, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')

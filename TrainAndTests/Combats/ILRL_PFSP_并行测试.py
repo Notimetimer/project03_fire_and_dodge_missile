@@ -670,8 +670,6 @@ if __name__ == "__main__":
                 
                 # --- 新增：测试模式下使用确定性动作 ---
                 explore_rate = 1
-                if 0:
-                    explore_rate = {'cont':0, 'cat':0, 'bern':1}
 
                 b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=explore_rate)
                 b_action_label = b_action_exec['cat'][0]
