@@ -93,6 +93,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 双杀
         if enm.dead and ego.dead:
             done = 1
+
         # 如果敌方和敌方所有导弹都没了，且我方存活，判定为胜
         if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
             ego_win = 1

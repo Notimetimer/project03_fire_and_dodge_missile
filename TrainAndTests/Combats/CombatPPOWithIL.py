@@ -858,6 +858,10 @@ def run_MLP_simulation(
             env.render(t_bias=t_bias)
         
         # # --- 回合结束处理 ---
+        # [修复] 胜负漏记问题 强制在回合结束后调用一次终止判定，以获取最终的胜负状态
+        # 无论循环是正常结束(超时)还是break(done=True)，都重新获取一次最终结果
+        done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier)
+        
         # **关键点 3: 存储【最后一个】不完整的动作周期的经验**
         # 循环结束，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
         if last_decision_state is not None:
