@@ -415,8 +415,11 @@ class HybridActorWrapper(nn.Module):
             label_smoothing: 标签平滑系数
             
         Returns:
-            total_loss_per_sample: (Batch, ) 每个样本的 Loss 总和 (未平均)
+            total_loss_per_sample: (Batch, ) 每个样本的 Loss 总和，未加权
         """
+        '''
+        会增加复杂度的可选改进：模仿学习的时候alpha 传入向量，从而区分密集和稀疏动作的学习强度（密集应该高一些）
+        '''
         actor_outputs = self.net(states) # 获取 raw output (mu/std, logits)
         
         # 初始化一个全 0 的 loss tensor，形状 (Batch, )

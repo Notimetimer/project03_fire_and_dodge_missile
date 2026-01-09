@@ -712,10 +712,7 @@ def run_MLP_simulation(
         last_enm_decision_state = None
         
         current_action = None
-
-        current_action_exec = None
-        current_enm_action_exec = None
-        
+        current_enm_action = None
         b_rew_event, b_rew_constraint, b_rew_shaping = 0,0,0
         
         # 新增：每回合的死亡查询表（0 表示存活，1 表示已记录死亡瞬间）
@@ -758,8 +755,8 @@ def run_MLP_simulation(
                         # 修改：传入 last_decision_obs 和 last_decision_state
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
-                        ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action, reward_for_enm, r_state_global, False, not dead_dict['r'])
                         
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
@@ -789,9 +786,7 @@ def run_MLP_simulation(
                 r_m_id = None
                 if r_fire:
                     r_m_id = launch_missile_immediately(env, 'r')
-                    
-                r_missile_fired = r_m_id is not None
-                
+
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
                 # 修改：Actor 依然使用 b_obs (局部观测) 进行决策
@@ -807,8 +802,6 @@ def run_MLP_simulation(
                 if b_fire:
                     b_m_id = launch_missile_immediately(env, 'b')
                     # print(b_m_id)
-                    
-                b_missile_fired = b_m_id is not None
                 if b_m_id is not None:
                     m_fired += 1
 
@@ -821,12 +814,9 @@ def run_MLP_simulation(
                 decide_steps_after_update += 1
                 
                 b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-                # PPO需要的是开火意图
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
-                # IL需要的是实际的开火执行情况
-                current_action_exec = {'cat': r_action_exec['cat'], 'bern': b_missile_fired}
-                current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': r_missile_fired}
+                current_enm_action = {'cat': r_action_exec['cat'], 'bern': r_action_exec['bern']}
                 
             if adv_is_rule:
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label) # 同步动作空间，现在都是区分左右
@@ -880,9 +870,8 @@ def run_MLP_simulation(
                 # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
                 # 修改：传入最后时刻的 next_b_state_global 作为 Next State
                 transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                
-                ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
             episode_return += reward_for_show
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
