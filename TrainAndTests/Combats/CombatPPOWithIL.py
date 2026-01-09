@@ -733,6 +733,8 @@ def run_MLP_simulation(
         steps_of_this_eps = -1
         
         m_fired = 0
+        enemy_m_fired = 0
+        fired_at_bad_condition = 0
         
         # --- Episode Loop ---
         for count in range(round(args.max_episode_len / dt_maneuver)):
@@ -791,6 +793,12 @@ def run_MLP_simulation(
                     r_m_id = launch_missile_immediately(env, 'r')
                     
                 r_missile_fired = r_m_id is not None
+                
+                if r_missile_fired:
+                    enemy_m_fired += 1
+                    r_ATA = r_check_obs['target_information'][4]
+                    if r_ATA > pi/3:
+                        fired_at_bad_condition += 1
                 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
@@ -913,17 +921,17 @@ def run_MLP_simulation(
                 '''
                 简单粗暴的对手筛选策略：
                 1、撞地
-                2、零开火失败
-                3、对着空气开火的对手(任1枚导弹在角度>pi/3或者4枚以上导弹均在40km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
-                4、
+                2、零开火且未获胜
+                3、所有导弹均不在角度开火
                 '''
                 cond_crash = env.crash(env.RUAV) # 撞地
                 r_fired_count = 6 - env.RUAV.ammo
-                cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
+                cond_coward = (r_fired_count == 0 and env.win) # 0弹且未取胜 (蓝方赢)
+                blind_shot = (fired_at_bad_condition == enemy_m_fired)
                 
-                if cond_crash or cond_coward:
+                if cond_crash or cond_coward or blind_shot:
                     is_kicked_opponent = True
-                    print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name} (Crash={cond_crash}, Coward={cond_coward})")
+                    print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name}")
 
 
             # 2. ELO 更新与记录逻辑
