@@ -1,6 +1,6 @@
 from CombatPPOWithIL import *
 
-mission_name = 'IL_and_PFSP_2元奖励_分阶段' # 'RL_combat_PFSP_简单熵_区分左右'
+mission_name = 'IL_and_PFSP_2元奖励_清理老顽固' # 'IL_and_PFSP_2元奖励'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3

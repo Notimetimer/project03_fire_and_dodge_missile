@@ -11,7 +11,6 @@ import re
 import time  # 确保引入 time 模块
 from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
-import copy
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -24,46 +23,6 @@ from Algorithms.Utils import compute_monte_carlo_returns
 from prepare_il_datas import run_rules
 from VsBaseline_while_training import test_worker
 
-
-mission_name = 'IL_and_PFSP_并行测试' # 'RL_combat_PFSP_简单熵_区分左右'
-
-# 超参数
-actor_lr = 1e-4 # 4 1e-3
-critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
-max_steps = 4 * 165e4
-hidden_dim = [128, 128, 128]
-gamma = 0.995
-lmbda = 0.995
-epochs = 4 # 10
-eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1.0  # 设置为0就是纯强化学习
-il_batch_size=128 # 模仿学习minibatch大小
-mini_batch_size_mixed = 64 # 混合更新minibatch大小
-beta_mixed = 1.0
-label_smoothing=0.3
-action_cycle_multiplier = int(round(6/dt_maneuver)) # 6s 决策一次
-trigger0 = 50e3  #  / 10
-trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 初始模仿对象
-
-# 仿真环境参数
-no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 10*60 # 回合最长时间，单位s
-R_cage = 55e3 # 场地半径，单位m
-dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1 
-
-
-require_new_IL_data = 0 # 是否需要现场产生示范数据
-
-
-# # 现场产生奖励函数一致的示范数据
-if require_new_IL_data:
-    run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
 
 
 def get_current_file_dir():
@@ -340,51 +299,81 @@ if original_il_transition_dict is not None:
     original_il_transition_dict['states'] = np.array(original_il_transition_dict['states'], dtype=np.float32)
     original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
 
-# ------------------------------------------------------------------
-# 参数与环境配置
-# ------------------------------------------------------------------
-parser = argparse.ArgumentParser("UAV swarm confrontation")
-parser.add_argument("--max-episode-len", type=float, default=max_episode_duration, help="maximum episode time length")
-parser.add_argument("--R-cage", type=float, default=R_cage, help="")
-args = parser.parse_args()
-
-env = ChooseStrategyEnv(args)
-state_dim = env.obs_dim
-
-# 动作空间定义 (需要与 BasicRules 产生的数据对应)
-# cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
-# bern: 攻击动作头 (env.fire_dim 通常是 1)
-action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-action_bound = None
-
-# 1. 创建神经网络
-actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-critic_net = ValueNet(state_dim, hidden_dim).to(device)
-
-# 2. Wrapper
-actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
-
-# 3. student_agent
-student_agent = PPOHybrid(
-    actor=actor_wrapper, 
-    critic=critic_net, 
-    actor_lr=actor_lr, 
-    critic_lr=critic_lr,
-    lmbda=lmbda, 
-    epochs=epochs, 
-    eps=eps, 
-    gamma=gamma, 
-    device=device, 
-    k_entropy=k_entropy, 
-    max_std=label_smoothing
-)
-
-adv_agent = copy.deepcopy(student_agent)
 
 
+def run_MLP_simulation(
+    mission_name='无名',
+    actor_lr=1e-4,
+    critic_lr=5e-4,
+    IL_epoches=180,
+    max_steps=4 * 165e4,
+    hidden_dim=None,
+    gamma=0.995,
+    lmbda=0.995,
+    epochs=4,
+    eps=0.2,
+    k_entropy=None,
+    alpha_il=1.0,
+    il_batch_size=128,
+    mini_batch_size_mixed=64,
+    beta_mixed=1.0,
+    label_smoothing=0.3,
+    action_cycle_multiplier=30,
+    trigger0=50e3,
+    trigger_delta=50e3,
+    weight_reward_0=None,
+    IL_rule=2,
+    no_crash=1,
+    dt_move=0.05,
+    max_episode_duration=10*60,
+    R_cage=55e3,
+    dt_maneuver=0.2,
+    transition_dict_capacity=1000,
+):
 
-if __name__ == "__main__":
+    # ------------------------------------------------------------------
+    # 参数与环境配置
+    # ------------------------------------------------------------------
+    parser = argparse.ArgumentParser("UAV swarm confrontation")
+    parser.add_argument("--max-episode-len", type=float, default=max_episode_duration, help="maximum episode time length")
+    parser.add_argument("--R-cage", type=float, default=R_cage, help="")
+    args = parser.parse_args()
+
+    env = ChooseStrategyEnv(args)
+    state_dim = env.obs_dim
+
+    # 动作空间定义 (需要与 BasicRules 产生的数据对应)
+    # cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
+    # bern: 攻击动作头 (env.fire_dim 通常是 1)
+    action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    action_bound = None
+
+    # 1. 创建神经网络
+    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    critic_net = ValueNet(state_dim, hidden_dim).to(device)
+
+    # 2. Wrapper
+    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, action_bound, device).to(device)
+
+    # 3. student_agent
+    student_agent = PPOHybrid(
+        actor=actor_wrapper, 
+        critic=critic_net, 
+        actor_lr=actor_lr, 
+        critic_lr=critic_lr,
+        lmbda=lmbda, 
+        epochs=epochs, 
+        eps=eps, 
+        gamma=gamma, 
+        device=device, 
+        k_entropy=k_entropy, 
+        max_std=label_smoothing
+    )
+
+    adv_agent = copy.deepcopy(student_agent)
+
+    
     mp.set_start_method('spawn', force=True) # 重要：CUDA 环境下推荐使用 spawn
     
     # [修改] 使用 maxtasksperchild 防止内存泄漏 (如 JSBSim 未完全释放)
@@ -744,6 +733,8 @@ if __name__ == "__main__":
         steps_of_this_eps = -1
         
         m_fired = 0
+        enemy_m_fired = 0
+        fired_at_bad_condition = 0
         
         # --- Episode Loop ---
         for count in range(round(args.max_episode_len / dt_maneuver)):
@@ -770,7 +761,7 @@ if __name__ == "__main__":
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
                         ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
                         
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
@@ -802,6 +793,12 @@ if __name__ == "__main__":
                     r_m_id = launch_missile_immediately(env, 'r')
                     
                 r_missile_fired = r_m_id is not None
+                
+                if r_missile_fired:
+                    enemy_m_fired += 1
+                    r_ATA = r_check_obs['target_information'][4]
+                    if r_ATA > pi/3:
+                        fired_at_bad_condition += 1
                 
                 # --- 蓝方 (训练对象) 决策 ---
                 b_state_check = env.unscale_state(b_check_obs)
@@ -836,7 +833,7 @@ if __name__ == "__main__":
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
                 # IL需要的是实际的开火执行情况
-                current_action_exec = {'cat': b_action_exec['cat'], 'bern': b_missile_fired}
+                current_action_exec = {'cat': r_action_exec['cat'], 'bern': b_missile_fired}
                 current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': r_missile_fired}
                 
             if adv_is_rule:
@@ -924,17 +921,17 @@ if __name__ == "__main__":
                 '''
                 简单粗暴的对手筛选策略：
                 1、撞地
-                2、零开火失败
-                3、对着空气开火的对手(任1枚导弹在角度>pi/3或者4枚以上导弹均在40km外开火的对手)也排除，但实际上我也可以在环境里面对开火角度加硬限制
-                4、
+                2、零开火且未获胜
+                3、所有导弹均不在角度开火
                 '''
                 cond_crash = env.crash(env.RUAV) # 撞地
                 r_fired_count = 6 - env.RUAV.ammo
-                cond_coward = (r_fired_count == 0 and env.win) # 0弹且输了 (蓝方赢)
+                cond_coward = (r_fired_count == 0 and env.win) # 0弹且未取胜 (蓝方赢)
+                blind_shot = (fired_at_bad_condition == enemy_m_fired)
                 
-                if cond_crash or cond_coward:
+                if cond_crash or cond_coward or blind_shot:
                     is_kicked_opponent = True
-                    print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name} (Crash={cond_crash}, Coward={cond_coward})")
+                    print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name}")
 
 
             # 2. ELO 更新与记录逻辑
