@@ -557,7 +557,6 @@ def run_MLP_simulation(
     # 循环变量初始化
     i_episode = 0 
     total_steps = 0
-    training_start_time = time.time()
     launch_time_count = 0
     t_bias = 0
     decide_steps_after_update = 0
