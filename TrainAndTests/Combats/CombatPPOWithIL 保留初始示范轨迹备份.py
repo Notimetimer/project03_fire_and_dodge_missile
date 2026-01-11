@@ -557,7 +557,6 @@ def run_MLP_simulation(
     # 循环变量初始化
     i_episode = 0 
     total_steps = 0
-    training_start_time = time.time()
     launch_time_count = 0
     t_bias = 0
     decide_steps_after_update = 0
@@ -761,7 +760,7 @@ def run_MLP_simulation(
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
                         ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
                         
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
@@ -833,7 +832,7 @@ def run_MLP_simulation(
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
                 # IL需要的是实际的开火执行情况
-                current_action_exec = {'cat': r_action_exec['cat'], 'bern': b_missile_fired}
+                current_action_exec = {'cat': b_action_exec['cat'], 'bern': b_missile_fired}
                 current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': r_missile_fired}
                 
             if adv_is_rule:
