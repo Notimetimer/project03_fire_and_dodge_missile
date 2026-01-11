@@ -154,150 +154,337 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
 class IL_transition_buffer:
     def __init__(self, init_dict, max_size=10000):
         """
-        init_dict: 初始的专在该模仿学习数据 (dict of arrays)
-        max_size: addon_dict 的最大容量
+        内部存储全部采用 List，确保状态和动作在最外层长度绝对对等。
         """
-        self.init_dict = copy.deepcopy(init_dict)
         self.max_size = max_size
-        
-        # 1. 确保 obs 存在 (如果只有 states，拷贝一份作为 obs)
-        if 'obs' not in self.init_dict and 'states' in self.init_dict:
-            self.init_dict['obs'] = self.init_dict['states'].copy()
-            print("[IL_transition_buffer] Copied 'states' to 'obs' for init_dict.")
-            
-        # 2. 初始化 addon_dict，结构必须与 init_dict 保持一致以便后续拼接
         self.addon_dict = {}
-        for k, v in self.init_dict.items():
-            if k == 'actions':
-                # actions 此时应已是嵌套字典 {'cat': array, 'bern': array}
-                self.addon_dict[k] = {}
-                for sub_k, sub_v in v.items():
-                    # 创建形状为 (0, dim...) 的空数组
-                    shape = list(sub_v.shape)
-                    shape[0] = 0
-                    self.addon_dict[k][sub_k] = np.zeros(shape, dtype=sub_v.dtype)
-            else:
-                # 其他键 (states, obs, returns 等)
-                shape = list(v.shape)
-                shape[0] = 0
-                self.addon_dict[k] = np.zeros(shape, dtype=v.dtype)
-                
+        
+        # 无论 init_dict 是否为空，都显式初始化所有键，确保 'obs' 一定存在
+        src = init_dict if init_dict is not None else {}
+        
+        # 强制转换成 list 存储。如果 src 里没有 'obs'，就用 'states' 代替
+        self.addon_dict['obs'] = list(src.get('obs', src.get('states', [])))
+        self.addon_dict['states'] = list(src.get('states', []))
+        self.addon_dict['returns'] = list(src.get('returns', []))
+        self.addon_dict['actions'] = list(src.get('actions', []))
+        
+        # 特殊处理：如果 returns 是 torch.tensor (如你截图中所示)，转为 list 存储
+        if torch.is_tensor(src.get('returns')):
+            self.addon_dict['returns'] = src['returns'].tolist()
+
+        # 打印初始长度以供检查
+        print(f"[IL_transition_buffer] Initialized. Size: {len(self.addon_dict['states'])}")
+        
     def add(self, data):
         """
-        将新数据加入 buffer。保留最新的 max_size 条数据。
-        data: 包含 'obs', 'states', 'actions', 'returns' 的字典
-             actions 在传入时可能是 list of dicts，需转换
+        data: 包含 'obs', 'states', 'actions', 'returns' 的字典，值应为 List。
         """
-        # 1. 数据预处理（转换格式）
-        processed_data = {}
+        # 1. 提取新数据并确保格式为 list (防止 data 缺失 'obs'，逻辑同 init)
+        new_obs = list(data.get('obs', data.get('states', [])))
+        new_states = list(data.get('states', []))
+        new_returns = list(data.get('returns', []))
+        new_actions = list(data.get('actions', []))
         
-        # 处理可能的 Numpy/List 数据
-        for key in ['obs', 'states', 'returns']:
-            if key in data:
-                processed_data[key] = np.array(data[key], dtype=np.float32)
-                
-        # 处理动作 (兼容 List[Dict] -> Dict[Array])
-        if 'actions' in data:
-            if isinstance(data['actions'], list):
-                # 调用脚本中已定义的 restructure_actions 函数进行转换
-                processed_data['actions'] = restructure_actions(data['actions'])
-            else:
-                processed_data['actions'] = data['actions']
-                
-        # 2. 存入 addon_dict 并进行容量剪裁
-        # 假设 batch 维度在第 0 维
-        for k in self.addon_dict:
-            if k not in processed_data:
-                continue
-                
-            if k == 'actions':
-                for sub_k in self.addon_dict[k]:
-                    if sub_k in processed_data[k]:
-                        old_arr = self.addon_dict[k][sub_k]
-                        new_arr = processed_data[k][sub_k]
-                        
-                        # 拼接
-                        concat_arr = np.concatenate([old_arr, new_arr], axis=0)
-                        
-                        # 剪裁（保留最新的 max_size 个）
-                        if len(concat_arr) > self.max_size:
-                            concat_arr = concat_arr[-self.max_size:]
-                            
-                        self.addon_dict[k][sub_k] = concat_arr
-            else:
-                old_arr = self.addon_dict[k]
-                new_arr = processed_data[k]
-                
-                concat_arr = np.concatenate([old_arr, new_arr], axis=0)
-                
-                if len(concat_arr) > self.max_size:
-                    concat_arr = concat_arr[-self.max_size:]
-                    
-                self.addon_dict[k] = concat_arr
-
+        # 处理可能传入的 tensor
+        if torch.is_tensor(data.get('returns')):
+            new_returns = data['returns'].tolist()
+        
+        # 使用 .extend() 拼接列表元素
+        self.addon_dict['obs'].extend(new_obs)
+        self.addon_dict['states'].extend(new_states)
+        self.addon_dict['returns'].extend(new_returns)
+        self.addon_dict['actions'].extend(new_actions)
+        
+        # 2. 基于 Return 的原子化排序与剪裁
+        # 通过 zip 绑定每一行数据，确保 S, A, R 在排序和删除时永远同步
+        combined = list(zip(
+            self.addon_dict['obs'],
+            self.addon_dict['states'],
+            self.addon_dict['returns'],
+            self.addon_dict['actions']
+        ))
+        # 按 returns (索引为 2) 降序排列（从高质量到低质量）
+        combined.sort(key=lambda x: x[2], reverse=True)
+        
+        # 保留前 max_size 条高质量经验
+        top_data = combined[:self.max_size]
+        
+        # 解包回列表
+        unzipped = list(zip(*top_data)) if top_data else ([], [], [], [])
+        self.addon_dict['obs'] = list(unzipped[0])
+        self.addon_dict['states'] = list(unzipped[1])
+        self.addon_dict['returns'] = list(unzipped[2])
+        self.addon_dict['actions'] = list(unzipped[3])
+    
     def read(self, batch_size):
         """
-        拼接 init_dict 和 addon_dict，然后随机采样 batch_size 大小的数据
+        随机采样并进行格式转换。
         """
-        # 1. 拼接 init 和 addon
-        combined = {}
-        # 为了获取总长度，找一个非字典的 key (如 states)
-        sample_key = 'states'
-        total_len = len(self.init_dict[sample_key]) + len(self.addon_dict[sample_key])
-        
-        # 2. 生成随机索引
-        # 如果请求大小超过总数据量，允许重复采样 (replace=True) 或仅返回全部 (视需求定，这里假设数据够多用 randint)
+        total_len = len(self.addon_dict['states'])
+        if total_len == 0:
+            raise ValueError("IL_transition_buffer is empty.")
+            
         indices = np.random.randint(0, total_len, size=batch_size)
         
-        # 3. 拼接并采样 (Full Concat -> Sample)
-        for k in self.init_dict:
-            if k == 'actions':
-                combined[k] = {}
-                sampled_sub = {}
-                for sub_k in self.init_dict[k]:
-                    # 拼接
-                    full_arr = np.concatenate([self.init_dict[k][sub_k], self.addon_dict[k][sub_k]], axis=0)
-                    # 采样
-                    sampled_sub[sub_k] = full_arr[indices]
-                combined[k] = sampled_sub
-            else:
-                full_arr = np.concatenate([self.init_dict[k], self.addon_dict[k]], axis=0)
-                combined[k] = full_arr[indices]
-                
-        return combined
+        # 采样（列表推导式，保持原始元素格式）
+        sampled_obs = [self.addon_dict['obs'][i] for i in indices]
+        sampled_states = [self.addon_dict['states'][i] for i in indices]
+        sampled_returns = [self.addon_dict['returns'][i] for i in indices]
+        sampled_actions_raw = [self.addon_dict['actions'][i] for i in indices]
+        
+        # 此时才将采样的动作列表转换为算法需要的 dict-of-arrays 格式
+        return {
+            'obs': np.array(sampled_obs, dtype=np.float32),
+            'states': np.array(sampled_states, dtype=np.float32),
+            'returns': np.array(sampled_returns, dtype=np.float32),
+            'actions': restructure_actions(sampled_actions_raw) 
+        }
 
     def clear(self):
-        """
-        只清空 addon_dict，init_dict 保持不变
-        """
         for k in self.addon_dict:
-            if k == 'actions':
-                for sub_k in self.addon_dict[k]:
-                    shape = list(self.addon_dict[k][sub_k].shape)
-                    shape[0] = 0 # 长度归零
-                    self.addon_dict[k][sub_k] = np.zeros(shape, dtype=self.addon_dict[k][sub_k].dtype)
-            else:
-                shape = list(self.addon_dict[k].shape)
-                shape[0] = 0
-                self.addon_dict[k] = np.zeros(shape, dtype=self.addon_dict[k].dtype)
-        print("[IL_transition_buffer] Addon buffer cleared.")
+            self.addon_dict[k] = []
+        print("[IL_transition_buffer] Buffer cleared.")
+        
+    
+# class IL_transition_buffer:
+#     def __init__(self, init_dict, max_size=10000):
+#         """
+#         变更说明：
+#         - 不再区分 init_dict 与 addon_dict，统一使用 self.addon_dict 存放所有样本（包含初始示例）。
+#         - 在 add 时对 self.addon_dict 做滚动剪裁（保留最新的 max_size 条），从而使初始示例也会被剪裁。
+#         - 数据结构：{'obs':[], 'states':[], 'actions': {}, 'returns': []}
+#         """
+#         self.max_size = max_size
+
+#         # 深拷贝并确保 obs 存在
+#         self.addon_dict = copy.deepcopy(init_dict) if init_dict is not None else {}
+#         if 'obs' not in self.addon_dict and 'states' in self.addon_dict:
+#             self.addon_dict['obs'] = self.addon_dict['states'].copy()
+#             print("[IL_transition_buffer] Copied 'states' to 'obs' for addon_dict.")
+
+#         # 规范化为 numpy arrays，并保证 actions 的子键结构
+#         for k, v in list(self.addon_dict.items()):
+#             if k == 'actions':
+#                 # 确保是 dict of arrays
+#                 if isinstance(v, dict):
+#                     for sub_k, sub_v in v.items():
+#                         arr = np.array(sub_v)
+#                         if arr.ndim == 1:
+#                             arr = arr.reshape(-1, 1)
+#                         self.addon_dict[k][sub_k] = arr
+#                 else:
+#                     # 如果 actions 是 list 等非 dict 结构，尝试重构
+#                     self.addon_dict[k] = restructure_actions(v)
+#             else:
+#                 self.addon_dict[k] = np.array(v)
+
+#         # 为缺失的常见键创建空数组（以便后续 concat 不出错）
+#         # IL 只需要这4个键
+#         expected_keys = ['obs', 'states', 'returns', 'actions']
+#         for ek in expected_keys:
+#             if ek not in self.addon_dict:
+#                 if ek == 'actions':
+#                     # 需要推断子键，默认 cat/bern 为空
+#                     self.addon_dict['actions'] = {'cat': np.zeros((0, 1), dtype=np.int64), 'bern': np.zeros((0, 1), dtype=np.float32)}
+#                 else:
+#                     self.addon_dict[ek] = np.zeros((0,), dtype=np.float32)
+
+#         # 对 actions 的子键再次保证 dtype & shape
+#         for sub_k in list(self.addon_dict['actions'].keys()):
+#             arr = np.array(self.addon_dict['actions'][sub_k])
+#             if arr.ndim == 1:
+#                 arr = arr.reshape(-1, 1)
+#             self.addon_dict['actions'][sub_k] = arr
+
+#         print(f"[IL_transition_buffer] Initialized addon_dict with sizes: " +
+#               ", ".join(f"{k}:{getattr(self.addon_dict[k], 'shape', self._shape_of_actions(k))}" 
+#                         for k in self.addon_dict if k != 'actions') +
+#               f", actions(cat:{self.addon_dict['actions']['cat'].shape}, bern:{self.addon_dict['actions']['bern'].shape})")
+
+#     def _shape_of_actions(self, key):
+#         return ""
+
+#     def add(self, data):
+#         """
+#         将新数据加入 self.addon_dict，并对整个 buffer 按照 Return 的降序进行剪裁。
+#         保留 Return 最高的 max_size 条样本，不再单纯按时间新旧删除。
+#         data: 包含 'obs', 'states', 'actions', 'returns' 的字典
+#         """
+#         # 1. 验证输入数据长度一致性（仅检查 IL 必需的键）
+#         data_lengths = {}
+#         for key in ['obs', 'states', 'returns']:
+#             if key in data:
+#                 arr = np.array(data[key], dtype=np.float32)
+#                 data_lengths[key] = len(arr)
+        
+#         if 'actions' in data:
+#             if isinstance(data['actions'], dict):
+#                 for sub_k in data['actions']:
+#                     arr = np.array(data['actions'][sub_k])
+#                     data_lengths[f'actions.{sub_k}'] = len(arr)
+        
+#         # 检查所有字段长度是否统一
+#         unique_lengths = set(data_lengths.values())
+#         if len(unique_lengths) > 1:
+#             raise ValueError(f"Inconsistent data lengths in IL_transition_buffer.add(): {data_lengths}")
+        
+#         min_len = list(unique_lengths)[0] if unique_lengths else 0
+        
+#         if min_len == 0:
+#             print("Warning: Attempting to add empty data to IL_transition_buffer. Skipping.")
+#             return
+        
+#         # 2. 预处理：将传入数据转换为 numpy arrays
+#         processed = {}
+#         for key in ['obs', 'states', 'returns']:
+#             if key in data:
+#                 arr = np.array(data[key], dtype=np.float32)
+#                 processed[key] = arr
+
+#         if 'actions' in data:
+#             if isinstance(data['actions'], list):
+#                 # 调用全局定义的动作重组函数
+#                 processed['actions'] = restructure_actions(data['actions'])
+#             elif isinstance(data['actions'], dict):
+#                 processed['actions'] = {}
+#                 for sub_k in data['actions']:
+#                     arr = np.array(data['actions'][sub_k])
+#                     if arr.ndim == 1:
+#                         arr = arr.reshape(-1, 1)
+#                     processed['actions'][sub_k] = arr
+#             else:
+#                 processed['actions'] = data['actions']
+
+#         # 3. 拼接数据到 self.addon_dict
+#         for k in self.addon_dict:
+#             if k not in processed:
+#                 continue
+
+#             if k == 'actions':
+#                 for sub_k in self.addon_dict[k]:
+#                     if sub_k in processed[k]:
+#                         old_arr = self.addon_dict[k][sub_k]
+#                         new_arr = np.array(processed[k][sub_k])
+#                         if new_arr.ndim == 1:
+#                             new_arr = new_arr.reshape(-1, 1)
+#                         concat_arr = np.concatenate([old_arr, new_arr], axis=0)
+#                         # 滚动剪裁：保留最近 self.max_size 条
+#                         if len(concat_arr) > self.max_size:
+#                             concat_arr = concat_arr[-self.max_size:]
+#                         self.addon_dict[k][sub_k] = concat_arr
+#             else:
+#                 old_arr = self.addon_dict[k]
+#                 new_arr = np.array(processed[k])
+#                 # 如果维度不匹配但旧数组为一维，尝试 flatten new_arr
+#                 try:
+#                     concat_arr = np.concatenate([old_arr, new_arr], axis=0)
+#                 except Exception as e:
+#                     raise ValueError(
+#                         f"Failed to concatenate key '{k}' in IL_transition_buffer.add():\n"
+#                         f"  Old shape: {old_arr.shape}, dtype: {old_arr.dtype}\n"
+#                         f"  New shape: {new_arr.shape}, dtype: {new_arr.dtype}\n"
+#                         f"  Error: {e}"
+#                     )
+                
+#         # 4. 核心改进：按 Return 排序并剪裁
+#         # 获取合并后所有样本的 Return 值并扁平化
+#         all_returns = self.addon_dict['returns'].flatten()
+#         total_len = len(all_returns)
+        
+#         if total_len > self.max_size:
+#             # 获取 Return 降序排列的索引（从大到小）
+#             keep_indices = np.argsort(-all_returns)[:self.max_size]
+            
+#             # 按照高质量索引重新切片所有数据键，确保样本在各个字段间同步
+#             for k in self.addon_dict:
+#                 if k == 'actions':
+#                     for sub_k in self.addon_dict[k]:
+#                         self.addon_dict[k][sub_k] = self.addon_dict[k][sub_k][keep_indices]
+#                 else:
+#                     self.addon_dict[k] = self.addon_dict[k][keep_indices]
+
+#     def read(self, batch_size):
+#         """
+#         从 self.addon_dict 中随机采样 batch_size 条数据（init 示例与新增数据一并被采样/剪裁）。
+#         """
+#         # 总长度取 states 长度为准
+#         sample_key = 'states'
+#         total_len = len(self.addon_dict[sample_key])
+        
+#         # 检查是否为空
+#         if total_len == 0:
+#             raise ValueError("IL_transition_buffer is empty. Cannot sample.")
+        
+#         # 【严格检查】actions 子键长度是否一致 - 不再填充，直接报错
+#         for sub_k in self.addon_dict['actions'].keys():
+#             action_len = len(self.addon_dict['actions'][sub_k])
+#             if action_len != total_len:
+#                 raise ValueError(
+#                     f"Data length mismatch in IL_transition_buffer.read():\n"
+#                     f"  Key 'actions[{sub_k}]' has length {action_len}\n"
+#                     f"  Key 'states' has length {total_len}\n"
+#                     f"  Expected: {total_len}, Got: {action_len}\n"
+#                     f"  Please check your data collection or adjust buffer parameters."
+#                 )
+
+#         # 若请求超过总量，允许重复采样
+#         indices = np.random.randint(0, total_len, size=batch_size)
+
+#         combined = {}
+#         for k in self.addon_dict:
+#             if k == 'actions':
+#                 combined[k] = {}
+#                 for sub_k in self.addon_dict[k]:
+#                     full_arr = self.addon_dict[k][sub_k]
+#                     combined[k][sub_k] = full_arr[indices]
+#             else:
+#                 full_arr = self.addon_dict[k]
+#                 # 【严格检查】确保长度匹配 - 不再填充，直接报错
+#                 if len(full_arr) != total_len:
+#                     raise ValueError(
+#                         f"Data length mismatch in IL_transition_buffer.read():\n"
+#                         f"  Key '{k}' has length {len(full_arr)}\n"
+#                         f"  Key 'states' has length {total_len}\n"
+#                         f"  Expected: {total_len}, Got: {len(full_arr)}\n"
+#                         f"  Please check your data collection or adjust buffer parameters."
+#                     )
+#                 combined[k] = full_arr[indices]
+
+#         return combined
+
+#     def clear(self):
+#         """
+#         清空所有存储（包含原始示例）。如果需要保留原始示例，请在外部保存副本。
+#         """
+#         for k in list(self.addon_dict.keys()):
+#             if k == 'actions':
+#                 for sub_k in list(self.addon_dict[k].keys()):
+#                     shape = list(self.addon_dict[k][sub_k].shape)
+#                     shape[0] = 0 # 长度归零
+#                     self.addon_dict[k][sub_k] = np.zeros(shape, dtype=self.addon_dict[k][sub_k].dtype)
+#             else:
+#                 shape = list(self.addon_dict[k].shape)
+#                 shape[0] = 0
+#                 self.addon_dict[k] = np.zeros(shape, dtype=self.addon_dict[k].dtype)
+#         print("[IL_transition_buffer] addon_dict cleared.")
 
 
 # 加载数据
-original_il_transition_dict, transition_dict = load_il_and_transitions(
+original_il_transition_dict, _ = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
     "il_transitions_combat_LR.pkl",
     "transition_dict_combat_LR.pkl"
 )
+original_il_transition_dict0 = copy.deepcopy(original_il_transition_dict)
 
 # --- 关键步骤：执行数据重构 ---
 if original_il_transition_dict is not None:
     # 这里完成 (Batch, Key) -> (Key, Batch) 的转换
-    original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict['actions'])
+    original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict0['actions'])
     
     # 顺便确保 states 和 returns 也是标准的 float32 numpy array
-    original_il_transition_dict['states'] = np.array(original_il_transition_dict['states'], dtype=np.float32)
-    original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
+    original_il_transition_dict['states'] = np.array(original_il_transition_dict0['states'], dtype=np.float32)
+    original_il_transition_dict['returns'] = np.array(original_il_transition_dict0['returns'], dtype=np.float32)
 
 
 
@@ -424,7 +611,7 @@ def run_MLP_simulation(
     if IL_epoches > 0:
         print("Initializing IL Transition Buffer...")
         # addon_dict 大小限制，可根据显存调整，例如 20000
-        il_transition_buffer = IL_transition_buffer(original_il_transition_dict, max_size=20000)
+        il_transition_buffer = IL_transition_buffer(original_il_transition_dict0, max_size=20000)
     
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -557,7 +744,6 @@ def run_MLP_simulation(
     # 循环变量初始化
     i_episode = 0 
     total_steps = 0
-    training_start_time = time.time()
     launch_time_count = 0
     t_bias = 0
     decide_steps_after_update = 0
@@ -761,7 +947,7 @@ def run_MLP_simulation(
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
                         ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
                         
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
@@ -833,7 +1019,7 @@ def run_MLP_simulation(
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
                 # IL需要的是实际的开火执行情况
-                current_action_exec = {'cat': r_action_exec['cat'], 'bern': b_missile_fired}
+                current_action_exec = {'cat': b_action_exec['cat'], 'bern': b_missile_fired}
                 current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': r_missile_fired}
                 
             if adv_is_rule:

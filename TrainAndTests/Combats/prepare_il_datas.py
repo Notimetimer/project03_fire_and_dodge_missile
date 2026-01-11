@@ -114,7 +114,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                     decide_steps_after_update += 1
                     
                     b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-                    current_action = {'fly': b_action_label, 'fire': b_fire}
+                    current_action = {'cat': b_action_label, 'bern': b_fire}
                     # current_action = np.array([b_action_label, b_fire])
 
                 r_action = env.maneuver14LR(env.RUAV, r_action_label)

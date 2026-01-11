@@ -1,6 +1,7 @@
 from CombatPPOWithIL import *
+from datetime import datetime
 
-mission_name = 'IL_and_PFSP_2元奖励_清理老顽固' # 'IL_and_PFSP_2元奖励_小alpha'
+mission_name = 'IL_and_PFSP_2元奖励_小alpha_清理老顽固' # 'IL_and_PFSP_2元奖励_小alpha'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -13,7 +14,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 0.01  # 设置为0就是纯强化学习
+alpha_il = 1e-4  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
 beta_mixed = 1.0
@@ -61,6 +62,8 @@ if original_il_transition_dict is not None:
 
 if __name__=='__main__':
     print('Hello')
+    start_time = datetime.now()
+    print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
         mission_name=mission_name,
         actor_lr=actor_lr,
@@ -90,3 +93,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
     )
+    end_time = datetime.now()
+    print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
+    elapsed_hours = (end_time - start_time).total_seconds() / 3600.0
+    print(f"Simulation duration: {elapsed_hours:.4f} hours")

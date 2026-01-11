@@ -1,6 +1,7 @@
 from CombatPPOWithIL import *
+from datetime import datetime
 
-mission_name = 'IL_and_PFSP_2元奖励_清理老顽固' # 'IL_and_PFSP_2元奖励'
+mission_name = 'IL_and_PFSP_2元奖励_分阶段学习'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -61,6 +62,8 @@ if original_il_transition_dict is not None:
 
 if __name__=='__main__':
     print('Hello')
+    start_time = datetime.now()
+    print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
         mission_name=mission_name,
         actor_lr=actor_lr,
@@ -90,3 +93,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
     )
+    end_time = datetime.now()
+    print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
+    elapsed_hours = (end_time - start_time).total_seconds() / 3600.0
+    print(f"Simulation duration: {elapsed_hours:.4f} hours")
