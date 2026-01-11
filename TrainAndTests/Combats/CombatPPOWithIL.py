@@ -1019,8 +1019,8 @@ def run_MLP_simulation(
                 current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
                 
                 # IL需要的是实际的开火执行情况
-                current_action_exec = {'cat': b_action_exec['cat'], 'bern': b_missile_fired}
-                current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': r_missile_fired}
+                current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_missile_fired])}
+                current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_missile_fired])}
                 
             if adv_is_rule:
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label) # 同步动作空间，现在都是区分左右
