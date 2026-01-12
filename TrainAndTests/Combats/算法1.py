@@ -16,6 +16,7 @@ eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
 alpha_il = 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
+il_batch_size2=il_batch_size
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
 beta_mixed = 1.0
 label_smoothing=0.3
@@ -79,6 +80,7 @@ if __name__=='__main__':
         k_entropy=k_entropy,
         alpha_il=alpha_il,
         il_batch_size=il_batch_size,
+        il_batch_size2=il_batch_size2,
         mini_batch_size_mixed=mini_batch_size_mixed,
         beta_mixed=beta_mixed,
         label_smoothing=label_smoothing,

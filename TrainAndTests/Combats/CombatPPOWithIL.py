@@ -502,6 +502,7 @@ def run_MLP_simulation(
     k_entropy=None,
     alpha_il=1.0,
     il_batch_size=128,
+    il_batch_size2=128,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
     label_smoothing=0.3,
@@ -1189,7 +1190,7 @@ def run_MLP_simulation(
         if len(transition_dict['dones'])>=transition_dict_capacity: 
             #===========================================
             # 混合强化学习与模仿学习
-            il_transition_dict = il_transition_buffer.read(il_batch_size)
+            il_transition_dict = il_transition_buffer.read(il_batch_size2)
             # 1. 定义 IL 衰减的最大轮次
             # 使用浮点数以确保计算精度
             # MAX_IL_EPISODE = 500 # 100.0 
