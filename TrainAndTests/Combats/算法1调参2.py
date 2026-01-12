@@ -20,6 +20,7 @@ il_batch_size=128 # 模仿学习minibatch大小
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
 beta_mixed = 1.0
 label_smoothing=0.3
+label_smoothing_mixed=0.01
 action_cycle_multiplier = int(round(6/dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -82,6 +83,7 @@ if __name__=='__main__':
         mini_batch_size_mixed=mini_batch_size_mixed,
         beta_mixed=beta_mixed,
         label_smoothing=label_smoothing,
+        label_smoothing_mixed=label_smoothing_mixed,
         action_cycle_multiplier=action_cycle_multiplier,
         trigger0=trigger0,
         trigger_delta=trigger_delta,

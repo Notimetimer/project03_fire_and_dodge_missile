@@ -17,8 +17,8 @@ from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 
 # --- 1. 配置参数 ---
-TOTAL_ROUNDS = 100    # 每对任务之间对抗 100 场
-TEAM_SIZE = 50        # 每队从 Elo 排行中取前 50 名
+TOTAL_ROUNDS = 10 # 100    # 每对任务之间对抗 100 场
+TEAM_SIZE = 5 # 50        # 每队从 Elo 排行中取前 50 名
 action_cycle_multiplier = 30
 dt_maneuver = 0.2
 
@@ -81,17 +81,17 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
 if __name__ == "__main__":
     # --- [在此处修改输入列表] ---
     mission_names = [
-        'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习', # 任务1
-        'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习', # 任务2 (示例重复)
-        'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习', # 任务3
-        'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习'  # 任务4
+        'IL_and_PFSP_2元奖励_小alpha_清理老顽固-run-20260111-125315', # 任务1
+        'IL_and_PFSP_2元奖励_更小alpha_清理老顽固-run-20260111-125324', # 任务2 (示例重复)
+        'IL_and_PFSP_2元奖励_分阶段学习-run-20260110-173920', # 任务3
+        'IL_and_PFSP_2元奖励_分阶段-run-20260109-201911'  # 任务4
     ]
     
     team_labels = [
-        'Algo_A (IL+Entropy)',
-        'Algo_B (No-IL)',
-        'Algo_C (Base)',
-        'Algo_D (Rule-Mix)'
+        'Algo_A',
+        'Algo_B',
+        'Algo_C',
+        'Algo_D',
     ]
     
     # 强制校验长度
@@ -105,7 +105,8 @@ if __name__ == "__main__":
     teams = []
     print("正在准备各任务精英智能体...")
     for name in mission_names:
-        log_dir = get_latest_log_dir(logs_root_dir, name)
+        # log_dir = get_latest_log_dir(logs_root_dir, name)
+        log_dir = os.path.join(logs_root_dir, name)
         if not log_dir:
             raise FileNotFoundError(f"未找到任务目录: {name}")
         teams.append(get_top_elo_agents(log_dir, TEAM_SIZE))
