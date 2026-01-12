@@ -1242,9 +1242,9 @@ def run_MLP_simulation(
             logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
             
             # IL-PPO信号强度对比
-            logger.add("train_plus/Grad_Norm_Ratio_IL_RL", student_agent.grad_norm_ratio, total_steps)
-            logger.add("train_plus/Grad_Cosine_Similarity", student_agent.grad_cos_sim, total_steps)
-
+            logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
+            logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
+            
             # 修改：重置 transition_dict 时保留 obs 键
             transition_dict = copy.deepcopy(empty_transition_dict)
             
@@ -1344,7 +1344,10 @@ def run_MLP_simulation(
                         diff = latest_elo - float(valid_elos[rk])
                         # diffs.append(diff)
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", diff, total_steps)
-
+                    # if diffs:
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Mean", float(np.mean(diffs)), total_steps)
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Min", float(np.min(diffs)), total_steps)
+                    #     logger.add("Elo_Diff/Latest_vs_Rules_Max", float(np.max(diffs)), total_steps)
     
     # End Training
     training_end_time = time.time()

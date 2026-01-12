@@ -568,9 +568,6 @@ class PPOHybrid:
         self.entropy_cat = 0
         self.entropy_bern = 0
         self.entropy_cont = 0
-        # 初始化IL和RL的余弦相似度和模长比
-        self.grad_norm_ratio = 0.0
-        self.grad_cos_sim = 0.0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -731,6 +728,9 @@ class PPOHybrid:
         entropy_bern_list = []
         entropy_cont_list = []
         
+        # [新增] 初始化样本统计计数器 (包含重复更新累加)
+        ppo_samples_total = 0
+        ppo_valid_samples_total = 0
 
         mask_eps = 1e-5
         
@@ -792,6 +792,9 @@ class PPOHybrid:
                 surrogate_loss = -torch.min(surr1, surr2)
                 # active_sum 已经在上面计算过
                 
+                # [新增] 统计 PPO 样本
+                ppo_samples_total += mb_active_masks.numel()
+                ppo_valid_samples_total += mb_active_masks.sum().item()
 
                 actor_loss = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
@@ -1203,9 +1206,11 @@ class PPOHybrid:
         
         entropy_cat_list, entropy_bern_list, entropy_cont_list = [], [], []
 
-        # 初始化IL和RL的余弦相似度和模长比
-        self.grad_norm_ratio = 0.0
-        self.grad_cos_sim = 0.0
+        # [新增] 初始化样本统计计数器 (包含重复更新累加)
+        ppo_samples_total = 0
+        ppo_valid_samples_total = 0
+        il_samples_total = 0
+        il_valid_samples_total = 0
 
         mask_eps = 1e-5
         rl_num_samples = rl_actor_inputs.size(0)
@@ -1275,6 +1280,9 @@ class PPOHybrid:
                 surrogate_loss = -torch.min(surr1, surr2)
                 # active_sum 已经在上面计算过
                 
+                # [新增] 统计 PPO 样本
+                ppo_samples_total += mb_active_masks.numel()
+                ppo_valid_samples_total += mb_active_masks.sum().item()
 
                 actor_loss_rl = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
@@ -1366,6 +1374,9 @@ class PPOHybrid:
                         F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
                         il_weights = torch.clamp(il_raw_weights * F_word, max=max_weight)
 
+                        # [新增] 统计 IL 样本强度
+                        il_samples_total += curr_il_batch_size
+                        il_valid_samples_total += F_word.sum().item()
 
                     # compute_il_loss 接口不变
                     raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing)
@@ -1380,69 +1391,11 @@ class PPOHybrid:
                 # 4. 联合反向传播
                 total_actor_loss = actor_loss_rl + (alpha * actor_loss_il if is_last_epoch else 0)
                 total_critic_loss = critic_loss_rl + (alpha * critic_loss_il if is_last_epoch else 0)
-                # 旧
-                # total_actor_loss.backward()
-                
-                # 新
-                self.actor_optimizer.zero_grad()
-                # --- A：单独计算 RL 梯度 ---
-                # retain_graph=True 因为稍后还要计算 IL 的 Loss
-                # 收集 RL 梯度并拉平
-                actor_loss_rl.backward(retain_graph=True)
-                g_rl_list = [p.grad.view(-1) for p in self.actor.parameters() if p.grad is not None]
-                if len(g_rl_list) > 0:
-                    g_rl = torch.cat(g_rl_list)
-                    g_rl_norm = torch.norm(g_rl)
-                else:
-                    g_rl = torch.tensor([0.0], device=self.device)
-                    g_rl_norm = torch.tensor(0.0, device=self.device)
-                
-                # --- B：单独计算 IL 梯度 (包含 alpha 权重) ---
-                self.actor_optimizer.zero_grad()
-                if is_last_epoch and alpha > 0:
-                    # 这里的 alpha * actor_loss_il 是最终进入梯度的项
-                    (alpha * actor_loss_il).backward()
-                    g_il_list = [p.grad.view(-1) for p in self.actor.parameters() if p.grad is not None]
-                    if len(g_il_list) > 0:
-                        g_il = torch.cat(g_il_list)
-                        g_il_norm = torch.norm(g_il)
-                    else:
-                        g_il = torch.zeros_like(g_rl)
-                        g_il_norm = torch.tensor(0.0, device=self.device)
-                else:
-                    g_il = torch.zeros_like(g_rl)
-                    g_il_norm = torch.tensor(0.0, device=self.device)
 
-                # --- C：计算强弱比与相似度 ---
-                with torch.no_grad():
-                    # 模长比：IL 信号相对 RL 信号的压制力
-                    self.grad_norm_ratio = (g_il_norm / (g_rl_norm + 1e-8)).item()
-                    
-                    # 余弦相似度：方向是否一致
-                    dot_prod = torch.dot(g_rl, g_il)
-                    self.grad_cos_sim = (dot_prod / (g_rl_norm * g_il_norm + 1e-8)).item()
-
-                # --- D：手动合成总梯度并恢复 ---
-                # 将合成后的梯度写回 .grad 属性，以便执行 step()
-                # idx = 0
-                # for p in self.actor.parameters():
-                #     if p.grad is not None:
-                #         n = p.numel()
-                #         p.grad.copy_((g_rl[idx:idx+n] + g_il[idx:idx+n]).view_as(p))
-                #         idx += n
-                with torch.no_grad():
-                    idx = 0
-                    for p in self.actor.parameters():
-                        if p.grad is not None:
-                            n = p.numel()
-                            # 如果是非最后一轮，g_il 保持 None 或全 0
-                            # g_il 在非 last_epoch 时已经是全 0 向量，所以逻辑是通用的
-                            combined_grad = g_rl[idx : idx + n] + g_il[idx : idx + n]
-                            p.grad.copy_(combined_grad.view_as(p))
-                            idx += n
-                
-                # Critic 梯度处理 (Critic 也可以做类似的分析，但目前合并计算)
+                self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
+                
+                total_actor_loss.backward()
                 total_critic_loss.backward()
                 
                 # [修复] 记录裁剪前梯度
@@ -1506,6 +1459,11 @@ class PPOHybrid:
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
         self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
 
+        # [新增] 赋值有效样本监控项
+        self.PPO_samples = ppo_samples_total
+        self.PPO_valid_samples = ppo_valid_samples_total
+        self.IL_samples = il_samples_total
+        self.IL_valid_samples = il_valid_samples_total
 
         # 计算 Explained Variance (对比 Value 更新前后)
         mask_bool = rl_active_masks.squeeze(-1).bool().cpu().numpy()
