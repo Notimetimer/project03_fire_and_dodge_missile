@@ -221,7 +221,7 @@ if __name__ == "__main__":
 
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    mission_name = 'RL_combat_PFSP_简单熵_区分左右_无rule'
+    mission_name = 'RL_combat_PFSP_简单熵_区分左右_常数奖励'
     log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     
     os.makedirs(log_dir, exist_ok=True)
@@ -346,9 +346,9 @@ if __name__ == "__main__":
     
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = {
-        # "Rule_0": INITIAL_ELO,
-        # "Rule_1": INITIAL_ELO,
-        # "Rule_2": INITIAL_ELO,
+        "Rule_0": INITIAL_ELO,
+        "Rule_1": INITIAL_ELO,
+        "Rule_2": INITIAL_ELO,
     }
     elo_json_path = os.path.join(log_dir, "elo_ratings.json")
     
