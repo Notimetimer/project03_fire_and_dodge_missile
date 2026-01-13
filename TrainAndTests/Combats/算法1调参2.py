@@ -15,7 +15,7 @@ epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
 '''设置为0就是纯强化学习, 目前暂不支持alpha_il 随步数缓慢下降'''
-alpha_il = 1e-5  
+alpha_il = 1e-6
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
