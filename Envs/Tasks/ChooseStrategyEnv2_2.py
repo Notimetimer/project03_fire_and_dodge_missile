@@ -54,15 +54,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'enemy_gets_warning': 0.05,
             'alt_limit_penalty': 1.0,
             'border_penalty_scale': 0.2,
-            'border_reward': 1.0,
+            'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
             'angle_advantage': 1.0,
             'height_advantage': 0.1,
             'defensive_angle_close': 0.5,
             'defensive_run_close': 0.5,
             'defensive_angle_far': 0.2,
             'defensive_crank_penalty': 0.3,
-            'aoa_penalty': 0.02,
-            'pitch_penalty': 0.02,
+            'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
+            'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
         }
 
         ego_win=0
