@@ -454,10 +454,17 @@ if __name__ == "__main__":
             elif test_run == 1:
                 # 修改：直接指定，不加入 ELO 池
                 selected_opponent_name = "Rule_1"
-            else: # test_run == 2
+            elif test_run == 2:
                 # 修改：直接指定，不加入 ELO 池
                 selected_opponent_name = "Rule_2"
-            
+            elif test_run == 3:
+                selected_opponent_name = "Rule_3"
+            elif test_run == 4:
+                selected_opponent_name = "Rule_4"
+            else:
+                print("规则对手超出范围")
+                selected_opponent_name = "Rule_4"
+                
             try:
                 rule_num = int(selected_opponent_name.split('_')[1])
             except:
@@ -734,7 +741,7 @@ if __name__ == "__main__":
 
             print(f"  Test Result vs {selected_opponent_name}: {outcome}. ELO not updated during testing.")
 
-            if test_run < 2:
+            if test_run < 4:
                 test_run += 1
             else: # test_run == 2, 测试全部完成
                 test_run = 0
