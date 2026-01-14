@@ -1,7 +1,7 @@
 from CombatPPOWithIL import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_2元奖励_更小alpha_清理旧经验'
+mission_name = 'IL_and_PFSP1e-6_有踢出'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -97,7 +97,7 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,
+        should_kick=True,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

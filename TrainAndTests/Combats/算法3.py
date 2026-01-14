@@ -1,7 +1,7 @@
 from CombatPPOWithIL import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_3元奖励_分阶段学习' # 'RL_combat_PFSP_简单熵_区分左右'
+mission_name = 'IL_and_PFSP_2元奖励_有踢出'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -24,7 +24,7 @@ label_smoothing_mixed=0.01
 action_cycle_multiplier = int(round(6/dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,1]) # 1,1,1 引导奖励很难说该不该有
+weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 2 # 初始模仿对象
 
 
@@ -96,7 +96,7 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,
+        should_kick=True,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
