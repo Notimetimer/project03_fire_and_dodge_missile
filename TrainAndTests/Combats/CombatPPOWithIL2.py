@@ -1,3 +1,8 @@
+'''
+消融实验：
+无自博弈，全规则对手
+'''
+
 import os
 import sys
 import numpy as np
@@ -306,6 +311,7 @@ def run_MLP_simulation(
     dt_maneuver=0.2,
     transition_dict_capacity=1000,
     should_kick = True,
+    Only_Rule_opponent = False,
 ):
 
     # ------------------------------------------------------------------
@@ -480,12 +486,15 @@ def run_MLP_simulation(
     main_agent_elo = INITIAL_ELO
 
     # [新增] 如果没有历史对手（例如第一次运行且屏蔽了规则），保存当前初始策略作为 actor_rein0
-    if (not elo_ratings) or IL_epoches>0:
-        init_opponent_name = "actor_rein0"
-        init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
-        torch.save(student_agent.actor.state_dict(), init_opponent_path)
-        elo_ratings[init_opponent_name] = INITIAL_ELO
-        print(f"Initialized {init_opponent_name} as the first opponent.")
+    if not Only_Rule_opponent:
+        if (not elo_ratings) or IL_epoches>0:
+            init_opponent_name = "actor_rein0"
+            init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
+            torch.save(student_agent.actor.state_dict(), init_opponent_path)
+            elo_ratings[init_opponent_name] = INITIAL_ELO
+            print(f"Initialized {init_opponent_name} as the first opponent.")
+    else:
+        print("Only_Rule_opponent=True -> actor snapshots will NOT be added to ELO pool.")
 
     def calculate_expected_score(player_elo, opponent_elo):
         """计算期望得分"""
@@ -595,7 +604,7 @@ def run_MLP_simulation(
         # -- 训练模式 --
         else: # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
             ego_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-            enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+            # enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
             
             # 1. 计算当前排位 rank_pos
             valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
@@ -627,6 +636,18 @@ def run_MLP_simulation(
             else:
                 # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
                 probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
+                # 如果只允许规则对手，过滤掉所有非 Rule_ 开头的 key，并重归一化概率
+                if Only_Rule_opponent:
+                    rule_keys = [k for k in opponent_keys if k.startswith("Rule_")]
+                    if len(rule_keys) == 0:
+                        # 保底回退到 Rule_0
+                        opponent_keys = ["Rule_0"]
+                        probs = np.array([1.0])
+                    else:
+                        indices = [opponent_keys.index(k) for k in rule_keys]
+                        probs = probs[indices]
+                        probs = probs / (probs.sum() + 1e-12)
+                        opponent_keys = rule_keys
                 
                 if rank_pos < 0.7:
                     # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
@@ -737,7 +758,7 @@ def run_MLP_simulation(
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
                         ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        # enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
                         
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
@@ -866,7 +887,7 @@ def run_MLP_simulation(
                 transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
                 
                 ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                # enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
             episode_return += reward_for_show
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
@@ -963,15 +984,15 @@ def run_MLP_simulation(
             il_transition_buffer.add(new_il_transition_dict)
             
             # 对手
-            new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
-            new_il_transition_dict['obs'] = enm_transition_dict['obs']
-            new_il_transition_dict['states'] = enm_transition_dict['states']
-            new_il_transition_dict['actions'] = enm_transition_dict['actions']
-            # 将状态转移处理成蒙特卡洛回报形式
-            new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
-                                                                        enm_transition_dict['rewards'], \
-                                                                        enm_transition_dict['dones'])
-            il_transition_buffer.add(new_il_transition_dict)
+            # new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
+            # new_il_transition_dict['obs'] = enm_transition_dict['obs']
+            # new_il_transition_dict['states'] = enm_transition_dict['states']
+            # new_il_transition_dict['actions'] = enm_transition_dict['actions']
+            # # 将状态转移处理成蒙特卡洛回报形式
+            # new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
+            #                                                             enm_transition_dict['rewards'], \
+            #                                                             enm_transition_dict['dones'])
+            # il_transition_buffer.add(new_il_transition_dict)
 
 
         # --- RL Update ---
@@ -1060,8 +1081,11 @@ def run_MLP_simulation(
 
             # 将当前主智能体作为一个新的历史快照加入 ELO 列表
             # 新快照继承当前主智能体的 ELO
-            elo_ratings[actor_key] = main_agent_elo
-            
+            if not Only_Rule_opponent:
+                elo_ratings[actor_key] = main_agent_elo
+            else:
+                print(f"Only_Rule_opponent=True -> not adding {actor_key} to ELO pool.")
+
             # 保存 ELO JSON
             try:
                 tmp_path = elo_json_path + ".tmp"
@@ -1085,6 +1109,7 @@ def run_MLP_simulation(
                 
                 # 记录主智能体
                 logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
+                # logger.add("Elo/Main_Agent_Centered", main_agent_elo - mean_elo, total_steps) # 重复了
 
                 # 记录主智能体在当前所有 ELO 中的归一化排名位置：
                 # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5

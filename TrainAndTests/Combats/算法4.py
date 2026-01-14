@@ -1,7 +1,7 @@
-from CombatPPOWithIL import *
+from CombatPPOWithIL2 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_2元奖励_小alpha_清理旧经验' # 'IL_and_PFSP_2元奖励_小alpha'
+mission_name = 'IL_and_PFSP_2元奖励_纯规则对手' # 'IL_and_PFSP_2元奖励_分阶段学习'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -14,7 +14,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1e-4  # 设置为0就是纯强化学习
+alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
@@ -96,7 +96,6 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
