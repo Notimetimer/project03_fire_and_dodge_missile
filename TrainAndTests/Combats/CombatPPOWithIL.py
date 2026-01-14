@@ -594,7 +594,7 @@ def run_MLP_simulation(
         # -- 训练模式 --
         else: # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
             ego_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-            enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+            # enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
             
             # 1. 计算当前排位 rank_pos
             valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
@@ -736,7 +736,7 @@ def run_MLP_simulation(
                         transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
                         # 保存当前对局中的状态转移
                         ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                        # enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
                         
                         '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
@@ -865,7 +865,7 @@ def run_MLP_simulation(
                 transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
                 
                 ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                # enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
             episode_return += reward_for_show
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
@@ -962,15 +962,15 @@ def run_MLP_simulation(
             il_transition_buffer.add(new_il_transition_dict)
             
             # 对手
-            new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
-            new_il_transition_dict['obs'] = enm_transition_dict['obs']
-            new_il_transition_dict['states'] = enm_transition_dict['states']
-            new_il_transition_dict['actions'] = enm_transition_dict['actions']
-            # 将状态转移处理成蒙特卡洛回报形式
-            new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
-                                                                        enm_transition_dict['rewards'], \
-                                                                        enm_transition_dict['dones'])
-            il_transition_buffer.add(new_il_transition_dict)
+            # new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
+            # new_il_transition_dict['obs'] = enm_transition_dict['obs']
+            # new_il_transition_dict['states'] = enm_transition_dict['states']
+            # new_il_transition_dict['actions'] = enm_transition_dict['actions']
+            # # 将状态转移处理成蒙特卡洛回报形式
+            # new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
+            #                                                             enm_transition_dict['rewards'], \
+            #                                                             enm_transition_dict['dones'])
+            # il_transition_buffer.add(new_il_transition_dict)
 
 
         # --- RL Update ---

@@ -446,25 +446,14 @@ if __name__ == "__main__":
         is_testing = False
         # -- 测试模式 --
         if total_steps >= trigger:
+            # 明确测试对手列表，避免索引/计数不一致造成漏选
+            TEST_OPPONENTS = ["Rule_0", "Rule_1", "Rule_2", "Rule_3", "Rule_4"]
+            n_tests = len(TEST_OPPONENTS)
+
             is_testing = True
-            print(f"\n--- Entering TEST MODE (Run {test_run+1}/3) ---")
-            # 强制选择对手
-            if test_run == 0:
-                selected_opponent_name = "Rule_0"
-            elif test_run == 1:
-                # 修改：直接指定，不加入 ELO 池
-                selected_opponent_name = "Rule_1"
-            elif test_run == 2:
-                # 修改：直接指定，不加入 ELO 池
-                selected_opponent_name = "Rule_2"
-            elif test_run == 3:
-                selected_opponent_name = "Rule_3"
-            elif test_run == 4:
-                selected_opponent_name = "Rule_4"
-            else:
-                print("规则对手超出范围")
-                selected_opponent_name = "Rule_4"
-                
+            curr_run = test_run % n_tests
+            print(f"\n--- Entering TEST MODE (Run {curr_run+1}/{n_tests}) ---")
+            selected_opponent_name = TEST_OPPONENTS[curr_run]
             try:
                 rule_num = int(selected_opponent_name.split('_')[1])
             except:
@@ -741,9 +730,9 @@ if __name__ == "__main__":
 
             print(f"  Test Result vs {selected_opponent_name}: {outcome}. ELO not updated during testing.")
 
-            if test_run < 4:
-                test_run += 1
-            else: # test_run == 2, 测试全部完成
+            # 递增 test_run；完成一轮后重置并推进下次触发阈值
+            test_run += 1
+            if test_run >= n_tests:
                 test_run = 0
                 trigger += 20e3 # 50e3
                 print(f"--- TEST PHASE COMPLETED. Next trigger at {trigger} steps. Resuming training... ---\n")
