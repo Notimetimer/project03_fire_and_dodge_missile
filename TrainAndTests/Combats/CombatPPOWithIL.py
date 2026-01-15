@@ -306,6 +306,7 @@ def run_MLP_simulation(
     dt_maneuver=0.2,
     transition_dict_capacity=1000,
     should_kick = True,
+    use_init_data = False,
 ):
 
     # ------------------------------------------------------------------
@@ -951,27 +952,30 @@ def run_MLP_simulation(
         
         if is_testing == False:
             # 添加当前回合回放信息和对手回放信息
-            # 自己
-            new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
-            new_il_transition_dict['obs'] = ego_transition_dict['obs']
-            new_il_transition_dict['states'] = ego_transition_dict['states']
-            new_il_transition_dict['actions'] = ego_transition_dict['actions']
-            # 将状态转移处理成蒙特卡洛回报形式
-            new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
-                                                                        ego_transition_dict['rewards'], \
-                                                                        ego_transition_dict['dones'])
-            il_transition_buffer.add(new_il_transition_dict)
+            # 赢了学自己，输了学对手
+            if env.win:
+                # 自己
+                new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
+                new_il_transition_dict['obs'] = ego_transition_dict['obs']
+                new_il_transition_dict['states'] = ego_transition_dict['states']
+                new_il_transition_dict['actions'] = ego_transition_dict['actions']
+                # 将状态转移处理成蒙特卡洛回报形式
+                new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
+                                                                            ego_transition_dict['rewards'], \
+                                                                            ego_transition_dict['dones'])
+                il_transition_buffer.add(new_il_transition_dict)
             
             # 对手
-            new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
-            new_il_transition_dict['obs'] = enm_transition_dict['obs']
-            new_il_transition_dict['states'] = enm_transition_dict['states']
-            new_il_transition_dict['actions'] = enm_transition_dict['actions']
-            # 将状态转移处理成蒙特卡洛回报形式
-            new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
-                                                                        enm_transition_dict['rewards'], \
-                                                                        enm_transition_dict['dones'])
-            il_transition_buffer.add(new_il_transition_dict)
+            if env.lose:
+                new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
+                new_il_transition_dict['obs'] = enm_transition_dict['obs']
+                new_il_transition_dict['states'] = enm_transition_dict['states']
+                new_il_transition_dict['actions'] = enm_transition_dict['actions']
+                # 将状态转移处理成蒙特卡洛回报形式
+                new_il_transition_dict['returns'] = compute_monte_carlo_returns(gamma, \
+                                                                            enm_transition_dict['rewards'], \
+                                                                            enm_transition_dict['dones'])
+                il_transition_buffer.add(new_il_transition_dict)
 
 
         # --- RL Update ---
@@ -991,6 +995,8 @@ def run_MLP_simulation(
             student_agent.mixed_update(
                 transition_dict,          # RL 数据
                 il_transition_dict,       # IL 数据
+                init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
+                eta = np.clip(1-total_steps/1e6, 0, 1),
                 adv_normed=True,          # 沿用 RL 实例中的优势归一化
                 il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
                 label_smoothing=label_smoothing_mixed,      # 沿用 IL 实例中的标签平滑

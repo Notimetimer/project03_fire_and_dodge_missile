@@ -1,5 +1,9 @@
 '''
-PPO-DPC 消融实验
+使用简单熵正则项的备份
+
+分动作头接收entropy_loss
+
+现在给伯努利分布加入actor内mask
 '''
 
 import numpy as np
@@ -1040,7 +1044,7 @@ class PPOHybrid:
     # --- 新增功能 3: 混合更新 (PPO + MARWIL) ---
     # --- 修改后的 mixed_update ---
     # --- 修复后的 mixed_update (包含完整监控项) ---
-    def mixed_update(self, transition_dict, il_transition_dict, init_il_transition_dict, eta=0.1,  # [新增] 专家数据与约束系数
+    def mixed_update(self, transition_dict, il_transition_dict, 
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
@@ -1137,15 +1141,20 @@ class PPOHybrid:
         # =====================================================================
         # Part B: IL 数据准备
         # =====================================================================
-        # 1. 自模仿数据 (保持原样)
         il_states_all = to_tensor(il_transition_dict['states'], torch.float)
         il_returns_all = to_tensor(il_transition_dict['returns'], torch.float).view(-1, 1)
+        
         use_il_obs = False
         if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
             il_obs_all = to_tensor(il_transition_dict['obs'], torch.float)
             use_il_obs = True
+        
+        # ---------------------------------------------------------------------
+        # [修改] IL Actions 处理
+        # ---------------------------------------------------------------------
         il_actions_raw = il_transition_dict['actions']
-        il_actions_all = {}  
+        il_actions_all = {}
+        
         if isinstance(il_actions_raw, list):
             if len(il_actions_raw) > 0:
                 keys = il_actions_raw[0].keys()
@@ -1155,40 +1164,16 @@ class PPOHybrid:
                 il_actions_raw = temp_dict
             else:
                 il_actions_raw = {}
+        
         if isinstance(il_actions_raw, dict):
             for k, v in il_actions_raw.items():
                 if k == 'cat':
                     il_actions_all[k] = to_tensor(v, torch.long)
                 else:
                     il_actions_all[k] = to_tensor(v, torch.float)
+        
         il_total_size = il_states_all.size(0)
-        
-        # 2. 他模仿数据
-        init_il_states_all = to_tensor(init_il_transition_dict['states'], torch.float)
-        init_il_returns_all = to_tensor(init_il_transition_dict['returns'], torch.float).view(-1, 1)
-        use_il_obs = False
-        if 'obs' in init_il_transition_dict and len(init_il_transition_dict['obs']) > 0:
-            init_il_obs_all = to_tensor(init_il_transition_dict['obs'], torch.float)
-            use_il_obs = True
-        init_il_actions_raw = init_il_transition_dict['actions']
-        init_il_actions_all = {}  
-        if isinstance(init_il_actions_raw, list):
-            if len(init_il_actions_raw) > 0:
-                keys = init_il_actions_raw[0].keys()
-                temp_dict = {}
-                for k in keys:
-                    temp_dict[k] = np.stack([d[k] for d in init_il_actions_raw], axis=0)
-                init_il_actions_raw = temp_dict
-            else:
-                init_il_actions_raw = {}
-        if isinstance(init_il_actions_raw, dict):
-            for k, v in init_il_actions_raw.items():
-                if k == 'cat':
-                    init_il_actions_all[k] = to_tensor(v, torch.long)
-                else:
-                    init_il_actions_all[k] = to_tensor(v, torch.float)
-        init_il_total_size = init_il_states_all.size(0)
-        
+
         # =====================================================================
         # Part C: 混合更新循环 (完整监控版)
         # =====================================================================
@@ -1320,7 +1305,6 @@ class PPOHybrid:
 
                 # 3. IL Loss (MARWIL) - 仅在 Last Epoch 的那个 Big Batch 中计算
                 actor_loss_il = torch.tensor(0.0, device=self.device)
-                actor_loss_init_il = torch.tensor(0.0, device=self.device) # [新增] 他模仿 Loss
                 critic_loss_il = torch.tensor(0.0, device=self.device)
                 
                 if is_last_epoch:
@@ -1330,7 +1314,6 @@ class PPOHybrid:
                     
                     # 简单起见，如果要求全batch，则直接取全部，或者随机取一个大 Batch
                     il_indices = np.random.randint(0, il_total_size, curr_il_batch_size)
-                    init_il_idx = np.random.randint(0, init_il_total_size, init_il_total_size)
                     
                     il_s_batch = il_states_all[il_indices] 
                     il_r_batch = il_returns_all[il_indices]
@@ -1378,7 +1361,6 @@ class PPOHybrid:
 
                     # compute_il_loss 接口不变
                     raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=True)
-                    raw_init_il_loss = self.actor.compute_il_loss(init_il_s_batch, self._slice_actions(init_il_actions_all, init_il_idx), label_smoothing, no_bern=True)
                     actor_loss_il = torch.mean(il_weights * raw_il_loss)
                     
                     il_values_grad = self.critic(il_s_batch)

@@ -1,9 +1,5 @@
 '''
-使用简单熵正则项的备份
-
-分动作头接收entropy_loss
-
-现在给伯努利分布加入actor内mask
+PPO-DPC 消融实验
 '''
 
 import numpy as np
@@ -1044,7 +1040,7 @@ class PPOHybrid:
     # --- 新增功能 3: 混合更新 (PPO + MARWIL) ---
     # --- 修改后的 mixed_update ---
     # --- 修复后的 mixed_update (包含完整监控项) ---
-    def mixed_update(self, transition_dict, il_transition_dict, 
+    def mixed_update(self, transition_dict, il_transition_dict, init_il_transition_dict=None, eta=0.1,  # [新增] 专家数据与约束系数
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
@@ -1141,17 +1137,13 @@ class PPOHybrid:
         # =====================================================================
         # Part B: IL 数据准备
         # =====================================================================
+        # 1. 自模仿数据 (保持原样)
         il_states_all = to_tensor(il_transition_dict['states'], torch.float)
         il_returns_all = to_tensor(il_transition_dict['returns'], torch.float).view(-1, 1)
-        
         use_il_obs = False
         if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
             il_obs_all = to_tensor(il_transition_dict['obs'], torch.float)
             use_il_obs = True
-        
-        # ---------------------------------------------------------------------
-        # [修改] IL Actions 处理
-        # ---------------------------------------------------------------------
         il_actions_raw = il_transition_dict['actions']
         il_actions_all = {}
         
@@ -1164,16 +1156,41 @@ class PPOHybrid:
                 il_actions_raw = temp_dict
             else:
                 il_actions_raw = {}
-        
         if isinstance(il_actions_raw, dict):
             for k, v in il_actions_raw.items():
                 if k == 'cat':
                     il_actions_all[k] = to_tensor(v, torch.long)
                 else:
                     il_actions_all[k] = to_tensor(v, torch.float)
-        
         il_total_size = il_states_all.size(0)
-
+        
+        if init_il_transition_dict is not None:
+            # 2. 他模仿数据
+            init_il_states_all = to_tensor(init_il_transition_dict['states'], torch.float)
+            use_init_il_obs = False
+            if 'obs' in init_il_transition_dict and len(init_il_transition_dict['obs']) > 0:
+                init_il_obs_all = to_tensor(init_il_transition_dict['obs'], torch.float)
+                use_init_il_obs = True
+            init_il_actions_raw = init_il_transition_dict['actions']
+            init_il_actions_all = {}  
+            if isinstance(init_il_actions_raw, list):
+                if len(init_il_actions_raw) > 0:
+                    keys = init_il_actions_raw[0].keys()
+                    temp_dict = {}
+                    for k in keys:
+                        temp_dict[k] = np.stack([d[k] for d in init_il_actions_raw], axis=0)
+                    init_il_actions_raw = temp_dict
+                else:
+                    init_il_actions_raw = {}
+            if isinstance(init_il_actions_raw, dict):
+                for k, v in init_il_actions_raw.items():
+                    if k == 'cat':
+                        init_il_actions_all[k] = to_tensor(v, torch.long)
+                    else:
+                        init_il_actions_all[k] = to_tensor(v, torch.float)
+            init_il_returns_all = to_tensor(init_il_transition_dict['returns'], torch.float).view(-1, 1)
+            init_il_total_size = init_il_states_all.size(0)
+        
         # =====================================================================
         # Part C: 混合更新循环 (完整监控版)
         # =====================================================================
@@ -1305,6 +1322,7 @@ class PPOHybrid:
 
                 # 3. IL Loss (MARWIL) - 仅在 Last Epoch 的那个 Big Batch 中计算
                 actor_loss_il = torch.tensor(0.0, device=self.device)
+                actor_loss_init_il = torch.tensor(0.0, device=self.device) # [新增] 他模仿 Loss
                 critic_loss_il = torch.tensor(0.0, device=self.device)
                 
                 if is_last_epoch:
@@ -1318,14 +1336,25 @@ class PPOHybrid:
                     il_s_batch = il_states_all[il_indices] 
                     il_r_batch = il_returns_all[il_indices]
                     if use_il_obs:
-                        il_actor_input_batch = il_obs_all[il_indices] 
+                        il_actor_input_batch = il_obs_all[il_indices]
                     else:
                         il_actor_input_batch = il_s_batch
 
                     il_actions_batch = {}
                     for k, v in il_actions_all.items():
                         il_actions_batch[k] = v[il_indices]
-
+                    
+                    if init_il_transition_dict is not None:
+                        init_il_idx = np.random.randint(0, init_il_total_size, init_il_total_size)
+                        init_il_returns_batch = init_il_returns_all[init_il_idx]
+                        if use_init_il_obs:
+                            init_il_actor_input_batch = init_il_obs_all[init_il_idx]
+                        else:
+                            init_il_actor_input_batch = init_il_states_all[init_il_idx]
+                        init_il_actions_batch = {}
+                        for k, v in init_il_actions_all.items():
+                            init_il_actions_batch[k] = v[init_il_idx]
+                        
                     with torch.no_grad():
                         il_values = self.critic(il_s_batch)
                         residual = il_r_batch - il_values
@@ -1363,14 +1392,62 @@ class PPOHybrid:
                     raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=True)
                     actor_loss_il = torch.mean(il_weights * raw_il_loss)
                     
+                    # --- [new] 对初始轨迹行为克隆 ---
+                    if init_il_transition_dict is not None:
+                        # 1. 计算初始轨迹的 F 函数 (优势加权)
+                        with torch.no_grad():
+                            # [修改] 按照你的要求，Critic 直接接收 init_il_actor_input_batch
+                            v_init = self.critic(init_il_actor_input_batch)
+                            adv_init = (init_il_returns_batch - v_init) / (torch.sqrt(self.c_sq) + 1e-8)
+                            
+                            # F 函数约束：只有比当前表现好的专家数据才学
+                            F_init = torch.where(adv_init > 0, torch.ones_like(adv_init), torch.full_like(adv_init, 1e-6))
+                            F_init = torch.clamp(F_init, max=max_weight)
+
+                        # 2. 获取网络当前的原始输出 (保留对 net 的直接调用)
+                        init_outputs = self.actor.net(init_il_actor_input_batch)
+                        
+                        # 【核心修正】：初始化为与 adv_init 形状相同的零张量 [Batch, 1]
+                        # 这样可以确保后续的 += 每一项都是 [Batch, 1] 的累加
+                        mse_loss_sum = torch.zeros_like(adv_init)
+                        # mse_loss_sum = torch.tensor(0.0, device=self.device)
+
+                        # --- 连续动作 MSE ---
+                        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+                            mu_current, _ = init_outputs['cont']
+                            u_expert = init_il_actions_batch['cont']
+                            mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
+
+                        # --- 离散动作 MSE ---
+                        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                            cat_probs_current = init_outputs['cat']
+                            expert_cat = init_il_actions_batch['cat'].long()
+                            for i, probs in enumerate(cat_probs_current):
+                                target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
+                                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
+
+                        # --- 伯努利动作 MSE ---
+                        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+                            bern_logits = init_outputs['bern']
+                            bern_probs = torch.sigmoid(bern_logits)
+                            target_bern = init_il_actions_batch['bern']
+                            mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
+
+                        # 3. 应用 F 函数约束并求平均
+                        actor_loss_init_mse = torch.mean(F_init * mse_loss_sum)
+                    # --- ---
+                    
                     il_values_grad = self.critic(il_s_batch)
                     critic_loss_il = F.mse_loss(il_values_grad, il_r_batch) * c_v
                     
                     il_actor_loss_list.append(actor_loss_il.item())
                     il_critic_loss_list.append(critic_loss_il.item())
 
-                # 4. 联合反向传播
-                total_actor_loss = actor_loss_rl + (alpha * actor_loss_il if is_last_epoch else 0)
+                    # 4. 联合反向传播
+                    if init_il_transition_dict is not None:
+                        actor_loss_init_il = eta * actor_loss_init_mse
+                        
+                total_actor_loss = actor_loss_rl + (alpha * (actor_loss_il + actor_loss_init_il) if is_last_epoch else 0)
                 total_critic_loss = critic_loss_rl + (alpha * critic_loss_il if is_last_epoch else 0)
 
                 self.actor_optimizer.zero_grad()
