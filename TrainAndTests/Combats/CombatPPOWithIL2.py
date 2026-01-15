@@ -486,15 +486,15 @@ def run_MLP_simulation(
     main_agent_elo = INITIAL_ELO
 
     # [新增] 如果没有历史对手（例如第一次运行且屏蔽了规则），保存当前初始策略作为 actor_rein0
-    if not Only_Rule_opponent:
-        if (not elo_ratings) or IL_epoches>0:
-            init_opponent_name = "actor_rein0"
-            init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
-            torch.save(student_agent.actor.state_dict(), init_opponent_path)
+    if (not elo_ratings) or IL_epoches>0:
+        init_opponent_name = "actor_rein0"
+        init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
+        torch.save(student_agent.actor.state_dict(), init_opponent_path)
+        if not Only_Rule_opponent:
             elo_ratings[init_opponent_name] = INITIAL_ELO
-            print(f"Initialized {init_opponent_name} as the first opponent.")
-    else:
-        print("Only_Rule_opponent=True -> actor snapshots will NOT be added to ELO pool.")
+        else:
+            print("Only_Rule_opponent=True -> actor snapshots will NOT be added to ELO pool.")
+        print(f"Initialized {init_opponent_name} as the first opponent.")
 
     def calculate_expected_score(player_elo, opponent_elo):
         """计算期望得分"""
@@ -648,8 +648,8 @@ def run_MLP_simulation(
                         probs = probs[indices]
                         probs = probs / (probs.sum() + 1e-12)
                         opponent_keys = rule_keys
-                
-                if rank_pos < 0.7:
+                        
+                elif rank_pos < 0.7:
                     # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
                     # 概率线性插值：rank=0.4 -> prob=1.0 (理论上会被上面截断); rank=0.7 -> prob=0.0 (无额外加成)
                     target_rule0_prob = max(0, (0.7 - rank_pos) / 0.3)
