@@ -1,7 +1,7 @@
 from CombatPPOWithIL import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_1e-2_有踢出'
+mission_name = 'IL_and_PFSP_1e-2_有踢出_更换更新方式'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3

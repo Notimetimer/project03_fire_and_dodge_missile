@@ -356,7 +356,7 @@ class HybridActorWrapper(nn.Module):
             dist = SquashedNormal(mu, std)
             u = actions_raw['cont']
             log_probs += dist.log_prob(0, u).sum(-1, keepdim=True)
-            entropy += dist.entropy().unsqueeze(-1) # 近似熵
+            # entropy += dist.entropy().unsqueeze(-1) # 近似熵
             
             #  单独记录 cont entropy
             e_cont = dist.entropy().unsqueeze(-1)
@@ -871,6 +871,10 @@ class PPOHybrid:
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
         self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
         
+        # [新增] 赋值有效样本监控项
+        self.PPO_samples = ppo_samples_total
+        self.PPO_valid_samples = ppo_valid_samples_total
+        
         #  计算 Explained Variance
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
         # 这里使用 numpy 计算以防 tensor 维度广播问题
@@ -900,7 +904,187 @@ class PPOHybrid:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
+    # =========================================================================
+    #  [New Helper] 提取出的 MSE 计算逻辑 (供 mixed_update 和 BC_update 复用)
+    # =========================================================================
+    def _compute_mse_loss_with_f(self, actor_input_batch, actions_batch, returns_batch, 
+                                 critic_s_batch, # 用于计算 V
+                                 max_weight=100.0, use_F=True):
+        """
+        计算基于 F 函数 (Advantage > 0) 门控的 MSE Loss。
+        """
+        # 1. 计算 F 函数 (优势加权门控)
+        with torch.no_grad():
+            # Critic 计算 V 值
+            # 注意：如果 actor_input 和 critic_input 不一样 (如 obs vs state)，这里需要传入正确的 tensor
+            # 在本类中，通常传入的是用于 Actor 的输入，如果 Actor 用 Obs，Critic 用 State，
+            # 外部调用时需确保 critic_s_batch 是正确的全局 State 或与 Actor 输入一致(视具体配置)
+            # 这里为了通用性，假设 critic_s_batch 是正确的 Critic 输入
+            v_pred = self.critic(critic_s_batch)
+            
+            # 计算优势
+            # 确保 returns_batch 是 (Batch, 1)
+            adv = (returns_batch - v_pred) / (torch.sqrt(self.c_sq) + 1e-8)
 
+            if use_F:
+                # F 函数：只有 Adv > 0 的样本权重为 1，否则为极小值
+                F_mask = torch.where(adv > 0, torch.ones_like(adv), torch.full_like(adv, 1e-6))
+                F_mask = torch.clamp(F_mask, max=max_weight)
+            else:
+                F_mask = torch.ones_like(adv)
+
+        # 2. 获取网络原始输出
+        outputs = self.actor.net(actor_input_batch)
+        
+        # 初始化 Loss Sum (Batch, 1)
+        mse_loss_sum = torch.zeros_like(adv)
+
+        # --- Continuous MSE ---
+        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+            mu_current, _ = outputs['cont']
+            u_expert = actions_batch['cont']
+            mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
+
+        # --- Categorical MSE ---
+        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+            cat_probs_current = outputs['cat']
+            expert_cat = actions_batch['cat'].long()
+            for i, probs in enumerate(cat_probs_current):
+                target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
+                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
+
+        # --- Bernoulli MSE ---
+        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+            bern_logits = outputs['bern']
+            bern_probs = torch.sigmoid(bern_logits)
+            target_bern = actions_batch['bern']
+            mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
+
+        # 3. 应用 FMask 并求平均
+        # F_mask: [Batch, 1], mse_loss_sum: [Batch, 1]
+        if use_F:
+            final_loss = torch.mean(F_mask * mse_loss_sum)
+        else:
+            final_loss = torch.mean(mse_loss_sum)
+        
+        return final_loss, F_mask
+
+    
+    # =========================================================================
+    #  [New Method] BC_update (Critic 同 MARWIL, Actor 用 MSE+F)
+    # =========================================================================
+    def BC_update(self, il_transition_dict, batch_size=64, c_v=1.0, shuffled=1, max_weight=100.0):
+        """
+        行为克隆更新 (Behavior Cloning with F-function Constraint)。
+        Critic: 使用 MARWIL 风格的回归更新 (拟合 R)。
+        Actor: 使用 MSE 回归，但仅在 Advantage > 0 时通过 F 函数生效。
+        """
+        # 1. 数据准备
+        # 可能的局部观测
+        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
+            obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
+            use_obs = True
+        else:
+            use_obs = False
+            
+        # 冻结分布参数，只训练均值/Logits
+        if hasattr(self.actor.net, 'log_std_cont'):
+            self.actor.net.log_std_cont.requires_grad = False
+
+        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
+        
+        # 处理 Actions
+        raw_actions = il_transition_dict['actions']
+        actions_all = {}
+        if isinstance(raw_actions, list):
+            keys = raw_actions[0].keys()
+            temp_dict = {}
+            for k in keys:
+                temp_dict[k] = np.stack([d[k] for d in raw_actions], axis=0)
+            raw_actions = temp_dict
+        if isinstance(raw_actions, dict):
+            for k, v in raw_actions.items():
+                if k == 'cat':
+                    actions_all[k] = torch.tensor(v, dtype=torch.long).to(self.device)
+                else:
+                    actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
+
+        # 2. 索引准备
+        total_size = states_all.size(0)
+        indices = np.arange(total_size)
+        if shuffled:
+            np.random.shuffle(indices)
+
+        total_actor_loss = 0
+        total_critic_loss = 0
+        total_valid_samples = 0
+        batch_count = 0
+
+        # 初始化 c_sq 用于 Advantage 归一化 (如果不存在)
+        if not hasattr(self, 'c_sq'): 
+            self.c_sq = torch.tensor(1.0, device=self.device)
+
+        # 3. Mini-batch 循环
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+            
+            s_batch = states_all[batch_indices] 
+            r_batch = returns_all[batch_indices]
+            
+            if use_obs:
+                actor_input_batch = obs_all[batch_indices]
+            else:
+                actor_input_batch = s_batch
+            
+            # Critic input (通常 state)
+            critic_input_batch = s_batch
+
+            actions_batch = {}
+            for k, v in actions_all.items():
+                actions_batch[k] = v[batch_indices]
+
+            # --- A. Actor Loss (MSE + F) ---
+            # 使用 helper 函数计算
+            actor_loss, F_mask = self._compute_mse_loss_with_f(
+                actor_input_batch, actions_batch, r_batch, critic_input_batch, max_weight, use_F=0
+            )
+
+            # --- B. Critic Loss (同 MARWIL) ---
+            v_pred = self.critic(critic_input_batch)
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            
+            # 更新 running average of squared return error (for c calculation in helper)
+            with torch.no_grad():
+                batch_mse_val = ((r_batch - v_pred) ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse_val - self.c_sq)
+
+            # --- C. Optimize ---
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            total_valid_samples += F_mask.sum().item()
+            batch_count += 1
+
+        avg_actor_loss = total_actor_loss / batch_count if batch_count > 0 else 0
+        avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0
+        
+        return avg_actor_loss, avg_critic_loss, total_valid_samples
+    
+    
+    
     # --- 修改后的 MARWIL_update ---
     def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
                       tau=0.8):
@@ -1044,99 +1228,50 @@ class PPOHybrid:
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
-                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0,
+                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_updates=1,
                      # 公共参数
                      shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
         
         # =====================================================================
-        # Part A: RL 数据准备
+        # Phase 1: PPO 更新 (复用现有方法)
         # =====================================================================
-        # RL 更新阶段：确保所有分布参数都参与梯度更新
-        if hasattr(self.actor.net, 'log_std_cont'):
-            self.actor.net.log_std_cont.requires_grad = True
-        # if hasattr(self.actor.net, 'log_temp_cat'):
-        #     self.actor.net.log_temp_cat.requires_grad = False
-        # if hasattr(self.actor.net, 'log_temp_bern'):
-        #     self.actor.net.log_temp_bern.requires_grad = False
+        # 这一步会执行 self.epochs 次 PPO 更新，并修改 self.actor_loss 等类属性
+        self.update(transition_dict, adv_normed=adv_normed, clip_vf=clip_vf, 
+                    clip_range=clip_range, shuffled=shuffled, 
+                    mini_batch_size=mini_batch_size, alpha_logit_reg=alpha_logit_reg)
 
+        # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
+        # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
+        rl_total_size = len(transition_dict['states'])
+        # 假设 self.batch_size 是 PPO 的 mini_batch_size
+        # 如果 self.update 内部逻辑不同，这里可能需要调整计算方式
+        
+        # ppo_num_batches = max(1, int(rl_total_size / mini_batch_size)) * self.epochs
+        mb = mini_batch_size if mini_batch_size is not None else rl_total_size
+        ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
+        
+        ppo_stats = {
+            'actor_loss': self.actor_loss,
+            'critic_loss': self.critic_loss,
+            'actor_grad': self.actor_grad,
+            'critic_grad': self.critic_grad,
+            'entropy': self.entropy_mean,
+            'ratio': self.ratio_mean,
+            'pre_clip_actor': self.pre_clip_actor_grad,
+            'pre_clip_critic': self.pre_clip_critic_grad
+        }
+
+        # =====================================================================
+        # Phase 2: IL 更新 (自模仿 + 专家 MSE)
+        # =====================================================================
+        # 辅助函数：转 Tensor
         def to_tensor(x, dtype):
             if isinstance(x, np.ndarray):
                 return torch.tensor(x, dtype=dtype).to(self.device)
-            else:
-                return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
 
-        rl_states = to_tensor(transition_dict['states'], torch.float)
-        rl_next_states = to_tensor(transition_dict['next_states'], torch.float)
-        rl_dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
-        rl_rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
-
-        if 'active_masks' in transition_dict:
-            rl_active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
-        else:
-            rl_active_masks = torch.ones_like(rl_dones)
-
-        if 'obs' in transition_dict:
-            rl_actor_inputs = to_tensor(transition_dict['obs'], torch.float)
-            rl_critic_inputs = rl_states
-        else:
-            rl_actor_inputs = rl_states
-            rl_critic_inputs = rl_states
-
-        # ---------------------------------------------------------------------
-        # [修改] RL Actions 处理：List of Dicts -> Dict of Tensors
-        # ---------------------------------------------------------------------
-        rl_actions_raw = transition_dict['actions']
-        rl_actions_tensor = {}
-        
-        if isinstance(rl_actions_raw, list):
-            if len(rl_actions_raw) > 0:
-                keys = rl_actions_raw[0].keys()
-                temp_dict = {}
-                for k in keys:
-                    temp_dict[k] = np.stack([d[k] for d in rl_actions_raw], axis=0)
-                rl_actions_raw = temp_dict
-            else:
-                rl_actions_raw = {}
-
-        if isinstance(rl_actions_raw, dict):
-            for key, val in rl_actions_raw.items():
-                if key == 'cat':
-                    rl_actions_tensor[key] = to_tensor(val, torch.long)
-                else:
-                    rl_actions_tensor[key] = to_tensor(val, torch.float)
-        
-        # RL Advantage 计算
-        if 'advantages' in transition_dict and 'td_targets' in transition_dict:
-            rl_advantage = to_tensor(transition_dict['advantages'], torch.float).view(-1, 1)
-            rl_td_target = to_tensor(transition_dict['td_targets'], torch.float).view(-1, 1)
-        else:
-            with torch.no_grad():
-                next_vals = self.critic(rl_next_states)
-                td_target = rl_rewards + self.gamma * next_vals * (1 - rl_dones)
-                td_delta = td_target - self.critic(rl_critic_inputs)
-                rl_advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), rl_dones.cpu(), None).to(self.device)
-                rl_td_target = td_target
-
-        with torch.no_grad():
-            # Actor 使用 actor_inputs (可能是 obs)
-            # [修改] 接收 5 个返回值
-            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(rl_actor_inputs, rl_actions_tensor, h=None, max_std=self.max_std)
-            v_pred_old = self.critic(rl_critic_inputs)
-
-        if adv_normed:
-            active_adv = rl_advantage[rl_active_masks.squeeze(-1).bool()]
-            if active_adv.numel() > 1:
-                adv_mean = active_adv.mean()
-                adv_std = active_adv.std(unbiased=False)
-                rl_advantage = (rl_advantage - adv_mean) / (adv_std + 1e-8)
-        else:
-            active_adv = rl_advantage[rl_active_masks.squeeze(-1).bool()]
-            if active_adv.numel() > 0:
-                rl_advantage = rl_advantage - active_adv.mean()
-
-        # =====================================================================
-        # Part B: IL 数据准备
-        # =====================================================================
+        # --- [Step B] 准备 IL 数据 ---
+        # 1. Self-Imitation Data
         # 1. 自模仿数据 (保持原样)
         il_states_all = to_tensor(il_transition_dict['states'], torch.float)
         il_returns_all = to_tensor(il_transition_dict['returns'], torch.float).view(-1, 1)
@@ -1191,360 +1326,198 @@ class PPOHybrid:
             init_il_returns_all = to_tensor(init_il_transition_dict['returns'], torch.float).view(-1, 1)
             init_il_total_size = init_il_states_all.size(0)
         
-        # =====================================================================
-        # Part C: 混合更新循环 (完整监控版)
-        # =====================================================================
+        # --- [Step C] 执行 IL 更新 (通常执行 1 次，或者根据 batch_size 循环) ---
+        # 这里为了简单且符合"PPO为主，IL为辅"的逻辑，我们执行一次 IL Update
+        # 如果 IL 数据量很大，这里可以改为循环
+        
         # [修复] 完整初始化所有监控列表
-        actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
+        actor_loss_list, critic_loss_list = [], [],
         actor_grad_list, critic_grad_list = [], []
         pre_clip_actor_grad, pre_clip_critic_grad = [], []
         
-        kl_list, clip_frac_list = [], []
         il_actor_loss_list, il_critic_loss_list = [], [] 
         
-        entropy_cat_list, entropy_bern_list, entropy_cont_list = [], [], []
-
-        # [新增] 初始化样本统计计数器 (包含重复更新累加)
-        ppo_samples_total = 0
-        ppo_valid_samples_total = 0
         il_samples_total = 0
         il_valid_samples_total = 0
 
-        mask_eps = 1e-5
-        rl_num_samples = rl_actor_inputs.size(0)
-        if mini_batch_size is None:
-            mini_batch_size = rl_num_samples
-
-        for i_epoch in range(self.epochs):
+        for _ in range(il_updates):
+            actor_loss_init_il = torch.tensor(0.0, device=self.device) # 显式初始化
+            # 使用全量(或最大batch) IL 数据，不切分 Mini-Batch
+            # 这里也可以稍微 Shuffle 一下 IL 数据，或者直接随机采样 batch_size
+            curr_il_batch_size = il_batch_size if il_batch_size is not None else il_total_size
             
-            # --- [Shuffle 逻辑: 每个 Epoch 打乱一次] ---
-            if shuffled:
-                rl_idx = torch.randperm(rl_num_samples, device=self.device)
+            # 简单起见，如果要求全batch，则直接取全部，或者随机取一个大 Batch
+            il_indices = np.random.randint(0, il_total_size, curr_il_batch_size)
+            
+            il_s_batch = il_states_all[il_indices] 
+            il_r_batch = il_returns_all[il_indices]
+            if use_il_obs:
+                il_actor_input_batch = il_obs_all[il_indices]
             else:
-                rl_idx = torch.arange(rl_num_samples, device=self.device)
+                il_actor_input_batch = il_s_batch
+
+            il_actions_batch = {}
+            for k, v in il_actions_all.items():
+                il_actions_batch[k] = v[il_indices]
             
-            is_last_epoch = (i_epoch == self.epochs - 1)
-            
-            # === [分流逻辑] ===
-            # 情况1：如果是最后一个 epoch，不切分 mini-batch，使用打乱后的全量 RL 数据 + 全量 IL 数据进行单次更新
-            # 情况2：如果是前面的 epoch，使用 Mini-Batch 仅更新 RL 部分
-            
-            if is_last_epoch:
-                # 构造单次循环，为了代码复用，将 start 设为 0，步长设为 rl_num_samples (一次取完)
-                # 注意：这里我们强制取完所有数据
-                step_indices = [(0, rl_num_samples)]
-            else:
-                # 构造 Mini-Batch 索引
-                step_indices = []
-                for start in range(0, rl_num_samples, mini_batch_size):
-                    end = min(start + mini_batch_size, rl_num_samples)
-                    step_indices.append((start, end))
-
-            # 遍历 Batches (Last Epoch 时只有一个 Big Batch，普通 Epoch 时有多个 Mini Batch)
-            for start, end in step_indices:
-                batch_idx = rl_idx[start:end]
-                
-                # 1. RL 数据切片
-                mb_actor_inputs = rl_actor_inputs[batch_idx]
-                mb_critic_inputs = rl_critic_inputs[batch_idx]
-                mb_advantage = rl_advantage[batch_idx]
-                mb_td_target = rl_td_target[batch_idx]
-                mb_old_log_probs = old_log_probs[batch_idx]
-                mb_active_masks = rl_active_masks[batch_idx]
-                # v_pred_old_batch = v_pred_old[batch_idx] # 如需
-
-                mb_actions = {}
-                for k, v in rl_actions_tensor.items():
-                    mb_actions[k] = v[batch_idx]
-
-                # 2. RL Loss 计算
-                # [修改] 接收 actor_outputs
-                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
-                
-                log_ratio = log_probs - mb_old_log_probs
-                ratio = torch.exp(log_ratio)
-                
-                with torch.no_grad():
-                    active_sum = mb_active_masks.sum()
-                    approx_kl = (((ratio - 1) - log_ratio) * mb_active_masks).sum() / (active_sum + mask_eps)
-                    kl_list.append(approx_kl.item())
-                    clip_fracs = (((ratio - 1.0).abs() > self.eps).float() * mb_active_masks).sum() / (active_sum + mask_eps)
-                    clip_frac_list.append(clip_fracs.item())
-
-                surr1 = ratio * mb_advantage
-                surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * mb_advantage
-                
-                #  Actor Loss 使用 mask 加权
-                surrogate_loss = -torch.min(surr1, surr2)
-                # active_sum 已经在上面计算过
-                
-                # [新增] 统计 PPO 样本
-                ppo_samples_total += mb_active_masks.numel()
-                ppo_valid_samples_total += mb_active_masks.sum().item()
-
-                actor_loss_rl = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
-                
-                # [修改] 分项 Entropy Loss 计算 (Mixed Update)
-                e_cont = entropy_details['cont'] if entropy_details['cont'] is not None else torch.tensor(0., device=self.device)
-                e_cat = entropy_details['cat'] if entropy_details['cat'] is not None else torch.tensor(0., device=self.device)
-                e_bern = entropy_details['bern'] if entropy_details['bern'] is not None else torch.tensor(0., device=self.device)
-
-                loss_ent_cont = (e_cont * mb_active_masks).sum() / (active_sum + mask_eps)
-                loss_ent_cat = (e_cat * mb_active_masks).sum() / (active_sum + mask_eps)
-                loss_ent_bern = (e_bern * mb_active_masks).sum() / (active_sum + mask_eps)
-
-                k_cont = self.k_entropy.get('cont', 0.0)
-                k_cat = self.k_entropy.get('cat', 0.0)
-                k_bern = self.k_entropy.get('bern', 0.0)
-
-                actor_loss_rl = actor_loss_rl - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
-
-                # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
-                if actor_outputs['bern'] is not None:
-                    bern_logits = actor_outputs['bern']
-                    # 仅对绝对值超出阈值的部分施加平缓增加的惩罚：
-                    # over = max(|logit| - 4, 0)，惩罚 (over)^2 的均值
-                    over = F.relu(torch.abs(bern_logits) - 4.0)
-                    logit_loss = (over ** 2).mean()
-                    actor_loss_rl = actor_loss_rl + alpha_logit_reg * logit_loss
-
-                v_pred = self.critic(mb_critic_inputs)
-                if clip_vf:
-                    v_pred_old_batch = v_pred_old[batch_idx]
-                    v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - clip_range, v_pred_old_batch + clip_range)
-                    vf_loss1 = (v_pred - mb_td_target).pow(2)
-                    vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
-                    critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
+            if init_il_transition_dict is not None:
+                init_il_idx = np.random.randint(0, init_il_total_size, init_il_total_size)
+                init_il_returns_batch = init_il_returns_all[init_il_idx]
+                if use_init_il_obs:
+                    init_il_actor_input_batch = init_il_obs_all[init_il_idx]
                 else:
-                    critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
+                    init_il_actor_input_batch = init_il_states_all[init_il_idx]
+                init_il_actions_batch = {}
+                for k, v in init_il_actions_all.items():
+                    init_il_actions_batch[k] = v[init_il_idx]
                 
-                critic_loss_rl = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
-
-                # 3. IL Loss (MARWIL) - 仅在 Last Epoch 的那个 Big Batch 中计算
-                actor_loss_il = torch.tensor(0.0, device=self.device)
-                actor_loss_init_il = torch.tensor(0.0, device=self.device) # [新增] 他模仿 Loss
-                critic_loss_il = torch.tensor(0.0, device=self.device)
+            with torch.no_grad():
+                il_values = self.critic(il_s_batch)
+                residual = il_r_batch - il_values
                 
-                if is_last_epoch:
-                    # 使用全量(或最大batch) IL 数据，不切分 Mini-Batch
-                    # 这里也可以稍微 Shuffle 一下 IL 数据，或者直接随机采样 batch_size
-                    curr_il_batch_size = il_batch_size if il_batch_size is not None else il_total_size
-                    
-                    # 简单起见，如果要求全batch，则直接取全部，或者随机取一个大 Batch
-                    il_indices = np.random.randint(0, il_total_size, curr_il_batch_size)
-                    
-                    il_s_batch = il_states_all[il_indices] 
-                    il_r_batch = il_returns_all[il_indices]
-                    if use_il_obs:
-                        il_actor_input_batch = il_obs_all[il_indices]
-                    else:
-                        il_actor_input_batch = il_s_batch
-
-                    il_actions_batch = {}
-                    for k, v in il_actions_all.items():
-                        il_actions_batch[k] = v[il_indices]
-                    
-                    if init_il_transition_dict is not None:
-                        init_il_idx = np.random.randint(0, init_il_total_size, init_il_total_size)
-                        init_il_returns_batch = init_il_returns_all[init_il_idx]
-                        if use_init_il_obs:
-                            init_il_actor_input_batch = init_il_obs_all[init_il_idx]
-                        else:
-                            init_il_actor_input_batch = init_il_states_all[init_il_idx]
-                        init_il_actions_batch = {}
-                        for k, v in init_il_actions_all.items():
-                            init_il_actions_batch[k] = v[init_il_idx]
-                        
-                    with torch.no_grad():
-                        il_values = self.critic(il_s_batch)
-                        residual = il_r_batch - il_values
-                        
-                        if not hasattr(self, 'c_sq'): self.c_sq = torch.tensor(1.0, device=self.device)
-                        batch_mse = (residual ** 2).mean().item()
-                        self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
-                        c = torch.sqrt(self.c_sq)
-                        
-                        il_adv = residual / (c + 1e-8)
-                        # 对负 advantage 强烈抑制权重：adv>0 正常放行，否则乘以 1e-6
-                        
-                        '''
-                        exp可能导致梯度爆炸，对此有以下解决方法（最新的梯度爆炸不是这个原因，代码仅做候补）
-                        # 1 数值归一化
-                        il_adv = (il_adv - il_adv.mean()) / (il_adv.std() + 1e-8)
-                        il_raw_weights = torch.exp(beta * il_adv)
-                        # 2 减去最大值 (Max-Subtraction Trick)
-                        il_adv_max = torch.max(il_adv)
-                        il_raw_weights = torch.exp(beta * (il_adv - il_adv_max))
-                        # 3 权重截断
-                        il_raw_weights = torch.exp(beta * il_adv)
-                        il_raw_weights = torch.clamp(il_raw_weights, max=100.0) # 限制单样本权重最大100倍
-                        '''
-                        
-                        il_raw_weights = beta * il_adv  # torch.exp(beta * il_adv)
-                        F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
-                        il_weights = torch.clamp(il_raw_weights * F_word, min=0, max=max_weight)
-
-                        # [新增] 统计 IL 样本强度
-                        il_samples_total += curr_il_batch_size
-                        il_valid_samples_total += F_word.sum().item()
-
-                    # compute_il_loss 接口不变
-                    raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=True)
-                    actor_loss_il = torch.mean(il_weights * raw_il_loss)
-                    
-                    # --- [new] 对初始轨迹行为克隆 ---
-                    if init_il_transition_dict is not None:
-                        # 1. 计算初始轨迹的 F 函数 (优势加权)
-                        with torch.no_grad():
-                            # [修改] 按照你的要求，Critic 直接接收 init_il_actor_input_batch
-                            v_init = self.critic(init_il_actor_input_batch)
-                            adv_init = (init_il_returns_batch - v_init) / (torch.sqrt(self.c_sq) + 1e-8)
-                            
-                            # F 函数约束：只有比当前表现好的专家数据才学
-                            F_init = torch.where(adv_init > 0, torch.ones_like(adv_init), torch.full_like(adv_init, 1e-6))
-                            F_init = torch.clamp(F_init, max=max_weight)
-
-                        # 2. 获取网络当前的原始输出 (保留对 net 的直接调用)
-                        init_outputs = self.actor.net(init_il_actor_input_batch)
-                        
-                        # 【核心修正】：初始化为与 adv_init 形状相同的零张量 [Batch, 1]
-                        # 这样可以确保后续的 += 每一项都是 [Batch, 1] 的累加
-                        mse_loss_sum = torch.zeros_like(adv_init)
-                        # mse_loss_sum = torch.tensor(0.0, device=self.device)
-
-                        # --- 连续动作 MSE ---
-                        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
-                            mu_current, _ = init_outputs['cont']
-                            u_expert = init_il_actions_batch['cont']
-                            mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
-
-                        # --- 离散动作 MSE ---
-                        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-                            cat_probs_current = init_outputs['cat']
-                            expert_cat = init_il_actions_batch['cat'].long()
-                            for i, probs in enumerate(cat_probs_current):
-                                target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
-                                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
-
-                        # --- 伯努利动作 MSE ---
-                        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-                            bern_logits = init_outputs['bern']
-                            bern_probs = torch.sigmoid(bern_logits)
-                            target_bern = init_il_actions_batch['bern']
-                            mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
-
-                        # 3. 应用 F 函数约束并求平均
-                        actor_loss_init_mse = torch.mean(F_init * mse_loss_sum)
-                    # --- ---
-                    
-                    il_values_grad = self.critic(il_s_batch)
-                    critic_loss_il = F.mse_loss(il_values_grad, il_r_batch) * c_v
-                    
-                    il_actor_loss_list.append(actor_loss_il.item())
-                    il_critic_loss_list.append(critic_loss_il.item())
-
-                    # 4. 联合反向传播
-                    if init_il_transition_dict is not None:
-                        actor_loss_init_il = eta * actor_loss_init_mse
-                        
-                total_actor_loss = actor_loss_rl + (alpha * (actor_loss_il + actor_loss_init_il) if is_last_epoch else 0)
-                total_critic_loss = critic_loss_rl + (alpha * critic_loss_il if is_last_epoch else 0)
-
-                self.actor_optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
+                if not hasattr(self, 'c_sq'): self.c_sq = torch.tensor(1.0, device=self.device)
+                batch_mse = (residual ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
+                c = torch.sqrt(self.c_sq)
                 
-                total_actor_loss.backward()
-                total_critic_loss.backward()
+                il_adv = residual / (c + 1e-8)
+                # 对负 advantage 强烈抑制权重：adv>0 正常放行，否则乘以 1e-6
                 
-                # [修复] 记录裁剪前梯度
-                pre_clip_actor_grad.append(model_grad_norm(self.actor))
-                pre_clip_critic_grad.append(model_grad_norm(self.critic))
-
-                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-                nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-
-                self.actor_optimizer.step()
-                self.critic_optimizer.step()
-
-                # [修复] 记录步进后梯度和其他监控项
-                actor_grad_list.append(model_grad_norm(self.actor))
-                critic_grad_list.append(model_grad_norm(self.critic))            
-                actor_loss_list.append(total_actor_loss.item()) # 注意：记录的是混合 Loss
-                critic_loss_list.append(total_critic_loss.item())
+                '''
+                exp可能导致梯度爆炸，对此有以下解决方法（最新的梯度爆炸不是这个原因，代码仅做候补）
+                # 1 数值归一化
+                il_adv = (il_adv - il_adv.mean()) / (il_adv.std() + 1e-8)
+                il_raw_weights = torch.exp(beta * il_adv)
+                # 2 减去最大值 (Max-Subtraction Trick)
+                il_adv_max = torch.max(il_adv)
+                il_raw_weights = torch.exp(beta * (il_adv - il_adv_max))
+                # 3 权重截断
+                il_raw_weights = torch.exp(beta * il_adv)
+                il_raw_weights = torch.clamp(il_raw_weights, max=100.0) # 限制单样本权重最大100倍
+                '''
                 
-                # 记录总 Entropy
-                entropy_total = (entropy * mb_active_masks).sum() / (active_sum + mask_eps)
-                entropy_list.append(entropy_total.item())
-                ratio_list.append(ratio.mean().item())
-                
-                # [修改] 记录分项 Entropy (Tensor -> float)
-                if entropy_details['cont'] is not None:
-                    entropy_cont_list.append(entropy_details['cont'].mean().item())
-                if entropy_details['cat'] is not None:
-                    entropy_cat_list.append(entropy_details['cat'].mean().item())
-                if entropy_details['bern'] is not None:
-                    entropy_bern_list.append(entropy_details['bern'].mean().item())
+                il_raw_weights = beta * il_adv  # torch.exp(beta * il_adv)
+                F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
+                il_weights = torch.clamp(il_raw_weights * F_word, min=0, max=max_weight)
 
-        # =====================================================================
-       
-        # Part D: 更新统计指标
-        # =====================================================================
-        self.actor_loss = np.mean(actor_loss_list)
-        self.critic_loss = np.mean(critic_loss_list)
-        self.entropy_mean = np.mean(entropy_list)
-        self.approx_kl = np.mean(kl_list)
-        self.clip_frac = np.mean(clip_frac_list)
-        
-        self.il_actor_loss = np.mean(il_actor_loss_list) if il_actor_loss_list else 0
-        self.il_critic_loss = np.mean(il_critic_loss_list) if il_critic_loss_list else 0
+                # [新增] 统计 IL 样本强度
+                il_samples_total += curr_il_batch_size
+                il_valid_samples_total += F_word.sum().item()
 
-        # [修复] 补充所有确实的统计项
-        self.actor_grad = np.mean(actor_grad_list)
-        self.critic_grad = np.mean(critic_grad_list)
-        self.ratio_mean = np.mean(ratio_list)
-        self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
-        self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
-
-        # 记录 active 的 advantage 均值
-        active_sum_total = rl_active_masks.sum().item()
-        if active_sum_total > 0:
-            self.advantage = (rl_advantage.abs() * rl_active_masks).sum().item() / active_sum_total
-        else:
-            self.advantage = 0
+            # compute_il_loss 接口不变
+            raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=True)
+            actor_loss_il = torch.mean(il_weights * raw_il_loss)
             
-        # 记录分项 Entropy
-        self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
-        self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
-        self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
+            # --- [new] 对初始轨迹行为克隆 ---
+            if init_il_transition_dict is not None:
+                # 1. 计算初始轨迹的 F 函数 (优势加权)
+                with torch.no_grad():
+                    # [修改] 按照你的要求，Critic 直接接收 init_il_actor_input_batch
+                    v_init = self.critic(init_il_actor_input_batch)
+                    adv_init = (init_il_returns_batch - v_init) / (torch.sqrt(self.c_sq) + 1e-8)
+                    
+                    # F 函数约束：只有比当前表现好的专家数据才学
+                    F_init = torch.where(adv_init > 0, torch.ones_like(adv_init), torch.full_like(adv_init, 1e-6))
+                    F_init = torch.clamp(F_init, max=max_weight)
 
-        # [新增] 赋值有效样本监控项
-        self.PPO_samples = ppo_samples_total
-        self.PPO_valid_samples = ppo_valid_samples_total
+                # 2. 获取网络当前的原始输出 (保留对 net 的直接调用)
+                init_outputs = self.actor.net(init_il_actor_input_batch)
+                
+                # 【核心修正】：初始化为与 adv_init 形状相同的零张量 [Batch, 1]
+                # 这样可以确保后续的 += 每一项都是 [Batch, 1] 的累加
+                mse_loss_sum = torch.zeros_like(adv_init)
+                # mse_loss_sum = torch.tensor(0.0, device=self.device)
+
+                # --- 连续动作 MSE ---
+                if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+                    mu_current, _ = init_outputs['cont']
+                    u_expert = init_il_actions_batch['cont']
+                    mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
+
+                # --- 离散动作 MSE ---
+                if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                    cat_probs_current = init_outputs['cat']
+                    expert_cat = init_il_actions_batch['cat'].long()
+                    for i, probs in enumerate(cat_probs_current):
+                        target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
+                        mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
+
+                # --- 伯努利动作 MSE ---
+                if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+                    bern_logits = init_outputs['bern']
+                    bern_probs = torch.sigmoid(bern_logits)
+                    target_bern = init_il_actions_batch['bern']
+                    mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
+
+                # 3. 应用 F 函数约束并求平均
+                actor_loss_init_mse = torch.mean(F_init * mse_loss_sum)
+                actor_loss_init_il = eta * actor_loss_init_mse
+
+            
+            il_values_grad = self.critic(il_s_batch)
+            critic_loss_il = F.mse_loss(il_values_grad, il_r_batch) * c_v
+            
+            il_actor_loss_list.append(actor_loss_il.item())
+            il_critic_loss_list.append(critic_loss_il.item())
+
+            # 4. 联合反向传播
+
+            il_actor_loss = alpha * (actor_loss_il + actor_loss_init_il)
+            il_critic_loss = alpha * critic_loss_il
+
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            il_actor_loss.backward()
+            il_critic_loss.backward()
+            
+            # [修复] 记录裁剪前梯度
+            pre_clip_actor_grad.append(model_grad_norm(self.actor))
+            pre_clip_critic_grad.append(model_grad_norm(self.critic))
+            
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            # [修复] 记录步进后梯度和其他监控项
+            actor_grad_list.append(model_grad_norm(self.actor))
+            critic_grad_list.append(model_grad_norm(self.critic))            
+            actor_loss_list.append(il_actor_loss.item()) # 注意：记录的是混合 Loss
+            critic_loss_list.append(il_critic_loss.item())
+        
+
+        # =====================================================================
+        # Phase 3: 统计指标融合 (加权平均)
+        # =====================================================================
+        
+        # 定义权重：PPO 占 epoch * batches 份，IL 占 1 份 (或者你希望 1:1，可以设 il_weight = ppo_num_batches)
+        # 这里按照“梯度更新次数”进行加权是比较科学的
+        def weighted_avg(ppo_val, il_val, 
+                         ppo_num_batches=ppo_num_batches, il_updates=il_updates):
+            total_updates = ppo_num_batches + il_updates
+            return (ppo_val * ppo_num_batches + il_val * il_updates) / total_updates
+
+        # 更新类属性用于 Log
+        self.actor_loss = weighted_avg(ppo_stats['actor_loss'], np.mean(actor_loss_list))
+        self.critic_loss = weighted_avg(ppo_stats['critic_loss'], np.mean(critic_loss_list))
+        
+        self.actor_grad = weighted_avg(ppo_stats['actor_grad'], np.mean(actor_grad_list))
+        self.critic_grad = weighted_avg(ppo_stats['critic_grad'], np.mean(critic_grad_list))
+        
+        self.pre_clip_actor_grad = weighted_avg(ppo_stats['pre_clip_actor'], np.mean(pre_clip_actor_grad))
+        self.pre_clip_critic_grad = weighted_avg(ppo_stats['pre_clip_critic'], np.mean(pre_clip_critic_grad))
+        
+        # 熵和Ratio只有PPO有，IL没有，所以乘以系数缩放或者直接保持PPO的
+        # 为了避免 Log 里的值看起来突然变小，这里建议直接使用 PPO 的值，因为 IL 不产生 entropy/ratio 概念
+        self.entropy_mean = ppo_stats['entropy']
+        self.ratio_mean = ppo_stats['ratio']
+        
+        # 更新样本计数
         self.IL_samples = il_samples_total
         self.IL_valid_samples = il_valid_samples_total
 
-        # 计算 Explained Variance (对比 Value 更新前后)
-        mask_bool = rl_active_masks.squeeze(-1).bool().cpu().numpy()
-        y_true = rl_td_target.flatten().cpu().numpy()[mask_bool]
-        y_pred = v_pred_old.flatten().cpu().numpy()[mask_bool] 
         
-        # if len(y_true) > 1:
-        #     var_y = np.var(y_true)
-        #     if var_y == 0:
-        #         self.explained_var = np.nan
-        #     else:
-        #         self.explained_var = 1 - np.var(y_true - y_pred) / var_y
-        # else:
-        #     self.explained_var = 0
-
-        if len(y_true) > 1:
-            var_y = np.var(y_true)
-            if var_y < 1e-8:
-                self.explained_var = 0.0
-            else:
-                self.explained_var = 1 - np.var(y_true - y_pred) / var_y
-        else:
-            self.explained_var = 0.0
-
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")
         check_weights_bias_nan(self.critic, "critic", "mixed_update后")
