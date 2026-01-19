@@ -99,7 +99,7 @@ if __name__=='__main__':
         should_kick=False,
         init_elo_ratings = {
             "Rule_2": 1200,
-        },
+        },   # 这里应该是打Rule_1的，打Rule_2要学得太好了
         self_play_type = 'None', # PFSP, FSP, SP, None(非自博弈)
     )
     end_time = datetime.now()
