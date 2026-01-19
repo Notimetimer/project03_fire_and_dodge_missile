@@ -1,7 +1,7 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_分阶段_纯自博弈'
+mission_name = 'IL_and_RL_分阶段_固定对手'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -98,8 +98,9 @@ if __name__=='__main__':
         transition_dict_capacity=transition_dict_capacity,
         should_kick=False,
         init_elo_ratings = {
-        }, # 不允许规则对手进入，这样就是纯自博弈了
-        self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
+            "Rule_2": 1200,
+        },
+        self_play_type = 'None', # PFSP, FSP, SP, None(非自博弈)
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

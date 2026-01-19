@@ -1,11 +1,11 @@
 '''
 更改慕目标：
-1、实现混合规则对手开关可调, 对手池中的规则对手都有谁, 需可调开关      √ init_elo_ratings + pure_self_play
+1、实现混合规则对手开关可调, 对手池中的规则对手都有谁, 需可调开关      √ init_elo_ratings -> pure_self_play
 2、实现历史对手淘汰机制开关可调                                     √ should_kick
 3、自模仿仅包含机动/包含机动与开火, 需可调开关                       √ il_only_maneuver
-4、是否能够向对手池中添加历史策略, 需可调开关                        √ self_play_type + hist_agent_as_opponent
+4、是否能够向对手池中添加历史策略, 需可调开关                        √ self_play_type -> hist_agent_as_opponent
 5、指定自博弈方式，以string传入，最后作用到 get_opponent_probabilities 上去      √ self_play_type
-6、0.4和0.7的逻辑梳理   直接砍掉
+6、0.4和0.7的逻辑梳理   √ 直接砍掉
 '''
 
 import os
@@ -506,7 +506,10 @@ def run_MLP_simulation(
         init_opponent_name = "actor_rein0"
         init_opponent_path = os.path.join(log_dir, f"{init_opponent_name}.pt")
         torch.save(student_agent.actor.state_dict(), init_opponent_path)
-        elo_ratings[init_opponent_name] = 1200
+        
+        if not self_play_type=='None':
+            elo_ratings[init_opponent_name] = 1200
+
         print(f"Initialized {init_opponent_name} as the first opponent.")
 
     def calculate_expected_score(player_elo, opponent_elo):
