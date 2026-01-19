@@ -1,11 +1,11 @@
 '''
 更改慕目标：
-1、实现混合规则对手开关可调, 对手池中的规则对手都有谁, 需可调开关      init_elo_ratings + pure_self_play
+1、实现混合规则对手开关可调, 对手池中的规则对手都有谁, 需可调开关      √ init_elo_ratings + pure_self_play
 2、实现历史对手淘汰机制开关可调                                     √ should_kick
 3、自模仿仅包含机动/包含机动与开火, 需可调开关                       √ il_only_maneuver
-4、是否能够向对手池中添加历史策略, 需可调开关                        self_play_type + hist_agent_as_opponent
-5、指定自博弈方式，以string传入，最后作用到 get_opponent_probabilities 上去      self_play_type
-6、0.4和0.7的逻辑梳理
+4、是否能够向对手池中添加历史策略, 需可调开关                        √ self_play_type + hist_agent_as_opponent
+5、指定自博弈方式，以string传入，最后作用到 get_opponent_probabilities 上去      √ self_play_type
+6、0.4和0.7的逻辑梳理   直接砍掉
 '''
 
 import os
@@ -322,7 +322,6 @@ def run_MLP_simulation(
         "Rule_1": 1200,
         "Rule_2": 1200,
     },
-    pure_self_play = False,
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
     il_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
 
@@ -520,25 +519,94 @@ def run_MLP_simulation(
         return player_elo + K_FACTOR * (score - expected)
 
 
-    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400):
-        """返回与 elo_ratings.keys() 顺序对应的概率数组。
-        - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
-        - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。
+    # def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400):
+    #     """返回与 elo_ratings.keys() 顺序对应的概率数组。
+    #     - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
+    #     - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。
+    #     """
+    #     keys = list(elo_ratings.keys())
+    #     if len(keys) == 0:
+    #         return np.array([]), keys # 返回 keys 以便索引
+    #     elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+
+    #     if target_elo is None:
+    #         target_elo = np.mean(elos)
+
+    #     # 以高斯核度量相似度（基于差的平方）
+    #     diffs = elos - float(target_elo)
+    #     # 数值稳定性：将 exponent 的常数项减去 max
+    #     scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+    #     probs = scores / (scores.sum() + 1e-12)
+    #     return probs, keys # 修改为返回 probs 和 keys
+    
+    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP'):
+        """
+        返回与 keys 顺序对应的概率数组。
+        
+        参数:
+        - elo_ratings: dict, 格式为 {name: elo_value}
+        - target_elo: float, PFSP 模式下优先靠近的 ELO。
+        - sigma: float, PFSP 模式下的高斯核标准差。
+        - SP_type: str, 采样类型:
+            - 'PFSP': 优先级虚构自博弈，基于 Elo 相似度的高斯分布。
+            - 'FSP': 虚构自博弈，全样本均匀分布。
+            - 'SP': 自博弈，仅选择 actor_rein 编号最大的那一个。
+            - 'None': 仅在以 "Rule" 开头的 key 中均匀分布。
         """
         keys = list(elo_ratings.keys())
         if len(keys) == 0:
-            return np.array([]), keys # 返回 keys 以便索引
-        elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+            return np.array([]), []
 
-        if target_elo is None:
-            target_elo = np.mean(elos)
+        # --- 逻辑 1: PFSP (保持原样) ---
+        if SP_type == 'PFSP':
+            elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+            if target_elo is None:
+                target_elo = np.mean(elos)
+            
+            # 以高斯核度量相似度（基于差的平方）
+            diffs = elos - float(target_elo)
+            # 高斯核计算
+            scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+            probs = scores / (scores.sum() + 1e-12)
+            return probs, keys
 
-        # 以高斯核度量相似度（基于差的平方）
-        diffs = elos - float(target_elo)
-        # 数值稳定性：将 exponent 的常数项减去 max
-        scores = np.exp(-0.5 * (diffs / float(sigma))**2)
-        probs = scores / (scores.sum() + 1e-12)
-        return probs, keys # 修改为返回 probs 和 keys
+        # --- 逻辑 2: FSP (全样本均匀分布) ---
+        elif SP_type == 'FSP':
+            probs = np.ones(len(keys)) / len(keys)
+            return probs, keys
+
+        # --- 逻辑 3: SP (找到 actor_rein 编号最大者) ---
+        elif SP_type == 'SP':
+            # 过滤出所有以 actor_rein 开头的 key
+            rein_keys = [k for k in keys if k.startswith('actor_rein')]
+            if not rein_keys:
+                return np.array([]), []
+            
+            # 提取编号并找到最大值对应的 key
+            # 假设格式是 actor_rein + 数字，例如 actor_rein25
+            def extract_number(key_str):
+                num_part = key_str.replace('actor_rein', '')
+                try:
+                    return int(num_part)
+                except ValueError:
+                    return -1
+
+            best_key = max(rein_keys, key=extract_number)
+            
+            # 只返回这一个元素，概率为 1.0
+            return np.array([1.0]), [best_key]
+
+        # --- 逻辑 4: None (Rule开头均匀分布) ---
+        elif SP_type == 'None' or SP_type is None:
+            rule_keys = [k for k in keys if k.startswith('Rule')]
+            if not rule_keys:
+                return np.array([]), []
+            
+            probs = np.ones(len(rule_keys)) / len(rule_keys)
+            return probs, rule_keys
+
+        else:
+            raise ValueError(f"Unknown SP_type: {SP_type}")
     
     '''
     通过高斯核与elo分确定对手概率
@@ -613,60 +681,56 @@ def run_MLP_simulation(
                 pending_tests.remove(task)
             
 
-        # -- 测试模式 --
-        if 0:
-            pass
-        # -- 训练模式 --
-        else: # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
-            ego_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-            enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-            
-            # 1. 计算当前排位 rank_pos
-            valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
-            if not valid_elo_values:
+        # --- [Modified] 对手选择逻辑 (Bypass & PFSP) ---
+        ego_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+        enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+        
+        # 1. 计算当前排位 rank_pos
+        valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
+        if not valid_elo_values:
+            rank_pos = 0.5
+            min_elo, max_elo = main_agent_elo, main_agent_elo
+        else:
+            min_elo = np.min(valid_elo_values)
+            max_elo = np.max(valid_elo_values)
+            denom = float(max_elo - min_elo)
+            # 如果分母为0，视为0.5中位
+            if denom == 0.0:
                 rank_pos = 0.5
-                min_elo, max_elo = main_agent_elo, main_agent_elo
             else:
-                min_elo = np.min(valid_elo_values)
-                max_elo = np.max(valid_elo_values)
-                denom = float(max_elo - min_elo)
-                # 如果分母为0，视为0.5中位
-                if denom == 0.0:
-                    rank_pos = 0.5
-                else:
-                    rank_pos = float((main_agent_elo - min_elo) / denom)
+                rank_pos = float((main_agent_elo - min_elo) / denom)
 
-            # 2. 根据 rank_pos 决定选择策略
-            # 确保 Rule_0 在列表中，否则无法执行特定逻辑（虽然初始化时肯定有）
-            # if "Rule_0" not in elo_ratings and (not pure_self_play):
-            #     elo_ratings["Rule_0"] = 1200
-                
-            if rank_pos < 0.4 and (not pure_self_play):
-                # 策略 A: 排名过低 (<0.4)，强制只打 Rule_0，无视 Elo 概率
-                selected_opponent_name = "Rule_0"
-                probs = np.array([1.0]) # 仅作日志或调试用
-                opponent_keys = ["Rule_0"]
-                print(f"Eps {i_episode}: Rank {rank_pos:.2f} < 0.4. FORCED match against Rule_0.")
-                
-            else:
-                # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
-                probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo)
-                
-                if rank_pos < 0.7:
-                    # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
-                    # 概率线性插值：rank=0.4 -> prob=1.0 (理论上会被上面截断); rank=0.7 -> prob=0.0 (无额外加成)
-                    target_rule0_prob = max(0, (0.7 - rank_pos) / 0.3)
-                    
-                    if "Rule_0" in opponent_keys:
-                        rule0_idx = opponent_keys.index("Rule_0")
-                        # 取 max(原Elo概率, 目标加权概率)
-                        probs[rule0_idx] = max(target_rule0_prob, probs[rule0_idx])
-                        # 重新归一化
-                        probs = probs / (probs.sum() + 1e-12)
-                        # print(f"  Rank {rank_pos:.2f}. Boosted Rule_0 prob to {probs[rule0_idx]:.2f}")
-                
-                # 最终根据概率采样
-                selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+        # 2. 根据 rank_pos 决定选择策略
+        # 确保 Rule_0 在列表中，否则无法执行特定逻辑（虽然初始化时肯定有）
+        # if "Rule_0" not in elo_ratings and (not pure_self_play):
+        #     elo_ratings["Rule_0"] = 1200
+            
+        # if rank_pos < 0.4 and (not pure_self_play):
+        #     # 策略 A: 排名过低 (<0.4)，强制只打 Rule_0，无视 Elo 概率
+        #     selected_opponent_name = "Rule_0"
+        #     probs = np.array([1.0]) # 仅作日志或调试用
+        #     opponent_keys = ["Rule_0"]
+        #     print(f"Eps {i_episode}: Rank {rank_pos:.2f} < 0.4. FORCED match against Rule_0.")
+            
+        # else:
+        # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
+        probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type)
+
+        # if rank_pos < 0.7:
+        #     # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
+        #     # 概率线性插值：rank=0.4 -> prob=1.0 (理论上会被上面截断); rank=0.7 -> prob=0.0 (无额外加成)
+        #     target_rule0_prob = max(0, (0.7 - rank_pos) / 0.3)
+            
+        #     if "Rule_0" in opponent_keys:
+        #         rule0_idx = opponent_keys.index("Rule_0")
+        #         # 取 max(原Elo概率, 目标加权概率)
+        #         probs[rule0_idx] = max(target_rule0_prob, probs[rule0_idx])
+        #         # 重新归一化
+        #         probs = probs / (probs.sum() + 1e-12)
+        #         # print(f"  Rank {rank_pos:.2f}. Boosted Rule_0 prob to {probs[rule0_idx]:.2f}")
+        
+        # 最终根据概率采样
+        selected_opponent_name = np.random.choice(opponent_keys, p=probs)
         
         
         # 判断对手类型并加载
@@ -755,15 +819,13 @@ def run_MLP_simulation(
                 # # **关键点 1: 完成并存储【上一个】动作周期的经验**
                 # 如果这不是回合的第0步，说明一个完整的动作周期已经过去了
                 if steps_of_this_eps > 0: # and not dead_dict['b']:
-                    # --- 新增：测试模式下不存储经验 ---
-                    if 1:
-                        # 修改：传入 last_decision_obs 和 last_decision_state
-                        transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        # 保存当前对局中的状态转移
-                        ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
-                        
-                        '''todo 引入active_mask'''
+                    # 修改：传入 last_decision_obs 和 last_decision_state
+                    transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                    # 保存当前对局中的状态转移
+                    ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                    enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+
+                    '''todo 引入active_mask'''
                 # **关键点 2: 开始【新的】一个动作周期**
                 # 1. 记录新周期的起始状态
                 # 修改：更新 obs 和 state 两个变量
@@ -868,9 +930,8 @@ def run_MLP_simulation(
             next_r_state_global, _ = env.obs_1v1('r', reward_fn=1)
             dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
 
-            # --- 新增：测试模式下不累加 total_steps ---
-            if 1:
-                total_steps += 1
+            
+            total_steps += 1
             '''显示运行轨迹'''
             # 可视化
             env.render(t_bias=t_bias)
@@ -884,13 +945,12 @@ def run_MLP_simulation(
         # 循环结束，最后一个动作周期因为 done=True 而中断，必须在这里手动存入
         if last_decision_state is not None:
             # --- 新增：测试模式下不存储经验 ---
-            if 1:
-                # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
-                # 修改：传入最后时刻的 next_b_state_global 作为 Next State
-                transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                
-                ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+            # # 若在回合结束前未曾在死亡瞬间计算 next_b_obs（例如超时终止或其他非击毁终止），做一次后备计算
+            # 修改：传入最后时刻的 next_b_state_global 作为 Next State
+            transition_dict = append_experience(transition_dict, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+            
+            ego_transition_dict = append_experience(ego_transition_dict, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+            enm_transition_dict = append_experience(enm_transition_dict, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
             episode_return += reward_for_show
             
         print('r 剩余导弹数量:', env.RUAV.ammo)
@@ -903,75 +963,74 @@ def run_MLP_simulation(
             print('r 撞地')
         if env.crash(env.BUAV):
             print('b 撞地')
-        if 0:
-            pass
-        else: # --- [Optimized] ELO 更新与策略池清洗逻辑 (只在训练回合执行) ---
-            actual_score = 0.5 # Default draw
-            if env.win: actual_score = 1.0
-            elif env.lose: actual_score = 0.0
+        
+        # --- [Optimized] ELO 更新与策略池清洗逻辑 (只在训练回合执行) ---
+        actual_score = 0.5 # Default draw
+        if env.win: actual_score = 1.0
+        elif env.lose: actual_score = 0.0
+        
+        prev_main_elo = main_agent_elo
+        
+        # 1. 判定对手是否为“待踢出”类型 (只针对非规则智能体)
+        is_rule_agent = "Rule" in selected_opponent_name
+        is_kicked_opponent = False
+        
+        # 踢出判定条件：
+        if not is_rule_agent:
+            '''
+            简单粗暴的对手筛选策略：
+            1、撞地
+            2、零开火且未获胜
+            3、所有导弹均不在角度开火
+            '''
+            cond_crash = env.crash(env.RUAV) # 撞地
+            r_fired_count = 6 - env.RUAV.ammo
+            cond_coward = (r_fired_count == 0 and env.win) # 0弹且未取胜 (蓝方赢)
+            blind_shot = (fired_at_bad_condition == enemy_m_fired)
             
-            prev_main_elo = main_agent_elo
+            if cond_crash or cond_coward or blind_shot:
+                is_kicked_opponent = True
+                print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name}")
+
+
+        # 2. ELO 更新与记录逻辑
+        if selected_opponent_name in elo_ratings and not is_kicked_opponent:
+            # A. 正常更新 ELO：对手合格，进行 ELO 结算
+            adv_elo = elo_ratings[selected_opponent_name]
+            main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
             
-            # 1. 判定对手是否为“待踢出”类型 (只针对非规则智能体)
-            is_rule_agent = "Rule" in selected_opponent_name
-            is_kicked_opponent = False
+            # 更新对手 ELO
+            new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
+            elo_ratings[selected_opponent_name] = new_adv_elo
             
-            # 踢出判定条件：
-            if not is_rule_agent:
-                '''
-                简单粗暴的对手筛选策略：
-                1、撞地
-                2、零开火且未获胜
-                3、所有导弹均不在角度开火
-                '''
-                cond_crash = env.crash(env.RUAV) # 撞地
-                r_fired_count = 6 - env.RUAV.ammo
-                cond_coward = (r_fired_count == 0 and env.win) # 0弹且未取胜 (蓝方赢)
-                blind_shot = (fired_at_bad_condition == enemy_m_fired)
-                
-                if cond_crash or cond_coward or blind_shot:
-                    is_kicked_opponent = True
-                    print(f"\n[Pool Filter] Found opponent for KICKING: {selected_opponent_name}")
+            print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
+            
+        elif is_kicked_opponent:
+            # B. 忽略 ELO 更新：对手不合格，主智能体的 ELO 保持不变
+            # 保持 main_agent_elo == prev_main_elo
+            print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f} (No Change due to Opponent Filter).")
+            
+        else:
+            # C. 极端情况
+            print(f"Warning: Opponent {selected_opponent_name} not found in ELO dict. ELO not updated.")
 
 
-            # 2. ELO 更新与记录逻辑
-            if selected_opponent_name in elo_ratings and not is_kicked_opponent:
-                # A. 正常更新 ELO：对手合格，进行 ELO 结算
-                adv_elo = elo_ratings[selected_opponent_name]
-                main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
-                
-                # 更新对手 ELO
-                new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
-                elo_ratings[selected_opponent_name] = new_adv_elo
-                
-                print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
-                
-            elif is_kicked_opponent:
-                # B. 忽略 ELO 更新：对手不合格，主智能体的 ELO 保持不变
-                # 保持 main_agent_elo == prev_main_elo
-                print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f} (No Change due to Opponent Filter).")
-                
-            else:
-                # C. 极端情况
-                print(f"Warning: Opponent {selected_opponent_name} not found in ELO dict. ELO not updated.")
+        # 3. 执行踢出操作
+        if is_kicked_opponent and should_kick:
+            if selected_opponent_name in elo_ratings:
+                del elo_ratings[selected_opponent_name]
+                print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
 
 
-            # 3. 执行踢出操作
-            if is_kicked_opponent and should_kick:
-                if selected_opponent_name in elo_ratings:
-                    del elo_ratings[selected_opponent_name]
-                    print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
-
-
-            # 有没有试图发射过导弹
-            logger.add("special/0 发射的导弹数量", m_fired, total_steps)
-            # 每一场胜负变化
-            logger.add("train/1 episode_return", episode_return, total_steps)
-            logger.add("train/2 win", env.win, total_steps)
-            logger.add("train/2 lose", env.lose, total_steps)
-            logger.add("train/2 draw", env.draw, total_steps)
-            logger.add("debug/胜负统计", env.win+env.lose+env.draw, total_steps)  # debug 和不为1
-            logger.add("train/11 episode/step", i_episode, total_steps)
+        # 有没有试图发射过导弹
+        logger.add("special/0 发射的导弹数量", m_fired, total_steps)
+        # 每一场胜负变化
+        logger.add("train/1 episode_return", episode_return, total_steps)
+        logger.add("train/2 win", env.win, total_steps)
+        logger.add("train/2 lose", env.lose, total_steps)
+        logger.add("train/2 draw", env.draw, total_steps)
+        logger.add("debug/胜负统计", env.win+env.lose+env.draw, total_steps)  # debug 和不为1
+        logger.add("train/11 episode/step", i_episode, total_steps)
         
         if is_testing == False:
             # 添加当前回合回放信息和对手回放信息
@@ -1090,7 +1149,8 @@ def run_MLP_simulation(
 
             # 将当前主智能体作为一个新的历史快照加入 ELO 列表
             # 新快照继承当前主智能体的 ELO
-            elo_ratings[actor_key] = main_agent_elo
+            if hist_agent_as_opponent:
+                elo_ratings[actor_key] = main_agent_elo
             
             # 保存 ELO JSON
             try:
