@@ -38,7 +38,7 @@ transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
-
+use_sil = False
 
 # # 现场产生奖励函数一致的示范数据
 if require_new_IL_data:
@@ -96,7 +96,13 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,
+        should_kick=True,
+        init_elo_ratings = {
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            },
+        self_play_type = 'PFSP', # PFSP, FSP, SP, None(非自博弈)
+        use_sil=use_sil,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

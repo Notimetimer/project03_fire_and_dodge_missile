@@ -1229,7 +1229,7 @@ class PPOHybrid:
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
                      beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_updates=1,
-                     il_only_maneuver=True,
+                     sil_only_maneuver=True,
                      # 公共参数
                      shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
         
@@ -1406,7 +1406,7 @@ class PPOHybrid:
                 il_valid_samples_total += F_word.sum().item()
 
             # compute_il_loss 接口不变
-            raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=il_only_maneuver)
+            raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=sil_only_maneuver)
             actor_loss_il = torch.mean(il_weights * raw_il_loss)
             
             # --- [new] 对初始轨迹行为克隆 ---

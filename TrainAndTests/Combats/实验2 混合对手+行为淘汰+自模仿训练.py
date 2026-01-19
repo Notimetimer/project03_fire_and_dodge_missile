@@ -96,7 +96,12 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,
+        should_kick=True,
+        init_elo_ratings = {
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            },
+        self_play_type = 'PFSP', # PFSP, FSP, SP, None(非自博弈)
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

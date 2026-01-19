@@ -2,7 +2,7 @@
 更改慕目标：
 1、实现混合规则对手开关可调, 对手池中的规则对手都有谁, 需可调开关      √ init_elo_ratings -> pure_self_play
 2、实现历史对手淘汰机制开关可调                                     √ should_kick
-3、自模仿仅包含机动/包含机动与开火, 需可调开关                       √ il_only_maneuver
+3、自模仿仅包含机动/包含机动与开火, 需可调开关                       √ sil_only_maneuver
 4、是否能够向对手池中添加历史策略, 需可调开关                        √ self_play_type -> hist_agent_as_opponent
 5、指定自博弈方式，以string传入，最后作用到 get_opponent_probabilities 上去      √ self_play_type
 6、0.4和0.7的逻辑梳理   √ 直接砍掉
@@ -323,7 +323,8 @@ def run_MLP_simulation(
         "Rule_2": 1200,
     },
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
-    il_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
+    use_sil = True,
+    sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
 
 ):
     if not init_elo_ratings:  # 初始没有rule，自动转为纯自博弈
@@ -1035,7 +1036,7 @@ def run_MLP_simulation(
         logger.add("debug/胜负统计", env.win+env.lose+env.draw, total_steps)  # debug 和不为1
         logger.add("train/11 episode/step", i_episode, total_steps)
         
-        if is_testing == False:
+        if is_testing == False and use_sil:
             # 添加当前回合回放信息和对手回放信息
             # 赢了学自己，输了学对手
             if env.win:
@@ -1065,44 +1066,40 @@ def run_MLP_simulation(
 
         # --- RL Update ---
         if len(transition_dict['dones'])>=transition_dict_capacity: 
-            #===========================================
-            # 混合强化学习与模仿学习
-            il_transition_dict = il_transition_buffer.read(il_batch_size2)
-            # 1. 定义 IL 衰减的最大轮次
-            # 使用浮点数以确保计算精度
-            # MAX_IL_EPISODE = 500 # 100.0 
-            # 2. 计算当前 IL 权重 alpha_il (线性衰减，确保不小于 0)
-            # 当 i_episode = 0 时，alpha_il = 1.0
-            # 当 i_episode = 100 时，alpha_il = 0.0
-            # alpha_il = 1.0 # max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
-
-            # 3. 调用混合更新函数，传入计算出的 alpha
-            student_agent.mixed_update(
-                transition_dict,          # RL 数据
-                il_transition_dict,       # IL 数据
-                init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                eta = np.clip(1-total_steps/1e6, 0, 1),
-                adv_normed=True,          # 沿用 RL 实例中的优势归一化
-                il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
-                label_smoothing=label_smoothing_mixed,      # 沿用 IL 实例中的标签平滑
-                alpha=alpha_il,           # 核心：传入随时间衰减的权重
-                beta=beta_mixed,                  # 沿用 IL 实例中的 beta
-                il_only_maneuver = il_only_maneuver,
-                mini_batch_size = mini_batch_size_mixed
-            )
+            if use_sil:
+                #===========================================
+                # 混合强化学习与模仿学习
+                il_transition_dict = il_transition_buffer.read(il_batch_size2)
+                # 1. 定义 IL 衰减的最大轮次
+                # 使用浮点数以确保计算精度
+                # MAX_IL_EPISODE = 500 # 100.0 
+                # 2. 计算当前 IL 权重 alpha_il (线性衰减，确保不小于 0)
+                # 当 i_episode = 0 时，alpha_il = 1.0
+                # 当 i_episode = 100 时，alpha_il = 0.0
+                # alpha_il = 1.0 # max(0.0, 1.0 - i_episode / MAX_IL_EPISODE)
+                # 3. 调用混合更新函数，传入计算出的 alpha
+                student_agent.mixed_update(
+                    transition_dict,          # RL 数据
+                    il_transition_dict,       # IL 数据
+                    init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
+                    eta = np.clip(1-total_steps/1e6, 0, 1),
+                    adv_normed=True,          # 沿用 RL 实例中的优势归一化
+                    il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
+                    label_smoothing=label_smoothing_mixed,      # 沿用 IL 实例中的标签平滑
+                    alpha=alpha_il,           # 核心：传入随时间衰减的权重
+                    beta=beta_mixed,                  # 沿用 IL 实例中的 beta
+                    sil_only_maneuver = sil_only_maneuver,
+                    mini_batch_size = mini_batch_size_mixed
+                )
+            else:
+                #====================
+                # 原有强化学习部分
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
+                #====================
             decide_steps_after_update = 0
-            #===========================================
-            
-            #====================
-            # 原有强化学习部分
-            # student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
-            # decide_steps_after_update = 0
-            #====================
 
             # [Modification] 保留原有梯度监控代码
-            actor_grad_norm = student_agent.actor_grad
             actor_pre_clip_grad = student_agent.pre_clip_actor_grad
-            critic_grad_norm = student_agent.critic_grad
             critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
             # 梯度监控
