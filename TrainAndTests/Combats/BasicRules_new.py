@@ -95,6 +95,23 @@ def basic_rules(state_check, rules_num, last_action=0):
         else:
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
+    
+    elif rules_num in [5]:
+        if RWR: # 受到威胁
+            action_number = 8 # 立刻 split-S
+            fire_missile = False # 防御时不发射
+        elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
+            action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
+        elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
+            if last_action != 2: # 如果上一动作为非爬升
+                action_number = 2 # 则本回合执行爬升
+                fire_missile = False
+            else:
+                fire_missile = True
+        else:
+            action_number = 3  # 低空苟分
+        fire_missile_affirmative = fire_missile
+        
 
     # if fire_missile_affirmative:
     #     launch_missile_immediately(env, side)
@@ -178,7 +195,7 @@ if __name__=='__main__':
         b_action_list = []
         
         # 采集不同轨迹的动作
-        for i_episode in range(5):
+        for i_episode in range(1): # 5
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -235,7 +252,7 @@ if __name__=='__main__':
 
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, i_episode, last_action=last_r_action_label)
+                    r_action_label, r_fire = basic_rules(r_state_check, 5, last_action=last_r_action_label) # i_episode
                     last_r_action_label = r_action_label
                     if r_fire:
                         launch_missile_immediately(env, 'r')
