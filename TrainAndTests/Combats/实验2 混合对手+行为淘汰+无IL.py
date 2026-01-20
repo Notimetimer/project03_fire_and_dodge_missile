@@ -1,13 +1,13 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = '无IL_PFSP_分阶段_混规则对手'
+mission_name = '无IL_PFSP_分阶段_混规则对手_强者优先'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0
-max_steps = 4 * 165e4
+max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
@@ -38,7 +38,7 @@ transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
-use_sil = False
+
 
 # # 现场产生奖励函数一致的示范数据
 if require_new_IL_data:
@@ -101,8 +101,9 @@ if __name__=='__main__':
             "Rule_1": 1200,
             "Rule_2": 1200,
             },
-        self_play_type = 'PFSP', # PFSP, FSP, SP, None(非自博弈)
-        use_sil=use_sil,
+        self_play_type = 'PFSP_challenge', # PFSP, FSP, SP, None(非自博弈)
+        use_sil = False,
+        sigma_elo = 200,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

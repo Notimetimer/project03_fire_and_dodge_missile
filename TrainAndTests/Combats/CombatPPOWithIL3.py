@@ -327,10 +327,10 @@ def run_MLP_simulation(
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 200
 ):
-    if not init_elo_ratings:  # 初始没有rule，自动转为纯自博弈
-        pure_self_play = 0
-    else:
-        pure_self_play = 1
+    # if not init_elo_ratings:  # 初始没有rule，自动转为纯自博弈
+    #     pure_self_play = 0
+    # else:
+    #     pure_self_play = 1
 
     if self_play_type == 'None':
         hist_agent_as_opponent = 0
