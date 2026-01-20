@@ -559,8 +559,8 @@ def run_MLP_simulation(
             if SP_type == 'PFSP_balanced':
                 actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
                 
-            elif SP_type == 'PFSP_balanced_biased':
-                actual_target = (float(target_elo) if target_elo is not None else np.mean(elos)) + 200
+            # elif SP_type == 'PFSP_balanced_biased':
+            #     actual_target = (float(target_elo) if target_elo is not None else np.mean(elos)) + 200
                 
             elif SP_type == 'PFSP_challenge':
                 actual_target = np.max(elos)
