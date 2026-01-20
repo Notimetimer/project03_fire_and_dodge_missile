@@ -325,7 +325,7 @@ def run_MLP_simulation(
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-
+    sigma_elo = 200
 ):
     if not init_elo_ratings:  # 初始没有rule，自动转为纯自博弈
         pure_self_play = 0
@@ -336,6 +336,24 @@ def run_MLP_simulation(
         hist_agent_as_opponent = 0
     else:
         hist_agent_as_opponent = 1
+    
+    # 设置随机数种子
+    seed = 42
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    
+    # # 尽量开启确定性模式（可能影响性能）
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
+    # try:
+    #     torch.use_deterministic_algorithms(True)
+    # except Exception:
+    #     pass
+    
     # ------------------------------------------------------------------
     # 参数与环境配置
     # ------------------------------------------------------------------
@@ -434,15 +452,6 @@ def run_MLP_simulation(
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
     # ==============================================================================
-    
-    # 设置随机数种子
-    seed = 42
-    import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
         
     # # 根据参数数量缩放学习率
     # from Math_calculates.ScaleLearningRate import scale_learning_rate
@@ -515,35 +524,15 @@ def run_MLP_simulation(
 
     def calculate_expected_score(player_elo, opponent_elo):
         """计算期望得分"""
-        return 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
+        return 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400)) # 这个数是约定俗成的,别改
 
     def update_elo(player_elo, opponent_elo, score):
         """更新ELO分数. score: 1 for win, 0 for loss, 0.5 for draw."""
         expected = calculate_expected_score(player_elo, opponent_elo)
         return player_elo + K_FACTOR * (score - expected)
 
-
-    # def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400):
-    #     """返回与 elo_ratings.keys() 顺序对应的概率数组。
-    #     - target_elo: 要优先靠近的 ELO（传入 main_agent_elo）。
-    #     - sigma: 高斯核标准差，越小越只选接近 target_elo 的对手。
-    #     """
-    #     keys = list(elo_ratings.keys())
-    #     if len(keys) == 0:
-    #         return np.array([]), keys # 返回 keys 以便索引
-    #     elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
-
-    #     if target_elo is None:
-    #         target_elo = np.mean(elos)
-
-    #     # 以高斯核度量相似度（基于差的平方）
-    #     diffs = elos - float(target_elo)
-    #     # 数值稳定性：将 exponent 的常数项减去 max
-    #     scores = np.exp(-0.5 * (diffs / float(sigma))**2)
-    #     probs = scores / (scores.sum() + 1e-12)
-    #     return probs, keys # 修改为返回 probs 和 keys
     
-    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP'):
+    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_balanced'):
         """
         返回与 keys 顺序对应的概率数组。
         
@@ -552,7 +541,8 @@ def run_MLP_simulation(
         - target_elo: float, PFSP 模式下优先靠近的 ELO。
         - sigma: float, PFSP 模式下的高斯核标准差。
         - SP_type: str, 采样类型:
-            - 'PFSP': 优先级虚构自博弈，基于 Elo 相似度的高斯分布。
+            - 'PFSP_balanced': 匹配实力相近的对手（target = target_elo）。
+            - 'PFSP_challenge': 匹配最强的对手（target = max_elo）。
             - 'FSP': 虚构自博弈，全样本均匀分布。
             - 'SP': 自博弈，仅选择 actor_rein 编号最大的那一个。
             - 'None': 仅在以 "Rule" 开头的 key 中均匀分布。
@@ -561,18 +551,39 @@ def run_MLP_simulation(
         if len(keys) == 0:
             return np.array([]), []
 
-        # --- 逻辑 1: PFSP (保持原样) ---
-        if SP_type == 'PFSP':
-            elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
-            if target_elo is None:
-                target_elo = np.mean(elos)
+        elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
+
+        # --- 1. 确定高斯采样的参数 (Target & Sigma) ---
+        if SP_type.startswith('PFSP'):
+            actual_sigma = float(sigma)
+            if SP_type == 'PFSP_balanced':
+                actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
+                
+            elif SP_type == 'PFSP_balanced_biased':
+                actual_target = (float(target_elo) if target_elo is not None else np.mean(elos)) + 200
+                
+            elif SP_type == 'PFSP_challenge':
+                actual_target = np.max(elos)
+                actual_sigma *= 1.5  # 挑战模式下的宽度缩放
+
+            elif SP_type == 'PFSP':  # 默认是平衡
+                actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
             
-            # 以高斯核度量相似度（基于差的平方）
-            diffs = elos - float(target_elo)
-            # 高斯核计算
-            scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+            # 统一计算 PFSP 概率
+            diffs = elos - actual_target
+            scores = np.exp(-0.5 * (diffs / actual_sigma)**2)
             probs = scores / (scores.sum() + 1e-12)
             return probs, keys
+
+            
+        # # --- 逻辑 1: PFSP (保持原样) ---
+        # if SP_type == 'PFSP':
+        #     # 以高斯核度量相似度（基于差的平方）
+        #     diffs = elos - float(target_elo)
+        #     # 高斯核计算
+        #     scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+        #     probs = scores / (scores.sum() + 1e-12)
+        #     return probs, keys
 
         # --- 逻辑 2: FSP (全样本均匀分布) ---
         elif SP_type == 'FSP':
@@ -612,13 +623,6 @@ def run_MLP_simulation(
         else:
             raise ValueError(f"Unknown SP_type: {SP_type}")
     
-    '''
-    通过高斯核与elo分确定对手概率
-    Δ = 200 (1σ = 200)：≈ 0.7597 → 75.97% ： 相似度 ≈ 0.6065，区域内概率0.683
-    Δ = 400 (2σ = 400)：≈ 0.9091 → 90.91% ： 相似度 ≈ 0.1353，区域内概率0.955
-    Δ = 600 (3σ = 600)：≈ 0.9693 → 96.93% ： 相似度 ≈ 0.0111，区域内概率0.997
-    '''
-
     # 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
     def shorten_actor_key(path_or_name):
         base = os.path.basename(path_or_name)
@@ -718,7 +722,7 @@ def run_MLP_simulation(
             
         # else:
         # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
-        probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type)
+        probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type, sigma=sigma_elo)
 
         # if rank_pos < 0.7:
         #     # 策略 B: 排名中下 (0.4 <= rank < 0.7)，增加 Rule_0 选中概率
