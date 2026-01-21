@@ -867,7 +867,7 @@ def run_MLP_simulation(
                 if r_missile_fired:
                     enemy_m_fired += 1
                     r_ATA = r_check_obs['target_information'][4]
-                    if r_ATA > pi/3:
+                    if r_ATA > pi/2:
                         fired_at_bad_condition += 1
                 
                 # --- 蓝方 (训练对象) 决策 ---
@@ -984,12 +984,12 @@ def run_MLP_simulation(
         is_kicked_opponent = False
         
         # 踢出判定条件：
-        if not is_rule_agent:
+        if not (is_rule_agent or selected_opponent_name==init_opponent_name):
             '''
             简单粗暴的对手筛选策略：
             1、撞地
             2、零开火且未获胜
-            3、所有导弹均不在角度开火
+            3、所有导弹均背对目标开火
             '''
             cond_crash = env.crash(env.RUAV) # 撞地
             r_fired_count = 6 - env.RUAV.ammo

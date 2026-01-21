@@ -1,10 +1,11 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_分阶段_混规则对手_平衡对手_无淘汰'
+mission_name = 'IL_and_PFSP_分阶段_混规则对手_平衡对手'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
+# IL_and_PFSP_分阶段_混规则对手_平衡对手_无淘汰   PFSP_balanced
 
 
 # 超参数
@@ -100,7 +101,7 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,  # 是否踢走不合规的对手
+        should_kick=1, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             "Rule_1": 1200,
             "Rule_2": 1200,

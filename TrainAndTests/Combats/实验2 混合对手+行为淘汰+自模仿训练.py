@@ -1,7 +1,11 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_强者优先'
+mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡对手_无淘汰'
+
+# IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
+# IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
+
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -96,13 +100,16 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=True,
+        should_kick=True,  # 是否踢走不合规的对手
         init_elo_ratings = {
             "Rule_1": 1200,
             "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
             },
-        self_play_type = 'PFSP_challenge', # PFSP, FSP, SP, None(非自博弈)
-        use_sil = True,
+        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        use_sil = 1,
         sigma_elo = 200,
     )
     end_time = datetime.now()
