@@ -1,7 +1,7 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_分阶段_混规则对手_平衡对手'
+mission_name = 'IL_and_PFSP_分阶段_混规则对手_平衡'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -101,7 +101,7 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=1, # False,  # 是否踢走不合规的对手
+        should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             "Rule_1": 1200,
             "Rule_2": 1200,
@@ -113,6 +113,9 @@ if __name__=='__main__':
         hist_agent_as_opponent = 1,
         use_sil = False,
         sigma_elo = 200,
+        WARM_UP_STEPS = 1e3, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = 0.5,
+        MAX_HISTORY_SIZE = 100,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
