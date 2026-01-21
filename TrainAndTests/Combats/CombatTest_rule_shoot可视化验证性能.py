@@ -8,19 +8,20 @@ import re
 from math import pi
 import time
 import datetime
+import copy
 
 # --- 1. 项目路径和模块导入 ---
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from Envs.Tasks.ChooseStrategyEnv2 import ChooseStrategyEnv
-from BasicRules import basic_rules
+from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
+from BasicRules_new import basic_rules
 from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 # from Algorithms.PPOHybrid23 import PolicyNetHybrid, HybridActorWrapper
 
 # --- [修正] 在此处直接定义缺失的常量 ---
-action_cycle_multiplier = 20
+action_cycle_multiplier = 30
 dt_maneuver = 0.2
 # -----------------------------------------
 
@@ -57,18 +58,19 @@ if __name__ == "__main__":
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
 
-    # --- 查找并加载模型 ---
-    logs_root_dir = os.path.join(project_root, "logs/combat")
-    latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
+    # # --- 查找并加载模型 ---
+    # logs_root_dir = os.path.join(project_root, "logs/combat")
+    # latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
     
-    # 如果要硬编码为本地绝对路径，使用原始字符串并检查存在性
-    # hardcoded = r'D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\RL_combat_PFSP-run-20251215-175820'
-    # if os.path.exists(hardcoded):
-    #     latest_log_dir = hardcoded
+    # # 如果要硬编码为本地绝对路径，使用原始字符串并检查存在性
+    # # hardcoded = r'D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\RL_combat_PFSP-run-20251215-175820'
+    # # if os.path.exists(hardcoded):
+    # #     latest_log_dir = hardcoded
     
-    if not latest_log_dir:
-        raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
+    # if not latest_log_dir:
+    #     raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
     
+    latest_log_dir = logs_root_dir = os.path.join(project_root, "logs/combat", "IL_and_PFSP_分阶段_混规则对手_平衡对手_无淘汰-run-20260120-222851")
     agent_path = find_latest_agent_path(latest_log_dir, args.agent_id)
     if not agent_path:
         raise FileNotFoundError(f"No agent file found in '{latest_log_dir}' (ID: {args.agent_id or 'latest'})")
@@ -84,12 +86,14 @@ if __name__ == "__main__":
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() # **非常重要**：设置为评估模式
+    
+    enm_wrapper = copy.deepcopy(actor_wrapper)
 
     env = ChooseStrategyEnv(env_args, tacview_show=1)
     env.shielded = 1
     
     # --- 循环测试 ---
-    rule_opponents = [0, 1, 2]
+    rule_opponents = [-1, 0, 1, 2]
     t_bias = 0
 
     try:
@@ -117,12 +121,33 @@ if __name__ == "__main__":
 
                 # 决策
                 if count % action_cycle_multiplier == 0:
-                    # 红方 (规则智能体)
-                    r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
-                    last_r_action_label = r_action_label
+                    # 红方 (对手决策)
+                    if rule_num >= 0:
+                        # [Fix] 传入选定的 rule_num
+                        r_state_check = env.unscale_state(r_check_obs)
+                        r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
+                        r_action_exec = {'cat': None, 'bern': None}
+                        r_action_exec['cat'] = np.array([r_action_label])
+                        r_action_exec['bern'] = np.array([r_fire], dtype=np.float32)
+                    else:
+                        # [Fix] NN 对手决策
+                        # 1. 使用网络获取机动动作
+                        with torch.no_grad():
+                            r_action_exec, _, _, r_action_check = enm_wrapper.get_action(r_obs, 
+                                        explore={'cont':0, 'cat':0, 'bern':1}, 
+                                        check_obs=r_check_obs, 
+                                        bern_threshold=0.33)
+                        r_action_label = r_action_exec['cat'][0]
+                        r_fire = r_action_exec['bern'][0]
+                        
+                        # # 2. 使用规则获取开火决策 (这里使用 Rule 1 作为开火逻辑)
+                        # _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
+                        # last_b_action_label = b_action_label # 更新上一机动，供规则使用
+
                     if r_fire:
-                        launch_missile_immediately(env, 'r')
+                        launch_missile_immediately(env, 'r', tabu=1)
+                        # launch_missile_immediately(env, 'r')
+                    last_r_action_label = r_action_label
 
                     # 蓝方 (RL 智能体)
                     # [修改] 机动由网络控制，开火由规则控制
@@ -131,14 +156,15 @@ if __name__ == "__main__":
                     # 1. 使用网络获取机动动作
                     with torch.no_grad():
                         b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, 
-                                    explore={'cont':0, 'cat':0, 'bern':0}, 
+                                    explore={'cont':0, 'cat':0, 'bern':1}, 
                                     check_obs=b_check_obs, 
                                     bern_threshold=0.33)
                     b_action_label = b_action_exec['cat'][0]
-
-                    # 2. 使用规则获取开火决策 (这里使用 Rule 1 作为开火逻辑)
-                    _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
-                    last_b_action_label = b_action_label # 更新上一机动，供规则使用
+                    b_fire = b_action_exec['bern'][0]
+                    
+                    # # 2. 使用规则获取开火决策 (这里使用 Rule 1 作为开火逻辑)
+                    # _, b_fire = basic_rules(b_state_check, 1, last_action=last_b_action_label)
+                    # last_b_action_label = b_action_label # 更新上一机动，供规则使用
 
                     if b_fire:
                         launch_missile_immediately(env, 'b', tabu=1)
@@ -146,10 +172,10 @@ if __name__ == "__main__":
                     # print(f"Time: {env.t:.1f}s, Blue Action: Maneuver={b_action_label}, Fire Rule Active={b_fire}")
 
                 # 执行机动并步进
-                r_maneuver = env.maneuver14(env.RUAV, r_action_label)
-                b_maneuver = env.maneuver14(env.BUAV, b_action_label)
+                r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
+                b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                 env.step(r_maneuver, b_maneuver)
-                done, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_fire)
+                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_fire)
                 done = done
                 env.render(t_bias=t_bias)
 
