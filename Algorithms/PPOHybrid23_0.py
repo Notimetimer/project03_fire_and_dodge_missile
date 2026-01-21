@@ -554,6 +554,30 @@ class PPOHybrid:
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr  
 
+
+    # 重置优化器
+    def reset_optimizer(self):
+        """
+        清除 optimizer 的动量等 state，但保留当前学习率/其他 param_group 设置。
+        通过重建 optimizer（保留 param_group 的 lr/betas/eps/weight_decay）来达到清空 state 的目的。
+        """
+        def _recreate_from(old_optim, params):
+            pg = old_optim.param_groups[0]
+            lr = pg.get('lr', 1e-3)
+            betas = pg.get('betas', (0.9, 0.999))
+            eps = pg.get('eps', 1e-8)
+            weight_decay = pg.get('weight_decay', 0.0)
+            return torch.optim.Adam(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+
+        # 重新创建 optim（以清除内部 state），但使用当前的 lr/betas/eps/weight_decay
+        self.actor_optimizer = _recreate_from(self.actor_optimizer, self.actor.parameters())
+        self.critic_optimizer = _recreate_from(self.critic_optimizer, self.critic.parameters())
+
+        # 清除可能残留的梯度
+        self.actor_optimizer.zero_grad()
+        self.critic_optimizer.zero_grad()
+    
+    
     def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None):
         # 委托给 Actor Wrapper
         max_s = max_std if max_std is not None else self.max_std
