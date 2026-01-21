@@ -101,6 +101,7 @@ if __name__=='__main__':
             "Rule_4": 1200,
         },   # 这里应该是打Rule_1的，打Rule_2要学得太好了
         self_play_type = 'None', # PFSP, FSP, SP, None(非自博弈)
+        hist_agent_as_opponent = 0,
         use_sil = False,
     )
     end_time = datetime.now()

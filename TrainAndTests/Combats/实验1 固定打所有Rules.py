@@ -1,7 +1,7 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_RL_分阶段_固定rule0'
+mission_name = 'IL_and_RL_分阶段_打所有Rules'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -98,9 +98,14 @@ if __name__=='__main__':
         transition_dict_capacity=transition_dict_capacity,
         should_kick=False,
         init_elo_ratings = {
-            "Rule_0": 1200,
-        },   # 这里应该是打Rule_1的，打Rule_2要学得太好了
-        self_play_type = 'None', # PFSP, FSP, SP, None(非自博弈)
+            'Rule_0': 1200,
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
+            },
+        self_play_type = 'PFSP', # PFSP, FSP, SP, None(非自博弈)
         hist_agent_as_opponent = 0,
         use_sil = False,
     )

@@ -323,6 +323,7 @@ def run_MLP_simulation(
         "Rule_2": 1200,
     },
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
+    hist_agent_as_opponent = 0, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 200
@@ -332,10 +333,10 @@ def run_MLP_simulation(
     # else:
     #     pure_self_play = 1
 
-    if self_play_type == 'None':
-        hist_agent_as_opponent = 0
-    else:
-        hist_agent_as_opponent = 1
+    # if self_play_type == 'None':
+    #     hist_agent_as_opponent = 0
+    # else:
+    #     hist_agent_as_opponent = 1
     
     # 设置随机数种子
     seed = 42
@@ -1043,7 +1044,7 @@ def run_MLP_simulation(
         if is_testing == False and use_sil:
             # 添加当前回合回放信息和对手回放信息
             # 赢了学自己，输了学对手
-            if env.win:
+            if not env.lose:
                 # 自己
                 new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
                 new_il_transition_dict['obs'] = ego_transition_dict['obs']
@@ -1056,7 +1057,7 @@ def run_MLP_simulation(
                 il_transition_buffer.add(new_il_transition_dict)
             
             # 对手
-            if env.lose:
+            if not env.win:
                 new_il_transition_dict = {'obs':[], 'states':[], 'actions': [], 'returns': []}
                 new_il_transition_dict['obs'] = enm_transition_dict['obs']
                 new_il_transition_dict['states'] = enm_transition_dict['states']

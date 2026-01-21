@@ -102,6 +102,7 @@ if __name__=='__main__':
             "Rule_2": 1200,
             },
         self_play_type = 'PFSP_challenge', # PFSP, FSP, SP, None(非自博弈)
+        hist_agent_as_opponent = 1,
         use_sil = False,
         sigma_elo = 200,
     )
