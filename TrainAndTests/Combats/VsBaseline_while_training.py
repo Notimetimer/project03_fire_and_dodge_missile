@@ -11,6 +11,7 @@ import re
 import time  # 确保引入 time 模块
 from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
+import random
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -24,6 +25,9 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 # [修改] 并行测试 Worker 函数 (增加了 dt_maneuver_val 参数)
 # ==========================================
 def test_worker(model_state_dict, rule_num, env_args, state_dim, hidden_dim, action_dims_dict, dt_maneuver_val, device_name='cpu'):
+    seed = 42
+    random.seed(seed)
+    np.random.seed(seed)
     """
     在独立进程中运行一场对战。
     """
