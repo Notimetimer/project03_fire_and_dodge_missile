@@ -2,7 +2,7 @@ from CombatPPOWithIL3 import *
 # CombatPPOWithIL3  CombatPPOWithIL4  # 无elo匹配的问题太多了，暂时不使用
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_分阶段_纯自博弈_平衡对手'
+mission_name = 'IL_and_PFSP_分阶段_纯自博弈_平衡'
 
 # IL_and_PFSP_分阶段_纯自博弈_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_纯自博弈_平衡对手   PFSP_balanced
