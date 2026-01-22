@@ -103,11 +103,14 @@ if __name__=='__main__':
         transition_dict_capacity=transition_dict_capacity,
         should_kick=False,
         init_elo_ratings = {
-        }, # 不允许规则对手进入，这样就是纯自博弈了
+        }, # 不允许规则对手进入，这样就是纯自博弈了, 
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = False,
         sigma_elo = 200,
+        WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
+        ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
+        MAX_HISTORY_SIZE = np.inf, # 100,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

@@ -1,15 +1,10 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡2'
-
-# IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
-# IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
-# IL_and_PFSP_带自模仿_混规则对手_平衡对手_无淘汰   PFSP_balanced
-
+mission_name = 'IL_and_RL_分阶段_固定rule4带自模仿'
 
 # 超参数
-actor_lr = 1e-4 # 1e-4
+actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 180
 max_steps = 8 * 165e4
@@ -103,20 +98,12 @@ if __name__=='__main__':
         transition_dict_capacity=transition_dict_capacity,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            # 'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
-            # 'Rule_5': 1200,
-            },
-        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1,
+            "Rule_4": 1200,
+        },   # 这里应该是打Rule_1的，打Rule_2要学得太好了
+        self_play_type = 'None', # PFSP, FSP, SP, None(非自博弈)
+        hist_agent_as_opponent = 0,
         use_sil = 1,
-        sigma_elo = 200,
-        WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 100,
+
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

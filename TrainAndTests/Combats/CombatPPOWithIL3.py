@@ -1175,7 +1175,7 @@ def run_MLP_simulation(
                         denom = float(rule_max - rule_min)
                         rank_pos = 0.5 if denom == 0 else (main_agent_elo - rule_min) / denom
 
-                    # 2. 准入判断 (50% 位次)               
+                    # 2. 准入判断 (50% 位次) 
                     if rank_pos >= ADMISSION_THRESHOLD:
                         # --- 容量控制 (淘汰机制) ---
                         
