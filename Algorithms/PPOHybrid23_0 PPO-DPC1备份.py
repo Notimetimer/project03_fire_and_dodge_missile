@@ -1079,6 +1079,11 @@ class PPOHybrid:
             v_pred = self.critic(critic_input_batch)
             critic_loss = F.mse_loss(v_pred, r_batch) * c_v
             
+            # 更新 running average of squared return error (for c calculation in helper)
+            with torch.no_grad():
+                batch_mse_val = ((r_batch - v_pred) ** 2).mean().item()
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse_val - self.c_sq)
+
             # --- C. Optimize ---
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
@@ -1397,8 +1402,7 @@ class PPOHybrid:
                 
                 if not hasattr(self, 'c_sq'): self.c_sq = torch.tensor(1.0, device=self.device)
                 batch_mse = (residual ** 2).mean().item()
-                # self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
-                self.c_sq = torch.tensor(1.0, device=self.device)  # 不要再让缩放系数浮动了
+                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
                 c = torch.sqrt(self.c_sq)
                 
                 il_adv = residual / (c + 1e-8)

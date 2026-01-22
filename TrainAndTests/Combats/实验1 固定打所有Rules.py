@@ -96,16 +96,16 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=False,
+        should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200,
+            # 'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            'Rule_5': 1200,
+            # 'Rule_5': 1200,
             },
-        self_play_type = 'PFSP', # PFSP, FSP, SP, None(非自博弈)
+        self_play_type = 'PFSP_balanced', # PFSP, FSP, SP, None(非自博弈)
         hist_agent_as_opponent = 0,
         use_sil = False,
     )
