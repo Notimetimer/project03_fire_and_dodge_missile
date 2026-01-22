@@ -103,6 +103,7 @@ if __name__=='__main__':
         transition_dict_capacity=transition_dict_capacity,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
+            # 'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
@@ -111,7 +112,7 @@ if __name__=='__main__':
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
-        use_sil = False,
+        use_sil = 0,
         sigma_elo = 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,

@@ -1,14 +1,15 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡对手_无淘汰'
+mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡'
 
 # IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
+# IL_and_PFSP_带自模仿_混规则对手_平衡对手_无淘汰   PFSP_balanced
 
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
+actor_lr = 1e-4 # 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 180
 max_steps = 8 * 165e4
@@ -18,7 +19,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1e-2  # 设置为0就是纯强化学习
+alpha_il = 0.1  # 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
@@ -100,17 +101,22 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
-        should_kick=True,  # 是否踢走不合规的对手
+        should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
+            # 'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            'Rule_5': 1200,
+            # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        hist_agent_as_opponent = 1,
         use_sil = 1,
         sigma_elo = 200,
+        WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = 0.5,
+        MAX_HISTORY_SIZE = 100,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
