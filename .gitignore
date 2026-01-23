@@ -49,3 +49,4 @@ __pycache__/
 TrainAndTests/Combats/IL/il_transitions_combat_LR.pkl
 TrainAndTests/Combats/IL/transition_dict_combat_LR.pkl
 /假回收站/废弃logs
+/结果展示/data

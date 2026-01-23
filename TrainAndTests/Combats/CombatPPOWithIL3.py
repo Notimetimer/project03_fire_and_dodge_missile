@@ -1083,7 +1083,7 @@ def run_MLP_simulation(
                         transition_dict,          # RL 数据
                         il_transition_dict,       # IL 数据
                         init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                        eta = np.clip(1-total_steps/1e6, 0, 1),
+                        eta = np.clip(1-total_steps/3e6, 0, 1),
                         adv_normed=True,          # 沿用 RL 实例中的优势归一化
                         il_batch_size=None,        # 沿用 IL 实例中的 Batch Size 128
                         label_smoothing=label_smoothing_mixed,      # 沿用 IL 实例中的标签平滑

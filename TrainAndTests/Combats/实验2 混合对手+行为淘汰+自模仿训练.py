@@ -1,7 +1,7 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡'
+mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_他模仿'
 
 # IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
@@ -102,6 +102,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
         should_kick=0, # False,  # 是否踢走不合规的对手
+        use_init_data=1,  # 是否留够他模仿的次数
         init_elo_ratings = {
             # 'Rule_0': 1200, # debug
             "Rule_1": 1200,
