@@ -32,7 +32,8 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(current_dir))
 
-from Envs.MissileModel1112 import *  # test
+from Envs.MissileModel1112 import *  # 传统三自由度动力学导弹模型
+# from Envs.MissileModel260123 import * # 可垂直飞行的导弹模型
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
@@ -398,7 +399,7 @@ class Battle(object):
                     if uav.id == missile.launcher_id:
                         if uav.can_offer_guidance(missile, self.UAVs):
                             has_datalink = True
-                last_vmt_, last_pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = \
+                last_vmt_, last_pmt_, _, _, _, _, _, _, _, _ = \
                     missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)

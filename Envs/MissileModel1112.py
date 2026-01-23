@@ -545,7 +545,7 @@ if __name__ == '__main__':
         # 更新载机位置和速度
         p_carrier_ += v_carrier_ * dt
         # 更新目标位置和速度
-        ptt_, vtt_ = Target.step()
+        ptt_, vtt_ = Target.step(dt=dt)
         L_t_ = ptt_ - p_carrier_
         distance_of_planes = norm(L_t_)
 
@@ -568,7 +568,7 @@ if __name__ == '__main__':
                 target_information = missile1.observe(vmt_, vtt_, pmt_, ptt_)
                 # 导弹移动
                 vmt_, pmt_, v_dot, nyt, nzt, line_t_, q_beta_t, q_epsilon_t, theta_mt, psi_mt = missile1.step(
-                    target_information)
+                    target_information, dt=dt)
                 vmt = norm(vmt_)
 
                 # 毁伤判定
