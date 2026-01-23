@@ -2,6 +2,7 @@ from CombatPPOWithIL3 import *
 from datetime import datetime
 
 mission_name = 'IL_and_PFSP_分阶段_混规则对手_中上'
+# 实验没有跑完，但这样确实快过平衡
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
