@@ -676,7 +676,7 @@ def run_MLP_simulation(
             
             # --- 新增：测试模式判断与设置 ---
             is_testing = False
-            # -- 测试模式 --
+            # -- 并行测试回合 --
             if total_steps >= trigger:
                 print(f"\n>>> Triggering Parallel Test at steps {total_steps}...")
                 # 1. 深度拷贝当前 Actor 权重到 CPU 内存
@@ -970,10 +970,13 @@ def run_MLP_simulation(
                 print('b 撞地')
             
             # --- [Optimized] ELO 更新与策略池清洗逻辑 (只在训练回合执行) ---
-            actual_score = 0.5 # Default draw
+            
             if env.win: actual_score = 1.0
             elif env.lose: actual_score = 0.0
-            
+            else: 
+                env.draw=1
+                actual_score = 0.5
+
             prev_main_elo = main_agent_elo
             
             # 1. 判定对手是否为“待踢出”类型 (只针对非规则智能体)
