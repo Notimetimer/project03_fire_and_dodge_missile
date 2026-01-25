@@ -1,7 +1,7 @@
 from CombatPPOWithIL3 import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_他模仿'
+mission_name = 'IL_and_PFSP_带自模仿_混规则对手_挑战'
 
 # IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
@@ -102,7 +102,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_capacity=transition_dict_capacity,
         should_kick=0, # False,  # 是否踢走不合规的对手
-        use_init_data=1,  # 是否留够他模仿的次数
+        use_init_data=0,  # 是否留够他模仿的次数
         init_elo_ratings = {
             # 'Rule_0': 1200, # debug
             "Rule_1": 1200,
@@ -111,7 +111,7 @@ if __name__=='__main__':
             'Rule_4': 1200,
             # 'Rule_5': 1200,
             },
-        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 1,
         sigma_elo = 200,
