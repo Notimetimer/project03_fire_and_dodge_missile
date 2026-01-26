@@ -27,7 +27,7 @@ dt_maneuver = 0.2
 # --- 2. 辅助函数 ---
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
 
-def create_initial_state(randomized=1):
+def create_initial_state(randomized=0):
     """创建固定的初始状态"""
     blue_height, red_height = 9000, 9000
     red_psi, blue_psi = pi / 2, -pi / 2

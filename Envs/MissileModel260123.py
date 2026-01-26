@@ -278,19 +278,7 @@ class missile_class:
         aN1_ = aN_target_required_ + aN_course_required_
         
         return 2, aN1_
-        
-        # # 制导指令算法，欧拉角速度方程
-        # vrx, vry, vrz = vrt_
-        # omega_LOS_y = (line_t_[0] * vrz - vrx * line_t_[2]) / (line_t_[0] ** 2 + line_t_[2] ** 2)  # 视线偏转角速度
-        # q_beta_dot = omega_LOS_y
-        # omega_LOS_z = (vry * (line_t_[0] ** 2 + line_t_[2] ** 2) - line_t_[1] * (
-        #         line_t_[0] * vrx + line_t_[2] * vrz)) / (
-        #                       distance ** 2 * distance_hor)  # 视线俯仰角速度
-        # q_epsilon_dot = omega_LOS_z
-        # nyt1 = 2 * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
-        # nzt1 = 2 * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)
 
-        # return 2, [nzt1, nyt1]
 
     # 末制导
     def terminal_guidance(self, v_missile_, v_target_, p_missile_, p_target_):
@@ -449,16 +437,6 @@ class missile_class:
         else:
             aN1_ = temp
         
-        # # 继续处理制导指令
-        # if case == 1:
-        #     theta_mt = temp[0]
-        #     psi_mt = temp[1]
-        #     nzt = 0  # 没法给
-        #     nyt = 0
-
-        # else:
-        #     nzt = temp[0]
-        #     nyt = temp[1]
 
         # 根据制导指令更新动力学
         Fp, m_missile1 = self.calc_burn()
@@ -472,8 +450,6 @@ class missile_class:
         Fx = 1 / 2 * Rho * vmt ** 2 * self.area * cd
         # 速率更新
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
-        # if v_dot<0 and vmt < 
-        
         vmt += v_dot * dt
         
         # # 限马赫数
@@ -493,11 +469,6 @@ class missile_class:
         nzt = 0
         
         
-        # # 欧拉角速度方程
-        # [nzt, nyt] = np.array([nzt, nyt]) * nt / np.sqrt(nyt ** 2 + nzt ** 2) if np.abs(nt) > 0 else [0.0, 0.0]
-        # theta_mt += ((nyt - cos(theta_mt)) * g / vmt) * dt
-        # psi_mt += nzt * g / vmt / cos(theta_mt) * dt
-        
         # 欧拉角反奇异
         theta_mt = np.clip(theta_mt, -theta_limit, theta_limit)
         if psi_mt > pi:
@@ -508,8 +479,6 @@ class missile_class:
         # 运动方程
         vmt_ += am_ * dt
         vmt_ = vmt_ * vmt / (np.linalg.norm(vmt_) + 1e-6) # if np.linalg.norm(vmt_) > 0 else np.zeros([1, 3])
-        
-        # vmt_ = vmt * np.array([cos(theta_mt) * cos(psi_mt), sin(theta_mt), cos(theta_mt) * sin(psi_mt)])
         
         self.vel_ = vmt_
 

@@ -335,8 +335,9 @@ def run_MLP_simulation(
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
-    deltaPFSP_epsilon = 0.8,
+    deltaFSP_epsilon = 0.8,
     K_FACTOR = 16,  # 32 原先振荡太大了
+    randomized_birth = 1,
 ):
 
     
@@ -482,16 +483,17 @@ def run_MLP_simulation(
     t_bias = 0
     
     
-    def create_initial_state(randomized=1):
+    def create_initial_state(randomized=0):
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
         blue_height = 9000
         red_height = 9000
         red_psi = -pi/2
         blue_psi = pi/2
-        red_N = 0
+        init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
+        red_N = init_North
         red_E = 45e3
-        blue_N = red_N
+        blue_N = init_North
         blue_E = -red_E
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                             'psi': red_psi
@@ -501,9 +503,8 @@ def run_MLP_simulation(
                                     }
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
+
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
-    
-    
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = init_elo_ratings
     # 定义路径
@@ -608,7 +609,7 @@ def run_MLP_simulation(
             probs = np.ones(len(keys)) / len(keys)
             return probs, keys
 
-        elif SP_type == 'deltaPFSP':
+        elif SP_type == 'deltaFSP':
             # 保持 keys 的插入顺序（json.load / dict 保留插入顺序）
             n = len(keys)
             if n == 0:
@@ -617,8 +618,8 @@ def run_MLP_simulation(
             new_count = max(1, int(np.ceil(n * 0.2)))
             new_keys = keys[-new_count:]
             old_keys = keys[:-new_count] if len(keys) - new_count > 0 else []
-            # 以 deltaPFSP_epsilon 概率从“新”池均匀采样，否则从“旧”池均匀采样
-            if np.random.rand() < float(deltaPFSP_epsilon):
+            # 以 deltaFSP_epsilon 概率从“新”池均匀采样，否则从“旧”池均匀采样
+            if np.random.rand() < float(deltaFSP_epsilon):
                 probs = np.ones(len(new_keys)) / len(new_keys)
                 return probs, new_keys
             else:
@@ -789,7 +790,7 @@ def run_MLP_simulation(
             
             episode_return = 0
 
-            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
+            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state(randomized=randomized_birth)
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=6, blue_init_ammo=6)

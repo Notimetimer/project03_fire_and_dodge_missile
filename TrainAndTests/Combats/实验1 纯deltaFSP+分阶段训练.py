@@ -2,7 +2,7 @@ from CombatPPOWithIL3 import *
 # CombatPPOWithIL3  CombatPPOWithIL4  # 无elo匹配的问题太多了，暂时不使用
 from datetime import datetime
 
-mission_name = 'IL_and_deltaPFSP_分阶段_纯自博弈'
+mission_name = 'IL_and_deltaFSP_分阶段_纯自博弈'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -100,7 +100,7 @@ if __name__=='__main__':
         should_kick=False,
         init_elo_ratings = {
         }, # 不允许规则对手进入，这样就是纯自博弈了, 
-        self_play_type = 'deltaPFSP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'deltaFSP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = False,
         sigma_elo = 500,  # 200,
