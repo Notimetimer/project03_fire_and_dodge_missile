@@ -335,6 +335,7 @@ def run_MLP_simulation(
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 100,
+    deltaPFSP_epsilon = 0.8,
 ):
 
     
@@ -606,6 +607,27 @@ def run_MLP_simulation(
             probs = np.ones(len(keys)) / len(keys)
             return probs, keys
 
+        elif SP_type == 'deltaPFSP':
+            # 保持 keys 的插入顺序（json.load / dict 保留插入顺序）
+            n = len(keys)
+            if n == 0:
+                return np.array([]), []
+            # 将后 20% 视为“新”，其余为“旧”
+            new_count = max(1, int(np.ceil(n * 0.2)))
+            new_keys = keys[-new_count:]
+            old_keys = keys[:-new_count] if len(keys) - new_count > 0 else []
+            # 以 deltaPFSP_epsilon 概率从“新”池均匀采样，否则从“旧”池均匀采样
+            if np.random.rand() < float(deltaPFSP_epsilon):
+                probs = np.ones(len(new_keys)) / len(new_keys)
+                return probs, new_keys
+            else:
+                # 若旧池为空则回退到新池
+                if not old_keys:
+                    probs = np.ones(len(new_keys)) / len(new_keys)
+                    return probs, new_keys
+                probs = np.ones(len(old_keys)) / len(old_keys)
+                return probs, old_keys
+        
         # --- 逻辑 3: SP (找到 actor_rein 编号最大者) ---
         elif SP_type == 'SP':
             # 过滤出所有以 actor_rein 开头的 key
