@@ -9,8 +9,6 @@ import random
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
-
 from _context import * # 包含 project_root
 from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
@@ -23,8 +21,8 @@ plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
 plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 # --- 1. 配置参数 ---
-TOTAL_ROUNDS = 100    # 每对任务之间对抗 100 场
-TEAM_SIZE = 50        # 每队从 Elo 排行中取前 50 名
+TOTAL_ROUNDS = 3 # 100    # 每对任务之间对抗 100 场
+TEAM_SIZE = 5 # 50        # 每队从 Elo 排行中取前 50 名
 action_cycle_multiplier = 30
 dt_maneuver = 0.2
 
@@ -88,7 +86,7 @@ if __name__ == "__main__":
     # --- [在此处修改输入列表] ---
     mission_names = [
         'IL_and_PFSP_分阶段_混规则对手_平衡-run-20260121-224828', # 任务1
-        'IL_and_PFSP_分阶段_混规则对手_中上-run-20260123-204031', # 任务2
+        'IL_and_PFSP_分阶段_混规则对手_中上-run-20260123-204031', # 任务2 (示例重复)
         'IL_and_PFSP_分阶段_混规则对手_挑战-run-20260123-203921', # 任务3
     ]
     
@@ -157,48 +155,27 @@ if __name__ == "__main__":
 
     print(f"\n矩阵计算完成！总耗时: {time.time() - start_time:.2f}s")
 
-    # 保存博弈矩阵为 CSV 以便后续分析/绘图
-    os.makedirs(os.path.join(project_root, "结果展示", "outputs"), exist_ok=True)
-    csv_path = os.path.join(project_root, "结果展示", "outputs", "combat_matrix.csv")
-    df = pd.DataFrame(results_matrix, index=team_labels, columns=team_labels)
-    df.to_csv(csv_path, float_format="%.4f", encoding="utf-8-sig")
-    print(f"博弈矩阵已保存到: {csv_path}")
-
-    # 4. 绘图部分（单色：白 -> 紫）
+    # 4. 绘图部分 (PRGn 配色 + X轴置顶)
     plt.figure(figsize=(num_teams + 4, num_teams + 2))
-    # 手动指定色彩空间向量（RGB 0-1）
-    colors = [
-        (1.0, 1.0, 1.0),
-        (0.1, 0.1, 0.44),
-    ]
-    # colors = [
-    #     (1.0, 1.0, 1.0),    # 白
-    #     (0.85, 0.75, 0.95), # 浅紫
-    #     (0.58, 0.44, 0.86), # 中紫
-    #     (0.29, 0.00, 0.51)  # 深紫
-    # ]
-    cmap = LinearSegmentedColormap.from_list("white_purple", colors, N=256)
-    norm = TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
-
     ax = sns.heatmap(
-        results_matrix,
-        annot=True,
-        fmt=".2f",
-        cmap=cmap,
-        norm=norm,
-        xticklabels=team_labels,
+        results_matrix, 
+        annot=True, 
+        fmt=".2f", 
+        cmap="PRGn",           # 核心修改：紫色配绿色
+        center=0.5,            # 设置 0.5 为颜色的中性点（浅色区）
+        xticklabels=team_labels, 
         yticklabels=team_labels,
-        square=True,
+        square=True,           # 保持正方形格子
         linewidths=0.5,
         cbar_kws={"label": "Blue Team Win Rate", "shrink": 0.8}
     )
-
+    
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
-
+    
     plt.title("Cross-Algorithm Final Agents Combat Matrix", fontsize=14, pad=40)
     plt.xlabel("Red Team (Opponent / Column)", fontsize=12, labelpad=15)
     plt.ylabel("Blue Team (Evaluated / Row)", fontsize=12)
-
+    
     plt.tight_layout()
     plt.show()

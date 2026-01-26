@@ -10,6 +10,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+from multiprocessing import Pool, cpu_count # 引入多进程库
 
 from _context import * # 包含 project_root
 from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
@@ -56,6 +57,7 @@ def get_top_elo_agents(log_dir, top_n=50):
         
     return top_agents_paths
 
+# --- 保持原样，完全不改动 ---
 def run_battle(env, blue_wrapper, red_wrapper, device):
     """仿真逻辑 (保持与文件 1 一致)"""
     env.reset(red_init_ammo=6, blue_init_ammo=6)
@@ -83,6 +85,42 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
     if env.lose: return 0.0  # 红胜
     return 0.5               # 平局
 
+# --- 新增：并行工作函数 (包装器) ---
+def worker_process_battle(args_pack):
+    """
+    为了并行化，需要在子进程内实例化环境和模型，
+    然后调用未修改的 run_battle。
+    """
+    blue_path, red_path = args_pack
+    
+    # 强制在 Worker 中使用 CPU，避免多进程 CUDA 冲突
+    device = torch.device("cpu")
+    # 限制单进程线程数，防止 CPU 争抢
+    torch.set_num_threads(1) 
+    
+    # 1. 初始化环境
+    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=600, R_cage=55e3), tacview_show=0)
+    state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
+    
+    # 2. 初始化模型结构 (使用 CPU)
+    # 变量名保持 blue_wrapper / red_wrapper 以匹配 run_battle 签名要求
+    blue_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
+    red_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
+    
+    # 3. 加载权重
+    try:
+        blue_wrapper.load_state_dict(torch.load(blue_path, map_location=device, weights_only=True))
+        red_wrapper.load_state_dict(torch.load(red_path, map_location=device, weights_only=True))
+    except Exception as e:
+        print(f"模型加载出错: {e}")
+        return 0.5
+    
+    blue_wrapper.eval()
+    red_wrapper.eval()
+    
+    # 4. 调用原始函数
+    return run_battle(env, blue_wrapper, red_wrapper, device)
+
 # --- 3. 主程序 ---
 if __name__ == "__main__":
     # --- [在此处修改输入列表] ---
@@ -102,15 +140,17 @@ if __name__ == "__main__":
     if len(mission_names) != len(team_labels):
         raise ValueError(f"输入错误：任务目录数量({len(mission_names)}) 与 标签数量({len(team_labels)}) 不一致！")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logs_root_dir = os.path.join(project_root, "结果展示/logs")
     
     # 1. 准备各算法的 Top 50 精英队
     teams = []
     print("正在准备各任务精英智能体...")
     for name in mission_names:
-        # log_dir = get_latest_log_dir(logs_root_dir, name)
         log_dir = os.path.join(logs_root_dir, name)
+        if not os.path.exists(log_dir):
+            # 尝试自动查找
+            log_dir = get_latest_log_dir(logs_root_dir, name)
+            
         if not log_dir:
             raise FileNotFoundError(f"未找到任务目录: {name}")
         teams.append(get_top_elo_agents(log_dir, TEAM_SIZE))
@@ -119,41 +159,39 @@ if __name__ == "__main__":
     results_matrix = np.zeros((num_teams, num_teams))
     np.fill_diagonal(results_matrix, 0.5)
 
-    # 2. 初始化环境和模型结构
-    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=600, R_cage=55e3), tacview_show=0)
-    state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
-    
-    actor_blue = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
-    actor_red = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
-
-    # 3. 跨任务博弈计算
+    # 并行配置
+    num_processes = min(cpu_count(), 20)  # 限制最大进程数，防止卡死
     print(f"\n开始跨任务博弈矩阵计算 ({num_teams}x{num_teams})...")
+    print(f"并行进程数: {num_processes}")
     start_time = time.time()
     
-    for i in range(num_teams):      # 行 i 为蓝方 (Evaluated)
-        for j in range(num_teams):  # 列 j 为红方 (Opponent)
-            if i == j: continue
-            
-            # 同样使用对称性，只跑 i > j
-            if i > j:
-                print(f"正在对抗: [Row]{team_labels[i]} (Blue) vs [Col]{team_labels[j]} (Red)...")
-                total_score = 0
-                for r in range(TOTAL_ROUNDS):
-                    # 从各自的 Top 50 中随机抽样
-                    blue_path = random.choice(teams[i])
-                    red_path = random.choice(teams[j])
-                    
-                    # 加载并设置为评估模式
-                    actor_blue.load_state_dict(torch.load(blue_path, map_location=device, weights_only=True))
-                    actor_red.load_state_dict(torch.load(red_path, map_location=device, weights_only=True))
-                    actor_blue.eval(); actor_red.eval()
-                    
-                    total_score += run_battle(env, actor_blue, actor_red, device)
+    # 创建进程池
+    with Pool(processes=num_processes) as pool:
+        for i in range(num_teams):      # 行 i 为蓝方 (Evaluated)
+            for j in range(num_teams):  # 列 j 为红方 (Opponent)
+                if i == j: continue
                 
-                win_rate = total_score / TOTAL_ROUNDS
-                results_matrix[i, j] = win_rate       # i 打赢 j 的胜率
-                results_matrix[j, i] = 1.0 - win_rate # j 打赢 i 的胜率 (即 i 作为蓝方输掉的概率)
-                print(f"  -> {team_labels[i]} 对阵 {team_labels[j]} 胜率: {win_rate:.2f}")
+                # 同样使用对称性，只跑 i > j
+                if i > j:
+                    print(f"正在对抗: [Row]{team_labels[i]} (Blue) vs [Col]{team_labels[j]} (Red)...")
+                    
+                    # 准备 100 场对局的任务参数
+                    battle_tasks = []
+                    for _ in range(TOTAL_ROUNDS):
+                        blue_path = random.choice(teams[i])
+                        red_path = random.choice(teams[j])
+                        battle_tasks.append((blue_path, red_path))
+                    
+                    # 并行执行
+                    # map 会按顺序返回结果列表 [1.0, 0.0, 0.5, ...]
+                    results = pool.map(worker_process_battle, battle_tasks)
+                    
+                    total_score = sum(results)
+                    win_rate = total_score / TOTAL_ROUNDS
+                    
+                    results_matrix[i, j] = win_rate       # i 打赢 j 的胜率
+                    results_matrix[j, i] = 1.0 - win_rate # j 打赢 i 的胜率
+                    print(f"  -> {team_labels[i]} 对阵 {team_labels[j]} 胜率: {win_rate:.2f}")
 
     print(f"\n矩阵计算完成！总耗时: {time.time() - start_time:.2f}s")
 
@@ -171,12 +209,7 @@ if __name__ == "__main__":
         (1.0, 1.0, 1.0),
         (0.1, 0.1, 0.44),
     ]
-    # colors = [
-    #     (1.0, 1.0, 1.0),    # 白
-    #     (0.85, 0.75, 0.95), # 浅紫
-    #     (0.58, 0.44, 0.86), # 中紫
-    #     (0.29, 0.00, 0.51)  # 深紫
-    # ]
+    
     cmap = LinearSegmentedColormap.from_list("white_purple", colors, N=256)
     norm = TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
 

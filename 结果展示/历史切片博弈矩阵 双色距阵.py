@@ -1,5 +1,4 @@
 import os
-import json
 import re
 import time
 import torch
@@ -9,8 +8,6 @@ import random
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
-
 from _context import * # 包含 project_root
 from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
@@ -18,9 +15,6 @@ from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
 # --- 2. 辅助函数 ---
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
-plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
 
 # --- 1. 参数配置 ---
 action_cycle_multiplier = 30
@@ -180,30 +174,16 @@ if __name__ == "__main__":
     # square=True: 强制每个格子为正方形
     # linewidths: 格子之间的白线宽度，增加高级感
     # cbar_kws: 侧边栏标签
-    # 手动指定色彩空间向量（RGB 0-1）
-    colors = [
-        (1.0, 1.0, 1.0),
-        (0.1, 0.1, 0.44),
-    ]
-    # colors = [
-    #     (1.0, 1.0, 1.0),    # 白
-    #     (0.85, 0.75, 0.95), # 浅紫
-    #     (0.58, 0.44, 0.86), # 中紫
-    #     (0.29, 0.00, 0.51)  # 深紫
-    # ]
-    cmap = LinearSegmentedColormap.from_list("white_purple", colors, N=256)
-    norm = TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
-
     ax = sns.heatmap(
-        results_matrix,
-        annot=True,
-        fmt=".2f",
-        cmap=cmap,
-        norm=norm,
-        xticklabels=team_labels,
+        results_matrix, 
+        annot=True, 
+        fmt=".2f", 
+        cmap="PRGn",           # 核心修改：紫色配绿色
+        center=0.5,            # 设置 0.5 为颜色的中性点（浅色区）
+        xticklabels=team_labels, 
         yticklabels=team_labels,
-        square=True,
-        linewidths=0.5,
+        square=True,           # 保持正方形格子
+        linewidths=0.5,        
         cbar_kws={"label": "Score Rate (Win + 0.5*Draw)", "shrink": 0.8}
     )
 
