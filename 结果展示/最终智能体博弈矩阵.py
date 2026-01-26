@@ -68,8 +68,8 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
             b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1}, check_obs=r_check)
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1}, check_obs=b_check)
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1})
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1})
             if r_act['bern'][0]: launch_missile_immediately(env, 'r')
             if b_act['bern'][0]: launch_missile_immediately(env, 'b')
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]

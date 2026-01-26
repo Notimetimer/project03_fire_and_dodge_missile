@@ -70,8 +70,8 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
             b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1}, check_obs=r_check)
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1}, check_obs=b_check)
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1})
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1})
             if r_act['bern'][0]: launch_missile_immediately(env, 'r')
             if b_act['bern'][0]: launch_missile_immediately(env, 'b')
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]
@@ -128,12 +128,17 @@ if __name__ == "__main__":
         'IL_and_PFSP_分阶段_混规则对手_平衡-run-20260121-224828', # 任务1
         'IL_and_PFSP_分阶段_混规则对手_中上-run-20260123-204031', # 任务2
         'IL_and_PFSP_分阶段_混规则对手_挑战-run-20260123-203921', # 任务3
+        'IL_and_PFSP_分阶段_纯自博弈_平衡-run-20260122-173613',
+        # 'IL_and_RL_分阶段_固定rule0-run-20260120-171600',
+        'IL_and_RL_分阶段_固定rule4-run-20260122-103556',
     ]
     
     team_labels = [
         '平衡',
         '中上',
         '挑战',
+        '纯自博弈_平衡',
+        '固定对手rule_4',
     ]
     
     # 强制校验长度

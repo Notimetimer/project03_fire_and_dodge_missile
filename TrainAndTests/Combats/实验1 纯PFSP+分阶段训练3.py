@@ -110,7 +110,7 @@ if __name__=='__main__':
         sigma_elo = 200,
         WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
         ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
-        MAX_HISTORY_SIZE = np.inf, # 100,
+        MAX_HISTORY_SIZE = 100,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

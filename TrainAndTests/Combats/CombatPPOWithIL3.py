@@ -1185,11 +1185,20 @@ def run_MLP_simulation(
                         # 找出所有现存的历史智能体 (排除 Rules 和 特殊key)
                         history_keys = [k for k in elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         
-                        if len(history_keys) >= MAX_HISTORY_SIZE:
-                            # 淘汰最弱的历史智能体
+                        # if len(history_keys) >= MAX_HISTORY_SIZE:
+                        #     # 淘汰最弱的历史智能体
+                        #     weakest_history_key = min(history_keys, key=lambda k: elo_ratings[k])
+                        #     del elo_ratings[weakest_history_key]
+                        #     print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {elo_ratings.get(weakest_history_key, 'N/A')})")
+                        # 使用 while 循环确保：即使积压了多个过剩智能体，也能一次性清理到位
+                        while len(history_keys) >= MAX_HISTORY_SIZE:
+                            # 每次找到当前池子中最弱的一个
                             weakest_history_key = min(history_keys, key=lambda k: elo_ratings[k])
+                            old_elo = elo_ratings[weakest_history_key]
+                            # 从 ELO 字典和局部列表中同步删除
                             del elo_ratings[weakest_history_key]
-                            print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {elo_ratings.get(weakest_history_key, 'N/A')})")
+                            history_keys.remove(weakest_history_key)
+                            print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
                         
                         # --- 正式入池 ---
                         elo_ratings[actor_key] = main_agent_elo
