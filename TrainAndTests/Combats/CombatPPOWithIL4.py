@@ -307,7 +307,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage=55e3,
+    R_cage= 45e3, # 55e3,
     dt_maneuver=0.2,
     transition_dict_capacity=1000,
     should_kick = True,
@@ -320,7 +320,7 @@ def run_MLP_simulation(
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    sigma_elo = 200
+    sigma_elo = 500  # 200
 ):
     # if not init_elo_ratings:  # 初始没有rule，自动转为纯自博弈
     #     pure_self_play = 0

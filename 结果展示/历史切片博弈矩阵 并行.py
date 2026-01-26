@@ -26,7 +26,7 @@ plt.rcParams['axes.unicode_minus'] = False
 action_cycle_multiplier = 30
 dt_maneuver = 0.2
 TOTAL_ROUNDS = 100 # 每两队之间打100场
-TEAM_SIZE = 10     # 每队成员数
+TEAM_SIZE = 25     # 每队成员数
 
 def get_agent_teams(log_dir):
     """根据文件编号划分三个进度的队伍"""
@@ -120,7 +120,7 @@ def worker_process_battle(args_pack):
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    name = 'IL_and_PFSP_分阶段_混规则对手_平衡-run-20260121-224828'
+    name = 'IL_and_PFSP_分阶段_混规则对手_挑战-run-20260123-203921'
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

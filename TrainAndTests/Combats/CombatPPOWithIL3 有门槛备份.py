@@ -316,7 +316,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage=55e3,
+    R_cage= 45e3, # 55e3,
     dt_maneuver=0.2,
     transition_dict_capacity=1000,
     should_kick = True,
@@ -330,10 +330,10 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    sigma_elo = 200,
+    sigma_elo = 500,  # 200,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
-    MAX_HISTORY_SIZE = 100,
+    MAX_HISTORY_SIZE = 300,  # 100
 ):
     # if not init_elo_ratings:  # 初始没有rule，自动转为纯自博弈
     #     pure_self_play = 0

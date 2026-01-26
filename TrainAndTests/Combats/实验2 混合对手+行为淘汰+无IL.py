@@ -32,7 +32,7 @@ IL_rule = 2 # 初始模仿对象
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 10*60 # 回合最长时间，单位s
-R_cage = 55e3 # 场地半径，单位m
+R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1 
 
@@ -108,10 +108,10 @@ if __name__=='__main__':
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
-        sigma_elo = 200,
+        sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 100,
+        MAX_HISTORY_SIZE = 300,  # 100
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

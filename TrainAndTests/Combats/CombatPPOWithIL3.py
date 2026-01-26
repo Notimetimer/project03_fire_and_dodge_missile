@@ -317,7 +317,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage=55e3,
+    R_cage = 45e3, # 55e3,
     dt_maneuver=0.2,
     transition_dict_capacity=1000,
     should_kick = True,
@@ -331,11 +331,12 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    sigma_elo = 200,
+    sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
-    MAX_HISTORY_SIZE = 100,
+    MAX_HISTORY_SIZE = 300,  # 100
     deltaPFSP_epsilon = 0.8,
+    K_FACTOR = 16,  # 32 原先振荡太大了
 ):
 
     
@@ -481,7 +482,7 @@ def run_MLP_simulation(
     t_bias = 0
     
     
-    def create_initial_state():
+    def create_initial_state(randomized=1):
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
         blue_height = 9000
@@ -501,7 +502,7 @@ def run_MLP_simulation(
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
-    K_FACTOR = 32
+    
     
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = init_elo_ratings

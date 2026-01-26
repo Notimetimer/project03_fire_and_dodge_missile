@@ -32,7 +32,7 @@ IL_rule = 2 # 初始模仿对象
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 10*60 # 回合最长时间，单位s
-R_cage = 55e3 # 场地半径，单位m
+R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1 
 
