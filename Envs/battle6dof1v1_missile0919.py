@@ -193,6 +193,12 @@ class Battle(object):
             UAV.color = np.array([1, 0, 0])
             # 红方出生点
             UAV.pos_ = red_birth_state['position']  # np.array([-38841.96119795, 9290.02131746, -1686.95469864])
+            # 不能出生在外面
+            init_R = norm([UAV.pos_[0], UAV.pos_[2]])
+            safe_R_cage = self.R_cage-5e3
+            if init_R > self.R_cage-5e3:
+                UAV.pos_[0] *= safe_R_cage/init_R
+                UAV.pos_[2] *= safe_R_cage/init_R
             # 判断是否有自定义初始速度、theta、phi
             UAV.speed = red_birth_state.get('speed', 300)  # (UAV.speed_max - UAV.speed_min) / 2
             # speed = UAV.speed
@@ -228,6 +234,12 @@ class Battle(object):
             UAV.color = np.array([0, 0, 1])
             # 蓝方出生点
             UAV.pos_ = blue_birth_state['position']  # np.array([38005.14540582, 6373.80721704, -1734.42509136])
+            # 不能出生在外面
+            init_R = norm([UAV.pos_[0], UAV.pos_[2]])
+            safe_R_cage = self.R_cage-5e3
+            if init_R > self.R_cage-5e3:
+                UAV.pos_[0] *= safe_R_cage/init_R
+                UAV.pos_[2] *= safe_R_cage/init_R
             UAV.speed = blue_birth_state.get('speed', (UAV.speed_max - UAV.speed_min) / 2)
             UAV.psi = blue_birth_state['psi']
             UAV.theta = blue_birth_state.get('theta', 0 * pi / 180)

@@ -73,9 +73,9 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             
             with torch.no_grad():
                 # 红方决策
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1}, check_obs=r_check)
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1})
                 # 蓝方决策
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1}, check_obs=b_check)
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1})
             
             if r_act['bern'][0]: launch_missile_immediately(env, 'r')
             if b_act['bern'][0]: launch_missile_immediately(env, 'b')
@@ -93,16 +93,12 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mission-name", type=str, default='RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习') # 测试路径
-    args = parser.parse_args()
+    name = 'IL_and_PFSP_分阶段_混规则对手_平衡-run-20260121-224828'
+
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    logs_root_dir = os.path.join(project_root, "logs/combat")
-    latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
-    
-    log_dir = latest_log_dir # f"./logs/combat/{args.mission_name}" # 根据实际路径修改
+    log_dir = os.path.join(project_root, "结果展示", "logs", name)
     
     # 1. 准备队伍
     teams = get_agent_teams(log_dir)
