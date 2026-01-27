@@ -117,6 +117,7 @@ if __name__=='__main__':
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
+        rule_actor_rate = 0.2, # “复习”概率
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

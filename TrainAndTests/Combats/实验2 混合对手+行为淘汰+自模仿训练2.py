@@ -104,7 +104,7 @@ if __name__=='__main__':
         should_kick=0, # False,  # 是否踢走不合规的对手
         use_init_data=0,  # 是否留够他模仿的次数
         init_elo_ratings = {
-            # 'Rule_0': 1200, # debug
+            'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
@@ -118,6 +118,7 @@ if __name__=='__main__':
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
+        rule_actor_rate = 0.2, # “复习”概率
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
