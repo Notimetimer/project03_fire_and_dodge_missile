@@ -331,6 +331,8 @@ def run_MLP_simulation(
     rule_actor_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
+    save_interval = 5,
+    
 ):
 
     
@@ -1169,7 +1171,7 @@ def run_MLP_simulation(
             
             
             # --- 保存模型与 ELO 维护 ---
-            if i_episode % 5 == 0:
+            if i_episode % save_interval == 0:
                 torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
                 
                 actor_name = f"actor_rein{i_episode}.pt" # 物理文件名
