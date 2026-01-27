@@ -336,7 +336,6 @@ def run_MLP_simulation(
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
     deltaFSP_epsilon = 0.8,
-    hist_actor_rate = 0.5,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
 ):
@@ -546,209 +545,121 @@ def run_MLP_simulation(
         expected = calculate_expected_score(player_elo, opponent_elo)
         return player_elo + K_FACTOR * (score - expected)
 
-
-    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_with_delta', elo_epsilon=0.3):
+    
+    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_balanced'):
         """
-        优化后的对手采样逻辑：
-        1. 优先判定是否进入“规则复习”分支。
-        2. 若未进入，则根据 SP_type 执行具体的采样策略。
+        返回与 keys 顺序对应的概率数组。
+        
+        参数:
+        - elo_ratings: dict, 格式为 {name: elo_value}
+        - target_elo: float, PFSP 模式下优先靠近的 ELO。
+        - sigma: float, PFSP 模式下的高斯核标准差。
+        - SP_type: str, 采样类型:
+            - 'PFSP_balanced': 匹配实力相近的对手（target = target_elo）。
+            - 'PFSP_challenge': 匹配最强的对手（target = max_elo）。
+            - 'FSP': 虚构自博弈，全样本均匀分布。
+            - 'SP': 自博弈，仅选择 actor_rein 编号最大的那一个。
+            - 'None': 仅在以 "Rule" 开头的 key 中均匀分布。
         """
         keys = list(elo_ratings.keys())
-        if not keys:
+        if len(keys) == 0:
             return np.array([]), []
 
-        # --- 第一层判断：规则复习分支 (Epsilon-Greedy 锚点保护) ---
-        # 只要 elo_epsilon > 0，就有概率强行进入规则池采样，防止“策略遗忘”
-        rule_keys = [k for k in keys if k.startswith('Rule')]
-        if np.random.rand() < elo_epsilon and rule_keys:
-            probs = np.ones(len(rule_keys)) / len(rule_keys)
-            return probs, rule_keys
-
-        # --- 第二层判断：进入核心采样逻辑 ---
         elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
-        
-        # 1. 处理 PFSP 系列 (高斯核采样)
+
+        # --- 1. 确定高斯采样的参数 (Target & Sigma) ---
         if SP_type.startswith('PFSP'):
-            if SP_type == 'PFSP_challenge':
-                actual_target = np.max(elos)
-            elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
+            # [新增] 如果是通用的 'PFSP'，则在 balanced 和 challenge 之间随机选择
+            if SP_type == 'PFSP':
+                actual_target = 0.5*float(target_elo) if target_elo is not None else np.mean(elos) + 0.5*np.max(elos)
+                
+            actual_sigma = float(sigma)
+            if SP_type == 'PFSP_balanced':
                 actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
-            else: # 默认通用的 'PFSP' 逻辑
-                # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
-                actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
+
+            # elif SP_type == 'PFSP_balanced_biased':
+            #     actual_target = (float(target_elo) if target_elo is not None else np.mean(elos)) + 200
+
+            elif SP_type == 'PFSP_challenge':
+                actual_target = np.max(elos)
+
+            # elif SP_type == 'PFSP':  # 默认是平衡
+            #     actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
             
+            # 统一计算 PFSP 概率
             diffs = elos - actual_target
-            scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+            scores = np.exp(-0.5 * (diffs / actual_sigma)**2)
             probs = scores / (scores.sum() + 1e-12)
             return probs, keys
 
-        # 2. 处理 FSP (全样本均匀分布)
+            
+        # # --- 逻辑 1: PFSP (保持原样) ---
+        # if SP_type == 'PFSP':
+        #     # 以高斯核度量相似度（基于差的平方）
+        #     diffs = elos - float(target_elo)
+        #     # 高斯核计算
+        #     scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+        #     probs = scores / (scores.sum() + 1e-12)
+        #     return probs, keys
+
+        # --- 逻辑 2: FSP (全样本均匀分布) ---
         elif SP_type == 'FSP':
             probs = np.ones(len(keys)) / len(keys)
             return probs, keys
 
-        # 3. 处理 deltaFSP (新旧池切分)
         elif SP_type == 'deltaFSP':
+            # 保持 keys 的插入顺序（json.load / dict 保留插入顺序）
             n = len(keys)
+            if n == 0:
+                return np.array([]), []
+            # 将后 20% 视为“新”，其余为“旧”
             new_count = max(1, int(np.ceil(n * 0.2)))
             new_keys = keys[-new_count:]
-            old_keys = keys[:-new_count]
-            
-            # 这里的 deltaFSP_epsilon 建议直接作为参数传入或使用全局变量
-            if np.random.rand() < float(deltaFSP_epsilon) or not old_keys:
-                target_keys = new_keys
+            old_keys = keys[:-new_count] if len(keys) - new_count > 0 else []
+            # 以 deltaFSP_epsilon 概率从“新”池均匀采样，否则从“旧”池均匀采样
+            if np.random.rand() < float(deltaFSP_epsilon):
+                probs = np.ones(len(new_keys)) / len(new_keys)
+                return probs, new_keys
             else:
-                target_keys = old_keys
-                
-            probs = np.ones(len(target_keys)) / len(target_keys)
-            return probs, target_keys
-
-        # 4. 处理 SP (最强/最新历史版本)
+                # 若旧池为空则回退到新池
+                if not old_keys:
+                    probs = np.ones(len(new_keys)) / len(new_keys)
+                    return probs, new_keys
+                probs = np.ones(len(old_keys)) / len(old_keys)
+                return probs, old_keys
+        
+        # --- 逻辑 3: SP (找到 actor_rein 编号最大者) ---
         elif SP_type == 'SP':
+            # 过滤出所有以 actor_rein 开头的 key
             rein_keys = [k for k in keys if k.startswith('actor_rein')]
-            if not rein_keys: return np.array([]), []
+            if not rein_keys:
+                return np.array([]), []
             
-            def extract_number(k):
-                try: return int(k.replace('actor_rein', ''))
-                except: return -1
-                
+            # 提取编号并找到最大值对应的 key
+            # 假设格式是 actor_rein + 数字，例如 actor_rein25
+            def extract_number(key_str):
+                num_part = key_str.replace('actor_rein', '')
+                try:
+                    return int(num_part)
+                except ValueError:
+                    return -1
+
             best_key = max(rein_keys, key=extract_number)
+            
+            # 只返回这一个元素，概率为 1.0
             return np.array([1.0]), [best_key]
 
-        # 5. 兜底逻辑: Rule 均匀采样 (None)
-        else:
-            if not rule_keys: return np.array([]), []
+        # --- 逻辑 4: None (Rule开头均匀分布) ---
+        elif SP_type == 'None' or SP_type is None:
+            rule_keys = [k for k in keys if k.startswith('Rule')]
+            if not rule_keys:
+                return np.array([]), []
+            
             probs = np.ones(len(rule_keys)) / len(rule_keys)
             return probs, rule_keys
 
-    # def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_balanced', elo_epsilon=hist_actor_rate):
-    #     """
-    #     返回与 keys 顺序对应的概率数组。
-        
-    #     参数:
-    #     - elo_ratings: dict, 格式为 {name: elo_value}
-    #     - target_elo: float, PFSP 模式下优先靠近的 ELO。
-    #     - sigma: float, PFSP 模式下的高斯核标准差。
-    #     - SP_type: str, 采样类型:
-    #         - 'PFSP_balanced': 匹配实力相近的对手（target = target_elo）。
-    #         - 'PFSP_challenge': 匹配最强的对手（target = max_elo）。
-    #         - 'FSP': 虚构自博弈，全样本均匀分布。
-    #         - 'SP': 自博弈，仅选择 actor_rein 编号最大的那一个。
-    #         - 'None': 仅在以 "Rule" 开头的 key 中均匀分布。
-    #     """
-    #     keys = list(elo_ratings.keys())
-    #     if len(keys) == 0:
-    #         return np.array([]), []
-
-    #     elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
-
-    #     # --- 1. 确定高斯采样的参数 (Target & Sigma) ---
-    #     if SP_type.startswith('PFSP'):
-    #         # [新增] 如果是通用的 'PFSP'，则在 balanced 和 challenge 之间随机选择
-    #         if SP_type == 'PFSP':
-    #             actual_target = 0.5*float(target_elo) if target_elo is not None else np.mean(elos) + 0.5*np.max(elos)
-                
-    #         actual_sigma = float(sigma)
-    #         if SP_type == 'PFSP_balanced':
-    #             actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
-
-    #         elif SP_type == 'PFSP_challenge':
-    #             actual_target = np.max(elos)
-
-    #         elif SP_type == 'PFSP_with_delta':
-    #             # 提取规则对手作为“基础复习池”
-    #             rule_keys = [k for k in keys if k.startswith('Rule')]
-    #             # --- 分支 1: epsilon 概率触发“基础复习” (只打规则) ---
-    #             if np.random.rand() < elo_epsilon and rule_keys:
-    #                 # 完全均匀采样，确保 Rule_3 与其他规则地位平等
-    #                 probs = np.ones(len(rule_keys)) / len(rule_keys)
-    #                 return probs, rule_keys
-
-    #             # --- 分支 2: 1-epsilon 概率触发“精英对决” (精英池包含规则+智能体) ---
-    #             else:
-    #                 # 沿用你之前的 PFSP 逻辑，但在整个池子上计算
-    #                 actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
-                    
-    #                 # 计算高斯核概率
-    #                 diffs = elos - actual_target
-    #                 scores = np.exp(-0.5 * (diffs / float(sigma))**2)
-    #                 probs = scores / (scores.sum() + 1e-12)
-    #                 return probs, keys
-            
-    #         # 统一计算 PFSP 概率
-    #         diffs = elos - actual_target
-    #         scores = np.exp(-0.5 * (diffs / actual_sigma)**2)
-    #         probs = scores / (scores.sum() + 1e-12)
-    #         return probs, keys
-
-            
-    #     # # --- 逻辑 1: PFSP (保持原样) ---
-    #     # if SP_type == 'PFSP':
-    #     #     # 以高斯核度量相似度（基于差的平方）
-    #     #     diffs = elos - float(target_elo)
-    #     #     # 高斯核计算
-    #     #     scores = np.exp(-0.5 * (diffs / float(sigma))**2)
-    #     #     probs = scores / (scores.sum() + 1e-12)
-    #     #     return probs, keys
-
-    #     # --- 逻辑 2: FSP (全样本均匀分布) ---
-    #     elif SP_type == 'FSP':
-    #         probs = np.ones(len(keys)) / len(keys)
-    #         return probs, keys
-
-    #     elif SP_type == 'deltaFSP':
-    #         # 保持 keys 的插入顺序（json.load / dict 保留插入顺序）
-    #         n = len(keys)
-    #         if n == 0:
-    #             return np.array([]), []
-    #         # 将后 20% 视为“新”，其余为“旧”
-    #         new_count = max(1, int(np.ceil(n * 0.2)))
-    #         new_keys = keys[-new_count:]
-    #         old_keys = keys[:-new_count] if len(keys) - new_count > 0 else []
-    #         # 以 deltaFSP_epsilon 概率从“新”池均匀采样，否则从“旧”池均匀采样
-    #         if np.random.rand() < float(deltaFSP_epsilon):
-    #             probs = np.ones(len(new_keys)) / len(new_keys)
-    #             return probs, new_keys
-    #         else:
-    #             # 若旧池为空则回退到新池
-    #             if not old_keys:
-    #                 probs = np.ones(len(new_keys)) / len(new_keys)
-    #                 return probs, new_keys
-    #             probs = np.ones(len(old_keys)) / len(old_keys)
-    #             return probs, old_keys
-        
-    #     # --- 逻辑 3: SP (找到 actor_rein 编号最大者) ---
-    #     elif SP_type == 'SP':
-    #         # 过滤出所有以 actor_rein 开头的 key
-    #         rein_keys = [k for k in keys if k.startswith('actor_rein')]
-    #         if not rein_keys:
-    #             return np.array([]), []
-            
-    #         # 提取编号并找到最大值对应的 key
-    #         # 假设格式是 actor_rein + 数字，例如 actor_rein25
-    #         def extract_number(key_str):
-    #             num_part = key_str.replace('actor_rein', '')
-    #             try:
-    #                 return int(num_part)
-    #             except ValueError:
-    #                 return -1
-
-    #         best_key = max(rein_keys, key=extract_number)
-            
-    #         # 只返回这一个元素，概率为 1.0
-    #         return np.array([1.0]), [best_key]
-
-    #     # --- 逻辑 4: None (Rule开头均匀分布) ---
-    #     elif SP_type == 'None' or SP_type is None:
-    #         rule_keys = [k for k in keys if k.startswith('Rule')]
-    #         if not rule_keys:
-    #             return np.array([]), []
-            
-    #         probs = np.ones(len(rule_keys)) / len(rule_keys)
-    #         return probs, rule_keys
-
-    #     else:
-    #         raise ValueError(f"Unknown SP_type: {SP_type}")
+        else:
+            raise ValueError(f"Unknown SP_type: {SP_type}")
     
     # 新增：将完整路径或名字缩短为 actor_rein<数字> 形式的 key（优先匹配 actor_*）
     def shorten_actor_key(path_or_name):
