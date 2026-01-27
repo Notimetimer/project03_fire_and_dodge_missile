@@ -1,5 +1,13 @@
 '''
+更改目标：
+1、实现混合规则对手开关可调, 对手池中的规则对手都有谁, 需可调开关      √ init_elo_ratings -> pure_self_play
+2、实现历史对手淘汰机制开关可调                                     √ should_kick
+3、自模仿仅包含机动/包含机动与开火, 需可调开关                       √ sil_only_maneuver
+4、是否能够向对手池中添加历史策略, 需可调开关                        √ self_play_type -> hist_agent_as_opponent
+5、指定自博弈方式，以string传入，最后作用到 get_opponent_probabilities 上去      √ self_play_type
+6、0.4和0.7的逻辑梳理   √ 直接砍掉
 
+elo_ratings.json 仍然是所有agent的elo表格，但是变量 elo_ratings 仅包含规则和精英历史智能体
 '''
 
 import os
@@ -500,37 +508,20 @@ def run_MLP_simulation(
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = init_elo_ratings
-    elite_elo_ratings = copy.deepcopy(elo_ratings)
+    # 定义路径
+    # 注意：这里提前定义路径，确保后面逻辑一致
+    full_json_path = os.path.join(log_dir, "elo_ratings.json")
+    elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
     
-    # --- [修改] 规范化 ELO 变量与文件路径 ---
-    full_json_path = os.path.join(log_dir, "elo_ratings.json")       # 全量历史
-    elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json") # 精英池
-    hof_json_path = os.path.join(log_dir, "hall_of_fame.json")       # 名人堂 (仅存Key)
-
-    # 1. 加载全量表 (elo_ratings)
-    if os.path.exists(full_json_path):
+    # [修改] 优先加载 Elite Pool，如果没有则尝试加载旧的 full pool，都没有则用默认
+    if os.path.exists(elite_json_path):
+        print(f"Loading Elite Elo Pool from: {elite_json_path}")
+        with open(elite_json_path, 'r', encoding='utf-8') as f:
+            elo_ratings = json.load(f)
+    elif os.path.exists(full_json_path):
+        print(f"Warning: Elite Pool not found. Loading Full History from: {full_json_path}")
         with open(full_json_path, 'r', encoding='utf-8') as f:
             elo_ratings = json.load(f)
-    else:
-        elo_ratings = copy.deepcopy(init_elo_ratings) # 初始规则
-
-    # 2. 加载精英池 (elite_elo_ratings)
-    if os.path.exists(elite_json_path):
-        with open(elite_json_path, 'r', encoding='utf-8') as f:
-            elite_elo_ratings = json.load(f)
-    else:
-        elite_elo_ratings = copy.deepcopy(elo_ratings)
-
-    # 3. 加载名人堂 (hall_of_fame_keys)
-    if os.path.exists(hof_json_path):
-        with open(hof_json_path, 'r', encoding='utf-8') as f:
-            hall_of_fame_keys = json.load(f)
-    else:
-        hall_of_fame_keys = [] # 初始为空
-
-    # --- [新增] 测试结果汇总器 ---
-    # 格式: {recorded_step: {rule_num: outcome}}
-    test_results_aggregator = {}
             
     # 主智能体当前的 ELO
     main_agent_elo = 1200
@@ -556,21 +547,15 @@ def run_MLP_simulation(
         return player_elo + K_FACTOR * (score - expected)
 
 
-    def get_opponent_probabilities(elite_elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_with_delta', rule_rate=rule_actor_rate):
+    def get_opponent_probabilities(elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_with_delta', rule_rate=rule_actor_rate):
         """
         优化后的对手采样逻辑：
         1. 优先判定是否进入“规则复习”分支。
         2. 若未进入，则根据 SP_type 执行具体的采样策略。
         """
-        keys = list(elite_elo_ratings.keys())
+        keys = list(elo_ratings.keys())
         if not keys:
             return np.array([]), []
-        
-        # 2. [新增] 简单合并：将名人堂成员塞进候选名单
-        # 这样它们就会根据在 elo_ratings.json 里的分数参与正常的 PFSP 采样
-        for hof_key in hall_of_fame_keys:
-            if hof_key not in keys:
-                keys.append(hof_key)
 
         # --- 第一层判断：规则复习分支 (Epsilon-Greedy 锚点保护) ---
         # 只要 rule_rate > 0，就有概率强行进入规则池采样，防止“策略遗忘”
@@ -580,7 +565,7 @@ def run_MLP_simulation(
             return probs, rule_keys
 
         # --- 第二层判断：进入核心采样逻辑 ---
-        elos = np.array([elite_elo_ratings[k] for k in keys], dtype=np.float64)
+        elos = np.array([elo_ratings[k] for k in keys], dtype=np.float64)
         
         # 1. 处理 PFSP 系列 (高斯核采样)
         if SP_type.startswith('PFSP'):
@@ -698,31 +683,9 @@ def run_MLP_simulation(
                     if res_obj.ready(): # 检查进程是否跑完
                         # [修改] 直接获取结果，不再包裹 try-except
                         rule_num, outcome = res_obj.get()
-                        
-                        # A. 正常的日志记录
+                        # 在主进程的 Logger 中记录结果
                         logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
                         print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
-                        
-                        # B. [新增] 汇总逻辑
-                        if recorded_step not in test_results_aggregator:
-                            test_results_aggregator[recorded_step] = {}
-                        test_results_aggregator[recorded_step][rule_num] = outcome
-                        
-                        # C. [新增] 检查是否达成“名人堂”成就
-                        # 假设你测试的是 Rule 0, 1, 2, 3, 4 共 5 个规则
-                        expected_rule_count = len([k for k in init_elo_ratings.keys() if k.startswith("Rule")])
-                        if len(test_results_aggregator[recorded_step]) == expected_rule_count:
-                            all_outcomes = test_results_aggregator[recorded_step].values()
-                            # 如果 5 场全胜 (1.0 代表胜)
-                            if all(res == 1.0 for res in all_outcomes):
-                                hof_key = f"actor_rein_step_{recorded_step}" # 定义一个唯一的标识符
-                                if hof_key not in hall_of_fame_keys:
-                                    hall_of_fame_keys.append(hof_key)
-                                    print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
-                            
-                            # 完成后清理该步数的汇总数据，释放内存
-                            del test_results_aggregator[recorded_step]
-                        
                         finished_tasks.append(task)
                 
                 # 清理已完成的任务
@@ -735,7 +698,7 @@ def run_MLP_simulation(
             enm_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
             
             # 1. 计算当前排位 rank_pos
-            valid_elo_values = [v for k, v in elite_elo_ratings.items() if not k.startswith("__")]
+            valid_elo_values = [v for k, v in elo_ratings.items() if not k.startswith("__")]
             if not valid_elo_values:
                 rank_pos = 0.5
                 min_elo, max_elo = main_agent_elo, main_agent_elo
@@ -751,7 +714,7 @@ def run_MLP_simulation(
 
             # else:
             # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
-            probs, opponent_keys = get_opponent_probabilities(elite_elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type, sigma=sigma_elo)
+            probs, opponent_keys = get_opponent_probabilities(elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type, sigma=sigma_elo)
 
 
             # 最终根据概率采样
@@ -766,9 +729,9 @@ def run_MLP_simulation(
                     rule_num = int(selected_opponent_name.split('_')[1])
                 except:
                     rule_num = 0
-                # 在测试模式下 Rule_1/Rule_2 可能不在 elite_elo_ratings 中，避免直接索引导致 KeyError
-                if selected_opponent_name in elite_elo_ratings:
-                    print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (ELO: {elite_elo_ratings[selected_opponent_name]:.0f})")
+                # 在测试模式下 Rule_1/Rule_2 可能不在 elo_ratings 中，避免直接索引导致 KeyError
+                if selected_opponent_name in elo_ratings:
+                    print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
                 else:
                     print(f"Eps {i_episode}: Opponent is {selected_opponent_name} (test-only, no ELO entry)")
             else:
@@ -778,7 +741,7 @@ def run_MLP_simulation(
                 adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
                 if os.path.exists(adv_path):
                     adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device, weights_only=1), strict=False)
-                    print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elite_elo_ratings[selected_opponent_name]:.0f})")
+                    print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
                 else:
                     print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_0.")
                     adv_is_rule = True
@@ -1022,21 +985,14 @@ def run_MLP_simulation(
 
 
             # 2. ELO 更新与记录逻辑
-            if selected_opponent_name in elite_elo_ratings and not is_kicked_opponent:
+            if selected_opponent_name in elo_ratings and not is_kicked_opponent:
                 # A. 正常更新 ELO：对手合格，进行 ELO 结算
-                adv_elo = elite_elo_ratings[selected_opponent_name]
+                adv_elo = elo_ratings[selected_opponent_name]
                 main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
                 
                 # 更新对手 ELO
                 new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score)
-                
-                # --- [核心修改] 同步更新两个字典 ---
-                # 更新精英池
-                elite_elo_ratings[selected_opponent_name] = new_adv_elo
-                
-                # 更新全量表 (即便对手以后被踢出精英池，全量表也会保留它最后的分数)
                 elo_ratings[selected_opponent_name] = new_adv_elo
-                elo_ratings["__CURRENT_MAIN__"] = main_agent_elo # 记录当前主智能体水位
                 
                 print(f"  Result: Score={actual_score}, Main ELO: {prev_main_elo:.0f}->{main_agent_elo:.0f}, Adv ELO: {adv_elo:.0f}->{new_adv_elo:.0f}")
                 
@@ -1052,8 +1008,8 @@ def run_MLP_simulation(
 
             # 3. 执行踢出操作
             if is_kicked_opponent and should_kick:
-                if selected_opponent_name in elite_elo_ratings:
-                    del elite_elo_ratings[selected_opponent_name]
+                if selected_opponent_name in elo_ratings:
+                    del elo_ratings[selected_opponent_name]
                     print(f"  Opponent {selected_opponent_name} has been removed from the ELO pool.")
 
 
@@ -1179,9 +1135,12 @@ def run_MLP_simulation(
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, actor_name))
                 print(f"Saved critic.pt and {actor_name} at episode {i_episode}")
 
+                # # 定义文件路径
+                # full_json_path = os.path.join(log_dir, "elo_ratings.json")       # 全量历史（用于分析）
+                # elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json") # 精英池（用于采样）
                 
                 # -----------------------------------------------------------
-                # 逻辑分支 A: 维护“内存中的精英池” (elite_elo_ratings)
+                # 逻辑分支 A: 维护“内存中的精英池” (elo_ratings)
                 # -----------------------------------------------------------
                 # 只有开启了自博弈开关，且步数超过冷启动阈值 (500k)，才允许扩充池子
                 admission_status = "Skipped" # 用于日志打印状态
@@ -1189,8 +1148,8 @@ def run_MLP_simulation(
                 # 将当前主智能体作为一个新的历史快照加入 ELO 列表
                 # 新快照继承当前主智能体的 ELO
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    # elite_elo_ratings[actor_key] = main_agent_elo
-                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    # elo_ratings[actor_key] = main_agent_elo
+                    rule_elos = [v for k, v in elo_ratings.items() if k.startswith("Rule")]
                     
                     # 防御性逻辑：防止还没有规则数据
                     if not rule_elos:
@@ -1207,25 +1166,25 @@ def run_MLP_simulation(
                         # --- 容量控制 (淘汰机制) ---
                         
                         # 找出所有现存的历史智能体 (排除 Rules 和 特殊key)
-                        history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
+                        history_keys = [k for k in elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         
                         # if len(history_keys) >= MAX_HISTORY_SIZE:
                         #     # 淘汰最弱的历史智能体
-                        #     weakest_history_key = min(history_keys, key=lambda k: elite_elo_ratings[k])
-                        #     del elite_elo_ratings[weakest_history_key]
-                        #     print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {elite_elo_ratings.get(weakest_history_key, 'N/A')})")
+                        #     weakest_history_key = min(history_keys, key=lambda k: elo_ratings[k])
+                        #     del elo_ratings[weakest_history_key]
+                        #     print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {elo_ratings.get(weakest_history_key, 'N/A')})")
                         # 使用 while 循环确保：即使积压了多个过剩智能体，也能一次性清理到位
                         while len(history_keys) >= MAX_HISTORY_SIZE:
                             # 每次找到当前池子中最弱的一个
-                            weakest_history_key = min(history_keys, key=lambda k: elite_elo_ratings[k])
-                            old_elo = elite_elo_ratings[weakest_history_key]
+                            weakest_history_key = min(history_keys, key=lambda k: elo_ratings[k])
+                            old_elo = elo_ratings[weakest_history_key]
                             # 从 ELO 字典和局部列表中同步删除
-                            del elite_elo_ratings[weakest_history_key]
+                            del elo_ratings[weakest_history_key]
                             history_keys.remove(weakest_history_key)
                             print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
                         
                         # --- 正式入池 ---
-                        elite_elo_ratings[actor_key] = main_agent_elo
+                        elo_ratings[actor_key] = main_agent_elo
                         admission_status = f"Accepted (Rank {rank_pos:.2f})"
                     else:
                         admission_status = f"Rejected (Rank {rank_pos:.2f} < {ADMISSION_THRESHOLD})"
@@ -1239,31 +1198,53 @@ def run_MLP_simulation(
                 # 逻辑分支 B: 维护“全量历史记录” (Full JSON)
                 # -----------------------------------------------------------
                 # 目标：记录所有产生过的 Agent 的最后一次已知 Elo，无论它是否在精英池里
-                # 无论是否进入精英池，全量表都要记录
-                elo_ratings[actor_key] = main_agent_elo
-                elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
-                
-                # 5. 保存全量日志
-                with open(full_json_path, "w", encoding="utf-8") as f:
-                    json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
+                try:
+                    full_history_data = {}
+                    # 1. 尝试读取旧的全量数据
+                    if os.path.exists(full_json_path):
+                        with open(full_json_path, 'r', encoding='utf-8') as f:
+                            try:
+                                full_history_data = json.load(f)
+                            except json.JSONDecodeError:
+                                full_history_data = {} # 文件损坏则重置
+                    
+                    # 2. 用当前内存中的精英池更新全量数据 (因为规则和幸存的精英 Elo 变了)
+                    for k, v in elo_ratings.items():
+                        if not k.startswith("__"):
+                            full_history_data[k] = v
+                    
+                    # 3. 强制把【当前】Agent 写入全量数据 (即使它被拒绝入池，也要记录它来过)
+                    full_history_data[actor_key] = main_agent_elo
+                    
+                    # 4. 记录当前元数据
+                    full_history_data["__CURRENT_MAIN__"] = main_agent_elo
+                    full_history_data["__LAST_UPDATE_STEP__"] = total_steps
+                    
+                    # 5. 保存全量日志
+                    with open(full_json_path, "w", encoding="utf-8") as f:
+                        json.dump(full_history_data, f, ensure_ascii=False, indent=2)
+
+                except Exception as e:
+                    print(f"Warning: failed to save FULL elo json: {e}")
 
                 # -----------------------------------------------------------
                 # 逻辑分支 C: 保存“精英池快照” (Elite JSON)
                 # -----------------------------------------------------------
                 # 这才是下次训练 resume 时应该读取的文件
-                save_elite_data = copy.deepcopy(elite_elo_ratings)
-                save_elite_data["__CURRENT_MAIN__"] = main_agent_elo 
-                with open(elite_json_path, "w", encoding="utf-8") as f:
-                    json.dump(save_elite_data, f, ensure_ascii=False, indent=2)
-                
-                # -----------------------------------------------------------
-                # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)
-                # -----------------------------------------------------------
-                with open(hof_json_path, "w", encoding="utf-8") as f:
-                    json.dump(hall_of_fame_keys, f, ensure_ascii=False, indent=2)
+                try:
+                    save_data = copy.deepcopy(elo_ratings)
+                    save_data["__CURRENT_MAIN__"] = main_agent_elo 
+                    
+                    # 为了原子性写入，先写临时文件再 rename
+                    tmp_path = elite_json_path + ".tmp"
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        json.dump(save_data, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp_path, elite_json_path)
+                except Exception as e:
+                    print(f"Warning: failed to save ELITE elo json: {e}")
 
                 # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
-                valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
+                valid_elos = {k: v for k, v in elo_ratings.items() if not k.startswith("__")}
                 if valid_elos:
                     mean_elo = np.mean(list(valid_elos.values()))
                     # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
@@ -1338,7 +1319,76 @@ def run_MLP_simulation(
                             # diffs.append(diff)
                             logger.add(f"Elo_Diff/Latest_vs_{rk}", diff, total_steps)
                             
+                # ############# 旧逻辑 #####################################     
+                # try:
+                #     tmp_path = elo_json_path + ".tmp"
+                #     with open(tmp_path, "w", encoding="utf-8") as f:
+                #         # 同时保存 current main agent elo 以便断点续传
+                #         save_data = copy.deepcopy(elo_ratings)
+                #         save_data["__CURRENT_MAIN__"] = main_agent_elo 
+                #         json.dump(save_data, f, ensure_ascii=False, indent=2)
+                #     os.replace(tmp_path, elo_json_path)
+                # except Exception as e:
+                #     print(f"Warning: failed to save elo json: {e}")
 
+                # # --- [Fix] Logging ELOs (Sorted) ---
+                # # 过滤掉特殊 Key
+                # valid_elos = {k: v for k, v in elo_ratings.items() if not k.startswith("__")}
+                # if valid_elos:
+                #     mean_elo = np.mean(list(valid_elos.values()))
+                #     # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
+                #     # 这里为了简单，直接遍历
+                #     sorted_keys = sorted(valid_elos.keys())
+                    
+                #     # 记录主智能体
+                #     logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
+
+                #     # 记录主智能体在当前所有 ELO 中的归一化排名位置：
+                #     # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
+                #     min_elo = np.min(list(valid_elos.values()))
+                #     max_elo = np.max(list(valid_elos.values()))
+                #     denom = float(max_elo - min_elo)
+                #     if denom == 0.0:
+                #         rank_pos = 0.5
+                #     else:
+                #         rank_pos = float((main_agent_elo - min_elo) / denom)
+                #     # 现有日志
+                #     logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                    
+                #     # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
+                #     elo_spread = float(max_elo - min_elo)
+                #     print('elo分极差：', elo_spread)
+                #     logger.add("Elo/Spread", elo_spread, total_steps)
+                    
+                #     # 只记录所有规则智能体和最新保存的智能体（actor_key）
+                #     rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
+                #     keys_to_log = list(sorted(rule_keys))
+                #     # actor_key 在本代码块上方已定义为当前保存的快照名
+                #     if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
+                #         keys_to_log.append(actor_key)
+                    
+                #     for k in keys_to_log:
+                #         # 如果是规则智能体，使用其自身名字
+                #         if k.startswith("Rule_"):
+                #             raw_tag = f"Elo_Raw/{k}"
+                #             centered_tag = f"Elo_Centered/{k}"
+                #         # 否则，认为是最新智能体，使用固定标签 "Latest"
+                #         else:
+                #             raw_tag = "Elo_Raw/Latest"
+                #             centered_tag = "Elo_Centered/Latest"
+                        
+                #         logger.add(raw_tag, valid_elos[k], total_steps)
+                #         logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
+
+                #     # --- 插入: 记录 Latest(当前保存的 actor_key) 相对于所有存在的 Rule_* 的 ELO 差值 ---
+                #     if 'actor_key' in locals() and actor_key in valid_elos:
+                #         latest_elo = float(valid_elos[actor_key])
+                #         rule_keys_present = [rk for rk in valid_elos.keys() if rk.startswith("Rule_")]
+                #         # diffs = []
+                #         for rk in rule_keys_present:
+                #             diff = latest_elo - float(valid_elos[rk])
+                #             # diffs.append(diff)
+                #             logger.add(f"Elo_Diff/Latest_vs_{rk}", diff, total_steps)
                         
         # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")
