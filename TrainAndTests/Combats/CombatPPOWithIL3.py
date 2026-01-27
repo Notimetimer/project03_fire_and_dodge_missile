@@ -332,7 +332,7 @@ def run_MLP_simulation(
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
     save_interval = 5,
-    
+    opp_greedy_rate = 0.5, # 对手贪婪率
 ):
 
     
@@ -873,7 +873,9 @@ def run_MLP_simulation(
                         r_action_exec['bern'] = np.array([r_fire], dtype=np.float32)
                     else:
                         # [Fix] NN 对手决策
-                        r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore=1)
+                        # 随机决定本局对手是否开启探索
+                        adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
+                        r_action_exec, r_action_raw, _, r_action_check = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
                         r_action_label = r_action_exec['cat'][0]
                         r_fire = r_action_exec['bern'][0] # 网络控制开火
                     last_r_action_label = r_action_label
@@ -892,11 +894,7 @@ def run_MLP_simulation(
                     # --- 蓝方 (训练对象) 决策 ---
                     b_state_check = env.unscale_state(b_check_obs)
                     # 修改：Actor 依然使用 b_obs (局部观测) 进行决策
-                    
-                    # --- 新增：测试模式下使用确定性动作 ---
-                    explore_rate = 1
-
-                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=explore_rate)
+                    b_action_exec, b_action_raw, _, b_action_check = student_agent.take_action(b_obs, explore=1)
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
 

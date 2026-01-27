@@ -611,7 +611,7 @@ class PPOHybrid:
                 return torch.tensor(np.array(x), dtype=dtype).to(self.device)
 
         states = to_tensor(transition_dict['states'], torch.float)
-        next_states = to_tensor(transition_dict['next_states'], torch.float)
+        
         dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
         rewards = to_tensor(transition_dict['rewards'], torch.float).view(-1, 1)
 
@@ -676,9 +676,17 @@ class PPOHybrid:
             # 以下为公共部分
             # 如果没有预计算，则现场计算 (注意：如果是并行数据直接展平进来的，这里计算会有偏差)
             with torch.no_grad():
-                # Critic 使用全局 next_states 计算 Target
-                # 注意：对于截断的步，next_value 应该是 V(s_t+1) 而不是 0
-                next_vals = self.critic(next_states)
+                # [修改] 优先使用预计算的 next_values
+                if 'next_values' in transition_dict:
+                    next_vals = to_tensor(transition_dict['next_values'], torch.float).view(-1, 1)
+                else:
+                    # Critic 使用全局 next_states 计算 Target
+                    # 注意：对于截断的步，next_value 应该是 V(s_t+1) 而不是 0
+                    next_states = to_tensor(transition_dict['next_states'], torch.float)
+                    # Critic 使用全局 next_states 计算 Target
+                    # 注意：对于截断的步，next_value 应该是 V(s_t+1) 而不是 0
+                    next_vals = self.critic(next_states)
+                
                 # td_target的计算不应考虑truncs。仅当dones=1时，next_value才为0。
                 # truncs的影响由compute_advantage函数内部处理。
                 td_target = rewards + self.gamma * next_vals * (1 - dones)
