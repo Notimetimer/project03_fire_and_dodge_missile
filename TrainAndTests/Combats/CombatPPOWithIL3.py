@@ -816,7 +816,7 @@ def run_MLP_simulation(
 
             env.dt_maneuver = dt_maneuver
             
-            episode_start_time = time.time()
+
             
             last_r_action_label = 0
             last_b_action_label = 0
@@ -1125,7 +1125,7 @@ def run_MLP_simulation(
                 else:
                     #====================
                     # 原有强化学习部分
-                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)  # 优势归一化 debug
+                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
                     #====================
                 decide_steps_after_update = 0
 
@@ -1252,7 +1252,7 @@ def run_MLP_simulation(
                 # -----------------------------------------------------------
                 # 这才是下次训练 resume 时应该读取的文件
                 save_elite_data = copy.deepcopy(elite_elo_ratings)
-                save_elite_data["__CURRENT_MAIN__"] = main_agent_elo 
+                save_elite_data["__CURRENT_MAIN__"] = main_agent_elo
                 with open(elite_json_path, "w", encoding="utf-8") as f:
                     json.dump(save_elite_data, f, ensure_ascii=False, indent=2)
                 
@@ -1366,11 +1366,11 @@ def run_MLP_simulation(
             break
     
     # End Training
-    training_end_time = time.time()
+
     env.end_render()
     print("Total Steps Reached. Training Finished.")
     
-    # [新增] 训练结束后，如果还有未完成的测试，等待它们跑完（可选）
+    # 训练结束后，如果还有未完成的测试，等待它们跑完（可选）
     if len(pending_tests) > 0:
         print(f"Waiting for {len(pending_tests)} pending tests to finish...")
         for res_obj, recorded_step in pending_tests:

@@ -1,5 +1,6 @@
 '''
-并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
+同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
+放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
 
 import os
@@ -287,21 +288,25 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
     return player_elo + K_FACTOR * (score - expected)
 
 
-def get_opponent_probabilities(elite_elo_ratings, hall_of_fame_keys=None, target_elo=None, sigma=400, SP_type='PFSP_with_delta', rule_rate=0.5, deltaFSP_epsilon=0.5, ):
+def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None, 
+                               target_elo=None, sigma=400, SP_type='PFSP_with_delta', 
+                               rule_rate=0.5, deltaFSP_epsilon=0.5):
     """
     优化后的对手采样逻辑：
     1. 优先判定是否进入“规则复习”分支。
     2. 若未进入，则根据 SP_type 执行具体的采样策略。
     """
-    keys = list(elite_elo_ratings.keys())
+    # 1. 【核心】构建采样池
+    # 先复制名人堂（保底），再用精英池更新（覆盖）
+    # 这样确保：
+    #   a. 名人堂里的旧英雄（已被精英池淘汰）能被采到。
+    #   b. 还在精英池里的名人堂英雄，使用最新的动态分数。
+    candidate_pool = hall_of_fame.copy()
+    candidate_pool.update(elite_elo_ratings)
+    
+    keys = list(candidate_pool.keys())
     if not keys:
         return np.array([]), []
-    
-    # 2. [新增] 简单合并：将名人堂成员塞进候选名单
-    # 这样它们就会根据在 elo_ratings.json 里的分数参与正常的 PFSP 采样
-    for hof_key in hall_of_fame_keys:
-        if hof_key not in keys:
-            keys.append(hof_key)
 
     # --- 第一层判断：规则复习分支 (Epsilon-Greedy 锚点保护) ---
     # 只要 rule_rate > 0，就有概率强行进入规则池采样，防止“策略遗忘”
@@ -309,7 +314,7 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame_keys=None, target
     if np.random.rand() < rule_rate and rule_keys:
         probs = np.ones(len(rule_keys)) / len(rule_keys)
         return probs, rule_keys
-
+    
     # --- 第二层判断：进入核心采样逻辑 ---
     elos = np.array([elite_elo_ratings[k] for k in keys], dtype=np.float64)
     
@@ -351,11 +356,13 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame_keys=None, target
 
     # 4. 处理 SP (最强/最新历史版本)
     elif SP_type == 'SP':
-        rein_keys = [k for k in keys if k.startswith('actor_rein')]
+        rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
         if not rein_keys: return np.array([]), []
         
         def extract_number(k):
-            try: return int(k.replace('actor_rein', ''))
+            # try: return int(k.replace('actor_rein', ''))
+            # except: return -1
+            try: return int(re.search(r'actor_rein(\d+)', k).group(1))
             except: return -1
             
         best_key = max(rein_keys, key=extract_number)
@@ -389,7 +396,9 @@ def create_initial_state_worker(randomized=0):
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
 
-def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, device_worker, dt_maneuver, seed):
+def worker_process(rank, pipe, args, state_dim, hidden_dim, 
+                   action_dims_dict, device_worker, dt_maneuver, 
+                   seed, opp_greedy_rate):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -520,8 +529,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, de
                             r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=0)
                             r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
                         else:
-                            # 设定一个对手贪婪率，比如 0.5
-                            opp_greedy_rate = 0.5 
                             # 随机决定本局对手是否开启探索
                             adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
                             r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
@@ -646,6 +653,7 @@ def run_MLP_simulation(
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
     save_interval = 2, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
+    opp_greedy_rate = 0.5, # 对手贪婪率
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -756,8 +764,10 @@ def run_MLP_simulation(
     # --- A. 启动并行测试进程池 (Async Test Pool) ---
     # 这个池子用于 periodic testing，不参与训练数据的生成
     test_pool = mp.Pool(processes=3, maxtasksperchild=10) 
-    pending_tests = []
-    test_results_aggregator = {}
+    
+    # 非阻塞测试才需要
+    # pending_tests = []
+    # test_results_aggregator = {}
 
     # --- B. 启动并行训练 Worker (Sync Training Workers) ---
     # 这些 Worker 与 Master 同步，负责生成训练数据
@@ -769,7 +779,9 @@ def run_MLP_simulation(
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()
         p = mp.Process(target=worker_process, args=(
-            i, child_conn, args, state_dim, hidden_dim, action_dims_dict, worker_device, dt_maneuver, seed
+            i, child_conn, args, state_dim, hidden_dim, 
+            action_dims_dict, worker_device, dt_maneuver, 
+            seed, opp_greedy_rate
         ))
         p.start()
         workers.append(p)
@@ -778,7 +790,7 @@ def run_MLP_simulation(
     # ELO 初始化
     elo_ratings = copy.deepcopy(init_elo_ratings)
     elite_elo_ratings = copy.deepcopy(elo_ratings)
-    hall_of_fame_keys = []
+    hall_of_fame = {}
     
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
     elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
@@ -790,7 +802,7 @@ def run_MLP_simulation(
     if os.path.exists(elite_json_path):
         with open(elite_json_path, 'r', encoding='utf-8') as f: elite_elo_ratings = json.load(f)
     if os.path.exists(hof_json_path):
-        with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame_keys = json.load(f)
+        with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
@@ -808,63 +820,93 @@ def run_MLP_simulation(
     
     # 全局 Buffer (用于攒够 Batch 训练)
     empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-    global_transition_dict = copy.deepcopy(empty_transition_dict)
+    transition_dict = copy.deepcopy(empty_transition_dict)
 
     # =========================================================
     # 主循环 (Master Process)
     # =========================================================
     while True: 
         while total_steps < current_max_steps:
-            
+            # --- 【修改】同步并行测试阶段 ---
+            # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
             # --- 1. 并行测试触发逻辑 (Async) ---
             if total_steps >= trigger:
                 print(f"\n>>> Triggering Parallel Test at steps {total_steps}...")
                 # 1. 深度拷贝当前 Actor 权重到 CPU 内存
                 current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
+                # 2. 非阻塞等待的并行测试
+                # for r_idx in [0, 1, 2, 3, 4]:
+                #     res_obj = test_pool.apply_async(
+                #         test_worker, 
+                #         args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu') # [修改] 显式传入 dt_maneuver
+                #     )
+                #     pending_tests.append((res_obj, total_steps)) # 记录任务对象和触发时的步数
+                # 2. 分发测试任务并【立即阻塞等待】
+                # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
+                test_tasks = []
                 for r_idx in [0, 1, 2, 3, 4]:
-                    res_obj = test_pool.apply_async(
+                    obj = test_pool.apply_async(
                         test_worker, 
-                        args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu') # [修改] 显式传入 dt_maneuver
+                        args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu')
                     )
-                    pending_tests.append((res_obj, total_steps)) # 记录任务对象和触发时的步数
+                    test_tasks.append(obj)
+                # 等待所有测试进程结束
+                test_results = [t.get() for t in test_tasks]
                 
                 trigger += trigger_delta # 更新下一次触发阈值
 
-            # 处理测试结果
-            if len(pending_tests) > 0:
-                finished_tasks = []
-                for task in pending_tests:
-                    res_obj, recorded_step = task
-                    if res_obj.ready():
-                        rule_num, outcome = res_obj.get()
-                        logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
-                        print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
+            # 处理测试结果与名人堂
+            # if len(pending_tests) > 0:
+                # 非阻塞处理逻辑
+                # finished_tasks = []
+                # for task in pending_tests:
+                #     res_obj, recorded_step = task
+                #     if res_obj.ready():
+                #         rule_num, outcome = res_obj.get()
+                #         logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
+                #         print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
                         
-                        # B. 名人堂逻辑
-                        if recorded_step not in test_results_aggregator:
-                            test_results_aggregator[recorded_step] = {}
-                        test_results_aggregator[recorded_step][rule_num] = outcome
+                #         # B. 名人堂逻辑
+                #         if recorded_step not in test_results_aggregator:
+                #             test_results_aggregator[recorded_step] = {}
+                #         test_results_aggregator[recorded_step][rule_num] = outcome
                         
-                        # C. [新增] 检查是否达成“名人堂”成就
-                        # 假设你测试的是 Rule 0, 1, 2, 3, 4 共 5 个规则
-                        expected_rule_count = len([k for k in init_elo_ratings.keys() if k.startswith("Rule")])
-                        if len(test_results_aggregator[recorded_step]) == expected_rule_count:
-                            all_outcomes = test_results_aggregator[recorded_step].values()
-                            # 如果 5 场全胜 (1.0 代表胜)
-                            if all(res == 1.0 for res in all_outcomes):
-                                hof_key = f"actor_rein_step_{recorded_step}" # 定义一个唯一的标识符
-                                if hof_key not in hall_of_fame_keys:
-                                    hall_of_fame_keys.append(hof_key)
-                                    print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
-                            
-                            # 完成后清理该步数的汇总数据，释放内存
-                            del test_results_aggregator[recorded_step]
-                        
-                        finished_tasks.append(task)
+                #         # C. [新增] 检查是否达成“名人堂”成就
+                #         # 假设你测试的是 Rule 0, 1, 2, 3, 4 共 5 个规则
+                #         expected_rule_count = len([k for k in init_elo_ratings.keys() if k.startswith("Rule")])
+                #         if len(test_results_aggregator[recorded_step]) == expected_rule_count:
+                #             all_outcomes = test_results_aggregator[recorded_step].values()
+                #             # 如果 5 场全胜 (1.0 代表胜)
+                #             if all(res == 1.0 for res in all_outcomes):
+                #                 hof_key = f"actor_rein_step_{recorded_step}" # 定义一个唯一的标识符
+                #                 if hof_key not in hall_of_fame_keys:
+                #                     hall_of_fame_keys.append(hof_key)
+                #                     print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
+                #             # 完成后清理该步数的汇总数据，释放内存
+                #             del test_results_aggregator[recorded_step]   
+                #         finished_tasks.append(task)
+                # # 清理已完成的任务
+                # for task in finished_tasks:
+                #     pending_tests.remove(task)
                 
-                # 清理已完成的任务
-                for task in finished_tasks:
-                    pending_tests.remove(task)
+                
+                # 阻塞式处理逻辑
+                outcomes = {rule_num: score for rule_num, score in test_results}
+                for r_num, score in outcomes.items():
+                    logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
+                    print(f"  [Test Result] Rule_{r_num}: {score}")
+
+                # 名人堂判定：如果全胜则保存并加入池子
+                if all(score == 1.0 for score in outcomes.values()):
+                    hof_key = f"actor_rein_step_{total_steps}"
+                    # A. 保存文件
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{hof_key}.pt"))
+                    # B. 加入 ELO 字典，确保接下来的 获取对手概率 能采到它
+                    elite_elo_ratings[hof_key] = main_agent_elo 
+                    hall_of_fame[hof_key] = main_agent_elo
+                    print(f"!!! [Hall of Fame] Hero captured and saved: {hof_key}")
+                
+                trigger += trigger_delta
 
             # --- 2. 准备训练 Batch (Synchronous) ---
             
@@ -893,15 +935,23 @@ def run_MLP_simulation(
             
             for rank in range(num_workers):
                 # 采样对手
-                probs, opponent_keys = get_opponent_probabilities(elite_elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type, sigma=sigma_elo)
+                probs, opponent_keys = get_opponent_probabilities(
+                    elite_elo_ratings,
+                    hall_of_fame,
+                    target_elo=main_agent_elo,
+                    SP_type=self_play_type,
+                    sigma=sigma_elo
+                )
                 selected_opponent_name = np.random.choice(opponent_keys, p=probs)
                 
                 # 准备对手数据
                 opp_type = 'rule'
                 opp_data = 0
                 if "Rule" in selected_opponent_name:
-                    try: rule_num = int(selected_opponent_name.split('_')[1])
-                    except: rule_num = 0
+                    try:
+                        rule_num = int(selected_opponent_name.split('_')[1])
+                    except:
+                        rule_num = 0
                     opp_data = rule_num
                 else:
                     opp_type = 'nn'
@@ -938,6 +988,9 @@ def run_MLP_simulation(
             batch_total_steps = 0
             batch_wins = 0
             batch_loss_cnt = 0
+            batch_draw_cnt = 0        # 新增统计
+            batch_total_return = 0    # 新增统计
+            batch_total_m_fired = 0   # 新增统计
             
             for res in batch_results:
                 # res 结构: {'trans':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
@@ -947,13 +1000,21 @@ def run_MLP_simulation(
                 metrics = res['metrics']
                 opp_name = res['opp_name']
                 
+                # [新增] 填充 buffer 用户打印详情
+                result_str = "Win" if metrics['win'] else ("Lose" if metrics['lose'] else "Draw")
+                worker_metrics_buffer.append(f"{opp_name}: {result_str}")
+                
                 batch_total_steps += metrics['steps']
+                batch_total_return += metrics['return']
+                batch_total_m_fired += metrics['m_fired']
+
                 if metrics['win']: batch_wins += 1
-                if metrics['lose']: batch_loss_cnt += 1
+                elif metrics['lose']: batch_loss_cnt += 1
+                else: batch_draw_cnt += 1
                 
                 # 3.1 聚合 PPO 数据到全局 Buffer
-                for k in global_transition_dict:
-                    global_transition_dict[k].extend(l_tr[k])
+                for k in transition_dict:
+                    transition_dict[k].extend(l_tr[k])
                 
                 # 3.2 SIL 数据收集 (需计算 return)
                 if use_sil:
@@ -992,24 +1053,39 @@ def run_MLP_simulation(
                     elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
             
+            # [新增] 在 PPO 更新前打印本轮详细战况
+            if batch_idx % 1 == 0:
+                print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
+
             # 更新全局计数
             total_steps += batch_total_steps
             batch_idx += 1
             
+            # --- 3.5 记录批次聚合指标 ---
+            # 记录导弹发射平均数量或总数
+            logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
+            # 记录平均回报与胜率
+            logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
+            logger.add("train/2 win_rate", batch_wins / num_workers, total_steps)
+            logger.add("train/2 lose_rate", batch_loss_cnt / num_workers, total_steps)
+            logger.add("train/2 draw_rate", batch_draw_cnt / num_workers, total_steps)
+            logger.add("debug/胜负统计", batch_wins+batch_loss_cnt+batch_draw_cnt, total_steps)
+            logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
+
             # --- 4. 执行训练 (PPO Update) ---
             # 当收集的数据量超过 capacity 时更新
-            if len(global_transition_dict['dones']) >= transition_dict_capacity:
+            if len(transition_dict['dones']) >= transition_dict_capacity:
                 
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
-                global_transition_dict['actions'] = restructure_actions(global_transition_dict['actions'])
-                
+                transition_dict['actions'] = restructure_actions(transition_dict['actions'])
+                            
                 if use_sil:
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
                     
                     # 混合更新
                     student_agent.mixed_update(
-                        global_transition_dict,
+                        transition_dict,
                         il_data,
                         init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
                         eta = np.clip(1 - total_steps/3e6, 0, 1),
@@ -1021,19 +1097,42 @@ def run_MLP_simulation(
                         mini_batch_size = mini_batch_size_mixed
                     )
                 else:
-                    student_agent.update(global_transition_dict, adv_normed=1, mini_batch_size=64)
-                
+                    #====================
+                    # 原有强化学习部分
+                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
+                    #====================
                 # 记录 Log
+
+                # [Modification] 保留原有梯度监控代码
+                actor_pre_clip_grad = student_agent.pre_clip_actor_grad
+                critic_pre_clip_grad = student_agent.pre_clip_critic_grad
+
+                # 梯度监控
+                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
+                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
+                # 损失函数监控
                 logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
                 logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
-                logger.add("train/10 entropy", student_agent.entropy_mean, total_steps)
-                logger.add("train/batch_win_rate", batch_wins / num_workers, total_steps)
-                logger.add("Elo/Main_Agent", main_agent_elo, total_steps)
+                # 强化学习actor特殊项监控
+                logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
+                logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
+                logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
                 
+                logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+                # 强化学习
+                logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
+                logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
+                logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+                
+                # IL-PPO信号强度对比
+                if use_sil:
+                    logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
+                    logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
+                    
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
                 # 清空 Buffer
-                global_transition_dict = copy.deepcopy(empty_transition_dict)
+                transition_dict = copy.deepcopy(empty_transition_dict)
 
             # --- 5. 保存与维护 (Checkpoint & Pool) ---
             if batch_idx % save_interval == 0:
@@ -1056,40 +1155,154 @@ def run_MLP_simulation(
                         # 满员清理
                         history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         while len(history_keys) >= MAX_HISTORY_SIZE:
-                            weakest = min(history_keys, key=lambda k: elite_elo_ratings[k])
-                            del elite_elo_ratings[weakest]
-                            history_keys.remove(weakest)
-                            print(f"Kicked weakest: {weakest}")
+                            # 每次找到当前池子中最弱的一个
+                            weakest_history_key = min(history_keys, key=lambda k: elite_elo_ratings[k])
+                            old_elo = elite_elo_ratings[weakest_history_key]
+                            # 从 ELO 字典和局部列表中同步删除
+                            del elite_elo_ratings[weakest_history_key]
+                            history_keys.remove(weakest_history_key)
+                            print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
                         
+                        # --- 正式入池 ---
                         elite_elo_ratings[actor_key] = main_agent_elo
                         print(f"Accepted {actor_key} into Elite Pool.")
-                
-                # C. 保存 JSON
+                # -----------------------------------------------------------
+                # 逻辑分支 B: 维护“全量历史记录” (Full JSON)
+                # -----------------------------------------------------------
+                # 目标：记录所有产生过的 Agent 的最后一次已知 Elo，无论它是否在精英池里
+                # 无论是否进入精英池，全量表都要记录
                 elo_ratings[actor_key] = main_agent_elo
-                with open(full_json_path, "w", encoding="utf-8") as f: json.dump(elo_ratings, f, indent=2)
+                elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 
+                # 5. 保存全量日志
+                with open(full_json_path, "w", encoding="utf-8") as f:
+                    json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
+
+                # -----------------------------------------------------------
+                # 逻辑分支 C: 保存“精英池快照” (Elite JSON)
+                # -----------------------------------------------------------
+                # 这才是下次训练 resume 时应该读取的文件
                 save_elite = copy.deepcopy(elite_elo_ratings)
                 save_elite["__CURRENT_MAIN__"] = main_agent_elo
-                with open(elite_json_path, "w", encoding="utf-8") as f: json.dump(save_elite, f, indent=2)
-                with open(hof_json_path, "w", encoding="utf-8") as f: json.dump(hall_of_fame_keys, f, indent=2)
+                with open(elite_json_path, "w", encoding="utf-8") as f:
+                    json.dump(save_elite, f, ensure_ascii=False, indent=2)
+                
+                # -----------------------------------------------------------
+                # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)
+                # -----------------------------------------------------------
+                with open(hof_json_path, "w", encoding="utf-8") as f:
+                    json.dump(hall_of_fame, f, ensure_ascii=False, indent=2)
 
-        # --- 交互式延长训练 ---
+                # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
+                valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
+                if valid_elos:
+                    mean_elo = np.mean(list(valid_elos.values()))
+                    # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
+                    # 这里为了简单，直接遍历
+                    sorted_keys = sorted(valid_elos.keys())
+                    
+                    logger.add("Elo/Main_Agent_Raw", main_agent_elo, total_steps)
+                    
+                    # 记录主智能体在当前所有 ELO 中的归一化排名位置：
+                    # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
+                    min_elo = np.min(list(valid_elos.values()))
+                    max_elo = np.max(list(valid_elos.values()))
+                    denom = float(max_elo - min_elo)
+                    if denom == 0.0:
+                        rank_pos = 0.5
+                    else:
+                        rank_pos = float((main_agent_elo - min_elo) / denom)
+                    # 现有日志
+                    logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                    
+                    # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
+                    elo_spread = float(max_elo - min_elo)
+                    print('elo分极差：', elo_spread)
+                    logger.add("Elo/Spread", elo_spread, total_steps)
+                    
+                    rule_vals = [v for k, v in valid_elos.items() if k.startswith("Rule")]
+                    if rule_vals:
+                        r_min, r_max = np.min(rule_vals), np.max(rule_vals)
+                        denom = float(r_max - r_min)
+                        curr_rank = 0.5 if denom == 0 else (main_agent_elo - r_min) / denom
+                        logger.add("Elo_Centered/Current_Rank %", curr_rank * 100, total_steps)
+                    
+                    hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
+                    logger.add("Elo/History_Pool_Size", hist_count, total_steps)
+
+                    # 记录详细分数
+                    keys_to_log = [k for k in sorted(valid_elos.keys()) if k.startswith("Rule_")]
+                    if actor_key in valid_elos and actor_key not in keys_to_log:
+                        keys_to_log.append(actor_key)
+                    
+                    for k in keys_to_log:
+                        tag_suffix = k if k.startswith("Rule_") else "Latest_Saved"
+                        logger.add(f"Elo_Raw/{tag_suffix}", valid_elos[k], total_steps)
+                    
+                    # 只记录所有规则智能体和最新保存的智能体（actor_key）
+                    rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
+                    keys_to_log = list(sorted(rule_keys))
+                    # actor_key 在本代码块上方已定义为当前保存的快照名
+                    if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
+                        keys_to_log.append(actor_key)
+                        
+                    for k in keys_to_log:
+                        # 如果是规则智能体，使用其自身名字
+                        if k.startswith("Rule_"):
+                            raw_tag = f"Elo_Raw/{k}"
+                            centered_tag = f"Elo_Centered/{k}"
+                        # 否则，认为是最新智能体，使用固定标签 "Latest"
+                        else:
+                            raw_tag = "Elo_Raw/Latest"
+                            centered_tag = "Elo_Centered/Latest"
+                        
+                        logger.add(raw_tag, valid_elos[k], total_steps)
+                        logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
+
+                    # --- 插入: 记录 Latest(当前保存的 actor_key) 相对于所有存在的 Rule_* 的 ELO 差值 ---
+                    if 'actor_key' in locals() and actor_key in valid_elos:
+                        latest_elo = float(valid_elos[actor_key])
+                        rule_keys_present = [rk for rk in valid_elos.keys() if rk.startswith("Rule_")]
+                        # diffs = []
+                        for rk in rule_keys_present:
+                            diff = latest_elo - float(valid_elos[rk])
+                            # diffs.append(diff)
+                            logger.add(f"Elo_Diff/Latest_vs_{rk}", diff, total_steps)
+                            
+
+                        
+        # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")
         try:
             inp = input(f"Enter new max_steps (current {total_steps}): ")
-            if not inp.strip(): break
+            
+            if not inp.strip():
+                print("No input provided. Exiting training.")
+                break # 退出外层 while True 循环
             new_max = int(inp)
             if new_max > total_steps:
                 current_max_steps = new_max
+                print(f"Continuing training until {current_max_steps} steps.")
             else:
-                break
+                print(f"Input ({inp}) is not greater than current steps ({total_steps}). Exiting training.")
+                break # 退出外层 while True 循环
         except:
+            print("\nInterrupted by user. Exiting training.")
             break
 
     # Cleanup
     print("Closing workers...")
     for pipe in pipes: pipe.send(('EXIT', None))
     for p in workers: p.join()
+    
+    # 非阻塞式测试才需要：训练结束后，如果还有未完成的测试，等待它们跑完（可选）
+    # if len(pending_tests) > 0:
+    #     print(f"Waiting for {len(pending_tests)} pending tests to finish...")
+    #     for res_obj, recorded_step in pending_tests:
+    #         rule_num, outcome = res_obj.get() # 阻塞直至完成
+    #         logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
+    #         print(f"  [Finalizing Test] Rule_{rule_num}: {outcome}")
+
     test_pool.close()
     test_pool.join()
     logger.close()
