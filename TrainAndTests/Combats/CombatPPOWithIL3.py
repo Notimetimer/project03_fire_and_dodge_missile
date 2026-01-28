@@ -1125,7 +1125,7 @@ def run_MLP_simulation(
                 else:
                     #====================
                     # 原有强化学习部分
-                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
+                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)  # 优势归一化 debug
                     #====================
                 decide_steps_after_update = 0
 
