@@ -401,7 +401,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -417,8 +417,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         
         # 初始化环境 (关闭可视化以加速)
         env = ChooseStrategyEnv(args, tacview_show=False)
-        env.shielded = 1 # 假设默认开启防撞
-        env.dt_move = 0.05 
+        env.shielded = no_crash # 假设默认开启防撞
+        env.dt_move = dt_move
         env.dt_maneuver = dt_maneuver
 
         # 初始化本地网络 (CPU)
@@ -481,8 +481,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 randomized_birth = settings['randomized_birth']
                 action_cycle_multiplier = settings['action_cycle_multiplier']
                 reward_weight = settings['weight_reward']
-                
-                red_birth, blue_birth = create_initial_state_worker(randomized_birth)
+                # 在子环境中重新计算出生状态
+                # red_birth, blue_birth = create_initial_state_worker(randomized_birth)
+                # 使用从master传来的出生状态
+                red_birth = settings['red_birth']
+                blue_birth = settings['blue_birth']
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
                 
                 # 状态变量初始化
@@ -798,7 +801,7 @@ def run_MLP_simulation(
         p = mp.Process(target=worker_process, args=(
             i, child_conn, args, state_dim, hidden_dim, 
             action_dims_dict, worker_device, dt_maneuver, 
-            seed, opp_greedy_rate
+            seed, opp_greedy_rate, dt_move, no_crash
         ))
         p.start()
         workers.append(p)
@@ -961,7 +964,9 @@ def run_MLP_simulation(
                     hall_of_fame,
                     target_elo=main_agent_elo,
                     SP_type=self_play_type,
-                    sigma=sigma_elo
+                    sigma=sigma_elo,
+                    rule_rate=rule_actor_rate,
+                    deltaFSP_epsilon=deltaFSP_epsilon,
                 )
                 selected_opponent_name = np.random.choice(opponent_keys, p=probs)
                 
