@@ -16,6 +16,8 @@ import re
 import time  # 确保引入 time 模块
 from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
+import traceback # [新增]
+import random
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -403,199 +405,213 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
     """
-    # --- 1. 初始化阶段 (只运行一次) ---
-    import random
-    # 确保每个进程种子不同，避免所有环境生成完全一样的随机数
-    worker_seed = seed + rank * 1000
-    random.seed(worker_seed)
-    np.random.seed(worker_seed)
-    torch.manual_seed(worker_seed)
-    
-    # 初始化环境 (关闭可视化以加速)
-    env = ChooseStrategyEnv(args, tacview_show=False)
-    env.shielded = 1 # 假设默认开启防撞
-    env.dt_move = 0.05 
-    env.dt_maneuver = dt_maneuver
-
-    # 初始化本地网络 (CPU)
-    local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-    local_agent = PPOHybrid(
-        actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
-        critic=None, 
-        actor_lr=0, critic_lr=0, device=device_worker # Worker不训练，LR无所谓
-    )
-    
-    # 初始化对手网络
-    adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-    adv_agent = PPOHybrid(
-        actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
-        critic=None, 
-        actor_lr=0, critic_lr=0, device=device_worker
-    )
-
-
-    # --- 2. 循环等待阶段 ---
-    while True:
-        # 阻塞等待指令
-        cmd, packet = pipe.recv()
+    try:  # <--- 【新增】添加此行，并将下方所有代码整体缩进
+        # --- 1. 初始化阶段 (只运行一次) ---
         
-        if cmd == 'EXIT':
-            env.close()
-            break
-            
-        if cmd == 'RUN_EPISODE':
-            # 解包数据
-            (actor_weights, opponent_info, settings) = packet
-            
-            # A. 同步权重 (极快)
-            local_agent.actor.load_state_dict(actor_weights)
-            
-            # B. 配置对手
-            opp_name, opp_type, opp_data = opponent_info
-            adv_is_rule = (opp_type == 'rule')
-            rule_num = 0
-            if adv_is_rule:
-                rule_num = opp_data
-            else:
-                adv_agent.actor.load_state_dict(opp_data)
+        # 确保每个进程种子不同，避免所有环境生成完全一样的随机数
+        worker_seed = seed + rank * 1000
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
+        
+        # 初始化环境 (关闭可视化以加速)
+        env = ChooseStrategyEnv(args, tacview_show=False)
+        env.shielded = 1 # 假设默认开启防撞
+        env.dt_move = 0.05 
+        env.dt_maneuver = dt_maneuver
 
-            # C. 准备本回合容器
-            # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
-            # local_trans 用于 PPO 更新 (只包含 Blue 视角)
-            local_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-            ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-            enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+        # 初始化本地网络 (CPU)
+        local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
+        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+        local_agent = PPOHybrid(
+            actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
+            critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
+            actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
+            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
+            device=device_worker 
+        )
+        
+        # 初始化对手网络
+        adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        # 【修改 2】同样为对手创建一个 dummy critic
+        adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+        adv_agent = PPOHybrid(
+            actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
+            critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
+            actor_lr=0, critic_lr=0, 
+            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
+            device=device_worker
+        )
 
-            # D. 环境重置
-            randomized_birth = settings['randomized_birth']
-            action_cycle_multiplier = settings['action_cycle_multiplier']
-            reward_weight = settings['weight_reward']
+        # --- 2. 循环等待阶段 ---
+        while True:
+            # 阻塞等待指令
+            cmd, packet = pipe.recv()
             
-            red_birth, blue_birth = create_initial_state_worker(randomized_birth)
-            env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
-            
-            # 状态变量初始化
-            done = False
-            last_decision_obs, last_decision_state = None, None
-            last_enm_decision_obs, last_enm_decision_state = None, None
-            current_action, current_action_exec, current_enm_action_exec = None, None, None
-            
-            steps_run = 0
-            episode_return = 0 # 仅用于统计显示
-            m_fired = 0
-            
-            dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
-            
-            # --- E. 仿真循环 (核心物理逻辑) ---
-            # 计算最大步数
-            max_counts = int(args.max_episode_len / dt_maneuver)
-            
-            for count in range(max_counts):
-                if not env.running or done: break
+            if cmd == 'EXIT':
+                env.close()
+                break
                 
-                # 1. 获取观测
-                r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
-                b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
-                b_state_global, _ = env.obs_1v1('b', reward_fn=1)
-                r_state_global, _ = env.obs_1v1('r', reward_fn=1)
-
-                # 2. 决策点 (Action Cycle)
-                if steps_run % action_cycle_multiplier == 0:
-                    # 2.1 存储【上一个】周期的经验
-                    if steps_run > 0:
-                        # 注意：这里调用你原文件里的 append_experience 辅助函数
-                        # 确保 append_experience 在 worker_process 作用域外是可见的，或者复制进来
-                        append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                        append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
-
-                    # 2.2 更新上一帧记录
-                    last_decision_obs = b_obs
-                    last_decision_state = b_state_global
-                    last_enm_decision_obs = r_obs
-                    last_enm_decision_state = r_state_global
-                    
-                    # 2.3 产生新动作 (No Grad)
-                    with torch.no_grad():
-                        # Blue Decision
-                        b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1)
-                        b_action_label = b_action_exec['cat'][0]
-                        b_fire = b_action_exec['bern'][0]
-                        
-                        # Red Decision
-                        r_state_check = env.unscale_state(r_check_obs)
-                        if adv_is_rule:
-                            # 调用规则，假设 basic_rules 已导入
-                            r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=0)
-                            r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
-                        else:
-                            # 随机决定本局对手是否开启探索
-                            adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                            r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
-                            r_action_label = r_action_exec['cat'][0]
-                            r_fire = r_action_exec['bern'][0]
-
-                    # 2.4 处理开火
-                    b_m_id = launch_missile_immediately(env, 'b') if b_fire else None
-                    r_m_id = launch_missile_immediately(env, 'r') if r_fire else None
-                    if b_m_id: m_fired += 1
-                    
-                    # 2.5 记录当前动作供下一帧存储
-                    current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                    current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_m_id is not None])}
-                    current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_m_id is not None])}
-
-                # 3. 物理步进
-                r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
-                b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
-                env.step(r_maneuver, b_maneuver)
-                steps_run += 1
+            if cmd == 'RUN_EPISODE':
+                # 解包数据
+                (actor_weights, opponent_info, settings) = packet
                 
-                # 4. 奖励计算
-                done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
-                _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
+                # A. 同步权重 (极快)
+                local_agent.actor.load_state_dict(actor_weights)
                 
-                reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * reward_weight)
-                reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * reward_weight)
+                # B. 配置对手
+                opp_name, opp_type, opp_data = opponent_info
+                adv_is_rule = (opp_type == 'rule')
+                rule_num = 0
+                if adv_is_rule:
+                    rule_num = opp_data
+                else:
+                    adv_agent.actor.load_state_dict(opp_data)
+
+                # C. 准备本回合容器
+                # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
+                # local_trans 用于 PPO 更新 (只包含 Blue 视角)
+                local_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+                ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+                enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
+
+                # D. 环境重置
+                randomized_birth = settings['randomized_birth']
+                action_cycle_multiplier = settings['action_cycle_multiplier']
+                reward_weight = settings['weight_reward']
                 
-                if steps_run % action_cycle_multiplier == 0:
-                    episode_return += (b_rew_event + b_rew_constraint)
+                red_birth, blue_birth = create_initial_state_worker(randomized_birth)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
                 
-                # 5. 存活更新 (用于 Done 标记)
-                next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
-                next_r_state_global, _ = env.obs_1v1('r', reward_fn=1)
+                # 状态变量初始化
+                done = False
+                last_decision_obs, last_decision_state = None, None
+                last_enm_decision_obs, last_enm_decision_state = None, None
+                current_action, current_action_exec, current_enm_action_exec = None, None, None
+                
+                steps_run = 0
+                episode_return = 0 # 仅用于统计显示
+                m_fired = 0
+                
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
+                
+                # --- E. 仿真循环 (核心物理逻辑) ---
+                # 计算最大步数
+                max_counts = int(args.max_episode_len / dt_maneuver)
+                
+                for count in range(max_counts):
+                    if not env.running or done: break
+                    
+                    # 1. 获取观测
+                    r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
+                    b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+                    b_state_global, _ = env.obs_1v1('b', reward_fn=1)
+                    r_state_global, _ = env.obs_1v1('r', reward_fn=1)
 
-            # --- End of Simulation Loop ---
-            
-            # 6. 存储最后一步经验 (Terminal State)
-            # 强制做一次终局判定
-            done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier)
-            
-            if last_decision_state is not None:
-                append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                    # 2. 决策点 (Action Cycle)
+                    if steps_run % action_cycle_multiplier == 0:
+                        # 2.1 存储【上一个】周期的经验
+                        if steps_run > 0:
+                            # 注意：这里调用你原文件里的 append_experience 辅助函数
+                            # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
+                            append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
-            # 7. 打包结果
-            result_packet = {
-                'trans': local_trans, # 用于 RL Update
-                'ego_trans': ego_trans, # 用于 SIL (win)
-                'enm_trans': enm_trans, # 用于 SIL (lose)
-                'metrics': {
-                    'return': episode_return,
-                    'steps': steps_run,
-                    'win': env.win,
-                    'lose': env.lose,
-                    'draw': env.draw,
-                    'm_fired': m_fired
-                },
-                'opp_name': opp_name
-            }
-            
-            # 8. 发送回 Master
-            pipe.send(result_packet)
-            
+                        # 2.2 更新上一帧记录
+                        last_decision_obs = b_obs
+                        last_decision_state = b_state_global
+                        last_enm_decision_obs = r_obs
+                        last_enm_decision_state = r_state_global
+                        
+                        # 2.3 产生新动作 (No Grad)
+                        with torch.no_grad():
+                            # Blue Decision
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1)
+                            b_action_label = b_action_exec['cat'][0]
+                            b_fire = b_action_exec['bern'][0]
+                            
+                            # Red Decision
+                            r_state_check = env.unscale_state(r_check_obs)
+                            if adv_is_rule:
+                                # 调用规则，假设 basic_rules 已导入
+                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=0)
+                                r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
+                            else:
+                                # 随机决定本局对手是否开启探索
+                                adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
+                                r_action_label = r_action_exec['cat'][0]
+                                r_fire = r_action_exec['bern'][0]
+
+                        # 2.4 处理开火
+                        b_m_id = launch_missile_immediately(env, 'b') if b_fire else None
+                        r_m_id = launch_missile_immediately(env, 'r') if r_fire else None
+                        if b_m_id: m_fired += 1
+                        
+                        # 2.5 记录当前动作供下一帧存储
+                        current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
+                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_m_id is not None])}
+                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_m_id is not None])}
+
+                    # 3. 物理步进
+                    r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
+                    b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
+                    env.step(r_maneuver, b_maneuver)
+                    steps_run += 1
+                    
+                    # 4. 奖励计算
+                    done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+                    _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
+                    
+                    reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * reward_weight)
+                    reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * reward_weight)
+                    
+                    if steps_run % action_cycle_multiplier == 0:
+                        episode_return += (b_rew_event + b_rew_constraint)
+                    
+                    # 5. 存活更新 (用于 Done 标记)
+                    next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
+                    next_r_state_global, _ = env.obs_1v1('r', reward_fn=1)
+                    dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
+
+                # --- End of Simulation Loop ---
+                
+                # 6. 存储最后一步经验 (Terminal State)
+                # 强制做一次终局判定
+                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier)
+                
+                if last_decision_state is not None:
+                    append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+
+                # 7. 打包结果
+                result_packet = {
+                    'trans': local_trans, # 用于 RL Update
+                    'ego_trans': ego_trans, # 用于 SIL (win)
+                    'enm_trans': enm_trans, # 用于 SIL (lose)
+                    'metrics': {
+                        'return': episode_return,
+                        'steps': steps_run,
+                        'win': env.win,
+                        'lose': env.lose,
+                        'draw': env.draw,
+                        'm_fired': m_fired
+                    },
+                    'opp_name': opp_name
+                }
+                
+                # 8. 发送回 Master
+                pipe.send(result_packet)
+
+    except Exception: # [新增] 异常捕获与回传
+        print(f"!!! Worker {rank} CRASHED !!!")
+        tb = traceback.format_exc()
+        print(tb)
+        try: pipe.send({'error': tb})
+        except: pass
             
 
 
@@ -981,7 +997,21 @@ def run_MLP_simulation(
             # C. 等待所有 Worker 完成 (Barrier)
             batch_results = []
             for rank in range(num_workers):
-                res = pipes[rank].recv() # 阻塞等待
+                try: # <--- 【新增】
+                    res = pipes[rank].recv() # 阻塞等待
+                except EOFError: # <--- 【新增】捕获管道断开错误
+                    print(f"[Error] Worker {rank} crashed silently.")
+                    for p in workers: p.terminate()
+                    raise RuntimeError(f"Worker {rank} crashed.")
+                    
+                # [新增] 检查 Worker 是否传回了奔溃信息
+                if isinstance(res, dict) and 'error' in res:
+                    print(f"--- Master received error from Worker {rank}, aborting. ---")
+                    # 关闭所有子进程防止残留
+                    for p in workers: p.terminate()
+                    # 抛出具体的运行时错误
+                    raise RuntimeError(f"Worker {rank} crashed with error:\n{res['error']}")
+                    
                 batch_results.append(res)
             
             # --- 3. 数据聚合与处理 ---
