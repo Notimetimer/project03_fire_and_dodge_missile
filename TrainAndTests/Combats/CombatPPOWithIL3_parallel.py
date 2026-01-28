@@ -298,11 +298,9 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
     1. 优先判定是否进入“规则复习”分支。
     2. 若未进入，则根据 SP_type 执行具体的采样策略。
     """
-    # 1. 【核心】构建采样池
-    # 先复制名人堂（保底），再用精英池更新（覆盖）
-    # 这样确保：
-    #   a. 名人堂里的旧英雄（已被精英池淘汰）能被采到。
-    #   b. 还在精英池里的名人堂英雄，使用最新的动态分数。
+    # 【核心修改】在函数内部合并出一个临时的全集字典用于查询分数
+    # 这样 keys 里的任何元素都能在这里找到对应的 ELO
+    
     candidate_pool = hall_of_fame.copy()
     candidate_pool.update(elite_elo_ratings)
     
@@ -318,7 +316,8 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         return probs, rule_keys
     
     # --- 第二层判断：进入核心采样逻辑 ---
-    elos = np.array([elite_elo_ratings[k] for k in keys], dtype=np.float64)
+    # 【核心修改】统一从 candidate_pool 取分，彻底避免 KeyError
+    elos = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
     
     # 1. 处理 PFSP 系列 (高斯核采样)
     if SP_type.startswith('PFSP'):
@@ -358,7 +357,9 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
 
     # 4. 处理 SP (最强/最新历史版本)
     elif SP_type == 'SP':
-        rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
+        # rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
+        # 严格匹配 actor_rein + 数字
+        rein_keys = [k for k in keys if re.match(r'^actor_rein\d+$', k)]
         if not rein_keys: return np.array([]), []
         
         def extract_number(k):
@@ -914,13 +915,17 @@ def run_MLP_simulation(
 
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score == 1.0 for score in outcomes.values()):
-                    hof_key = f"actor_rein_step_{total_steps}"
-                    # A. 保存文件
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{hof_key}.pt"))
-                    # B. 加入 ELO 字典，确保接下来的 获取对手概率 能采到它
-                    elite_elo_ratings[hof_key] = main_agent_elo 
-                    hall_of_fame[hof_key] = main_agent_elo
-                    print(f"!!! [Hall of Fame] Hero captured and saved: {hof_key}")
+                    # 【核心修改】从全量注册表 elo_ratings 中寻找最新的已保存编号
+                    rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
+                    
+                    if rein_keys:
+                        # 找到数值最大的编号（即最新的已保存智能体）
+                        hof_key = max(rein_keys, key=lambda k: int(k.replace('actor_rein', '')))
+                        
+                        if hof_key not in hall_of_fame:
+                            # 存入字典，分数优先取全量表中的记录
+                            hall_of_fame[hof_key] = elo_ratings.get(hof_key, main_agent_elo)
+                            print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
                 
                 trigger += trigger_delta
 
