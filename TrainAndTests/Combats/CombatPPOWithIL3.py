@@ -717,10 +717,17 @@ def run_MLP_simulation(
                             all_outcomes = test_results_aggregator[recorded_step].values()
                             # 如果 5 场全胜 (1.0 代表胜)
                             if all(res == 1.0 for res in all_outcomes):
-                                hof_key = f"actor_rein_step_{recorded_step}" # 定义一个唯一的标识符
-                                if hof_key not in hall_of_fame_keys:
-                                    hall_of_fame_keys.append(hof_key)
-                                    print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
+                                # 寻找最新的标准命名智能体 (actor_rein + 数字)
+                                # 使用正则严格过滤，防止旧的脏数据(如 actor_rein_step_...)导致 int 转换失败
+                                rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
+                                
+                                if rein_keys:
+                                    # 提取数字并通过数值比较找到最新的智能体
+                                    hof_key = max(rein_keys, key=lambda k: int(k.replace('actor_rein', '')))
+                                    
+                                    if hof_key not in hall_of_fame_keys:
+                                        hall_of_fame_keys.append(hof_key)
+                                        print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
                             
                             # 完成后清理该步数的汇总数据，释放内存
                             del test_results_aggregator[recorded_step]
