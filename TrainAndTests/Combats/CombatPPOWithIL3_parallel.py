@@ -1096,9 +1096,9 @@ def run_MLP_simulation(
             logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
-            logger.add("train/2 win_rate", batch_wins / num_workers, total_steps)
-            logger.add("train/2 lose_rate", batch_loss_cnt / num_workers, total_steps)
-            logger.add("train/2 draw_rate", batch_draw_cnt / num_workers, total_steps)
+            logger.add("train/2 win", batch_wins / num_workers, total_steps)
+            logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
+            logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
             logger.add("debug/胜负统计", batch_wins+batch_loss_cnt+batch_draw_cnt, total_steps)
             logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
 
