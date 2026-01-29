@@ -763,10 +763,19 @@ def run_MLP_simulation(
                 else:
                     rank_pos = float((main_agent_elo - min_elo) / denom)
 
-            # else:
+            # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
+            if not init_elo_ratings:
+                # 按照 Elo 分数降序排列，排除内部特殊键
+                sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
+                                                   key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                                                   reverse=True) if not k.startswith("__")]
+                effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
+            else:
+                effective_pool = elite_elo_ratings
+
             # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
             probs, opponent_keys = get_opponent_probabilities(
-                elite_elo_ratings, 
+                effective_pool, 
                 hall_of_fame,
                 target_elo=main_agent_elo, 
                 SP_type=self_play_type, 
@@ -800,7 +809,7 @@ def run_MLP_simulation(
                 adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
                 if os.path.exists(adv_path):
                     adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device, weights_only=1), strict=False)
-                    print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elite_elo_ratings[selected_opponent_name]:.0f})")
+                    print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
                 else:
                     print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_0.")
                     adv_is_rule = True

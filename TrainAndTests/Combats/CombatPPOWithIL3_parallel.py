@@ -921,10 +921,20 @@ def run_MLP_simulation(
             # 这一步 Master 决定每个 Worker 打谁
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
+            # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
+            if not init_elo_ratings:
+                # 按照 Elo 分数降序排列，排除内部特殊键
+                sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
+                                                   key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                                                   reverse=True) if not k.startswith("__")]
+                effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
+            else:
+                effective_pool = elite_elo_ratings
+                
             for rank in range(num_workers):
                 # 采样对手
                 probs, opponent_keys = get_opponent_probabilities(
-                    elite_elo_ratings,
+                    effective_pool,
                     hall_of_fame,
                     target_elo=main_agent_elo,
                     SP_type=self_play_type,
