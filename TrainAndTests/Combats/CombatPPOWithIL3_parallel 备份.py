@@ -652,7 +652,7 @@ def run_MLP_simulation(
     max_episode_duration=10*60,
     R_cage = 45e3, # 55e3,
     dt_maneuver=0.2,
-    transition_dict_capacity=1000,
+    transition_dict_capacity=2000, # 稍微调大一点，因为现在是批量进数据
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
@@ -786,6 +786,9 @@ def run_MLP_simulation(
     # 这个池子用于 periodic testing，不参与训练数据的生成
     test_pool = mp.Pool(processes=3, maxtasksperchild=10) 
     
+    # 非阻塞测试才需要
+    # pending_tests = []
+    # test_results_aggregator = {}
 
     # --- B. 启动并行训练 Worker (Sync Training Workers) ---
     # 这些 Worker 与 Master 同步，负责生成训练数据
@@ -852,7 +855,13 @@ def run_MLP_simulation(
                 print(f"\n>>> Triggering Parallel Test at steps {total_steps}...")
                 # 1. 深度拷贝当前 Actor 权重到 CPU 内存
                 current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
-
+                # 2. 非阻塞等待的并行测试
+                # for r_idx in [0, 1, 2, 3, 4]:
+                #     res_obj = test_pool.apply_async(
+                #         test_worker, 
+                #         args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu') # [修改] 显式传入 dt_maneuver
+                #     )
+                #     pending_tests.append((res_obj, total_steps)) # 记录任务对象和触发时的步数
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
@@ -868,7 +877,41 @@ def run_MLP_simulation(
                 test_results = [t.get() for t in test_tasks]
                 
                 trigger += trigger_delta # 更新下一次触发阈值
-               
+
+            # 处理测试结果与名人堂
+            # if len(pending_tests) > 0:
+                # 非阻塞处理逻辑
+                # finished_tasks = []
+                # for task in pending_tests:
+                #     res_obj, recorded_step = task
+                #     if res_obj.ready():
+                #         rule_num, outcome = res_obj.get()
+                #         logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
+                #         print(f"  [Async Test Result] Rule_{rule_num}: {outcome} (Triggered at {recorded_step})")
+                        
+                #         # B. 名人堂逻辑
+                #         if recorded_step not in test_results_aggregator:
+                #             test_results_aggregator[recorded_step] = {}
+                #         test_results_aggregator[recorded_step][rule_num] = outcome
+                        
+                #         # C. [新增] 检查是否达成“名人堂”成就
+                #         # 假设你测试的是 Rule 0, 1, 2, 3, 4 共 5 个规则
+                #         expected_rule_count = len([k for k in init_elo_ratings.keys() if k.startswith("Rule")])
+                #         if len(test_results_aggregator[recorded_step]) == expected_rule_count:
+                #             all_outcomes = test_results_aggregator[recorded_step].values()
+                #             # 如果 5 场全胜 (1.0 代表胜)
+                #             if all(res == 1.0 for res in all_outcomes):
+                #                 hof_key = f"actor_rein_step_{recorded_step}" # 定义一个唯一的标识符
+                #                 if hof_key not in hall_of_fame_keys:
+                #                     hall_of_fame_keys.append(hof_key)
+                #                     print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
+                #             # 完成后清理该步数的汇总数据，释放内存
+                #             del test_results_aggregator[recorded_step]   
+                #         finished_tasks.append(task)
+                # # 清理已完成的任务
+                # for task in finished_tasks:
+                #     pending_tests.remove(task)
+                
                 
                 # 阻塞式处理逻辑
                 outcomes = {rule_num: score for rule_num, score in test_results}
@@ -1072,15 +1115,13 @@ def run_MLP_simulation(
             logger.add("debug/胜负统计", batch_wins+batch_loss_cnt+batch_draw_cnt, total_steps)
             logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
 
-
-            # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
-            if batch_idx % save_interval == 0 and \
-                len(transition_dict['dones']) >= transition_dict_capacity:
-                # # --- 4. 执行训练 (PPO Update) ---
-                # # 当收集的数据量超过 capacity 时更新
-                # if len(transition_dict['dones']) >= transition_dict_capacity:
+            # --- 4. 执行训练 (PPO Update) ---
+            # 当收集的数据量超过 capacity 时更新
+            if len(transition_dict['dones']) >= transition_dict_capacity:
+                
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
                 transition_dict['actions'] = restructure_actions(transition_dict['actions'])
+                            
                 if use_sil:
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
@@ -1135,7 +1176,9 @@ def run_MLP_simulation(
 
                 # 清空 Buffer
                 transition_dict = copy.deepcopy(empty_transition_dict)
-                
+
+            # --- 5. 保存与维护 (Checkpoint & Pool) ---
+            if batch_idx % save_interval == 0:
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
@@ -1295,6 +1338,14 @@ def run_MLP_simulation(
     for pipe in pipes: pipe.send(('EXIT', None))
     for p in workers: p.join()
     
+    # 非阻塞式测试才需要：训练结束后，如果还有未完成的测试，等待它们跑完（可选）
+    # if len(pending_tests) > 0:
+    #     print(f"Waiting for {len(pending_tests)} pending tests to finish...")
+    #     for res_obj, recorded_step in pending_tests:
+    #         rule_num, outcome = res_obj.get() # 阻塞直至完成
+    #         logger.add(f"test/agent_vs_rule{rule_num}", outcome, recorded_step)
+    #         print(f"  [Finalizing Test] Rule_{rule_num}: {outcome}")
+
     test_pool.close()
     test_pool.join()
     logger.close()

@@ -72,6 +72,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
+        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -118,6 +119,11 @@ if __name__=='__main__':
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
+        K_FACTOR = 16,  # 32 原先振荡太大了
+        randomized_birth = 1,
+        save_interval = 1, # 触发更新至少要经过多少批采样
+        opp_greedy_rate = 0.5, # 对手贪婪率
+        num_runs = 3, # 测试回合重复次数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

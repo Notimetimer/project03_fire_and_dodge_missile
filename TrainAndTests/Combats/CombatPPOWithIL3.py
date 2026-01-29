@@ -503,6 +503,7 @@ def run_MLP_simulation(
     # 初始化 ELO 字典，包含基础规则智能体
     elo_ratings = init_elo_ratings
     elite_elo_ratings = copy.deepcopy(elo_ratings)
+    hall_of_fame = {}
     
     # --- [修改] 规范化 ELO 变量与文件路径 ---
     full_json_path = os.path.join(log_dir, "elo_ratings.json")       # 全量历史
@@ -523,12 +524,10 @@ def run_MLP_simulation(
     else:
         elite_elo_ratings = copy.deepcopy(elo_ratings)
 
-    # 3. 加载名人堂 (hall_of_fame_keys)
+    # 3. 加载名人堂 (hall_of_fame)
     if os.path.exists(hof_json_path):
-        with open(hof_json_path, 'r', encoding='utf-8') as f:
-            hall_of_fame_keys = json.load(f)
-    else:
-        hall_of_fame_keys = [] # 初始为空
+        with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
+
 
     # --- [新增] 测试结果汇总器 ---
     # 格式: {recorded_step: {rule_num: outcome}}
@@ -558,21 +557,23 @@ def run_MLP_simulation(
         return player_elo + K_FACTOR * (score - expected)
 
 
-    def get_opponent_probabilities(elite_elo_ratings, target_elo=None, sigma=400, SP_type='PFSP_with_delta', rule_rate=rule_actor_rate):
+    def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
+                                   target_elo=None, sigma=400, SP_type='PFSP_with_delta', 
+                                   rule_rate=rule_actor_rate):
         """
         优化后的对手采样逻辑：
         1. 优先判定是否进入“规则复习”分支。
         2. 若未进入，则根据 SP_type 执行具体的采样策略。
         """
-        keys = list(elite_elo_ratings.keys())
+        # 【核心修改】在函数内部合并出一个临时的全集字典用于查询分数
+        # 这样 keys 里的任何元素都能在这里找到对应的 ELO
+        
+        candidate_pool = hall_of_fame.copy()
+        candidate_pool.update(elite_elo_ratings)
+        
+        keys = list(candidate_pool.keys())
         if not keys:
             return np.array([]), []
-        
-        # 2. [新增] 简单合并：将名人堂成员塞进候选名单
-        # 这样它们就会根据在 elo_ratings.json 里的分数参与正常的 PFSP 采样
-        for hof_key in hall_of_fame_keys:
-            if hof_key not in keys:
-                keys.append(hof_key)
 
         # --- 第一层判断：规则复习分支 (Epsilon-Greedy 锚点保护) ---
         # 只要 rule_rate > 0，就有概率强行进入规则池采样，防止“策略遗忘”
@@ -725,8 +726,9 @@ def run_MLP_simulation(
                                     # 提取数字并通过数值比较找到最新的智能体
                                     hof_key = max(rein_keys, key=lambda k: int(k.replace('actor_rein', '')))
                                     
-                                    if hof_key not in hall_of_fame_keys:
-                                        hall_of_fame_keys.append(hof_key)
+                                    if hof_key not in hall_of_fame:
+                                        # 存入字典，分数优先取全量表中的记录
+                                        hall_of_fame[hof_key] = elo_ratings.get(hof_key, main_agent_elo)
                                         print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
                             
                             # 完成后清理该步数的汇总数据，释放内存
@@ -1267,7 +1269,7 @@ def run_MLP_simulation(
                 # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)
                 # -----------------------------------------------------------
                 with open(hof_json_path, "w", encoding="utf-8") as f:
-                    json.dump(hall_of_fame_keys, f, ensure_ascii=False, indent=2)
+                    json.dump(hall_of_fame, f, ensure_ascii=False, indent=2)
 
                 # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
                 valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
