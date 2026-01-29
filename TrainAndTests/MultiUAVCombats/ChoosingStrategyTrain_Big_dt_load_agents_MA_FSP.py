@@ -135,7 +135,7 @@ if __name__=="__main__":
     
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
     agent = MAPPO(
         obs_dim=obs_dim,
@@ -399,7 +399,7 @@ if __name__=="__main__":
                 transition_dict['agent_ids'].append(sys_to_algo_id[env.BUAV.id])
                 transition_dict['active_masks'].append(1-env.BUAV.dead)
             
-            if 1: # len(transition_dict['next_global_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
+            if 1: # len(transition_dict['next_global_states']) >= transition_dict_threshold: # decide_steps_after_update >= transition_dict_threshold
                 '''更新智能体'''
                 agent.update(transition_dict, adv_normed=True, shuffled=True, mini_batches=1)
                 decide_steps_after_update = 0

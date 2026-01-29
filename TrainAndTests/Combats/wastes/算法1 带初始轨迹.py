@@ -1,7 +1,7 @@
 from CombatPPOWithIL import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_5_有踢出' # 'IL_and_PFSP_2元奖励_小alpha'
+mission_name = 'IL_and_PFSP_1e-2_有踢出_有初始轨迹'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -14,7 +14,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 5  # 设置为0就是纯强化学习
+alpha_il = 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 64 # 混合更新minibatch大小
@@ -34,7 +34,7 @@ dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 10*60 # 回合最长时间，单位s
 R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1 
+transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -95,8 +95,9 @@ if __name__=='__main__':
         max_episode_duration=max_episode_duration,
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
-        transition_dict_capacity=transition_dict_capacity,
+        transition_dict_threshold=transition_dict_threshold,
         should_kick=True,
+        use_init_data=True
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

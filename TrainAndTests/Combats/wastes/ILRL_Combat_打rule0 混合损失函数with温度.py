@@ -338,7 +338,7 @@ if __name__ == "__main__":
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Modification] 移除 ELO 相关的所有逻辑 ---
     # K_FACTOR = 32
@@ -542,7 +542,7 @@ if __name__ == "__main__":
         logger.add("train/11 episode/step", i_episode, total_steps)
         
         # --- RL Update ---
-        if len(transition_dict['dones'])>=transition_dict_capacity: 
+        if len(transition_dict['dones'])>=transition_dict_threshold: 
             # 纯强化学习
             # student_agent.update(transition_dict, adv_normed=1)  # 优势归一化 debug
             

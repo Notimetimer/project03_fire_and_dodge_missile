@@ -39,7 +39,7 @@ dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 10*60 # 回合最长时间，单位s
 R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_capacity = 5 * max_episode_duration//dt_action_cycle + 1 
+transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -101,7 +101,7 @@ if __name__=='__main__':
         max_episode_duration=max_episode_duration,
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
-        transition_dict_capacity=transition_dict_capacity,
+        transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug

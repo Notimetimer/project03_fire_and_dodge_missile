@@ -328,7 +328,7 @@ def run_MLP_simulation(
     max_episode_duration=10*60,
     R_cage= 45e3, # 55e3,
     dt_maneuver=0.2,
-    transition_dict_capacity=1000,
+    transition_dict_threshold=1000,
 ):
 
     # ------------------------------------------------------------------
@@ -998,7 +998,7 @@ def run_MLP_simulation(
 
 
         # --- RL Update ---
-        if len(transition_dict['dones'])>=transition_dict_capacity: 
+        if len(transition_dict['dones'])>=transition_dict_threshold: 
             #===========================================
             # 混合强化学习与模仿学习
             il_transition_dict = il_transition_buffer.read(il_batch_size)

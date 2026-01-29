@@ -299,12 +299,12 @@ if __name__ == "__main__":
 
     action_cycle_multiplier = 40 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 
 
     # 初始化经验池
     replay_buffer = HybridReplayBuffer(
         n_envs=n_envs, 
-        buffer_size=int(transition_dict_capacity), 
+        buffer_size=int(transition_dict_threshold), 
         obs_dim=state_dim, 
         state_dim=state_dim, 
         action_dims_dict=action_dims_dict,

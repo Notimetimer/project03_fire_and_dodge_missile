@@ -166,7 +166,7 @@ if __name__=="__main__":
     
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
@@ -335,7 +335,7 @@ if __name__=="__main__":
                 transition_dict['next_states'].append(next_b_obs) # 最后的 next_state 是环境的最终状态
                 transition_dict['dones'].append(True)
             
-            if 1: # len(transition_dict['next_states']) >= transition_dict_capacity: # decide_steps_after_update >= transition_dict_capacity
+            if 1: # len(transition_dict['next_states']) >= transition_dict_threshold: # decide_steps_after_update >= transition_dict_threshold
                 '''agent.update'''
                 agent.update(transition_dict, adv_normed=False)
                 decide_steps_after_update = 0

@@ -306,12 +306,12 @@ if __name__ == "__main__":
 
     action_cycle_multiplier = 40 # 8s 决策一次 40
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 
 
     # 初始化经验池
     replay_buffer = HybridReplayBuffer(
         n_envs=n_envs, 
-        buffer_size=int(transition_dict_capacity), 
+        buffer_size=int(transition_dict_threshold), 
         obs_dim=state_dim, 
         state_dim=state_dim, 
         action_dims_dict=action_dims_dict,
@@ -587,7 +587,7 @@ if __name__ == "__main__":
         # --- RL Update ---
         
         # if replay_buffer.full:  # 仅在并行无扩容的情况下使用
-        if replay_buffer.ptr >= transition_dict_capacity:
+        if replay_buffer.ptr >= transition_dict_threshold:
             # 准备序列数据
             transition_data = replay_buffer.get_recurrent_data(
                 student_agent.critic, 

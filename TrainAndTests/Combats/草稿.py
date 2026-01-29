@@ -291,7 +291,7 @@ if __name__ == "__main__":
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Modification] 初始化 ELO 变量与辅助函数 ---
     K_FACTOR = 32

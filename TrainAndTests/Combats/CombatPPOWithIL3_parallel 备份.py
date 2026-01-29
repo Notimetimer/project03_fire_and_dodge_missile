@@ -652,7 +652,7 @@ def run_MLP_simulation(
     max_episode_duration=10*60,
     R_cage = 45e3, # 55e3,
     dt_maneuver=0.2,
-    transition_dict_capacity=2000, # 稍微调大一点，因为现在是批量进数据
+    transition_dict_threshold=2000, # 稍微调大一点，因为现在是批量进数据
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
@@ -1117,7 +1117,7 @@ def run_MLP_simulation(
 
             # --- 4. 执行训练 (PPO Update) ---
             # 当收集的数据量超过 capacity 时更新
-            if len(transition_dict['dones']) >= transition_dict_capacity:
+            if len(transition_dict['dones']) >= transition_dict_threshold:
                 
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
                 transition_dict['actions'] = restructure_actions(transition_dict['actions'])

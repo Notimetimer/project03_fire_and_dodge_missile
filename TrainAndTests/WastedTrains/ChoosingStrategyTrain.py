@@ -163,7 +163,7 @@ def creat_initial_state():
 
 if __name__=="__main__":
     
-    transition_dict_capacity = env.args.max_episode_len//env.dt_maneuver + 1
+    transition_dict_threshold = env.args.max_episode_len//env.dt_maneuver + 1
 
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
@@ -334,7 +334,7 @@ if __name__=="__main__":
                 logger.add("train/2 lose", env.lose, total_steps)
                 logger.add("train/2 draw", env.draw, total_steps)
 
-                if steps_since_update >= transition_dict_capacity:
+                if steps_since_update >= transition_dict_threshold:
                     steps_since_update = 0
                     agent.update(transition_dict, adv_normed=False)
                     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}

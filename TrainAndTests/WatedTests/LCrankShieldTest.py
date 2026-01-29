@@ -108,7 +108,7 @@ save_path = os.path.join(data_dir, "Crankinitial_states.npy")
 
 if __name__=="__main__":
     
-    transition_dict_capacity = env.args.max_episode_len//env.dt_maneuver + 1
+    transition_dict_threshold = env.args.max_episode_len//env.dt_maneuver + 1
 
     out_range_count = 0
     return_list = []

@@ -474,7 +474,7 @@ if __name__ == "__main__":
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = 5 * env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
     K_FACTOR = 32
@@ -983,7 +983,7 @@ if __name__ == "__main__":
 
 
         # --- RL Update ---
-        if len(transition_dict['dones'])>=transition_dict_capacity: 
+        if len(transition_dict['dones'])>=transition_dict_threshold: 
             #===========================================
             # 混合强化学习与模仿学习
             il_transition_dict = il_transition_buffer.read(il_batch_size)

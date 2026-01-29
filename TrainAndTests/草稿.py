@@ -167,7 +167,7 @@ if __name__=="__main__":
     action_cycle_multiplier = 10 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2
@@ -340,7 +340,7 @@ if __name__=="__main__":
                 logger.add("train/2 draw", env.draw, total_steps)
 
                 # Agent update logic remains the same, but now it's triggered by collected action cycles
-                if len(transition_dict['states']) >= transition_dict_capacity or done: # Update if enough experience or episode ends
+                if len(transition_dict['states']) >= transition_dict_threshold or done: # Update if enough experience or episode ends
                     agent.update(transition_dict, adv_normed=False)
                     # Clear transition_dict after update
                     transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}

@@ -148,7 +148,7 @@ if __name__=="__main__":
     
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
     agent = PPO_discrete(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                         lmbda, epochs, eps, gamma, device, k_entropy=0.01, actor_max_grad=2, critic_max_grad=2) # 2,2

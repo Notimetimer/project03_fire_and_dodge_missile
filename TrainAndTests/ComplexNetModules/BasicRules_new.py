@@ -153,7 +153,7 @@ if __name__=='__main__':
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 # Adjusted capacity
 
     steps_count = 0
 

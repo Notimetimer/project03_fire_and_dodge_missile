@@ -1114,20 +1114,8 @@ def run_MLP_simulation(
                     il_transition_buffer.add(new_il_transition_dict)
 
 
-                
-            return_list.append(episode_return)
-            env.clear_render(t_bias=t_bias)
-            t_bias += env.t
-
-            print(f"Episode {i_episode}, Progress: {total_steps/current_max_steps:.3f}, Curr Return: {episode_return}")
-            print()
-
-            
-            
-            # --- 保存模型与 ELO 维护 ---
-            if i_episode % save_interval == 0 and\
-                len(transition_dict['dones'])>=transition_dict_threshold:
-                
+            # --- RL Update ---
+            if len(transition_dict['dones'])>=transition_dict_threshold: 
                 if use_sil:
                     #===========================================
                     # 混合强化学习与模仿学习
@@ -1189,7 +1177,18 @@ def run_MLP_simulation(
                 # 修改：重置 transition_dict 时保留 obs 键
                 transition_dict = copy.deepcopy(empty_transition_dict)
                 
+                
+            return_list.append(episode_return)
+            env.clear_render(t_bias=t_bias)
+            t_bias += env.t
 
+            print(f"Episode {i_episode}, Progress: {total_steps/current_max_steps:.3f}, Curr Return: {episode_return}")
+            print()
+
+            
+            
+            # --- 保存模型与 ELO 维护 ---
+            if i_episode % save_interval == 0:
                 torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
                 
                 actor_name = f"actor_rein{i_episode}.pt" # 物理文件名

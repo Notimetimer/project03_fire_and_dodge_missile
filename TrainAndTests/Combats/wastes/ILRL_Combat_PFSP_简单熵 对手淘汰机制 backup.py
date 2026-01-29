@@ -324,7 +324,7 @@ if __name__ == "__main__":
 
     action_cycle_multiplier = 30 # 8s 决策一次
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = 5 * env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = 5 * env.args.max_episode_len//dt_action_cycle + 1 
 
     # --- [Fix] 初始化 ELO 变量与辅助函数 ---
     K_FACTOR = 32
@@ -727,7 +727,7 @@ if __name__ == "__main__":
         logger.add("train/11 episode/step", i_episode, total_steps)
         
         # --- RL Update ---
-        if len(transition_dict['dones'])>=transition_dict_capacity: 
+        if len(transition_dict['dones'])>=transition_dict_threshold: 
             student_agent.update(transition_dict, adv_normed=1, mini_batch_size=64)  # 优势归一化 debug
             decide_steps_after_update = 0
 

@@ -281,7 +281,7 @@ if __name__ == "__main__":
         return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier
-    transition_dict_capacity = env.args.max_episode_len//dt_action_cycle + 1 
+    transition_dict_threshold = env.args.max_episode_len//dt_action_cycle + 1 
 
     i_episode = 0 
     total_steps = 0
@@ -446,7 +446,7 @@ if __name__ == "__main__":
         logger.add("train/win_rate", int(env.win), total_steps)
 
         # --- Update Networks ---
-        if len(mav_transition_dict['dones']) >= transition_dict_capacity:
+        if len(mav_transition_dict['dones']) >= transition_dict_threshold:
             print("Updating Agents...")
             # Update Maverick
             maverick_agent.update(mav_transition_dict, adv_normed=1)
