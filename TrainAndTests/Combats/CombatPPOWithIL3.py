@@ -1051,9 +1051,9 @@ def run_MLP_simulation(
 
 
             # 2. ELO 更新与记录逻辑
-            if selected_opponent_name in elite_elo_ratings and not is_kicked_opponent:
+            if selected_opponent_name in elo_ratings and not is_kicked_opponent:
                 # A. 正常更新 ELO：对手合格，进行 ELO 结算
-                adv_elo = elite_elo_ratings[selected_opponent_name]
+                adv_elo = elo_ratings[selected_opponent_name]
                 main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score)
                 
                 # 更新对手 ELO
@@ -1061,7 +1061,8 @@ def run_MLP_simulation(
                 
                 # --- [核心修改] 同步更新两个字典 ---
                 # 更新精英池
-                elite_elo_ratings[selected_opponent_name] = new_adv_elo
+                if selected_opponent_name in elite_elo_ratings:
+                    elite_elo_ratings[selected_opponent_name] = new_adv_elo
                 
                 # 更新全量表 (即便对手以后被踢出精英池，全量表也会保留它最后的分数)
                 elo_ratings[selected_opponent_name] = new_adv_elo

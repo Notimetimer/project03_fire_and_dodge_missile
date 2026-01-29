@@ -1053,19 +1053,21 @@ def run_MLP_simulation(
                     # 如果对手表现极差（例如无脑不开火且输了），可以不更新 ELO 甚至踢出
                     # 这里简化处理，暂时都更新
                     pass
-
-                if opp_name in elite_elo_ratings and should_update:
+                
+                if opp_name in elo_ratings:
                     prev_main_elo = main_agent_elo
-                    adv_elo = elite_elo_ratings[opp_name]
+                    adv_elo = elo_ratings[opp_name]
                     
                     # 更新主智能体Elo分
                     main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score, K_FACTOR)
                     # 更新对手Elo分
                     new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR)
-                    
-                    elite_elo_ratings[opp_name] = new_adv_elo
                     elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
+                    if opp_name in elite_elo_ratings:
+                        elite_elo_ratings[opp_name] = new_adv_elo
+                else:
+                    print('警告，elo_ratings没有全部收录!!!')
             
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
