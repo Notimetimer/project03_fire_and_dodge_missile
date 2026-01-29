@@ -678,6 +678,7 @@ def run_MLP_simulation(
     save_interval = 2, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
     opp_greedy_rate = 0.5, # 对手贪婪率
     num_runs = 3, # 测试回合重复次数
+    device = torch.device("cpu"),
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -701,7 +702,7 @@ def run_MLP_simulation(
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     del dummy_env
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
 
     # 3. 创建神经网络

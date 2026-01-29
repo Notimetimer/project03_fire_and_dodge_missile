@@ -31,7 +31,7 @@ trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 2 # 初始模仿对象
-
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
@@ -124,6 +124,7 @@ if __name__=='__main__':
         save_interval = 1, # 触发更新至少要经过多少批采样
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
+        device = device,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

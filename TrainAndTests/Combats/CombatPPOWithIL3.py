@@ -333,6 +333,7 @@ def run_MLP_simulation(
     randomized_birth = 1,
     save_interval = 5,
     opp_greedy_rate = 0.5, # 对手贪婪率
+    device = torch.device("cpu"),
 ):
 
     
@@ -368,7 +369,7 @@ def run_MLP_simulation(
     # cat: 离散机动动作头 (env.fly_act_dim 通常是一个列表 [n_actions])
     # bern: 攻击动作头 (env.fire_dim 通常是 1)
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    
     action_bound = None
 
     # 1. 创建神经网络

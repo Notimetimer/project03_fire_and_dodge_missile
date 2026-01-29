@@ -27,7 +27,7 @@ trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 2 # 初始模仿对象
-
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
@@ -107,6 +107,7 @@ if __name__=='__main__':
         WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
         ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
         MAX_HISTORY_SIZE = 300,  # 100
+        device = device,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
