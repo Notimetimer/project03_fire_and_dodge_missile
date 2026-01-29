@@ -69,8 +69,8 @@ class PolicyNetHybrid(torch.nn.Module):
             # 初始化为 0 (即 temp=1.0)
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
-    # [修改] 增加 action_masks 参数
-    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None):
+    # [修改] 增加 action_masks 参数, [新增] 增加 temp 参数
+    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0):
         shared_features = self.net(x)
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -94,7 +94,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
-            temps = 1.0  # use scalar temp (or replace with tensor if per-head temps are needed)
+            # temps = 1.0  # [修改] 使用传入的 temp
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
             # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
@@ -103,7 +103,8 @@ class PolicyNetHybrid(torch.nn.Module):
             for i, logits in enumerate(cat_logits_list):
                 # 对应的温度: temps[i]
                 # scaled_logits = logits / (temps[i] + 1e-8)
-                scaled_logits = logits / (temps + 1e-8)
+                # 使用传入的 temp 进行缩放, 防止除0
+                scaled_logits = logits / (temp + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
             
             outputs['cat'] = final_probs_list
@@ -119,9 +120,9 @@ class PolicyNetHybrid(torch.nn.Module):
                 # mask == 0 代表禁止开火，设为极小值
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
-            # use scalar temp (no tensor ops on plain number)
-            temps = 1.0 # torch.exp(self.log_temp_bern)
-            scaled_bern_logits = bern_logits / (temps + 1e-8)
+            # [修改] 使用传入的 temp
+            # temps = 1.0 
+            scaled_bern_logits = bern_logits / (temp + 1e-8)
             outputs['bern'] = scaled_bern_logits
             
         return outputs
@@ -133,7 +134,7 @@ class PolicyNetHybrid(torch.nn.Module):
 class HybridActorWrapper(nn.Module):
     """
     统一接口适配器。
-    将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get_action 和 evaluate_actions 接口。
+    将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get action 和 evaluate actions 接口。
     未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
     """
     def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu'):
@@ -155,8 +156,8 @@ class HybridActorWrapper(nn.Module):
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    # [修改] 增加 check_obs 参数，默认为 None
-    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5):
+    # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temp 参数
+    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temp=1.0):
         """
         推理接口。
         Args:
@@ -170,7 +171,7 @@ class HybridActorWrapper(nn.Module):
             next_h: hidden state (预留接口)
             
         注意： 仅在推理时传入check_obs, 训练时禁止传入!!!
-        1、目前 get_action 中的 mask 生成只处理单个 check_obs（推理时），
+        1、目前 get action 中的 mask 生成只处理单个 check_obs（推理时），
             并把同一 mask 广播到整个 batch；如果要对 batch 内每个样本分别判断需扩展生成逻辑。
         2、evaluate_actions（训练/计算 log_prob）默认未把 action_masks 传给 net ,
             若希望训练时也应用 mask，需要在 evaluate_actions 调用 net 时传入 action_masks。
@@ -251,8 +252,8 @@ class HybridActorWrapper(nn.Module):
             action_masks = {'bern': mask_tensor}
         # =====================================================================
 
-        # [修改] 调用网络时传入 action_masks
-        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks)
+        # [修改] 调用网络时传入 action_masks 和 temp
+        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks, temp=temp)
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
@@ -578,16 +579,13 @@ class PPOHybrid:
         self.critic_optimizer.zero_grad()
     
     
-    def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None):
+    def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None, temperature=1.0):
         # 委托给 Actor Wrapper
         max_s = max_std if max_std is not None else self.max_std
-        # 注意：这里返回了 hidden_state (虽然是 None)，保持接口一致性
-        # actions_exec, actions_raw, _ = self.actor.get_action(state, h=h0, explore=explore, max_std=max_s)
-        # return actions_exec, actions_raw
         
         # [修改] 透传 check_obs
         actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(
-            state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs
+            state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs, temp=temperature
         )
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
