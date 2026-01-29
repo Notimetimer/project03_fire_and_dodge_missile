@@ -807,13 +807,13 @@ def run_MLP_simulation(
                 # 尝试找到对应的权重文件
                 # 假设 selected_opponent_name 格式为 "actor_rein10"
                 adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
-                if os.path.exists(adv_path):
-                    adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device, weights_only=1), strict=False)
-                    print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
-                else:
-                    print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_0.")
-                    adv_is_rule = True
-                    rule_num = 0
+                # if os.path.exists(adv_path):
+                adv_agent.actor.load_state_dict(torch.load(adv_path, map_location=device, weights_only=1), strict=False)
+                print(f"Eps {i_episode}: Opponent Loaded from {selected_opponent_name} (ELO: {elo_ratings[selected_opponent_name]:.0f})")
+                # else:
+                #     print(f"Warning: Opponent file {adv_path} not found. Fallback to Rule_0.")
+                #     adv_is_rule = True
+                #     rule_num = 0
             
             episode_return = 0
 
