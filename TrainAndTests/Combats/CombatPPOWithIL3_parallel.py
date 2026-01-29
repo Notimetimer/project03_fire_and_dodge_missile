@@ -871,9 +871,6 @@ def run_MLP_simulation(
                 # 等待所有测试进程结束
                 test_results = [t.get() for t in test_tasks]
                 
-                trigger += trigger_delta # 更新下一次触发阈值
-               
-                
                 # 阻塞式处理逻辑
                 outcomes = {rule_num: score for rule_num, score in test_results}
                 for r_num, score in outcomes.items():
@@ -1289,29 +1286,45 @@ def run_MLP_simulation(
                         
         # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")
+        # 【新增】明确告知用户 Worker 当前状态
+        print("All simulation workers are now idling safely. System is paused.") 
+        
+        inp = input(f"Enter new max_steps (current {total_steps}), or press Enter to exit: ")
+        
+        if not inp.strip():
+            print("No input provided. Exiting training.")
+            break # 退出外层 while True 循环
         try:
-            inp = input(f"Enter new max_steps (current {total_steps}): ")
-            
-            if not inp.strip():
-                print("No input provided. Exiting training.")
-                break # 退出外层 while True 循环
             new_max = int(inp)
             if new_max > total_steps:
                 current_max_steps = new_max
                 print(f"Continuing training until {current_max_steps} steps.")
             else:
-                print(f"Input ({inp}) is not greater than current steps ({total_steps}). Exiting training.")
+                print("Input steps less than current. Exiting...")
                 break # 退出外层 while True 循环
-        except:
-            print("\nInterrupted by user. Exiting training.")
+        except ValueError:
+            print("Invalid input (not a number). Exiting...")
             break
 
     # Cleanup
     print("Closing workers...")
-    for pipe in pipes: pipe.send(('EXIT', None))
-    for p in workers: p.join()
+    for pipe in pipes:
+        try: # 【新增】防止管道已断开导致的报错
+            pipe.send(('EXIT', None))
+        except:
+            pass
+            
+    for p in workers:
+        p.join(timeout=5) # 【修改】给子进程 5 秒优雅退出的时间
+        if p.is_alive():
+            p.terminate() # 如果没死，强制结束
     
-    test_pool.close()
-    test_pool.join()
+    # 【修改】调整顺序：先尝试关闭测试池
+    try:
+        test_pool.close()
+        test_pool.join()
+    except:
+        pass
+    
     logger.close()
     print("Training Finished.")
