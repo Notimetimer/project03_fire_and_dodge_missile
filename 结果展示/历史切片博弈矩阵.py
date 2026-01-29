@@ -27,6 +27,7 @@ action_cycle_multiplier = 30
 dt_maneuver = 0.2
 TOTAL_ROUNDS = 100 # 每两队之间打100场
 TEAM_SIZE = 10     # 每队成员数
+using_explore_maneuver = 0  # 是否在实验间测试的时候允许动作有随机性
 
 def get_agent_teams(log_dir):
     """根据文件编号划分三个进度的队伍"""
@@ -73,9 +74,9 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             
             with torch.no_grad():
                 # 红方决策
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1})
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':using_explore_maneuver,'bern':1})
                 # 蓝方决策
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1})
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':using_explore_maneuver,'bern':1})
             
             if r_act['bern'][0]: launch_missile_immediately(env, 'r')
             if b_act['bern'][0]: launch_missile_immediately(env, 'b')

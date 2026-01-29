@@ -27,6 +27,7 @@ TOTAL_ROUNDS = 100    # 每对任务之间对抗 100 场
 TEAM_SIZE = 50        # 每队从 Elo 排行中取前 50 名
 action_cycle_multiplier = 30
 dt_maneuver = 0.2
+using_explore_maneuver = 0  # 是否在实验间测试的时候允许动作有随机性
 
 # --- 2. 核心辅助函数 ---
 
@@ -68,8 +69,8 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
             b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':0,'bern':1})
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':0,'bern':1})
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':using_explore_maneuver,'bern':1})
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':using_explore_maneuver,'bern':1})
             if r_act['bern'][0]: launch_missile_immediately(env, 'r')
             if b_act['bern'][0]: launch_missile_immediately(env, 'b')
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]
