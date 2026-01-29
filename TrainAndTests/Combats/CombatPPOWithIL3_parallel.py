@@ -301,8 +301,11 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
     # 【核心修改】在函数内部合并出一个临时的全集字典用于查询分数
     # 这样 keys 里的任何元素都能在这里找到对应的 ELO
     
-    candidate_pool = hall_of_fame.copy()
-    candidate_pool.update(elite_elo_ratings)
+    if hall_of_fame is not None:
+        candidate_pool = hall_of_fame.copy()
+        candidate_pool.update(elite_elo_ratings)
+    else:
+        candidate_pool = elite_elo_ratings
     
     keys = list(candidate_pool.keys())
     if not keys:

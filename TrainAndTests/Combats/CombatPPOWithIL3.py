@@ -559,7 +559,7 @@ def run_MLP_simulation(
 
     def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
                                    target_elo=None, sigma=400, SP_type='PFSP_with_delta', 
-                                   rule_rate=rule_actor_rate):
+                                   rule_rate=0.5, deltaFSP_epsilon=0.5):
         """
         优化后的对手采样逻辑：
         1. 优先判定是否进入“规则复习”分支。
@@ -567,9 +567,11 @@ def run_MLP_simulation(
         """
         # 【核心修改】在函数内部合并出一个临时的全集字典用于查询分数
         # 这样 keys 里的任何元素都能在这里找到对应的 ELO
-        
-        candidate_pool = hall_of_fame.copy()
-        candidate_pool.update(elite_elo_ratings)
+        if hall_of_fame is not None:
+            candidate_pool = hall_of_fame.copy()
+            candidate_pool.update(elite_elo_ratings)
+        else:
+            candidate_pool = elite_elo_ratings
         
         keys = list(candidate_pool.keys())
         if not keys:
@@ -762,7 +764,15 @@ def run_MLP_simulation(
 
             # else:
             # 策略 B & C: 使用 Elo 概率，但可能对 Rule_0 进行加权
-            probs, opponent_keys = get_opponent_probabilities(elite_elo_ratings, target_elo=main_agent_elo, SP_type=self_play_type, sigma=sigma_elo)
+            probs, opponent_keys = get_opponent_probabilities(
+                elite_elo_ratings, 
+                hall_of_fame,
+                target_elo=main_agent_elo, 
+                SP_type=self_play_type, 
+                sigma=sigma_elo,
+                rule_rate=rule_actor_rate,
+                deltaFSP_epsilon=deltaFSP_epsilon,
+            )
 
 
             # 最终根据概率采样
