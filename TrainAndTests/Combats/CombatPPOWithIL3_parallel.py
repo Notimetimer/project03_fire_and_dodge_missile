@@ -865,7 +865,7 @@ def run_MLP_simulation(
                         test_worker, 
                         args=(current_weights, r_idx, args, 
                               state_dim, hidden_dim, action_dims_dict, 
-                              dt_maneuver, 'cpu', num_runs)
+                              dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
                     )
                     test_tasks.append(obj)
                 # 等待所有测试进程结束

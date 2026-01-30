@@ -27,7 +27,7 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 def test_worker(model_state_dict, rule_num, 
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
-                device_name='cpu', num_runs=1):
+                device_name='cpu', num_runs=1, action_cycle_multiplier=30):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -48,12 +48,13 @@ def test_worker(model_state_dict, rule_num,
     actor = HybridActorWrapper(net, action_dims_dict, None, device).to(device)
     actor.load_state_dict(model_state_dict)
     actor.eval() # 设置为评估模式
-
+    action_cycle = action_cycle_multiplier
+    
     # 3. 运行对战逻辑
     result = 0
     for _ in range(num_runs):
         test_env.reset(red_init_ammo=6, blue_init_ammo=6)
-        action_cycle = 30
+        
         steps = 0
         done = False
         
