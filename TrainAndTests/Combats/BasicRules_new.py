@@ -113,8 +113,8 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         fire_missile_affirmative = fire_missile
         
     if  np.random.rand() <= p_random:
-        action_number = np.random.randint(0, 14+1)
-        action_number = np.clip(action_number, 0, 14)
+        action_number = np.random.randint(0, 13+1)
+        action_number = np.clip(action_number, 0, 13)
     
     if rules_num in [3, 4]:
         # 不准出界
@@ -123,14 +123,14 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     
     # 防撞地规则
     if alt < 3000:
-        if action_number in [1, 4, 5]:
-            action_number = 2
-        if action_number in [9,12,13,14]:
-            action_number = 12
+        if action_number in [0, 3, 4]:
+            action_number = 1
+        if action_number in [8,11,12,13]:
+            action_number = 11
     # 防破升限
     if alt > 12000:
-        if action_number in [2,3]:
-            action_number = 1
+        if action_number in [1,2]:
+            action_number = 0
 
     return action_number, fire_missile_affirmative
 
