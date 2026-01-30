@@ -17,7 +17,7 @@ import re
 use_tacview = 1  # 是否可视化
 action_cycle_multiplier = 30
 
-def basic_rules(state_check, rules_num, last_action=0):
+def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     '''
     rules_num = 0: 保持和目标相同高度只打进攻(action_number = 0,1,3)，0平飞追踪 1爬升追踪 3下降追踪，攻击区内发射导弹，上一枚导弹发射后如果还在中制导，不发射新导弹
     rules_num = 1: 保持和目标相同高度进攻(0,1,3), 发射完导弹立马crank(5,6), 受到威胁立刻回转至5000m高度以下(11水平回转, 12俯冲回转), 威胁结束后回归进攻
@@ -112,9 +112,9 @@ def basic_rules(state_check, rules_num, last_action=0):
             action_number = 3  # 低空苟分
         fire_missile_affirmative = fire_missile
         
-
-    # if fire_missile_affirmative:
-    #     launch_missile_immediately(env, side)
+    if  np.random.rand() <= p_random:
+        action_number = np.random.randint(0, 14+1)
+        action_number = np.clip(action_number, 0, 14)
     
     if rules_num in [3, 4]:
         # 不准出界

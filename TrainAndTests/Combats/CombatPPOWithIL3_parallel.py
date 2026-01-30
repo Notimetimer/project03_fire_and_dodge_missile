@@ -543,7 +543,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             r_state_check = env.unscale_state(r_check_obs)
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
-                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=0)
+                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=0, p_random=0.1)
                                 r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
