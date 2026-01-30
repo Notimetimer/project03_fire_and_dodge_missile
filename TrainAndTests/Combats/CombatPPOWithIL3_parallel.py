@@ -768,7 +768,7 @@ def run_MLP_simulation(
     
     # --- 新增：实例化混合缓冲区 ---
     il_transition_buffer = None
-    if IL_epoches > 0:
+    if IL_epoches + use_sil > 0:  # 只要出现模仿学习就得准备好初始的模仿池
         print("Initializing IL Transition Buffer...")
         il_transition_buffer = IL_transition_buffer(original_il_transition_dict0, max_size=il_buffer_max_size)
 
