@@ -1115,7 +1115,7 @@ def run_MLP_simulation(
                         # 2. 公式参数配置: a=-8, b=-2, k=0.006
                         # a_p, b_p, k_p = -8, -2, 0.006
                         # mid = (a_p + b_p) / 2.0        # -5.0
-                        
+
                         a_p = -8
                         k_p = 0.006
                         mid = log10(alpha_il)
@@ -1127,6 +1127,7 @@ def run_MLP_simulation(
                         # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
                         # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
                         exponent = mid - scale * np.tanh(k_p * x_elo_diff)
+                        exponent = min(exponent, -2)
                         dynamic_alpha_il = 10 ** exponent
                     else:
                         dynamic_alpha_il = 10 ** mid
