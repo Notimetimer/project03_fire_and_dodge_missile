@@ -1113,8 +1113,14 @@ def run_MLP_simulation(
                         x_elo_diff = main_agent_elo - avg_pool_elo
                         
                         # 2. 公式参数配置: a=-8, b=-2, k=0.006
-                        a_p, b_p, k_p = -8, -2, 0.006
-                        mid = (a_p + b_p) / 2.0        # -5.0
+                        # a_p, b_p, k_p = -8, -2, 0.006
+                        # mid = (a_p + b_p) / 2.0        # -5.0
+                        
+                        a_p = -8
+                        k_p = 0.006
+                        mid = log10(alpha_il)
+                        b_p = 2 * mid - a_p
+
                         scale = (b_p - a_p) / 2.0      # 3.0
                         
                         # 计算指数部分: exponent = mid - scale * tanh(k * x)
