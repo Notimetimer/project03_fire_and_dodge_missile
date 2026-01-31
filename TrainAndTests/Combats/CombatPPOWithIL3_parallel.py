@@ -1095,6 +1095,40 @@ def run_MLP_simulation(
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
                 transition_dict['actions'] = restructure_actions(transition_dict['actions'])
                 if use_sil:
+                    # [新增] 调节alpha_il
+                    # --- [新增] 动态计算 alpha_il ---
+                    # 1. 筛选对手池：Rule开头的所有Key + actor_rein开头的最后300个Key
+                    all_keys = list(elo_ratings.keys())
+                    rule_keys = [k for k in all_keys if k.startswith('Rule')]
+                    rein_keys = [k for k in all_keys if k.startswith('actor_rein')]
+                    # 取最后（最新插入）的300个
+                    latest_rein_keys = rein_keys[-300:] if len(rein_keys) > 300 else rein_keys
+                    
+                    target_pool_keys = rule_keys + latest_rein_keys
+                    
+                    if target_pool_keys:
+                        # 计算池子平均分
+                        avg_pool_elo = np.mean([elo_ratings[k] for k in target_pool_keys])
+                        # 计算 Elo 差值 x (当前主分 - 池子均分)
+                        x_elo_diff = main_agent_elo - avg_pool_elo
+                        
+                        # 2. 公式参数配置: a=-8, b=-2, k=0.006
+                        a_p, b_p, k_p = -8, -2, 0.006
+                        mid = (a_p + b_p) / 2.0        # -5.0
+                        scale = (b_p - a_p) / 2.0      # 3.0
+                        
+                        # 计算指数部分: exponent = mid - scale * tanh(k * x)
+                        # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
+                        # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
+                        exponent = mid - scale * np.tanh(k_p * x_elo_diff)
+                        dynamic_alpha_il = 10 ** exponent
+                    else:
+                        dynamic_alpha_il = 10 ** mid
+                    
+                    # 记录动态参数到 TensorBoard
+                    logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
+                    logger.add("train_plus/elo_diff_x_for_il", x_elo_diff, total_steps)
+                    
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
                     
