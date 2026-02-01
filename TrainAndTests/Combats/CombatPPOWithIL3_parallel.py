@@ -1112,29 +1112,38 @@ def run_MLP_simulation(
                         # 计算 Elo 差值 x (当前主分 - 池子均分)
                         x_elo_diff = main_agent_elo - avg_pool_elo
                         
-                        # 2. 公式参数配置: a=-8, b=-2, k=0.006
-                        # a_p, b_p, k_p = -8, -2, 0.006
-                        # mid = (a_p + b_p) / 2.0        # -5.0
-
-                        a_p = -8
-                        k_p = 0.006
-                        mid = log10(alpha_il)
-                        b_p = 2 * mid - a_p
-
-                        scale = (b_p - a_p) / 2.0      # 3.0
+                        # # 变化尺度对称型函数
+                        # a_p = -8
+                        # k_p = 0.006
+                        # mid = log10(alpha_il)
+                        # b_p = 2 * mid - a_p
+                        # scale = (b_p - a_p) / 2.0      # 3.0
+                        # # 计算指数部分: exponent = mid - scale * tanh(k * x)
+                        # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
+                        # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
+                        # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
+                        # exponent = min(exponent, -2)
                         
-                        # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                        # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                        # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                        exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                        exponent = min(exponent, -2)
-                        dynamic_alpha_il = 10 ** exponent
+                        # # 非对称函数
+                        # --- 自定义参数配置 ---
+                        M = -2.0      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
+                        b = min(M, log10(alpha_il))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
+                        k_shape = 0.004 # 形状参数：越大则领跑时关闭自模仿的速度越快
+                        
+                        # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
+                        # 为了防止巨大的 x 导致 exp 溢出，对 x 进行上限裁剪
+                        x_for_exp = np.clip(x_elo_diff, -1000, 1000)
+                        exponent = M - (M - b) * np.exp(k_shape * x_for_exp)
+                        
+                        # 得到最终 alpha_il (10 的 exponent 次方)
+                        dynamic_alpha_il = 10 ** max(exponent, -20)
                     else:
-                        dynamic_alpha_il = 10 ** mid
+                        dynamic_alpha_il = alpha_il
                     
                     # 记录动态参数到 TensorBoard
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                    logger.add("train_plus/elo_diff_x_for_il", x_elo_diff, total_steps)
+                    logger.add("train_plus/alpha_exponent", exponent, total_steps)
+                    logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                     
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
@@ -1147,7 +1156,7 @@ def run_MLP_simulation(
                         eta = np.clip(1 - total_steps/3e6, 0, 1),
                         adv_normed=True,
                         label_smoothing=label_smoothing_mixed,
-                        alpha=alpha_il,
+                        alpha=dynamic_alpha_il,
                         beta=beta_mixed,
                         sil_only_maneuver = sil_only_maneuver,
                         mini_batch_size = mini_batch_size_mixed
