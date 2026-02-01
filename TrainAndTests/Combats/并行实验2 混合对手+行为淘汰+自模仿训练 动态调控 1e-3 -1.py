@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行带动态调控'
+mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行带动态调控1e-4 -1'
 
 # IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
@@ -19,7 +19,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1e-3  # 1e-2  # 设置为0就是纯强化学习
+alpha_il = 1e-4  # 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
@@ -126,7 +126,7 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
-        max_il_exponent = -2.0,
+        max_il_exponent = -1.0,
         k_shape_il = 0.004,
     )
     end_time = datetime.now()

@@ -679,6 +679,8 @@ def run_MLP_simulation(
     opp_greedy_rate = 0.5, # 对手贪婪率
     num_runs = 3, # 测试回合重复次数
     device = torch.device("cpu"),
+    max_il_exponent = -2.0,
+    k_shape_il = 0.004,
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -1126,9 +1128,9 @@ def run_MLP_simulation(
                         
                         # # 非对称函数
                         # --- 自定义参数配置 ---
-                        M = -2.0      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
+                        M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
                         b = min(M, log10(alpha_il))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
-                        k_shape = 0.004 # 形状参数：越大则领跑时关闭自模仿的速度越快
+                        k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
                         
                         # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
                         # 为了防止巨大的 x 导致 exp 溢出，对 x 进行上限裁剪
