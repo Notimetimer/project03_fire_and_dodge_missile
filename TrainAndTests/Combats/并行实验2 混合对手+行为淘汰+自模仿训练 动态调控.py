@@ -1,11 +1,9 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行带动态调控'
+mission_name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行带动态调控 线性'
 
-# IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
-# IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
-# IL_and_PFSP_带自模仿_混规则对手_平衡对手_无淘汰   PFSP_balanced
+# 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行带动态调控'
 
 
 # 超参数
@@ -126,8 +124,8 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
-        max_il_exponent = -2.0,
-        k_shape_il = 0.004,
+        max_il_exponent = -1.5,  # -2.0
+        k_shape_il = 0.04,  # 0.004, # 指数型函数改为线性函数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

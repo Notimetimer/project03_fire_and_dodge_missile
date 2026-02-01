@@ -1131,11 +1131,13 @@ def run_MLP_simulation(
                         M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
                         b = min(M, log10(alpha_il))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
                         k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-                        
-                        # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
-                        # 为了防止巨大的 x 导致 exp 溢出，对 x 进行上限裁剪
-                        x_for_exp = np.clip(x_elo_diff, -1000, 1000)
-                        exponent = M - (M - b) * np.exp(k_shape * x_for_exp)
+
+                        # # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
+                        # # 为了防止巨大的 x 导致 exp 溢出，对 x 进行上限裁剪
+                        # x_for_exp = np.clip(x_elo_diff, -1000, 1000)
+                        # exponent = M - (M - b) * np.exp(k_shape * x_for_exp)
+
+                        exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
                         
                         # 得到最终 alpha_il (10 的 exponent 次方)
                         dynamic_alpha_il = 10 ** max(exponent, -20)
