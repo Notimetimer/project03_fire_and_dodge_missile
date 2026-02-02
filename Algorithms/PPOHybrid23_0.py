@@ -1253,7 +1253,7 @@ class PPOHybrid:
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
-                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_updates=1,
+                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_epochs=1,
                      sil_only_maneuver=True,
                      # 公共参数
                      shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
@@ -1366,11 +1366,11 @@ class PPOHybrid:
         il_samples_total = 0
         il_valid_samples_total = 0
 
-        for _ in range(il_updates):
+        for _ in range(il_epochs):
             actor_loss_init_il = torch.tensor(0.0, device=self.device) # 显式初始化
             # 使用全量(或最大batch) IL 数据，不切分 Mini-Batch
             # 这里也可以稍微 Shuffle 一下 IL 数据，或者直接随机采样 batch_size
-            curr_il_batch_size = il_batch_size if il_batch_size is not None else il_total_size
+            curr_il_batch_size = min(il_batch_size, il_total_size) if il_batch_size is not None else il_total_size
             
             # 简单起见，如果要求全batch，则直接取全部，或者随机取一个大 Batch
             il_indices = np.random.randint(0, il_total_size, curr_il_batch_size)
@@ -1522,9 +1522,9 @@ class PPOHybrid:
         # 定义权重：PPO 占 epoch * batches 份，IL 占 1 份 (或者你希望 1:1，可以设 il_weight = ppo_num_batches)
         # 这里按照“梯度更新次数”进行加权是比较科学的
         def weighted_avg(ppo_val, il_val, 
-                         ppo_num_batches=ppo_num_batches, il_updates=il_updates):
-            total_updates = ppo_num_batches + il_updates
-            return (ppo_val * ppo_num_batches + il_val * il_updates) / total_updates
+                         ppo_num_batches=ppo_num_batches, il_epochs=il_epochs):
+            total_updates = ppo_num_batches + il_epochs
+            return (ppo_val * ppo_num_batches + il_val * il_epochs) / total_updates
 
         # 更新类属性用于 Log
         self.actor_loss = weighted_avg(ppo_stats['actor_loss'], np.mean(actor_loss_list))

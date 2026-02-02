@@ -240,7 +240,7 @@ class IL_transition_buffer:
         if total_len == 0:
             raise ValueError("IL_transition_buffer is empty.")
             
-        indices = np.random.randint(0, total_len, size=batch_size)
+        indices = np.random.randint(0, total_len, size=min(batch_size, total_len))
         
         # 采样（列表推导式，保持原始元素格式）
         sampled_obs = [self.addon_dict['obs'][i] for i in indices]
@@ -1097,6 +1097,17 @@ def run_MLP_simulation(
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
                 transition_dict['actions'] = restructure_actions(transition_dict['actions'])
                 
+                '记录ELo相对位置'
+                # [新增] 调节alpha_il
+                # --- [新增] 动态计算 alpha_il ---
+                # 1. 筛选对手池：Rule开头的所有Key + actor_rein开头的最后300个Key
+                all_keys = list(elo_ratings.keys())
+                rule_keys = [k for k in all_keys if k.startswith('Rule')]
+                rein_keys = [k for k in all_keys if k.startswith('actor_rein')]
+                # 取最后（最新插入）的300个
+                latest_rein_keys = rein_keys[-300:] if len(rein_keys) > 300 else rein_keys
+                
+                target_pool_keys = rule_keys + latest_rein_keys
                 # 计算池子滑动平均分
                 avg_pool_elo = np.mean([elo_ratings[k] for k in target_pool_keys])
                 # 计算 Elo 差值 x (当前主分 - 池子均分)
@@ -1104,17 +1115,6 @@ def run_MLP_simulation(
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
                 if use_sil:
-                    # [新增] 调节alpha_il
-                    # --- [新增] 动态计算 alpha_il ---
-                    # 1. 筛选对手池：Rule开头的所有Key + actor_rein开头的最后300个Key
-                    all_keys = list(elo_ratings.keys())
-                    rule_keys = [k for k in all_keys if k.startswith('Rule')]
-                    rein_keys = [k for k in all_keys if k.startswith('actor_rein')]
-                    # 取最后（最新插入）的300个
-                    latest_rein_keys = rein_keys[-300:] if len(rein_keys) > 300 else rein_keys
-                    
-                    target_pool_keys = rule_keys + latest_rein_keys
-                    
                     if target_pool_keys:
                         
                         # # 变化尺度对称型函数
