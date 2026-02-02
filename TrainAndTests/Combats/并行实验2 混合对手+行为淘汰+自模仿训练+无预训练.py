@@ -26,7 +26,8 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3
 label_smoothing_mixed=0.01
-action_cycle_multiplier = int(round(6/dt_maneuver)) # 6s 决策一次
+dt_decide = 6
+action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
@@ -127,7 +128,7 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         max_il_exponent = -1.5,  # -2.0
-        k_shape_il = 0.02,  # 0.04, # 指数型函数改为线性函数
+        k_shape_il = 0.005,  # 0.04, # 指数型函数改为线性函数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
