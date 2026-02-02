@@ -1096,6 +1096,13 @@ def run_MLP_simulation(
                 # if len(transition_dict['dones']) >= transition_dict_threshold:
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
                 transition_dict['actions'] = restructure_actions(transition_dict['actions'])
+                
+                # 计算池子滑动平均分
+                avg_pool_elo = np.mean([elo_ratings[k] for k in target_pool_keys])
+                # 计算 Elo 差值 x (当前主分 - 池子均分)
+                x_elo_diff = main_agent_elo - avg_pool_elo
+                logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
+                
                 if use_sil:
                     # [新增] 调节alpha_il
                     # --- [新增] 动态计算 alpha_il ---
@@ -1109,10 +1116,6 @@ def run_MLP_simulation(
                     target_pool_keys = rule_keys + latest_rein_keys
                     
                     if target_pool_keys:
-                        # 计算池子平均分
-                        avg_pool_elo = np.mean([elo_ratings[k] for k in target_pool_keys])
-                        # 计算 Elo 差值 x (当前主分 - 池子均分)
-                        x_elo_diff = main_agent_elo - avg_pool_elo
                         
                         # # 变化尺度对称型函数
                         # a_p = -8
@@ -1147,7 +1150,6 @@ def run_MLP_simulation(
                     # 记录动态参数到 TensorBoard
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
                     logger.add("train_plus/alpha_exponent", exponent, total_steps)
-                    logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                     
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
