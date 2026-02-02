@@ -1133,7 +1133,7 @@ def run_MLP_simulation(
                         # # 非对称函数
                         # --- 自定义参数配置 ---
                         M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                        b = min(M, log10(alpha_il))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
+                        b = min(M, log10(alpha_il + 1e-6))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
                         k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
 
                         # # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
