@@ -1,12 +1,12 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = '无IL_PFSP_分阶段_混规则对手_平衡_并行_3s'
+mission_name = '有IL_PFSP_分阶段_混规则对手_平衡_并行_3s'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0
+IL_epoches= 180
 max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -21,7 +21,8 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3
 label_smoothing_mixed=0.01
-action_cycle_multiplier = int(round(3/dt_maneuver)) # 6s 决策一次
+dt_decide = 3
+action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
@@ -98,6 +99,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
+        use_init_data=0,  # 是否留够他模仿的次数
         init_elo_ratings = {
             'Rule_0': 1200, # debug
             "Rule_1": 1200,
@@ -108,7 +110,7 @@ if __name__=='__main__':
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
-        use_sil = 0,
+        use_sil = 1,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
@@ -119,7 +121,9 @@ if __name__=='__main__':
         save_interval = 1, # 触发更新至少要经过多少批采样
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
-        device=device,
+        device = device,
+        max_il_exponent = -1.5,  # -2.0
+        k_shape_il = 0.005,  # 0.04, # 指数型函数改为线性函数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
