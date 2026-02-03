@@ -127,6 +127,8 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
+        max_il_exponent = -2.0,
+        k_shape_il = 0.0, # 常数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

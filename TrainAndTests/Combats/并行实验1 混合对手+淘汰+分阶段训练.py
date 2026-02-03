@@ -43,7 +43,7 @@ dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 
 
-require_new_IL_data = 0 # 是否需要现场产生示范数据
+require_new_IL_data = 1 # 是否需要现场产生示范数据
 
 
 # # 现场产生奖励函数一致的示范数据
