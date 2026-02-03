@@ -3,6 +3,9 @@ import torch
 from _context import *
 from TrainAndTests.Combats.BasicRules_new import basic_rules
 
+'''
+暂时不处理多策略软平均的问题，随机匹配1条策略并蒸馏
+'''
 
 class UnifiedPolicyWrapper:
     """
@@ -21,21 +24,34 @@ class UnifiedPolicyWrapper:
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
     
-    def get_action(self, obs, check_obs, agent_type, actor, explore=None):
+    def get_action(self, obs, check_obs, agent_info, weights=1, explore=None):
         """
         统一接口获取动作
         
         Args:
             obs: 观测值 (用于NN)
             check_obs: 检查用观测值 (用于规则)
-            agent_type: 'NN' 或 'rule'
-            actor: 如果是'NN'则为网络实例，如果是'rule'则为rule_num
+            agent_info: 元组 (agent_type, actor) 或其列表 [(agent_type, actor), ...]
+            weights: 权重，默认为1。如果 agent_info 是列表且 weights 形状不符，则平分权重。
             explore: 探索参数字典 (用于NN)
         
         Returns:
             action_exec: {'cat': array([动作标签]), 'bern': array([开火概率])}
             action_check: {'cat': array([14维概率分布]), 'bern': array([开火概率])}
         """
+        if isinstance(agent_info, list):
+            agent_list = agent_info
+            if not isinstance(weights, list) or len(weights) != len(agent_list):
+                weight_list = [1.0 / len(agent_list)] * len(agent_list)
+            else:
+                weight_list = weights
+        else:
+            agent_list = [agent_info]
+            weight_list = [1.0]
+
+        # 暂时采用列表中的第一个 agent，后续实现权重融合
+        agent_type, actor = agent_list[0]
+
         if agent_type == 'NN':
             return self._get_nn_action(obs, check_obs, actor, explore)
         elif agent_type == 'rule':

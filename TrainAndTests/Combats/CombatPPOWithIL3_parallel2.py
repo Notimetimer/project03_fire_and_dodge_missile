@@ -708,7 +708,7 @@ def run_MLP_simulation(
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
-    del dummy_env
+    # del dummy_env # 不允许删除了，后续还要用
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")

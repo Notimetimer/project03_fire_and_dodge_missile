@@ -934,180 +934,7 @@ class PPOHybrid:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
-    # =========================================================================
-    #  [New Helper] 提取出的 MSE 计算逻辑 (供 mixed_update 和 BC_update 复用)
-    # =========================================================================
-    def _compute_mse_loss_with_f(self, actor_input_batch, actions_batch, returns_batch, 
-                                 critic_s_batch, # 用于计算 V
-                                 max_weight=100.0, use_F=True):
-        """
-        计算基于 F 函数 (Advantage > 0) 门控的 MSE Loss。
-        """
-        # 1. 计算 F 函数 (优势加权门控)
-        with torch.no_grad():
-            # Critic 计算 V 值
-            # 注意：如果 actor_input 和 critic_input 不一样 (如 obs vs state)，这里需要传入正确的 tensor
-            # 在本类中，通常传入的是用于 Actor 的输入，如果 Actor 用 Obs，Critic 用 State，
-            # 外部调用时需确保 critic_s_batch 是正确的全局 State 或与 Actor 输入一致(视具体配置)
-            # 这里为了通用性，假设 critic_s_batch 是正确的 Critic 输入
-            v_pred = self.critic(critic_s_batch)
-            
-            # 计算优势
-            # 确保 returns_batch 是 (Batch, 1)
-            adv = (returns_batch - v_pred) / (torch.sqrt(self.c_sq) + 1e-8)
 
-            if use_F:
-                # F 函数：只有 Adv > 0 的样本权重为 1，否则为极小值
-                F_mask = torch.where(adv > 0, torch.ones_like(adv), torch.full_like(adv, 1e-6))
-                F_mask = torch.clamp(F_mask, max=max_weight)
-            else:
-                F_mask = torch.ones_like(adv)
-
-        # 2. 获取网络原始输出
-        outputs = self.actor.net(actor_input_batch)
-        
-        # 初始化 Loss Sum (Batch, 1)
-        mse_loss_sum = torch.zeros_like(adv)
-
-        # --- Continuous MSE ---
-        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
-            mu_current, _ = outputs['cont']
-            u_expert = actions_batch['cont']
-            mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
-
-        # --- Categorical MSE ---
-        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-            cat_probs_current = outputs['cat']
-            expert_cat = actions_batch['cat'].long()
-            for i, probs in enumerate(cat_probs_current):
-                target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
-                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
-
-        # --- Bernoulli MSE ---
-        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-            bern_logits = outputs['bern']
-            bern_probs = torch.sigmoid(bern_logits)
-            target_bern = actions_batch['bern']
-            mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
-
-        # 3. 应用 FMask 并求平均
-        # F_mask: [Batch, 1], mse_loss_sum: [Batch, 1]
-        if use_F:
-            final_loss = torch.mean(F_mask * mse_loss_sum)
-        else:
-            final_loss = torch.mean(mse_loss_sum)
-        
-        return final_loss, F_mask
-
-    
-    # =========================================================================
-    #  [New Method] BC_update (Critic 同 MARWIL, Actor 用 MSE+F)
-    # =========================================================================
-    def BC_update(self, il_transition_dict, batch_size=64, c_v=1.0, shuffled=1, max_weight=100.0):
-        """
-        行为克隆更新 (Behavior Cloning with F-function Constraint)。
-        Critic: 使用 MARWIL 风格的回归更新 (拟合 R)。
-        Actor: 使用 MSE 回归，但仅在 Advantage > 0 时通过 F 函数生效。
-        """
-        # 1. 数据准备
-        # 可能的局部观测
-        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
-            obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
-            use_obs = True
-        else:
-            use_obs = False
-            
-        # 冻结分布参数，只训练均值/Logits
-        if hasattr(self.actor.net, 'log_std_cont'):
-            self.actor.net.log_std_cont.requires_grad = False
-
-        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
-        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
-        
-        # 处理 Actions
-        raw_actions = il_transition_dict['actions']
-        actions_all = {}
-        if isinstance(raw_actions, list):
-            keys = raw_actions[0].keys()
-            temp_dict = {}
-            for k in keys:
-                temp_dict[k] = np.stack([d[k] for d in raw_actions], axis=0)
-            raw_actions = temp_dict
-        if isinstance(raw_actions, dict):
-            for k, v in raw_actions.items():
-                if k == 'cat':
-                    actions_all[k] = torch.tensor(v, dtype=torch.long).to(self.device)
-                else:
-                    actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
-
-        # 2. 索引准备
-        total_size = states_all.size(0)
-        indices = np.arange(total_size)
-        if shuffled:
-            np.random.shuffle(indices)
-
-        total_actor_loss = 0
-        total_critic_loss = 0
-        total_valid_samples = 0
-        batch_count = 0
-
-        # 初始化 c_sq 用于 Advantage 归一化 (如果不存在)
-        if not hasattr(self, 'c_sq'): 
-            self.c_sq = torch.tensor(1.0, device=self.device)
-
-        # 3. Mini-batch 循环
-        for start in range(0, total_size, batch_size):
-            end = min(start + batch_size, total_size)
-            batch_indices = indices[start:end]
-            
-            s_batch = states_all[batch_indices] 
-            r_batch = returns_all[batch_indices]
-            
-            if use_obs:
-                actor_input_batch = obs_all[batch_indices]
-            else:
-                actor_input_batch = s_batch
-            
-            # Critic input (通常 state)
-            critic_input_batch = s_batch
-
-            actions_batch = {}
-            for k, v in actions_all.items():
-                actions_batch[k] = v[batch_indices]
-
-            # --- A. Actor Loss (MSE + F) ---
-            # 使用 helper 函数计算
-            actor_loss, F_mask = self._compute_mse_loss_with_f(
-                actor_input_batch, actions_batch, r_batch, critic_input_batch, max_weight, use_F=0
-            )
-
-            # --- B. Critic Loss (同 MARWIL) ---
-            v_pred = self.critic(critic_input_batch)
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
-            
-            # --- C. Optimize ---
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            
-            actor_loss.backward()
-            critic_loss.backward()
-            
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-            
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
-
-            total_actor_loss += actor_loss.item()
-            total_critic_loss += critic_loss.item()
-            total_valid_samples += F_mask.sum().item()
-            batch_count += 1
-
-        avg_actor_loss = total_actor_loss / batch_count if batch_count > 0 else 0
-        avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0
-        
-        return avg_actor_loss, avg_critic_loss, total_valid_samples
-    
     
     
     # --- 修改后的 MARWIL_update ---
@@ -1548,3 +1375,43 @@ class PPOHybrid:
         
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")
         check_weights_bias_nan(self.critic, "critic", "mixed_update后")
+        
+    def mixed_update_with_distil(self, transition_dict, teacher_agent=None, 
+                                # RL 参数
+                                adv_normed=False, clip_vf=False, clip_range=0.2, 
+                                # 公共参数
+                                shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05,
+                                # 策略蒸馏参数  
+                                alpha=1.0, distil_only_maneuver=True):
+        # =====================================================================
+        # Phase 1: PPO 更新 (复用现有方法)
+        # =====================================================================
+        # 这一步会执行 self.epochs 次 PPO 更新，并修改 self.actor_loss 等类属性
+        self.update(transition_dict, adv_normed=adv_normed, clip_vf=clip_vf, 
+                    clip_range=clip_range, shuffled=shuffled, 
+                    mini_batch_size=mini_batch_size, alpha_logit_reg=alpha_logit_reg)
+
+        # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
+        # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
+        rl_total_size = len(transition_dict['states'])
+        # 假设 self.batch_size 是 PPO 的 mini_batch_size
+        # 如果 self.update 内部逻辑不同，这里可能需要调整计算方式
+        
+        # ppo_num_batches = max(1, int(rl_total_size / mini_batch_size)) * self.epochs
+        mb = mini_batch_size if mini_batch_size is not None else rl_total_size
+        ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
+        
+        ppo_stats = {
+            'actor_loss': self.actor_loss,
+            'critic_loss': self.critic_loss,
+            'actor_grad': self.actor_grad,
+            'critic_grad': self.critic_grad,
+            'entropy': self.entropy_mean,
+            'ratio': self.ratio_mean,
+            'pre_clip_actor': self.pre_clip_actor_grad,
+            'pre_clip_critic': self.pre_clip_critic_grad
+        }
+        # =====================================================================
+        # Phase 2: 策略蒸馏
+        # =====================================================================
+        
