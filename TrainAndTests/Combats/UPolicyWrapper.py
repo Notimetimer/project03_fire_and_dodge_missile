@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from _context import *
 from TrainAndTests.Combats.BasicRules_new import basic_rules
 
 
@@ -19,7 +20,6 @@ class UnifiedPolicyWrapper:
         self.env = env
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
-        self.last_action_label = 0  # 记录上一次的动作标签（规则需要）
     
     def get_action(self, obs, check_obs, agent_type, actor, explore=None):
         """
@@ -43,19 +43,16 @@ class UnifiedPolicyWrapper:
         else:
             raise ValueError(f"Unknown agent_type: {agent_type}. Expected 'NN' or 'rule'.")
     
-    def _get_nn_action(self, obs, check_obs, actor, explore):
+    def _get_nn_action(self, obs, check_obs, actor, explore=None):
         """处理神经网络策略"""
         if explore is None:
-            explore = {'cont': 0, 'cat': 0, 'bern': 1}
+            explore = {'cont': 1, 'cat': 1, 'bern': 1}
         
         with torch.no_grad():
             action_exec, _, _, action_check = actor.get_action(
                 obs, 
                 explore=explore
             )
-        
-        # 更新last_action_label
-        self.last_action_label = action_exec['cat'][0]
         
         return action_exec, action_check
     
@@ -68,11 +65,8 @@ class UnifiedPolicyWrapper:
         action_label, fire = basic_rules(
             state_check, 
             rule_num, 
-            last_action=self.last_action_label
         )
         
-        # 更新last_action_label
-        self.last_action_label = action_label
         
         # 构造action_exec格式
         action_exec = {
@@ -94,7 +88,7 @@ class UnifiedPolicyWrapper:
     
     def reset(self):
         """重置包装器状态"""
-        self.last_action_label = 0
+        pass
 
 
 def create_policy_wrapper(env, agent_type, actor, epsilon=0.3, device=None):

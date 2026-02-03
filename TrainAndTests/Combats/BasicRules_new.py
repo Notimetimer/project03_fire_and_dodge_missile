@@ -40,6 +40,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     t_fired = state_check["weapon"] # 导弹发射后计时，<12s不允许发射新导弹
     ATA = state_check["target_information"][4]
     AA_hor = state_check["target_information"][6]
+    sin_theta = state_check["ego_main"][2]
 
     # 1. 计算初始的开火意图
     fire_missile = False
@@ -87,7 +88,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
             action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
-            if last_action != 2: # 如果上一动作为非爬升
+            if sin_theta < sin(30*pi/180):  # last_action != 2: # 如果上一动作为非爬升
                 action_number = 2 # 则本回合执行爬升
                 fire_missile = False
             else:
@@ -103,7 +104,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
             action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
-            if last_action != 2: # 如果上一动作为非爬升
+            if sin_theta < sin(30*pi/180):  # last_action != 2: # 如果上一动作为非爬升 达到高抛角度再发射导弹
                 action_number = 2 # 则本回合执行爬升
                 fire_missile = False
             else:
@@ -252,14 +253,14 @@ if __name__=='__main__':
 
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, 5, last_action=last_r_action_label) # i_episode
+                    r_action_label, r_fire = basic_rules(r_state_check, 5) # i_episode
                     last_r_action_label = r_action_label
                     if r_fire:
                         launch_missile_immediately(env, 'r')
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, 2, last_action=last_b_action_label)
+                    b_action_label, b_fire = basic_rules(b_state_check, 2)
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')

@@ -21,7 +21,7 @@ action_cycle_multiplier = 30
 dt_maneuver = 0.2
 TOTAL_ROUNDS = 100 # 每两队之间打100场
 TEAM_SIZE = 25     # 每队成员数
-using_explore_maneuver = 0  # 是否在实验间测试的时候允许动作有随机性
+using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
 def get_agent_teams(log_dir):
     """根据文件编号划分三个进度的队伍"""
@@ -115,12 +115,12 @@ def worker_process_battle(args_pack):
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    name = 'IL_and_PFSP_分阶段_混规则对手_挑战-run-20260123-203921'
+    name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行-run-20260129-214607'
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    log_dir = os.path.join(project_root, "结果展示", "logs", name)
+    log_dir = os.path.join(project_root, "logs","combat", name)
     
     # 1. 准备队伍
     teams = get_agent_teams(log_dir)

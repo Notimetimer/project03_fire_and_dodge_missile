@@ -1097,61 +1097,7 @@ def run_MLP_simulation(
                 # if len(transition_dict['dones']) >= transition_dict_threshold:
                 # 重构 Action 结构 (List[Dict] -> Dict[Array])
                 transition_dict['actions'] = restructure_actions(transition_dict['actions'])
-                
-                '记录ELo相对位置'
-                # [新增] 调节alpha_il
-                # --- [新增] 动态计算 alpha_il ---
-                # 1. 筛选对手池：Rule开头的所有Key + actor_rein开头的最后300个Key
-                all_keys = list(elo_ratings.keys())
-                rule_keys = [k for k in all_keys if k.startswith('Rule')]
-                rein_keys = [k for k in all_keys if k.startswith('actor_rein')]
-                # 取最后（最新插入）的300个
-                latest_rein_keys = rein_keys[-300:] if len(rein_keys) > 300 else rein_keys
-                
-                target_pool_keys = rule_keys + latest_rein_keys
-                # 计算池子滑动平均分
-                avg_pool_elo = np.mean([elo_ratings[k] for k in target_pool_keys])
-                # 计算 Elo 差值 x (当前主分 - 池子均分)
-                x_elo_diff = main_agent_elo - avg_pool_elo
-                logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
-                
                 if use_sil:
-                    if target_pool_keys:
-                        
-                        # # 变化尺度对称型函数
-                        # a_p = -8
-                        # k_p = 0.006
-                        # mid = log10(alpha_il)
-                        # b_p = 2 * mid - a_p
-                        # scale = (b_p - a_p) / 2.0      # 3.0
-                        # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                        # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                        # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                        # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                        # exponent = min(exponent, -2)
-                        
-                        # # 非对称函数
-                        # --- 自定义参数配置 ---
-                        M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                        b = min(M, log10(alpha_il + 1e-6))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
-                        k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-
-                        # # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
-                        # # 为了防止巨大的 x 导致 exp 溢出，对 x 进行上限裁剪
-                        # x_for_exp = np.clip(x_elo_diff, -1000, 1000)
-                        # exponent = M - (M - b) * np.exp(k_shape * x_for_exp)
-
-                        exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                        
-                        # 得到最终 alpha_il (10 的 exponent 次方)
-                        dynamic_alpha_il = 10 ** max(exponent, -20)
-                    else:
-                        dynamic_alpha_il = alpha_il
-                    
-                    # 记录动态参数到 TensorBoard
-                    logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                    logger.add("train_plus/alpha_exponent", exponent, total_steps)
-                    
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
                     
@@ -1163,7 +1109,7 @@ def run_MLP_simulation(
                         eta = np.clip(1 - total_steps/3e6, 0, 1),
                         adv_normed=True,
                         label_smoothing=label_smoothing_mixed,
-                        alpha=dynamic_alpha_il,
+                        alpha=alpha_il,
                         beta=beta_mixed,
                         sil_only_maneuver = sil_only_maneuver,
                         mini_batch_size = mini_batch_size_mixed
