@@ -1,12 +1,12 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_PFSP_混合模仿_混规则对手_平衡_并行_3s'
+mission_name = 'IL_PFSP_混合模仿_混规则对手_平衡_并行_3s 无预训练'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
+IL_epoches= 0
 max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -14,7 +14,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1e-3  # 1e-2  # 设置为0就是纯强化学习
+alpha_il = 5e-2  # 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
@@ -122,8 +122,8 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
-        max_il_exponent = -1.5,  # -2.0
-        k_shape_il = 0.005,  # 0.04, # 指数型函数改为线性函数
+        max_il_exponent = 0, #-1.5,  # -2.0
+        k_shape_il = 0.0, # 0.005,  # 0.04, # 指数型函数改为线性函数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
