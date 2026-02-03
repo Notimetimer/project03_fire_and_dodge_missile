@@ -881,7 +881,7 @@ def run_MLP_simulation(
                     print(f"  [Test Result] Rule_{r_num}: {score}")
 
                 # 名人堂判定：如果全胜则保存并加入池子
-                if all(score == 1.0 for score in outcomes.values()):
+                if all(score > 0.5 for score in outcomes.values()):
                     # 【核心修改】从全量注册表 elo_ratings 中寻找最新的已保存编号
                     rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
                     
