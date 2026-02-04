@@ -13,25 +13,26 @@ class UnifiedPolicyWrapper:
     输出格式统一为: {'cat': array([14维概率分布]), 'bern': array([1维])}
     """
     
-    def __init__(self, env, epsilon=0.3, device=None):
+    def __init__(self, env, agent_info=None, epsilon=0.3, device=None):
         """
         Args:
             env: 环境实例，用于获取状态缩放等信息
+            agent_info: 元组 (agent_type, actor) 或其列表 [(agent_type, actor), ...]
             epsilon: 规则策略时用于平滑动作分布的参数
             device: torch device (用于NN策略)
         """
         self.env = env
+        self.agent_info = agent_info
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
     
-    def get_action(self, obs, check_obs, agent_info, weights=1, explore=None):
+    def get_action(self, obs, weights=1, explore=None):
         """
         统一接口获取动作
         
         Args:
             obs: 观测值 (用于NN)
             check_obs: 检查用观测值 (用于规则)
-            agent_info: 元组 (agent_type, actor) 或其列表 [(agent_type, actor), ...]
             weights: 权重，默认为1。如果 agent_info 是列表且 weights 形状不符，则平分权重。
             explore: 探索参数字典 (用于NN)
         
@@ -39,19 +40,24 @@ class UnifiedPolicyWrapper:
             action_exec: {'cat': array([动作标签]), 'bern': array([开火概率])}
             action_check: {'cat': array([14维概率分布]), 'bern': array([开火概率])}
         """
-        if isinstance(agent_info, list):
-            agent_list = agent_info
+        if self.agent_info is None:
+            raise ValueError("agent_info has not been set.")
+
+        if isinstance(self.agent_info, list):
+            agent_list = self.agent_info
             if not isinstance(weights, list) or len(weights) != len(agent_list):
                 weight_list = [1.0 / len(agent_list)] * len(agent_list)
             else:
                 weight_list = weights
         else:
-            agent_list = [agent_info]
+            agent_list = [self.agent_info]
             weight_list = [1.0]
 
         # 暂时采用列表中的第一个 agent，后续实现权重融合
         agent_type, actor = agent_list[0]
 
+        check_obs = self.env.obs2obs_check(obs)
+        
         if agent_type == 'NN':
             return self._get_nn_action(obs, check_obs, actor, explore)
         elif agent_type == 'rule':
@@ -122,5 +128,6 @@ def create_policy_wrapper(env, agent_type, actor, epsilon=0.3, device=None):
         wrapper: UnifiedPolicyWrapper实例
         agent_info: (agent_type, actor) 元组
     """
-    wrapper = UnifiedPolicyWrapper(env, epsilon=epsilon, device=device)
-    return wrapper, (agent_type, actor)
+    agent_info = (agent_type, actor)
+    wrapper = UnifiedPolicyWrapper(env, agent_info=agent_info, epsilon=epsilon, device=device)
+    return wrapper, agent_info

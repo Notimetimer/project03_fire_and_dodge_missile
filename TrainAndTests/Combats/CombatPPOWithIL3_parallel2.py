@@ -29,12 +29,13 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0_distil import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from prepare_il_datas import run_rules
 from VsBaseline_while_training import test_worker
+from UPolicyWrapper import UnifiedPolicyWrapper
 
 dt_move = 0.05
 
@@ -161,112 +162,6 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     td['active_masks'].append(active_mask) # 【新增】active_mask，转入多智能体
     return td
 
-# ==========================================
-# 新增：混合缓冲区类
-# ==========================================
-class IL_transition_buffer:
-    def __init__(self, init_dict, max_size=10000):
-        """
-        内部存储全部采用 List，确保状态和动作在最外层长度绝对对等。
-        """
-        self.max_size = max_size
-        self.addon_dict = {}
-        
-        # 无论 init_dict 是否为空，都显式初始化所有键，确保 'obs' 一定存在
-        src = init_dict if init_dict is not None else {}
-        
-        # 强制转换成 list 存储。如果 src 里没有 'obs'，就用 'states' 代替
-        self.addon_dict['obs'] = list(src.get('obs', src.get('states', [])))
-        self.addon_dict['states'] = list(src.get('states', []))
-        self.addon_dict['returns'] = list(src.get('returns', []))
-        self.addon_dict['actions'] = list(src.get('actions', []))
-        
-        # 特殊处理：如果 returns 是 torch.tensor (如你截图中所示)，转为 list 存储
-        if torch.is_tensor(src.get('returns')):
-            self.addon_dict['returns'] = src['returns'].tolist()
-
-        # 打印初始长度以供检查
-        print(f"[IL_transition_buffer] Initialized. Size: {len(self.addon_dict['states'])}")
-        
-    def add(self, data):
-        """
-        data: 包含 'obs', 'states', 'actions', 'returns' 的字典，值应为 List。
-        """
-        # 1. 提取新数据并确保格式为 list (防止 data 缺失 'obs'，逻辑同 init)
-        new_obs = list(data.get('obs', data.get('states', [])))
-        new_states = list(data.get('states', []))
-        new_returns = list(data.get('returns', []))
-        new_actions = list(data.get('actions', []))
-        
-        # 处理可能传入的 tensor
-        if torch.is_tensor(data.get('returns')):
-            new_returns = data['returns'].tolist()
-        
-        # 使用 .extend() 拼接列表元素
-        self.addon_dict['obs'].extend(new_obs)
-        self.addon_dict['states'].extend(new_states)
-        self.addon_dict['returns'].extend(new_returns)
-        self.addon_dict['actions'].extend(new_actions)
-        
-        # 2. 基于添加顺序的剪裁（保留最后/最新的 max_size 条）
-        current_len = len(self.addon_dict['states'])
-        if current_len > self.max_size:
-            keep_from = current_len - self.max_size
-            self.addon_dict['obs'] = self.addon_dict['obs'][keep_from:]
-            self.addon_dict['states'] = self.addon_dict['states'][keep_from:]
-            self.addon_dict['returns'] = self.addon_dict['returns'][keep_from:]
-            self.addon_dict['actions'] = self.addon_dict['actions'][keep_from:]
-    
-        # # 2. 基于 Return 的原子化排序与剪裁
-        # # 通过 zip 绑定每一行数据，确保 S, A, R 在排序和删除时永远同步
-        # combined = list(zip(
-        #     self.addon_dict['obs'],
-        #     self.addon_dict['states'],
-        #     self.addon_dict['returns'],
-        #     self.addon_dict['actions']
-        # ))
-        # # 按 returns (索引为 2) 降序排列（从高质量到低质量）
-        # combined.sort(key=lambda x: x[2], reverse=True)
-        
-        # # 保留前 max_size 条高质量经验
-        # top_data = combined[:self.max_size]
-        
-        # # 解包回列表
-        # unzipped = list(zip(*top_data)) if top_data else ([], [], [], [])
-        # self.addon_dict['obs'] = list(unzipped[0])
-        # self.addon_dict['states'] = list(unzipped[1])
-        # self.addon_dict['returns'] = list(unzipped[2])
-        # self.addon_dict['actions'] = list(unzipped[3])
-    
-    def read(self, batch_size):
-        """
-        随机采样并进行格式转换。
-        """
-        total_len = len(self.addon_dict['states'])
-        if total_len == 0:
-            raise ValueError("IL_transition_buffer is empty.")
-            
-        indices = np.random.randint(0, total_len, size=min(batch_size, total_len))
-        
-        # 采样（列表推导式，保持原始元素格式）
-        sampled_obs = [self.addon_dict['obs'][i] for i in indices]
-        sampled_states = [self.addon_dict['states'][i] for i in indices]
-        sampled_returns = [self.addon_dict['returns'][i] for i in indices]
-        sampled_actions_raw = [self.addon_dict['actions'][i] for i in indices]
-        
-        # 此时才将采样的动作列表转换为算法需要的 dict-of-arrays 格式
-        return {
-            'obs': np.array(sampled_obs, dtype=np.float32),
-            'states': np.array(sampled_states, dtype=np.float32),
-            'returns': np.array(sampled_returns, dtype=np.float32),
-            'actions': restructure_actions(sampled_actions_raw) 
-        }
-
-    def clear(self):
-        for k in self.addon_dict:
-            self.addon_dict[k] = []
-        print("[IL_transition_buffer] Buffer cleared.")
-        
 
 
 # 加载数据
@@ -709,6 +604,10 @@ def run_MLP_simulation(
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     # del dummy_env # 不允许删除了，后续还要用
+    # ==========================================
+    # 新增：teacher_agent类
+    # ==========================================
+    teacher_agent = UnifiedPolicyWrapper(dummy_env)
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
@@ -781,12 +680,6 @@ def run_MLP_simulation(
 
     print("IL Training Finished.")
     
-    # --- 新增：实例化混合缓冲区 ---
-    il_transition_buffer = None
-    if IL_epoches + use_sil > 0:  # 只要出现模仿学习就得准备好初始的模仿池
-        print("Initializing IL Transition Buffer...")
-        original_data_input = original_il_transition_dict0 if use_init_data else None
-        il_transition_buffer = IL_transition_buffer(original_data_input, max_size=il_buffer_max_size)
 
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -1043,16 +936,6 @@ def run_MLP_simulation(
                 for k in transition_dict:
                     transition_dict[k].extend(l_tr[k])
                 
-                # 3.2 SIL 数据收集 (需计算 return)
-                if use_sil:
-                    if not metrics['lose']: # 赢或平，学自己
-                        # 计算回报 (Master 端计算)
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
-                    
-                    if not metrics['win']: # 输或平，学对手
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1165,22 +1048,16 @@ def run_MLP_simulation(
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
                     logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
-                    # 读取 IL 数据
-                    il_data = il_transition_buffer.read(il_batch_size2)
+                    # 测试举措： 就用rule4作为teacher
+                    teacher_agent.agent_info = ('rule', 4)
                     
                     # 混合更新
-                    student_agent.mixed_update(
-                        transition_dict,
-                        il_data,
-                        init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                        eta = np.clip(1 - total_steps/3e6, 0, 1),
-                        adv_normed=True,
-                        label_smoothing=label_smoothing_mixed,
-                        alpha=dynamic_alpha_il,
-                        beta=beta_mixed,
-                        sil_only_maneuver = sil_only_maneuver,
-                        mini_batch_size = mini_batch_size_mixed
-                    )
+                    student_agent.mixed_update_with_distil(transition_dict, teacher_agent=teacher_agent, 
+                                # RL 参数
+                                adv_normed=1, mini_batch_size=mini_batch_size_mixed,
+                                # 策略蒸馏参数  
+                                alpha=dynamic_alpha_il, distil_only_maneuver=True)
+                    
                 else:
                     #====================
                     # 原有强化学习部分
@@ -1209,11 +1086,10 @@ def run_MLP_simulation(
                 logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
                 logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
-                # IL-PPO信号强度对比
-                if use_sil:
-                    logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
-                    logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
-                    
+                # # IL-PPO信号强度对比
+                # if use_sil:
+                #     todo 监控PPO和策略蒸馏的梯度差异
+                
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
                 # 清空 Buffer

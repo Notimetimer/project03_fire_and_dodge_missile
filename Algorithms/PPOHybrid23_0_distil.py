@@ -1376,6 +1376,8 @@ class PPOHybrid:
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")
         check_weights_bias_nan(self.critic, "critic", "mixed_update后")
         
+        
+        
     def mixed_update_with_distil(self, transition_dict, teacher_agent=None, 
                                 # RL 参数
                                 adv_normed=False, clip_vf=False, clip_range=0.2, 
@@ -1394,10 +1396,6 @@ class PPOHybrid:
         # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
         # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
         rl_total_size = len(transition_dict['states'])
-        # 假设 self.batch_size 是 PPO 的 mini_batch_size
-        # 如果 self.update 内部逻辑不同，这里可能需要调整计算方式
-        
-        # ppo_num_batches = max(1, int(rl_total_size / mini_batch_size)) * self.epochs
         mb = mini_batch_size if mini_batch_size is not None else rl_total_size
         ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
         
@@ -1414,4 +1412,169 @@ class PPOHybrid:
         # =====================================================================
         # Phase 2: 策略蒸馏
         # =====================================================================
+        # 如果没有提供教师代理，或者教师代理为 None，则直接跳过蒸馏，返回 PPO 结果
+        if teacher_agent is None:
+            return
+
+        # 辅助函数：转 Tensor
+        def to_tensor(x, dtype):
+            if isinstance(x, np.ndarray):
+                return torch.tensor(x, dtype=dtype).to(self.device)
+            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+
+        # 1. 准备蒸馏输入数据 (优先使用 Obs)
+        # 这里的输入数据将用于 Student (Net forward) 和 Teacher (Label generation)
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            student_inputs_tensor = to_tensor(transition_dict['obs'], torch.float)
+            teacher_inputs_np = np.array(transition_dict['obs']) # (Batch, Dim)
+        else:
+            student_inputs_tensor = to_tensor(transition_dict['states'], torch.float)
+            teacher_inputs_np = np.array(transition_dict['states'])
+
+        num_samples = student_inputs_tensor.size(0)
+
+        # 2. 获取 Teacher 的动作分布 (Soft Targets)
+        # ---------------------------------------------------------------------
+        # [核心修改] 使用 env.obs2obs_check 将 Batch Obs 转换为 List[Dict]
+        # ---------------------------------------------------------------------
+        # # 假设 teacher_agent.env 指向环境实例
+        # if hasattr(teacher_agent, 'env'):
+        #     # 调用我们在 Environment 中新写的支持 Batch 的转换函数
+        #     # 返回: [ {dict_1}, {dict_2}, ... ]
+        #     # list_check_obs = teacher_agent.env.obs2obs_check(teacher_inputs_np)
+        # else:
+        #     raise AttributeError("teacher_agent must have 'env' attribute to call obs2obs_check")
+
+        cat_dim = teacher_agent.env.fly_act_dim[0]
+        target_probs_cat_np = np.zeros((num_samples, cat_dim), dtype=np.float32)
+        target_probs_bern_np = np.zeros((num_samples, 1), dtype=np.float32)
         
+        # 遍历每一个样本，逐个生成 Teacher Label
+        # 这样做虽然比 Batch 慢，但能完美兼容 Rule Policy，且保证 check_obs 结构正确
+        for i in range(num_samples):
+            # 获取单条数据的 obs (Numpy) 和 check_obs (Dict)
+            s_obs = teacher_inputs_np[i]       # (Dim, )
+            # s_check_obs = list_check_obs[i]    # Dict
+            
+            # 调用 Teacher 获取分布
+            # 注意：teacher_agent 必须封装好，get_action 接收 (obs, check_obs)
+            # 对于 Rule，它会忽略 obs 只看 check_obs；对于 NN，它可能看 obs
+            # explore=None 意味着 Teacher 可能会返回确定性动作或默认分布，这取决于 Wrapper 实现
+            # 这里我们需要的是 action_check (即概率分布部分)
+            _, t_out_check = teacher_agent.get_action(s_obs)
+            
+            # 收集结果
+            target_probs_cat_np[i] = t_out_check['cat']
+            target_probs_bern_np[i] = t_out_check['bern']
+
+        # 3. 将收集到的 List 堆叠回 Tensor (Batch Processing)
+        # 处理 Categorical (可能是 List of Arrays，如果有多头的话；或者单个 Array)
+        # 假设 t_out_check['cat'] 是一个 numpy array (14, )
+        
+        # 堆叠为 (Batch, 14) -> 转 Tensor
+        target_probs_cat = [to_tensor(target_probs_cat_np, torch.float)]
+        
+        # 处理 Bernoulli
+        if not distil_only_maneuver:
+            # 堆叠为 (Batch, 1) -> 转 Tensor
+            target_probs_bern = to_tensor(target_probs_bern_np, torch.float)
+        else:
+            target_probs_bern = None
+
+        # 4. 蒸馏训练循环
+        distil_actor_loss_list = []
+        distil_grad_list = []
+        pre_clip_distil_grad = []
+        
+        indices = np.arange(num_samples)
+        
+
+        for _ in range(1):  # self.epochs  (使用 PPO 相同的 epochs)
+            if shuffled:
+                np.random.shuffle(indices)
+                
+            for start in range(0, num_samples, mb):
+                end = min(start + mb, num_samples)
+                batch_idx = indices[start:end]
+                
+                # 准备 Mini-Batch 数据
+                mb_inputs = student_inputs_tensor[batch_idx]
+                
+                # 准备 Teacher Targets
+                mb_target_cat = [t[batch_idx] for t in target_probs_cat] # List of Tensors
+                if target_probs_bern is not None:
+                    mb_target_bern = target_probs_bern[batch_idx]
+                
+                # Student Forward
+                student_outputs = self.actor.net(mb_inputs)
+                
+                distil_loss = torch.tensor(0.0, device=self.device)
+                
+                # --- A. Categorical Loss (KL Divergence) ---
+                if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                    student_probs_list = student_outputs['cat'] # [Probs_Head1, ...]
+                    
+                    # 假设单头匹配
+                    for i, s_probs in enumerate(student_probs_list):
+                        if i < len(mb_target_cat):
+                            t_probs = mb_target_cat[i]
+                            
+                            # KL(Teacher || Student) = sum(P_t * log(P_t / P_s))
+                            # 最小化 KL 等价于最小化 CrossEntropy: - sum(P_t * log(P_s))
+                            log_s_probs = torch.log(s_probs + 1e-10)
+                            
+                            # F.kl_div 期望 input=log_probs, target=probs
+                            kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                            distil_loss += kl_loss
+
+                # --- B. Bernoulli Loss (BCELoss) ---
+                if (not distil_only_maneuver) and \
+                   ('bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0) and \
+                   (target_probs_bern is not None):
+                    
+                    s_logits = student_outputs['bern']
+                    s_probs = torch.sigmoid(s_logits)
+                    t_probs = mb_target_bern
+                    
+                    # BCE Loss: - [t * log(s) + (1-t) * log(1-s)]
+                    bce_loss = F.binary_cross_entropy(s_probs, t_probs, reduction='mean')
+                    distil_loss += bce_loss
+
+                # Apply Alpha Scaling
+                final_loss = alpha * distil_loss
+                
+                # Update
+                self.actor_optimizer.zero_grad()
+                final_loss.backward()
+                
+                pre_clip_distil_grad.append(model_grad_norm(self.actor))
+                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+                self.actor_optimizer.step()
+                
+                distil_actor_loss_list.append(final_loss.item())
+                distil_grad_list.append(model_grad_norm(self.actor))
+
+
+        # =====================================================================
+        # Phase 3: 统计指标融合
+        # =====================================================================
+        distil_num_batches = max(1, (num_samples + mb - 1) // mb) * self.epochs
+        
+        def weighted_avg(ppo_val, distil_val, w_ppo=ppo_num_batches, w_distil=distil_num_batches):
+            return (ppo_val * w_ppo + distil_val * w_distil) / (w_ppo + w_distil)
+
+        if len(distil_actor_loss_list) > 0:
+            avg_distil_loss = np.mean(distil_actor_loss_list)
+            avg_distil_grad = np.mean(distil_grad_list)
+            avg_pre_clip = np.mean(pre_clip_distil_grad)
+            
+            # 更新 Log 指标
+            self.actor_loss = weighted_avg(ppo_stats['actor_loss'], avg_distil_loss)
+            self.actor_grad = weighted_avg(ppo_stats['actor_grad'], avg_distil_grad)
+            self.pre_clip_actor_grad = weighted_avg(ppo_stats['pre_clip_actor'], avg_pre_clip)
+            
+            # 记录 IL/Distil 样本数
+            self.IL_samples = num_samples * self.epochs 
+            self.IL_valid_samples = num_samples * self.epochs
+            
+        check_weights_bias_nan(self.actor, "actor", "mixed_update_with_distil后")
