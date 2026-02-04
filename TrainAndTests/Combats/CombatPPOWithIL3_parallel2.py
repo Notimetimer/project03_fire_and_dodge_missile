@@ -1086,9 +1086,12 @@ def run_MLP_simulation(
                 logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
                 logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
-                # # IL-PPO信号强度对比
-                # if use_sil:
-                #     todo 监控PPO和策略蒸馏的梯度差异
+                # # IL-PPO信号强度对比 策略蒸馏对比PPO
+                if use_sil:
+                    logger.add("train_plus/ dist/PPO grad", 
+                               student_agent.dis_actor_grad/(student_agent.actor_grad + 1e-6), total_steps)
+                    logger.add("train_plus/ dist/PPO loss", 
+                               student_agent.dis_actor_loss/(student_agent.actor_loss + 1e-6), total_steps)
                 
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
