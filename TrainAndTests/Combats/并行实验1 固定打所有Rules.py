@@ -1,7 +1,7 @@
-from CombatPPOWithIL3 import *
+from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_and_RL_分阶段_打所有Rules'
+mission_name = 'IL_and_RL_分阶段_打所有Rules 并行'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -17,7 +17,7 @@ k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
-mini_batch_size_mixed = 64 # 混合更新minibatch大小
+mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3
 label_smoothing_mixed=0.01
@@ -68,6 +68,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
+        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -97,18 +98,18 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
-        should_kick=False,
+        should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200,
+            'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            'Rule_5': 1200,
+            # 'Rule_5': 1200,
             },
-        self_play_type = 'PFSP', # PFSP, FSP, SP, None(非自博弈)
+        self_play_type = 'PFSP_balanced', # PFSP, FSP, SP, None(非自博弈)
         hist_agent_as_opponent = 0,
-        use_sil = False,
+        use_sil = 0,
         device = device,
     )
     end_time = datetime.now()
