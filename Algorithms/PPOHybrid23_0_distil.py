@@ -547,6 +547,16 @@ class PPOHybrid:
         self.entropy_bern = 0
         self.entropy_cont = 0
 
+        # [新增] 独立记录模仿学习与策略蒸馏的指标
+        self.il_actor_loss = 0
+        self.il_critic_loss = 0
+
+        self.il_actor_grad = 0
+        self.il_critic_grad = 0
+        
+        self.dis_actor_loss = 0
+        self.dis_actor_grad = 0
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
@@ -1372,6 +1382,13 @@ class PPOHybrid:
         self.IL_samples = il_samples_total
         self.IL_valid_samples = il_valid_samples_total
 
+        # [新增] 记录 IL 指标到类属性
+        if len(actor_loss_list) > 0:
+            self.il_actor_loss = np.mean(actor_loss_list)
+            self.il_critic_loss = np.mean(critic_loss_list)
+            self.il_actor_grad = np.mean(pre_clip_actor_grad)
+            self.il_critic_grad = np.mean(pre_clip_critic_grad)
+
         
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")
         check_weights_bias_nan(self.critic, "critic", "mixed_update后")
@@ -1578,3 +1595,6 @@ class PPOHybrid:
             self.IL_valid_samples = num_samples * self.epochs
             
         check_weights_bias_nan(self.actor, "actor", "mixed_update_with_distil后")
+        
+        self.dis_actor_loss = avg_distil_loss
+        self.dis_actor_grad = avg_distil_grad
