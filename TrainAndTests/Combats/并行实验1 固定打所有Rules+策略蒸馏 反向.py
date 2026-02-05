@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel2 import *
 from datetime import datetime
 
-mission_name = 'IL_and_RL_分阶段_打所有Rules 蒸馏 并行'
+mission_name = 'IL_and_RL_分阶段_打所有Rules 反向KL蒸馏 并行'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -124,7 +124,7 @@ if __name__=='__main__':
         device = device,
         max_il_exponent = -1.5,  # -2.0
         k_shape_il = 0.0, # 0.005,  # 0.04, # 指数型函数改为线性函数
-        reverse_kl = 0,
+        reverse_kl = 1,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
