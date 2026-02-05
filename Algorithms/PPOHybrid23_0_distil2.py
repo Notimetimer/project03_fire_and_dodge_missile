@@ -1428,8 +1428,8 @@ class PPOHybrid:
             # 这里我们需要的是 action_check (即概率分布部分)
             _, t_out_check = teacher_agent.get_action(s_obs)
             
-            # 收集结果
-            target_probs_cat_np[i] = t_out_check['cat']
+            # 收集结果 debug here
+            target_probs_cat_np[i] = t_out_check['cat'][0] if type(t_out_check['cat']) is list else t_out_check['cat'] # debug
             target_probs_bern_np[i] = t_out_check['bern']
 
         # 3. 将收集到的 List 堆叠回 Tensor (Batch Processing)
