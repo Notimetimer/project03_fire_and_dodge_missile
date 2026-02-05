@@ -1086,43 +1086,19 @@ class PPOHybrid:
     # --- 新增功能 3: 混合更新 (PPO + MARWIL) ---
     # --- 修改后的 mixed_update ---
     # --- 修复后的 mixed_update (包含完整监控项) ---
-    def mixed_update(self, transition_dict, il_transition_dict, init_il_transition_dict=None, eta=0.1,  # [新增] 专家数据与约束系数
-                     # RL 参数
-                     adv_normed=False, clip_vf=False, clip_range=0.2, 
+    def IL_update(self, transition_dict, il_transition_dict, init_il_transition_dict=None, eta=0.1,  # [新增] 专家数据与约束系数
                      # IL 参数
                      beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_epochs=1,
-                     sil_only_maneuver=True,
-                     # 公共参数
-                     shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
+                     sil_only_maneuver=True, mini_batch_size=None,):
         
-        # =====================================================================
-        # Phase 1: PPO 更新 (复用现有方法)
-        # =====================================================================
-        # 这一步会执行 self.epochs 次 PPO 更新，并修改 self.actor_loss 等类属性
-        self.update(transition_dict, adv_normed=adv_normed, clip_vf=clip_vf, 
-                    clip_range=clip_range, shuffled=shuffled, 
-                    mini_batch_size=mini_batch_size, alpha_logit_reg=alpha_logit_reg)
 
-        # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
         # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
         rl_total_size = len(transition_dict['states'])
-        # 假设 self.batch_size 是 PPO 的 mini_batch_size
-        # 如果 self.update 内部逻辑不同，这里可能需要调整计算方式
         
         # ppo_num_batches = max(1, int(rl_total_size / mini_batch_size)) * self.epochs
         mb = mini_batch_size if mini_batch_size is not None else rl_total_size
         ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
         
-        ppo_stats = {
-            'actor_loss': self.actor_loss,
-            'critic_loss': self.critic_loss,
-            'actor_grad': self.actor_grad,
-            'critic_grad': self.critic_grad,
-            'entropy': self.entropy_mean,
-            'ratio': self.ratio_mean,
-            'pre_clip_actor': self.pre_clip_actor_grad,
-            'pre_clip_critic': self.pre_clip_critic_grad
-        }
 
         # =====================================================================
         # Phase 2: IL 更新 (自模仿 + 专家 MSE)
@@ -1364,19 +1340,11 @@ class PPOHybrid:
             return (ppo_val * ppo_num_batches + il_val * il_epochs) / total_updates
 
         # 更新类属性用于 Log
-        self.actor_loss = weighted_avg(ppo_stats['actor_loss'], np.mean(actor_loss_list))
-        self.critic_loss = weighted_avg(ppo_stats['critic_loss'], np.mean(critic_loss_list))
+        self.il_actor_loss = np.mean(actor_loss_list)
+        self.il_critic_loss = np.mean(critic_loss_list)
         
-        self.actor_grad = weighted_avg(ppo_stats['actor_grad'], np.mean(actor_grad_list))
-        self.critic_grad = weighted_avg(ppo_stats['critic_grad'], np.mean(critic_grad_list))
-        
-        self.pre_clip_actor_grad = weighted_avg(ppo_stats['pre_clip_actor'], np.mean(pre_clip_actor_grad))
-        self.pre_clip_critic_grad = weighted_avg(ppo_stats['pre_clip_critic'], np.mean(pre_clip_critic_grad))
-        
-        # 熵和Ratio只有PPO有，IL没有，所以乘以系数缩放或者直接保持PPO的
-        # 为了避免 Log 里的值看起来突然变小，这里建议直接使用 PPO 的值，因为 IL 不产生 entropy/ratio 概念
-        self.entropy_mean = ppo_stats['entropy']
-        self.ratio_mean = ppo_stats['ratio']
+        self.il_actor_grad = np.mean(pre_clip_actor_grad)  # weighted_avg(ppo_stats['actor_grad'], np.mean(actor_grad_list))
+        self.il_critic_grad = np.mean(pre_clip_critic_grad)  # weighted_avg(ppo_stats['critic_grad'], np.mean(critic_grad_list))
         
         # 更新样本计数
         self.IL_samples = il_samples_total
@@ -1392,40 +1360,20 @@ class PPOHybrid:
         
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")
         check_weights_bias_nan(self.critic, "critic", "mixed_update后")
-        
-        
-        
-    def mixed_update_with_distil(self, transition_dict, teacher_agent=None, 
-                                # RL 参数
-                                adv_normed=False, clip_vf=False, clip_range=0.2, 
+
+
+    def distil(self, transition_dict, teacher_agent=None, 
                                 # 公共参数
-                                shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05,
+                                shuffled=1, mini_batch_size=None,
                                 # 策略蒸馏参数  
                                 alpha=1.0, distil_only_maneuver=True):
-        # =====================================================================
-        # Phase 1: PPO 更新 (复用现有方法)
-        # =====================================================================
-        # 这一步会执行 self.epochs 次 PPO 更新，并修改 self.actor_loss 等类属性
-        self.update(transition_dict, adv_normed=adv_normed, clip_vf=clip_vf, 
-                    clip_range=clip_range, shuffled=shuffled, 
-                    mini_batch_size=mini_batch_size, alpha_logit_reg=alpha_logit_reg)
-
+        
         # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
         # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
         rl_total_size = len(transition_dict['states'])
         mb = mini_batch_size if mini_batch_size is not None else rl_total_size
         ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
         
-        ppo_stats = {
-            'actor_loss': self.actor_loss,
-            'critic_loss': self.critic_loss,
-            'actor_grad': self.actor_grad,
-            'critic_grad': self.critic_grad,
-            'entropy': self.entropy_mean,
-            'ratio': self.ratio_mean,
-            'pre_clip_actor': self.pre_clip_actor_grad,
-            'pre_clip_critic': self.pre_clip_critic_grad
-        }
         # =====================================================================
         # Phase 2: 策略蒸馏
         # =====================================================================
@@ -1580,26 +1528,18 @@ class PPOHybrid:
         # =====================================================================
         # Phase 3: 统计指标融合
         # =====================================================================
-        distil_num_batches = max(1, (num_samples + mb - 1) // mb) * self.epochs
-        
-        def weighted_avg(ppo_val, distil_val, w_ppo=ppo_num_batches, w_distil=distil_num_batches):
-            return (ppo_val * w_ppo + distil_val * w_distil) / (w_ppo + w_distil)
+        # distil_num_batches = max(1, (num_samples + mb - 1) // mb) * self.epochs
 
         if len(distil_actor_loss_list) > 0:
             avg_distil_loss = np.mean(distil_actor_loss_list)
             avg_distil_grad = np.mean(distil_grad_list)
-            avg_pre_clip = np.mean(pre_clip_distil_grad)
-            
-            # 更新 Log 指标
-            self.actor_loss = weighted_avg(ppo_stats['actor_loss'], avg_distil_loss)
-            self.actor_grad = weighted_avg(ppo_stats['actor_grad'], avg_distil_grad)
-            self.pre_clip_actor_grad = weighted_avg(ppo_stats['pre_clip_actor'], avg_pre_clip)
+            # avg_pre_clip = np.mean(pre_clip_distil_grad)
             
             # 记录 IL/Distil 样本数
             self.IL_samples = num_samples * self.epochs 
             self.IL_valid_samples = num_samples * self.epochs
             
-        check_weights_bias_nan(self.actor, "actor", "mixed_update_with_distil后")
-        
-        self.dis_actor_loss = avg_distil_loss
-        self.dis_actor_grad = avg_distil_grad
+            check_weights_bias_nan(self.actor, "actor", "distil后")
+            
+            self.dis_actor_loss = avg_distil_loss
+            self.dis_actor_grad = avg_distil_grad
