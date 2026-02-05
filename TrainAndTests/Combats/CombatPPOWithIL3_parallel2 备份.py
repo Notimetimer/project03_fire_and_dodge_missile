@@ -29,7 +29,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
-from Algorithms.PPOHybrid23_0_distil2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0_distil import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
@@ -583,7 +583,6 @@ def run_MLP_simulation(
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
     reverse_kl=0,
-    distil_only_maneuver=1,
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -1053,58 +1052,14 @@ def run_MLP_simulation(
                     logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
                     # 测试举措： 就用rule4作为teacher
-                    # teacher_agent.agent_info = ('rule', 4)
-                    # [Modification] 选取 Teacher 逻辑
-                    teacher_name = None
-                    should_distil = 1 # 备用，如果找不出，直接不要distill
-                    # 1. 如果 hall_of_fame 不为空，直接从里面抽取 Elo 最高的作为 teacher
-                    if hall_of_fame:
-                        teacher_name = max(hall_of_fame, key=hall_of_fame.get)
+                    teacher_agent.agent_info = ('rule', 4)
                     
-                    # 2. 否则从 elite_elo_ratings 里面进行轮盘赌抽样
-                    elif elite_elo_ratings:
-                        # 避开最新的 10 个 actor_rein
-                        rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith('actor_rein')]
-                        exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
-                        
-                        # 过滤掉排除的 Key 以及内置 Key (如 __CURRENT_MAIN__)
-                        candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
-                        
-                        if candidate_keys:
-                            candidate_elos = np.array([elite_elo_ratings[k] for k in candidate_keys], dtype=np.float64)
-                            # 统一减去最小值作为轮盘赌筹码 (平移确保权重非负)
-                            min_elo = np.min(candidate_elos)
-                            weights = candidate_elos - min_elo + 1e-6 # 加上极小值避免全零导致的错误
-                            weights /= np.sum(weights)
-                            
-                            teacher_name = np.random.choice(candidate_keys, p=weights)
-
-                    # --- 执行 Teacher 加载逻辑 ---
-                    if teacher_name:
-                        if teacher_name.startswith('actor_rein'):
-                            # 如果是神经网络模型，加载参数到 teacher_actor
-                            model_path = os.path.join(log_dir, f"{teacher_name}.pt")
-                            if os.path.exists(model_path):
-                                teacher_actor.load_state_dict(torch.load(model_path, map_location=device))
-                                teacher_agent.agent_info = ('NN', teacher_actor)
-                        elif teacher_name.startswith('Rule'):
-                            # 提取 Rule 编号 (支持 Rule_4 或 Rule4 格式)
-                            match = re.search(r'\d+', teacher_name)
-                            rule_idx = int(match.group()) if match else 4
-                            teacher_agent.agent_info = ('rule', rule_idx)
-                    
-                    if teacher_agent.agent_info is None:
-                        should_distil = 0
-
                     # 混合更新
-                    # # 先 PPO 更新
-                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
-                    
-                    if should_distil:
-                        # 再策略蒸馏
-                        student_agent.distil(transition_dict, teacher_agent=teacher_agent,
-                                                        alpha=dynamic_alpha_il, distil_only_maneuver=distil_only_maneuver,
-                                                        shuffled=1, mini_batch_size=mini_batch_size_mixed, reverse_kl=reverse_kl)
+                    student_agent.mixed_update_with_distil(transition_dict, teacher_agent=teacher_agent, 
+                                # RL 参数
+                                adv_normed=1, mini_batch_size=mini_batch_size_mixed,
+                                # 策略蒸馏参数  
+                                alpha=dynamic_alpha_il, distil_only_maneuver=True, reverse_kl=reverse_kl)
                     
                 else:
                     #====================
@@ -1114,10 +1069,6 @@ def run_MLP_simulation(
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
-                if should_distil:
-                    logger.add("train_plus/dis_actor_loss", student_agent.dis_actor_loss, total_steps)
-                    logger.add("train_plus/dis_actor_loss", student_agent.dis_actor_grad, total_steps)
-
                 actor_pre_clip_grad = student_agent.pre_clip_actor_grad
                 critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
@@ -1132,14 +1083,16 @@ def run_MLP_simulation(
                 logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
                 logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
                 
-                # logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+                logger.add("train/10 advantage", student_agent.advantage, total_steps) 
                 # 强化学习
-                # logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
-                # logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
-                # logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+                logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
+                logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
+                logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
                 # # IL-PPO信号强度对比 策略蒸馏对比PPO
-                if use_sil and should_distil:
+                if use_sil:
+                    logger.add("train_plus/ dist/PPO grad", 
+                               student_agent.dis_actor_grad/(student_agent.actor_grad + 1e-6), total_steps)
                     logger.add("train_plus/ dist/PPO loss", 
                                student_agent.dis_actor_loss/(student_agent.actor_loss + 1e-6), total_steps)
                 
