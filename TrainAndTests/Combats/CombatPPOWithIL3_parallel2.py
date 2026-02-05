@@ -869,7 +869,7 @@ def run_MLP_simulation(
                     opp_type = 'nn'
                     adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
                     if os.path.exists(adv_path):
-                        opp_data = torch.load(adv_path, map_location='cpu') # 传给 Worker 必须是 CPU Tensor
+                        opp_data = torch.load(adv_path, map_location='cpu', weights_only=1) # 传给 Worker 必须是 CPU Tensor
                     else:
                         # Fallback
                         opp_type = 'rule'
@@ -987,7 +987,7 @@ def run_MLP_simulation(
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
-            # logger.add("debug/胜负统计", batch_wins+batch_loss_cnt+batch_draw_cnt, total_steps)
+
             logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
 
 
@@ -1046,8 +1046,8 @@ def run_MLP_simulation(
                     # 2. 否则从 elite_elo_ratings 轮盘赌 (避开最新 10 个 actor_rein)
                     elif elite_elo_ratings:
                         rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith('actor_rein')]
-                        exclude_keys = set(rein_keys)
-                        # exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
+                        # exclude_keys = set(rein_keys) # debug
+                        exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
                         candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
                         
                         if candidate_keys:
@@ -1058,14 +1058,14 @@ def run_MLP_simulation(
                             teacher_name = np.random.choice(candidate_keys, p=weights)
 
                     # 3. 根据选取结果执行加载逻辑，并设置 should_distil
-                    teacher_name = 'actor_rein0'  # debug
+                    # teacher_name = 'actor_rein0'  # debug
                     if teacher_name:
                         if teacher_name.startswith('actor_rein'):
                             # 加载神经网络参数
                             model_path = os.path.join(log_dir, f"{teacher_name}.pt")
                             if os.path.exists(model_path):
                                 try:
-                                    teacher_actor.load_state_dict(torch.load(model_path, map_location=device))
+                                    teacher_actor.load_state_dict(torch.load(model_path, map_location=device, weights_only=1))
                                     teacher_agent.agent_info = ('NN', teacher_actor)
                                     should_distil = True # 成功加载，标记为可蒸馏
                                 except Exception as e:

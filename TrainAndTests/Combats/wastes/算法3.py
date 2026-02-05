@@ -26,7 +26,7 @@ action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,1,1]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 初始模仿对象
+IL_rule = 4 # 初始模仿对象
 
 
 # 仿真环境参数

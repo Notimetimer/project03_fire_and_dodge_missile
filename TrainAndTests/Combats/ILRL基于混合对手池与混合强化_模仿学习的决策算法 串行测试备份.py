@@ -40,7 +40,7 @@ action_cycle_multiplier = 30 # 6s 决策一次
 trigger0 = 50e3
 trigger_delta = 50e3
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2
+IL_rule = 4
 
 # # 现场产生奖励函数一致的示范数据
 # run_rules(gamma=gamma, weight_reward=weight_reward_0, action_cycle_multiplier=action_cycle_multiplier, current_rule=IL_rule)
