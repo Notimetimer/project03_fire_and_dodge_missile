@@ -76,7 +76,7 @@ class UnifiedPolicyWrapper:
                 explore=explore
             )
         
-        return action_exec[0], action_check
+        return action_exec, action_check
     
     def _get_rule_action(self, check_obs, rule_num):
         """处理规则策略"""

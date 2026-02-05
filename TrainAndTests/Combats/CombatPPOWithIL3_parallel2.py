@@ -1058,6 +1058,7 @@ def run_MLP_simulation(
                             teacher_name = np.random.choice(candidate_keys, p=weights)
 
                     # 3. 根据选取结果执行加载逻辑，并设置 should_distil
+                    teacher_name = 'actor_rein0'  # debug
                     if teacher_name:
                         if teacher_name.startswith('actor_rein'):
                             # 加载神经网络参数
