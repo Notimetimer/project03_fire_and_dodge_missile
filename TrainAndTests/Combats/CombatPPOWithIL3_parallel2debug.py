@@ -34,7 +34,7 @@ from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from prepare_il_datas import run_rules
-from VsBaseline_while_training import test_worker
+from VsBaseline_while_training2 import test_worker
 from UPolicyWrapper import UnifiedPolicyWrapper
 
 dt_move = 0.05
@@ -476,7 +476,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * reward_weight)
                     reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * reward_weight)
                     
-                    if steps_run % action_cycle_multiplier == 0:
+                    if steps_run % action_cycle_multiplier == 0 or done:
                         episode_return += (b_rew_event + b_rew_constraint)
                     
                     # 5. 存活更新 (用于 Done 标记)
@@ -779,12 +779,14 @@ def run_MLP_simulation(
                     test_tasks.append(obj)
                 # 等待所有测试进程结束
                 test_results = [t.get() for t in test_tasks]
-                
-                # 阻塞式处理逻辑
-                outcomes = {rule_num: score for rule_num, score in test_results}
+
+                outcomes = {rule_num: score for rule_num, score, result2 in test_results}
+                outcomes_return = {rule_num: result2 for rule_num, score, result2 in test_results}
+
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
-                    print(f"  [Test Result] Rule_{r_num}: {score}")
+                    logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
+                    print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
 
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score > 0.5 for score in outcomes.values()):
