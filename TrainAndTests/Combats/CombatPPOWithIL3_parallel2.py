@@ -37,6 +37,8 @@ from prepare_il_datas import run_rules
 from VsBaseline_while_training2 import test_worker
 from UPolicyWrapper import UnifiedPolicyWrapper
 
+EXEC_COUNT = 0
+
 dt_move = 0.05
 
 def get_current_file_dir():
@@ -1014,109 +1016,97 @@ def run_MLP_simulation(
                 # 计算 Elo 差值 x (当前主分 - 池子均分)
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
+
                 
+                should_distil = False 
+
                 if use_sil:
                     if target_pool_keys:
-                        
-                        # # 变化尺度对称型函数
-                        # a_p = -8
-                        # k_p = 0.006
-                        # mid = log10(alpha_il)
-                        # b_p = 2 * mid - a_p
-                        # scale = (b_p - a_p) / 2.0      # 3.0
-                        # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                        # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                        # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                        # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                        # exponent = min(exponent, -2)
-                        
-                        # # 非对称函数
-                        # --- 自定义参数配置 ---
-                        M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                        b = min(M, log10(alpha_il + 1e-6))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
-                        k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-
-                        # # 2. 公式计算: f(x) = M - (M - b) * exp(k * x)
-                        # # 为了防止巨大的 x 导致 exp 溢出，对 x 进行上限裁剪
-                        # x_for_exp = np.clip(x_elo_diff, -1000, 1000)
-                        # exponent = M - (M - b) * np.exp(k_shape * x_for_exp)
-
-                        exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                        
-                        # 得到最终 alpha_il (10 的 exponent 次方)
+                        M = max_il_exponent
+                        b = min(M, log10(alpha_il + 1e-6))
+                        k_shape = k_shape_il
+                        exponent = np.clip(b - k_shape * x_elo_diff, -20, M)
                         dynamic_alpha_il = 10 ** max(exponent, -20)
                     else:
                         dynamic_alpha_il = alpha_il
+                        exponent = log10(alpha_il + 1e-6) # 防止后续记录 log 时出错
                     
-                    # 记录动态参数到 TensorBoard
+                    # 记录动态参数
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
                     logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
-                    # 测试举措： 就用rule4作为teacher
-                    # teacher_agent.agent_info = ('rule', 4)
-                    # [Modification] 选取 Teacher 逻辑
+                    # --- [核心修改] 选取 Teacher 逻辑 ---
                     teacher_name = None
-                    should_distil = 1 # 备用，如果找不出，直接不要distill
-                    # 1. 如果 hall_of_fame 不为空，直接从里面抽取 Elo 最高的作为 teacher
+                    # teacher_agent.agent_info = None # 显式重置，确保不使用上一轮的 Teacher
+
+                    # 1. 尝试从 hall_of_fame 选取 Elo 最高者
                     if hall_of_fame:
                         teacher_name = max(hall_of_fame, key=hall_of_fame.get)
                     
-                    # 2. 否则从 elite_elo_ratings 里面进行轮盘赌抽样
+                    # 2. 否则从 elite_elo_ratings 轮盘赌 (避开最新 10 个 actor_rein)
                     elif elite_elo_ratings:
-                        # 避开最新的 10 个 actor_rein
                         rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith('actor_rein')]
                         exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
-                        
-                        # 过滤掉排除的 Key 以及内置 Key (如 __CURRENT_MAIN__)
                         candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
                         
                         if candidate_keys:
                             candidate_elos = np.array([elite_elo_ratings[k] for k in candidate_keys], dtype=np.float64)
-                            # 统一减去最小值作为轮盘赌筹码 (平移确保权重非负)
                             min_elo = np.min(candidate_elos)
-                            weights = candidate_elos - min_elo + 1e-6 # 加上极小值避免全零导致的错误
+                            weights = candidate_elos - min_elo + 1e-6
                             weights /= np.sum(weights)
-                            
                             teacher_name = np.random.choice(candidate_keys, p=weights)
 
-                    # --- 执行 Teacher 加载逻辑 ---
+                    # 3. 根据选取结果执行加载逻辑，并设置 should_distil
                     if teacher_name:
                         if teacher_name.startswith('actor_rein'):
-                            # 如果是神经网络模型，加载参数到 teacher_actor
+                            # 加载神经网络参数
                             model_path = os.path.join(log_dir, f"{teacher_name}.pt")
                             if os.path.exists(model_path):
-                                teacher_actor.load_state_dict(torch.load(model_path, map_location=device))
-                                teacher_agent.agent_info = ('NN', teacher_actor)
+                                try:
+                                    teacher_actor.load_state_dict(torch.load(model_path, map_location=device))
+                                    teacher_agent.agent_info = ('NN', teacher_actor)
+                                    should_distil = True # 成功加载，标记为可蒸馏
+                                except Exception as e:
+                                    print(f"Warning: Failed to load NN teacher {teacher_name}: {e}")
                         elif teacher_name.startswith('Rule'):
-                            # 提取 Rule 编号 (支持 Rule_4 或 Rule4 格式)
+                            # 解析规则编号
                             match = re.search(r'\d+', teacher_name)
-                            rule_idx = int(match.group()) if match else 4
-                            teacher_agent.agent_info = ('rule', rule_idx)
+                            if match:
+                                rule_idx = int(match.group())
+                                teacher_agent.agent_info = ('rule', rule_idx)
+                                should_distil = True # 成功解析规则，标记为可蒸馏
                     
-                    if teacher_agent.agent_info is None:
-                        should_distil = 0
-
-                    # 混合更新
-                    # # 先 PPO 更新
+                    # 4. 执行更新
+                    # 先执行常规 PPO 更新
                     student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
                     
+                    # 如果标记为可蒸馏，则执行策略蒸馏
                     if should_distil:
-                        # 再策略蒸馏
+                        # 在 1084 行附近
+                        global EXEC_COUNT
+                        EXEC_COUNT += 1
+                        print(f"\n[DEBUG] {'='*20}")
+                        print(f"  Current PID: {os.getpid()}")
+                        print(f"  Parent PID: {os.getppid()}") # 查看父进程，判断是不是主进程派生的
+                        print(f"  Local EXEC_COUNT: {EXEC_COUNT}")
+                        print(f"  Total Steps: {total_steps}")
+                        print(f"{'='*30}\n", flush=True)
                         student_agent.distil(transition_dict, teacher_agent=teacher_agent,
-                                                        alpha=dynamic_alpha_il, distil_only_maneuver=distil_only_maneuver,
-                                                        shuffled=1, mini_batch_size=mini_batch_size_mixed, reverse_kl=reverse_kl)
-                    
+                                            alpha=dynamic_alpha_il, distil_only_maneuver=distil_only_maneuver,
+                                            shuffled=1, mini_batch_size=mini_batch_size_mixed, reverse_kl=reverse_kl)
+                    else:
+                        # 可以在这里打印或记录跳过的日志
+                        # print(f"Step {total_steps}: No valid teacher found, skipping distillation.")
+                        pass
+                            
                 else:
-                    #====================
-                    # 原有强化学习部分
+                    # 原有强化学习 PPO 更新部分
                     student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
-                    #====================
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
                 if should_distil:
                     logger.add("train_plus/dis_actor_loss", student_agent.dis_actor_loss, total_steps)
-                    logger.add("train_plus/dis_actor_loss", student_agent.dis_actor_grad, total_steps)
 
                 actor_pre_clip_grad = student_agent.pre_clip_actor_grad
                 critic_pre_clip_grad = student_agent.pre_clip_critic_grad

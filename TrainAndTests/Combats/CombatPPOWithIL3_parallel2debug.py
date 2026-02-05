@@ -1013,7 +1013,7 @@ def run_MLP_simulation(
                 # 计算 Elo 差值 x (当前主分 - 池子均分)
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
-                
+
                 if use_sil:
                     if target_pool_keys:
                         
@@ -1063,15 +1063,12 @@ def run_MLP_simulation(
                                                     shuffled=1, mini_batch_size=mini_batch_size_mixed, reverse_kl=reverse_kl)
                     
                 else:
-                    #====================
-                    # 原有强化学习部分
+                    # 原有强化学习 PPO 更新部分
                     student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
-                    #====================
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
                 logger.add("train_plus/dis_actor_loss", student_agent.dis_actor_loss, total_steps)
-                logger.add("train_plus/dis_actor_loss", student_agent.dis_actor_grad, total_steps)
 
                 # actor_pre_clip_grad = student_agent.pre_clip_actor_grad
                 # critic_pre_clip_grad = student_agent.pre_clip_critic_grad
@@ -1088,7 +1085,7 @@ def run_MLP_simulation(
                 # logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
                 
                 # logger.add("train/10 advantage", student_agent.advantage, total_steps) 
-                # # 强化学习
+                # 强化学习
                 # logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
                 # logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
                 # logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
