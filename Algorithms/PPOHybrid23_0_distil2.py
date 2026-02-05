@@ -1491,18 +1491,20 @@ class PPOHybrid:
                                 'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
                                 '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
                                 # # F.kl_div 期望 input=log_probs, target=probs
-                                # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
-                                # distil_loss += kl_loss
+                                kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                                distil_loss += kl_loss
                                 '交叉熵 -sigma(p(a)log(q(a)))'
                                 # 只保留 - sum(P * log Q)（交叉熵）
-                                ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
-                                distil_loss += ce_loss
+                                # ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
+                                # distil_loss += ce_loss
                             else:
                                 log_t_probs = torch.log(t_probs + 1e-10)
-                                '反向KL散度，略'
+                                '反向KL散度'
+                                kl_loss = F.kl_div(log_t_probs, s_probs, reduction='batchmean')
+                                distil_loss += kl_loss
                                 '反向交叉熵'
-                                ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
-                                distil_loss += ce_loss
+                                # ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
+                                # distil_loss += ce_loss
 
 
                 # --- B. Bernoulli Loss (BCELoss) ---

@@ -1,5 +1,13 @@
 {
     "Lingma.methodQuickOperation": false,
     "Lingma.aI Chat.memories": true,
-    "Lingma.cloudModelAutoTriggerDisplayRule": false
+    "Lingma.cloudModelAutoTriggerDisplayRule": false,
+    
+    // ....  其他配置
+    "http.proxy": "http://127.0.0.1:7897",
+    "http.proxyStrictSSL": false,
+    "http.proxySupport": "override",
+    "http.noProxy": [],
+    "cursor.general.disableHttp2": true,
+
 }
