@@ -1046,7 +1046,8 @@ def run_MLP_simulation(
                     # 2. 否则从 elite_elo_ratings 轮盘赌 (避开最新 10 个 actor_rein)
                     elif elite_elo_ratings:
                         rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith('actor_rein')]
-                        exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
+                        exclude_keys = set(rein_keys)
+                        # exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
                         candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
                         
                         if candidate_keys:
