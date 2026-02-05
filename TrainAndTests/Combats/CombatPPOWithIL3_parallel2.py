@@ -582,6 +582,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
+    reverse_kl=0,
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -1058,7 +1059,7 @@ def run_MLP_simulation(
                                 # RL 参数
                                 adv_normed=1, mini_batch_size=mini_batch_size_mixed,
                                 # 策略蒸馏参数  
-                                alpha=dynamic_alpha_il, distil_only_maneuver=True)
+                                alpha=dynamic_alpha_il, distil_only_maneuver=True, reverse_kl=reverse_kl)
                     
                 else:
                     #====================

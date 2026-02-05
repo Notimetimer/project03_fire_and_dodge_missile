@@ -1366,7 +1366,7 @@ class PPOHybrid:
                                 # 公共参数
                                 shuffled=1, mini_batch_size=None,
                                 # 策略蒸馏参数  
-                                alpha=1.0, distil_only_maneuver=True):
+                                alpha=1.0, distil_only_maneuver=True, reverse_kl=False):
         
         # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
         # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
@@ -1486,16 +1486,24 @@ class PPOHybrid:
                             
                             # KL(Teacher || Student) = sum(P_t * log(P_t / P_s))
                             # 最小化 KL 等价于最小化 CrossEntropy: - sum(P_t * log(P_s))
-                            log_s_probs = torch.log(s_probs + 1e-10)
-                            'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
-                            '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
-                            # # F.kl_div 期望 input=log_probs, target=probs
-                            # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
-                            # distil_loss += kl_loss
-                            '交叉熵 -sigma(p(a)log(q(a)))'
-                            # 只保留 - sum(P * log Q)（交叉熵）
-                            ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
-                            distil_loss += ce_loss
+                            if not reverse_kl:
+                                log_s_probs = torch.log(s_probs + 1e-10)
+                                'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
+                                '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
+                                # # F.kl_div 期望 input=log_probs, target=probs
+                                # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                                # distil_loss += kl_loss
+                                '交叉熵 -sigma(p(a)log(q(a)))'
+                                # 只保留 - sum(P * log Q)（交叉熵）
+                                ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
+                                distil_loss += ce_loss
+                            else:
+                                log_t_probs = torch.log(t_probs + 1e-10)
+                                '反向KL散度，略'
+                                '反向交叉熵'
+                                ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
+                                distil_loss += ce_loss
+
 
                 # --- B. Bernoulli Loss (BCELoss) ---
                 if (not distil_only_maneuver) and \
