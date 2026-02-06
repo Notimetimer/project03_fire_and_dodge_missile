@@ -461,6 +461,15 @@ class HybridActorWrapper(nn.Module):
                     # 标准 CE: - log_p[target]
                     # gather 需要 index 维度为 (Batch, 1)
                     ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                    '''
+                    log_probs.gather()
+                    从所有动作的概率分布 log_probs 中，精准地抽取出“实际执行了的那个动作” expert_idx 对应的概率值。
+                    - 1 (第一个参数)：表示在第 1 维（列维度）进行选取。
+                    - expert_idx.unsqueeze(1)：将原来形状为(Batch,)的索引变成(Batch, 1)。
+                     这是因为 gather 要求索引的维度必须和原张量一致。
+                    - .squeeze(1)：取完值后，形状还是(Batch, 1)用 squeeze 把那个多余的维度删掉，
+                    变成平铺的 (Batch,)，方便后续算 Loss。
+                    '''
                 
                 total_loss_per_sample += ce_loss
 

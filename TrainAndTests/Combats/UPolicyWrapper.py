@@ -92,7 +92,15 @@ class UnifiedPolicyWrapper:
                 return val.item() if val.numel() == 1 else val
         else:
             # 非神经网络策略返回无穷大
-            return float('inf')
+            fake_value = float('-inf')  # 这里需要负无穷
+            check_obs = self.env.obs2obs_check(obs)
+            state_check = self.env.unscale_state(check_obs)
+            # 规则
+            d_hor, leftright = state_check["border"]
+            if d_hor < 8e3:
+                fake_value = float('inf')
+
+            return fake_value
     
     def _get_nn_action(self, obs, check_obs, actor, explore=None):
         """处理神经网络策略"""
