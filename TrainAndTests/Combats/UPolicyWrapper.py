@@ -13,16 +13,18 @@ class UnifiedPolicyWrapper:
     输出格式统一为: {'cat': array([14维概率分布]), 'bern': array([1维])}
     """
     
-    def __init__(self, env, agent_info=None, epsilon=0.3, device=None):
+    def __init__(self, env, agent_info=None, critic_info=None, epsilon=0.3, device=None):
         """
         Args:
             env: 环境实例，用于获取状态缩放等信息
             agent_info: 元组 (agent_type, actor) 或其列表 [(agent_type, actor), ...]
+            critic_info: 元组 (agent_type, critic) 或其列表 [(agent_type, critic), ...]
             epsilon: 规则策略时用于平滑动作分布的参数
             device: torch device (用于NN策略)
         """
         self.env = env
         self.agent_info = agent_info
+        self.critic_info = critic_info
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
     
@@ -64,6 +66,33 @@ class UnifiedPolicyWrapper:
             return self._get_rule_action(check_obs, actor)
         else:
             raise ValueError(f"Unknown agent_type: {agent_type}. Expected 'NN' or 'rule'.")
+
+    def get_value(self, obs, weights=1, explore=None):
+        """
+        获取价值函数值
+        输入接口与 get_action 保持一致
+        """
+        if self.critic_info is None:
+            return float('inf')
+
+        if isinstance(self.critic_info, list):
+            critic_list = self.critic_info
+        else:
+            critic_list = [self.critic_info]
+
+        agent_type, critic = critic_list[0]
+
+        if agent_type == 'NN':
+            with torch.no_grad():
+                if not isinstance(obs, torch.Tensor):
+                    obs_tensor = torch.tensor(obs, dtype=torch.float, device=self.device).unsqueeze(0)
+                else:
+                    obs_tensor = obs
+                val = critic(obs_tensor)
+                return val.item() if val.numel() == 1 else val
+        else:
+            # 非神经网络策略返回无穷大
+            return float('inf')
     
     def _get_nn_action(self, obs, check_obs, actor, explore=None):
         """处理神经网络策略"""

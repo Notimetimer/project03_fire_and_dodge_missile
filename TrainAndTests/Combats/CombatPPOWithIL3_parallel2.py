@@ -263,13 +263,13 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
 
     # 4. 处理 SP (最强/最新历史版本)
     elif SP_type == 'SP':
-        # rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
+        # rein_keys = [k for k in keys if k.startswith("actor_rein") and '_step_' not in k]
         # 严格匹配 actor_rein + 数字
         rein_keys = [k for k in keys if re.match(r'^actor_rein\d+$', k)]
         if not rein_keys: return np.array([]), []
         
         def extract_number(k):
-            # try: return int(k.replace('actor_rein', ''))
+            # try: return int(k.replace("actor_rein", ''))
             # except: return -1
             try: return int(re.search(r'actor_rein(\d+)', k).group(1))
             except: return -1
@@ -642,6 +642,10 @@ def run_MLP_simulation(
     teacher_actor.eval() # 永远处于验证模式，不更新梯度
     for param in teacher_actor.parameters():
         param.requires_grad = False # 彻底冻结
+    teacher_critic = ValueNet(state_dim, hidden_dim).to(device)
+    teacher_critic.eval()
+    for param in teacher_critic.parameters():
+        param.requires_grad = False # 彻底冻结
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
@@ -744,7 +748,9 @@ def run_MLP_simulation(
     # 初始对手
     if (not elo_ratings) or IL_epoches > 0:
         init_opponent_name = "actor_rein0"
+        init_critic_name = "critic_rein0"
         torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
+        torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, f"{init_critic_name}.pt"))
         if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
 
     # 训练循环变量
@@ -799,7 +805,7 @@ def run_MLP_simulation(
                     
                     if rein_keys:
                         # 找到数值最大的编号（即最新的已保存智能体）
-                        hof_key = max(rein_keys, key=lambda k: int(k.replace('actor_rein', '')))
+                        hof_key = max(rein_keys, key=lambda k: int(k.replace("actor_rein", '')))
                         
                         if hof_key not in hall_of_fame:
                             # 存入字典，分数优先取全量表中的记录
@@ -1006,7 +1012,7 @@ def run_MLP_simulation(
                 # 1. 筛选对手池：Rule开头的所有Key + actor_rein开头的最后300个Key
                 all_keys = list(elo_ratings.keys())
                 rule_keys = [k for k in all_keys if k.startswith('Rule')]
-                rein_keys = [k for k in all_keys if k.startswith('actor_rein')]
+                rein_keys = [k for k in all_keys if k.startswith("actor_rein")]
                 # 取最后（最新插入）的300个
                 latest_rein_keys = rein_keys[-300:] if len(rein_keys) > 300 else rein_keys
                 
@@ -1037,7 +1043,8 @@ def run_MLP_simulation(
                     
                     # --- [核心修改] 选取 Teacher 逻辑 ---
                     teacher_name = None
-                    # teacher_agent.agent_info = None # 显式重置，确保不使用上一轮的 Teacher
+                    teacher_agent.agent_info = None
+                    teacher_agent.critic_info = None # 显式重置
 
                     # 1. 尝试从 hall_of_fame 选取 Elo 最高者
                     if hall_of_fame:
@@ -1045,9 +1052,9 @@ def run_MLP_simulation(
                     
                     # 2. 否则从 elite_elo_ratings 轮盘赌 (避开最新 10 个 actor_rein)
                     elif elite_elo_ratings:
-                        rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith('actor_rein')]
-                        # exclude_keys = set(rein_keys) # debug
-                        exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
+                        rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith("actor_rein")]
+                        exclude_keys = [] # debug
+                        # exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
                         candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
                         
                         if candidate_keys:
@@ -1057,16 +1064,38 @@ def run_MLP_simulation(
                             weights /= np.sum(weights)
                             teacher_name = np.random.choice(candidate_keys, p=weights)
 
+                    teacher_c_name = re.sub(r'actor_rein(\d+)', r'critic_rein\1', teacher_name) if teacher_name and "actor_rein" in teacher_name else "critic_rein0"
+                    '''
+                    re.sub(pattern, repl, string) Substitute（替换）
+                    # pattern: 正则表达式模式（你要找什么？）
+                    # repl: 替换后的内容（你要换成什么？）
+                    # string: 原字符串（在哪换？）
+
+                    pattern 查找模式 (r'actor_rein(\d+)')
+                    \d：匹配一个数字
+                    +：匹配前面的内容（数字）一次或多次。
+                    ()：将匹配到的数字存入“第 1 号记录本”
+
+                    repl 替换内容 (r'critic_rein\1')：
+                    \1：这是一个反向引用，意思是“把刚才匹配到的第 1 号捕获组的内容填在这里
+                    
+                    teacher_name 原字符串： actor_rein0
+                    teacher_c_name 替换后： critic_rein0
+                    '''
+                    
                     # 3. 根据选取结果执行加载逻辑，并设置 should_distil
                     # teacher_name = 'actor_rein0'  # debug
                     if teacher_name:
-                        if teacher_name.startswith('actor_rein'):
+                        if teacher_name.startswith("actor_rein"):
                             # 加载神经网络参数
                             model_path = os.path.join(log_dir, f"{teacher_name}.pt")
-                            if os.path.exists(model_path):
+                            critic_model_path = os.path.join(log_dir, f"{teacher_c_name}.pt")
+                            if os.path.exists(model_path) and os.path.exists(critic_model_path):
                                 try:
                                     teacher_actor.load_state_dict(torch.load(model_path, map_location=device, weights_only=1))
                                     teacher_agent.agent_info = ('NN', teacher_actor)
+                                    teacher_critic.load_state_dict(torch.load(critic_model_path, map_location=device, weights_only=1))
+                                    teacher_agent.critic_info = ('NN', teacher_critic)
                                     should_distil = True # 成功加载，标记为可蒸馏
                                 except Exception as e:
                                     print(f"Warning: Failed to load NN teacher {teacher_name}: {e}")
@@ -1076,6 +1105,7 @@ def run_MLP_simulation(
                             if match:
                                 rule_idx = int(match.group())
                                 teacher_agent.agent_info = ('rule', rule_idx)
+                                teacher_agent.critic_info = ('rule', None) # 规则策略的 critic_info
                                 should_distil = True # 成功解析规则，标记为可蒸馏
                     
                     # 4. 执行更新
@@ -1142,7 +1172,9 @@ def run_MLP_simulation(
                 
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
+                critic_key = f"critic_rein{batch_idx}"
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, f"{critic_key}.pt"))
                 torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
                 print(f"Saved Checkpoint: {actor_key}")
 

@@ -39,7 +39,7 @@ dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 10*60 # 回合最长时间，单位s
 R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_threshold = 0 #  debug 5 * max_episode_duration//dt_action_cycle + 1 
+transition_dict_threshold = 0 #  DEBUG 5 * max_episode_duration//dt_action_cycle + 1 
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -72,7 +72,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=10, # 10 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,

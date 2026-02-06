@@ -1413,6 +1413,7 @@ class PPOHybrid:
         cat_dim = teacher_agent.env.fly_act_dim[0]
         target_probs_cat_np = np.zeros((num_samples, cat_dim), dtype=np.float32)
         target_probs_bern_np = np.zeros((num_samples, 1), dtype=np.float32)
+        target_vals_np = np.zeros((num_samples, 1), dtype=np.float32)
         
         # 遍历每一个样本，逐个生成 Teacher Label
         # 这样做虽然比 Batch 慢，但能完美兼容 Rule Policy，且保证 check_obs 结构正确
@@ -1427,10 +1428,12 @@ class PPOHybrid:
             # explore=None 意味着 Teacher 可能会返回确定性动作或默认分布，这取决于 Wrapper 实现
             # 这里我们需要的是 action_check (即概率分布部分)
             _, t_out_check = teacher_agent.get_action(s_obs)
+            t_out_val = teacher_agent.get_value(s_obs)
             
             # 收集结果 debug here
             target_probs_cat_np[i] = t_out_check['cat'][0] if type(t_out_check['cat']) is list else t_out_check['cat'] # debug
             target_probs_bern_np[i] = t_out_check['bern']
+            target_vals_np[i] = t_out_val
 
         # 3. 将收集到的 List 堆叠回 Tensor (Batch Processing)
         # 处理 Categorical (可能是 List of Arrays，如果有多头的话；或者单个 Array)
@@ -1438,6 +1441,7 @@ class PPOHybrid:
         
         # 堆叠为 (Batch, 14) -> 转 Tensor
         target_probs_cat = [to_tensor(target_probs_cat_np, torch.float)]
+        target_vals = to_tensor(target_vals_np, torch.float)
         
         # 处理 Bernoulli
         if not distil_only_maneuver:
@@ -1467,15 +1471,22 @@ class PPOHybrid:
                 
                 # 准备 Teacher Targets
                 mb_target_cat = [t[batch_idx] for t in target_probs_cat] # List of Tensors
-                if target_probs_bern is not None:
+                mb_target_vals = target_vals[batch_idx]
+                
+                if not distil_only_maneuver:
                     mb_target_bern = target_probs_bern[batch_idx]
                 
                 # Student Forward
                 student_outputs = self.actor.net(mb_inputs)
+                student_vals = self.critic(mb_inputs)
                 
                 distil_loss = torch.tensor(0.0, device=self.device)
                 
                 # --- A. Categorical Loss (KL Divergence) ---
+                # 计算门控：只有 Teacher 的 Value 高于 Student 时才允许蒸馏该样本
+                distil_mask = (mb_target_vals > student_vals).float()
+                mask_sum = distil_mask.sum() + 1e-8
+
                 if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
                     student_probs_list = student_outputs['cat'] # [Probs_Head1, ...]
                     
@@ -1490,8 +1501,11 @@ class PPOHybrid:
                                 log_s_probs = torch.log(s_probs + 1e-10)
                                 'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
                                 '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
-                                # # F.kl_div 期望 input=log_probs, target=probs
-                                kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                                # # # F.kl_div 期望 input=log_probs, target=probs
+                                # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                                # 使用 reduction='none' 配合门控
+                                kl_per_sample = F.kl_div(log_s_probs, t_probs, reduction='none').sum(dim=-1, keepdim=True)
+                                kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
                                 distil_loss += kl_loss
                                 '交叉熵 -sigma(p(a)log(q(a)))'
                                 # 只保留 - sum(P * log Q)（交叉熵）
@@ -1500,14 +1514,16 @@ class PPOHybrid:
                             else:
                                 log_t_probs = torch.log(t_probs + 1e-10)
                                 '反向KL散度'
-                                kl_loss = F.kl_div(log_t_probs, s_probs, reduction='batchmean')
+                                # kl_loss = F.kl_div(log_t_probs, s_probs, reduction='batchmean')
+                                kl_per_sample = F.kl_div(log_t_probs, s_probs, reduction='none').sum(dim=-1, keepdim=True)
+                                kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
                                 distil_loss += kl_loss
                                 '反向交叉熵'
                                 # ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
                                 # distil_loss += ce_loss
 
 
-                # --- B. Bernoulli Loss (BCELoss) ---
+                # --- B. Bernoulli Loss (BCELoss, 只考虑正向KL散度) ---
                 if (not distil_only_maneuver) and \
                    ('bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0) and \
                    (target_probs_bern is not None):
@@ -1517,7 +1533,9 @@ class PPOHybrid:
                     t_probs = mb_target_bern
                     
                     # BCE Loss: - [t * log(s) + (1-t) * log(1-s)]
-                    bce_loss = F.binary_cross_entropy(s_probs, t_probs, reduction='mean')
+                    # bce_loss = F.binary_cross_entropy(s_probs, t_probs, reduction='mean')
+                    bce_per_sample = F.binary_cross_entropy(s_probs, t_probs, reduction='none')
+                    bce_loss = (bce_per_sample * distil_mask).sum() / mask_sum
                     distil_loss += bce_loss
 
                 # Apply Alpha Scaling
