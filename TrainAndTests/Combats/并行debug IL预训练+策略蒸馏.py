@@ -69,7 +69,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=1,  # debug 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=10,  # debug 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -102,7 +102,7 @@ if __name__=='__main__':
         should_kick=0, # False,  # 是否踢走不合规的对手
         use_init_data=0,  # 是否留够他模仿的次数
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
+            'Rule_0': 1200,
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
