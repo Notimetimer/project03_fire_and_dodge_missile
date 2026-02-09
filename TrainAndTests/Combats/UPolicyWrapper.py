@@ -72,8 +72,8 @@ class UnifiedPolicyWrapper:
         获取价值函数值
         输入接口与 get_action 保持一致
         """
-        if self.critic_info is None:
-            return float('inf')
+        # if self.critic_info is None:
+        #     return float('inf')
 
         if isinstance(self.critic_info, list):
             critic_list = self.critic_info
@@ -83,13 +83,14 @@ class UnifiedPolicyWrapper:
         agent_type, critic = critic_list[0]
 
         if agent_type == 'NN':
-            with torch.no_grad():
-                if not isinstance(obs, torch.Tensor):
-                    obs_tensor = torch.tensor(obs, dtype=torch.float, device=self.device).unsqueeze(0)
-                else:
-                    obs_tensor = obs
-                val = critic(obs_tensor)
-                return val.item() if val.numel() == 1 else val
+            return float('inf')  # 不可靠的旧critic, 使用门控不如全通过
+            # with torch.no_grad():
+            #     if not isinstance(obs, torch.Tensor):
+            #         obs_tensor = torch.tensor(obs, dtype=torch.float, device=self.device).unsqueeze(0)
+            #     else:
+            #         obs_tensor = obs
+            #     val = critic(obs_tensor)
+            #     return val.item() if val.numel() == 1 else val
         else:
             # 非神经网络策略返回无穷大
             fake_value = float('-inf')  # 这里需要负无穷

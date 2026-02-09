@@ -1366,7 +1366,7 @@ class PPOHybrid:
                                 # 公共参数
                                 shuffled=1, mini_batch_size=None,
                                 # 策略蒸馏参数  
-                                alpha=1.0, distil_only_maneuver=True, reverse_kl=1):
+                                alpha=1.0, distil_only_maneuver=True):
         
         # [Step A] 准备工作
         if teacher_agent is None:

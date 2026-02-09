@@ -7,7 +7,7 @@ mission_name = '纯策略蒸馏debug'
 # 超参数
 actor_lr = 1e-4 # 1e-4
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0
+IL_epoches= 180
 max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995

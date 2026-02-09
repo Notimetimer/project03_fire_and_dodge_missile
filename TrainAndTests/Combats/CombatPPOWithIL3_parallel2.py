@@ -1094,8 +1094,8 @@ def run_MLP_simulation(
                                 try:
                                     teacher_actor.load_state_dict(torch.load(model_path, map_location=device, weights_only=1))
                                     teacher_agent.agent_info = ('NN', teacher_actor)
-                                    teacher_critic.load_state_dict(torch.load(critic_model_path, map_location=device, weights_only=1))
-                                    teacher_agent.critic_info = ('NN', teacher_critic)
+                                    # teacher_critic.load_state_dict(torch.load(critic_model_path, map_location=device, weights_only=1))
+                                    # teacher_agent.critic_info = ('NN', teacher_critic)
                                     should_distil = True # 成功加载，标记为可蒸馏
                                 except Exception as e:
                                     print(f"Warning: Failed to load NN teacher {teacher_name}: {e}")
@@ -1174,7 +1174,7 @@ def run_MLP_simulation(
                 actor_key = f"actor_rein{batch_idx}"
                 critic_key = f"critic_rein{batch_idx}"
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, f"{critic_key}.pt"))
+                # torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, f"{critic_key}.pt"))
                 torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
                 print(f"Saved Checkpoint: {actor_key}")
 
