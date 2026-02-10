@@ -1052,6 +1052,8 @@ def run_MLP_simulation(
                     logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
                     # 测试举措： 就用rule4作为teacher
+                    teacher_agent.agent_info = None
+                    teacher_agent.critic_info = None # 显式重置
                     teacher_agent.agent_info = ('rule', 4)
                     
                     # 混合更新

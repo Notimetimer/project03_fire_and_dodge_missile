@@ -1366,7 +1366,7 @@ class PPOHybrid:
                                 # 公共参数
                                 shuffled=1, mini_batch_size=None,
                                 # 策略蒸馏参数  
-                                alpha=1.0, distil_only_maneuver=True):
+                                alpha=1.0, distil_only_maneuver=True, reverse_kl=1):
         
         # [Step A] 准备工作
         if teacher_agent is None:
@@ -1461,6 +1461,7 @@ class PPOHybrid:
             # A. Categorical Reverse KL
             if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
                 s_probs = student_outputs['cat'][0]
+                s_probs = torch.clamp(s_probs, 1e-8, 1.0) # 确保不会出现极小值
                 t_probs = target_probs_cat
                 
                 log_s_probs = torch.log(s_probs + 1e-10)
@@ -1516,7 +1517,7 @@ class PPOHybrid:
                 # Gather teacher's prob for student's action
                 # log( pi_teacher(a_{t+1}) )
                 t_prob_selected = t_probs_next.gather(1, s_action_next)
-                r_exp_next = torch.log(t_prob_selected + 1e-10).detach() # 这是一个标量 Reward
+                r_exp_next = torch.log(t_prob_selected + 1e-8).clamp(min=-10.0).detach() # 这是一个标量 Reward
             else:
                 r_exp_next = torch.zeros_like(log_prob_curr)
 
@@ -1541,6 +1542,10 @@ class PPOHybrid:
 
             # 总 Loss
             total_loss = alpha * (kl_curr + loss_rl).mean()
+
+            if torch.isnan(total_loss):
+                print(f"Detect nan in loss! kl_curr: {kl_curr.mean().item()}, loss_rl: {loss_rl.mean().item()}")
+                # 可以在这里断点调试
 
             # 优化更新
             self.actor_optimizer.zero_grad()

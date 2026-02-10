@@ -1366,9 +1366,17 @@ class PPOHybrid:
                                 # 公共参数
                                 shuffled=1, mini_batch_size=None,
                                 # 策略蒸馏参数  
-                                alpha=1.0, distil_only_maneuver=True, reverse_kl=1):
+                                alpha=1.0, distil_only_maneuver=True, reverse_kl=False):
         
-        # [Step A] 准备工作
+        # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
+        # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
+        rl_total_size = len(transition_dict['states'])
+        mb = mini_batch_size if mini_batch_size is not None else rl_total_size
+        
+        # =====================================================================
+        # Phase 2: 策略蒸馏
+        # =====================================================================
+        # 如果没有提供教师代理，或者教师代理为 None，则直接跳过蒸馏，返回 PPO 结果
         if teacher_agent is None:
             return
 
@@ -1378,19 +1386,23 @@ class PPOHybrid:
                 return torch.tensor(x, dtype=dtype).to(self.device)
             return torch.tensor(np.array(x), dtype=dtype).to(self.device)
 
-        # 1. 准备输入数据 (Full Batch)
+        # 1. 准备蒸馏输入数据 (优先使用 Obs)
+        # 这里的输入数据将用于 Student (Net forward) 和 Teacher (Label generation)
         if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
             student_inputs_tensor = to_tensor(transition_dict['obs'], torch.float)
-            teacher_inputs_np = np.array(transition_dict['obs']) 
+            teacher_inputs_np = np.array(transition_dict['obs']) # (Batch, Dim)
         else:
             student_inputs_tensor = to_tensor(transition_dict['states'], torch.float)
             teacher_inputs_np = np.array(transition_dict['states'])
 
+        # 获取 dones 标记，用于截断轨迹 (Batch, 1)
         dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
 
-        # 动作数据准备 (用于 log_prob 计算)
+
+        # 获取学生实际采取的动作 (用于计算 log_prob)
         student_actions_raw = transition_dict['actions']
         student_actions_tensor = {}
+        # 统一格式处理
         if isinstance(student_actions_raw, list):
             keys = student_actions_raw[0].keys()
             temp_dict = {}
@@ -1406,153 +1418,183 @@ class PPOHybrid:
 
         num_samples = student_inputs_tensor.size(0)
 
-        # 2. 预计算 Teacher 的动作分布 (Soft Targets)
+        # 2. 获取 Teacher 的动作分布 (Soft Targets)
         # ---------------------------------------------------------------------
+        # [核心修改] 使用 env.obs2obs_check 将 Batch Obs 转换为 List[Dict]
+        # ---------------------------------------------------------------------
+        
         cat_dim = teacher_agent.env.fly_act_dim[0]
         target_probs_cat_np = np.zeros((num_samples, cat_dim), dtype=np.float32)
         target_probs_bern_np = np.zeros((num_samples, 1), dtype=np.float32)
         target_vals_np = np.zeros((num_samples, 1), dtype=np.float32)
         
+        # 遍历每一个样本，逐个生成 Teacher Label
+        # 这样做虽然比 Batch 慢，但能完美兼容 Rule Policy，且保证 check_obs 结构正确
         for i in range(num_samples):
-            s_obs = teacher_inputs_np[i]
+            # 获取单条数据的 obs (Numpy) 和 check_obs (Dict)
+            s_obs = teacher_inputs_np[i]       # (Dim, )
+            # s_check_obs = list_check_obs[i]    # Dict
+            
+            # 调用 Teacher 获取分布
+            # 注意：teacher_agent 必须封装好，get_action 接收 (obs, check_obs)
+            # 对于 Rule，它会忽略 obs 只看 check_obs；对于 NN，它可能看 obs
+            # explore=None 意味着 Teacher 可能会返回确定性动作或默认分布，这取决于 Wrapper 实现
+            # 这里我们需要的是 action_check (即概率分布部分)
             _, t_out_check = teacher_agent.get_action(s_obs)
             t_out_val = teacher_agent.get_value(s_obs)
             
-            target_probs_cat_np[i] = t_out_check['cat'][0] if type(t_out_check['cat']) is list else t_out_check['cat']
+            # 收集结果 debug here
+            target_probs_cat_np[i] = t_out_check['cat'][0] if type(t_out_check['cat']) is list else t_out_check['cat'] # debug
             target_probs_bern_np[i] = t_out_check['bern']
             target_vals_np[i] = t_out_val
         
         # 转 Tensor
-        target_probs_cat = to_tensor(target_probs_cat_np, torch.float)
-        target_vals = to_tensor(target_vals_np, torch.float)
+        # 将收集到的 List 堆叠回 Tensor (Batch Processing)
+        # 处理 Categorical (可能是 List of Arrays，如果有多头的话；或者单个 Array)
+        # 假设 t_out_check['cat'] 是一个 numpy array (14, )
+        
+        # 堆叠为 (Batch, 14) -> 转 Tensor
+        target_probs_cat = to_tensor(target_probs_cat_np, torch.float)  # (Batch, Dim)
+        target_vals = to_tensor(target_vals_np, torch.float)  # (Batch, 1)
+        
+        # 处理 Bernoulli
         if not distil_only_maneuver:
+            # 堆叠为 (Batch, 1) -> 转 Tensor
             target_probs_bern = to_tensor(target_probs_bern_np, torch.float)
         else:
             target_probs_bern = None
 
-        # 3. 蒸馏训练循环 (Multi-Epoch)
-        # ---------------------------------------------------------------------
+        # 蒸馏训练循环
         distil_actor_loss_list = []
         distil_grad_list = []
         
         valid_range_len = num_samples - 1
         base_indices = np.arange(valid_range_len)
 
-        for _ in range(self.epochs):
-            
-            if shuffled:
-                np.random.shuffle(base_indices)
-            
-            # 构造 Tensor 索引
-            curr_idx = to_tensor(base_indices, torch.long)     # t
-            next_idx = to_tensor(base_indices + 1, torch.long) # t+1
-            
-            # Forward Student 获取当前分布
+
+        '''
+        todo 打乱顺序和epoch的加在这里
+        '''
+        for _ in range(1):  # self.epochs  (使用 PPO 相同的 epochs)
+
+            # 3. 计算全量 KL 散度 (Immediate Distillation Loss)
+            # ---------------------------------------------------------------------
+            # 我们先计算出每一步的 KL(t)，然后通过错位索引得到 KL(t+1)
+            # Student Forward (全量)
             student_outputs = self.actor.net(student_inputs_tensor)
-            student_vals = self.critic(student_inputs_tensor)
-            
-            # -----------------------------------------------------------------
-            # [Change 1] 计算 Reverse KL (Exp Loss Term)
-            # -----------------------------------------------------------------
-            # Loss = Sum( Student * (Log_Student - Log_Teacher) )
+            student_vals = self.critic(student_inputs_tensor) # 用于门控
+
+            # 计算每一切实步的 KL Loss (不求和，保留 (Batch, 1) 维度)
             kl_loss_per_epoch = torch.zeros((num_samples, 1), device=self.device)
             distil_mask = (target_vals > student_vals).float()
+            mask_sum = distil_mask.sum() + 1e-8
 
-            # A. Categorical Reverse KL
+
             if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                # 假设单头
                 s_probs = student_outputs['cat'][0]
                 t_probs = target_probs_cat
                 
-                log_s_probs = torch.log(s_probs + 1e-10)
-                log_t_probs = torch.log(t_probs + 1e-10)
+                if not reverse_kl:
+                    log_s_probs = torch.log(s_probs + 1e-10)
+                    # reduction='none' 保留维度
+                    'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
+                    '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
+                    kl_cat = F.kl_div(log_s_probs, t_probs, reduction='none').sum(dim=-1, keepdim=True)
+                else:
+                    '反向KL散度'
+                    log_t_probs = torch.log(t_probs + 1e-10)
+                    kl_cat = F.kl_div(log_t_probs, s_probs, reduction='none').sum(dim=-1, keepdim=True)
                 
-                # 手动计算 Reverse KL: sum(p_student * (log_p_student - log_p_teacher))
-                kl_reverse = (s_probs * (log_s_probs - log_t_probs)).sum(dim=-1, keepdim=True)
-                kl_loss_per_epoch += kl_reverse
+                kl_cat = (kl_cat * distil_mask).sum() / mask_sum
+                kl_loss_per_epoch += kl_cat
 
-            # B. Bernoulli Reverse KL
-            if (not distil_only_maneuver) and (target_probs_bern is not None):
+            # --- B. Bernoulli BCELoss ---
+            if (not distil_only_maneuver) and (target_probs_bern is not None) and \
+                ('bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0):
+                
                 s_logits = student_outputs['bern']
                 s_probs_bern = torch.sigmoid(s_logits)
                 t_probs_bern = target_probs_bern
                 
-                # BCEWithLogits 其实是 - [y * log(x) + (1-y) * log(1-x)]
-                # Reverse KL 需要把 s_probs 当作分布 P，t_probs 当作 Q
-                # P log P - P log Q
-                # 为了数值稳定，这里简化使用 BCE，或者严格实现 Bernoulli KL
-                # 简单起见，这里仍沿用 BCE 近似，或者严格写：
-                s_p = s_probs_bern
-                t_p = t_probs_bern + 1e-10
-                kl_bern = s_p * (torch.log(s_p + 1e-10) - torch.log(t_p)) + \
-                          (1 - s_p) * (torch.log(1 - s_p + 1e-10) - torch.log(1 - t_p))
+                bce_per_sample = F.binary_cross_entropy(s_probs_bern, t_probs_bern, reduction='none')
+                kl_bern = (bce_per_sample * distil_mask).sum() / mask_sum
                 kl_loss_per_epoch += kl_bern
 
-            # 应用门控
-            kl_loss_per_epoch = kl_loss_per_epoch * distil_mask
-            
-            # 提取当前时刻的监督损失
-            kl_curr = kl_loss_per_epoch[curr_idx]
 
-            # -----------------------------------------------------------------
-            # [Change 2] 计算 Exp 补偿项 (Reward = Teacher LogProb of Next Action)
-            # -----------------------------------------------------------------
+
+            # 构建 N-distill 损失
+            # ---------------------------------------------------------------------
+            # 逻辑：
+            # Loss_total[t] = KL[t] + (log_pi[t] * KL[t+1].detach())
+            # 注意：最后一步没有 t+1，或者 t+1 是下一回合开始，必须截断
             
-            # 1. 计算 Student 当前的 log_prob (用于梯度)
+            # 1. 计算 Student 的 Log_Prob (全量)
+            # 使用 evaluate_actions 接口复用代码
             log_probs_all, _, _, _, _ = self.actor.evaluate_actions(
                 student_inputs_tensor, student_actions_tensor, max_std=self.max_std
-            )
-            log_prob_curr = log_probs_all[curr_idx]
+            ) # (Batch, 1)
 
-            # 2. 获取下一时刻 Student 实际采取的动作
-            # 这里的动作是 buffer 里的，即 student 采样产生的 a_{t+1}
-            # 我们需要计算 teacher 对这个动作的 log_prob
+            # 构造时序对 (t, t+1)
+            # current steps: 0 ... N-2
+            # next steps:    1 ... N-1
+            # 构造 Tensor 索引
+            # [Shuffle] 每个 Epoch 重新打乱索引，但保持 (t, t+1) 配对关系
+            if shuffled:
+                np.random.shuffle(base_indices)
+            curr_idx = to_tensor(base_indices, torch.long)     # t
+            next_idx = to_tensor(base_indices + 1, torch.long) # t+1
             
-            # 处理 Categorical 动作的 Gather
-            # 假设只有 'cat' 动作参与这个 Reward 计算
-            if 'cat' in student_actions_tensor:
-                s_action_next = student_actions_tensor['cat'][next_idx] # (Batch, 1)
-                t_probs_next = target_probs_cat[next_idx]               # (Batch, Dim)
-                
-                # Gather teacher's prob for student's action
-                # log( pi_teacher(a_{t+1}) )
-                t_prob_selected = t_probs_next.gather(1, s_action_next)
-                r_exp_next = torch.log(t_prob_selected + 1e-10).detach() # 这是一个标量 Reward
-            else:
-                r_exp_next = torch.zeros_like(log_prob_curr)
+            # 处理 Done (回合结束符)
+            # 如果 steps[i] 是 Done，那么 steps[i+1] 是新回合，不应产生关联
+            valid_mask = (1.0 - dones[curr_idx]) # (N-1, 1)
 
-            # 处理 Done
-            valid_mask = (1.0 - dones[curr_idx])
+            kl_curr = kl_loss_per_epoch[curr_idx]       # l(tau_t)
+            kl_next = kl_loss_per_epoch[next_idx]       # l(tau_{t+1})
 
-            # -----------------------------------------------------------------
-            # [Change 3] 构建 Exp RL Loss
-            # -----------------------------------------------------------------
-            # 标准 PG Loss: - Reward * log_pi
-            # 这里 Reward = r_exp_next (通常是负数，log概率)
-            # 我们希望 Maximize Reward => Minimize -Reward
-            # Loss = - (r_exp_next * log_prob_curr)
-            # 
-            # 分析梯度:
-            # 如果 r_exp_next 很小 (比如 -10, 老师觉得这个动作很烂), Loss = 10 * log_pi
-            # Min Loss -> Min log_pi -> 降低该动作概率 (Correct)
-            # 如果 r_exp_next 很大 (比如 -0.1, 老师觉得很棒), Loss = 0.1 * log_pi
-            # Min Loss -> 相对惩罚较小 (Softmax 会自然增加其概率)
+            log_prob_curr = log_probs_all[curr_idx]    # log pi(tau_t)
             
-            loss_rl = - (r_exp_next * log_prob_curr) * valid_mask
-
-            # 总 Loss
-            total_loss = alpha * (kl_curr + loss_rl).mean()
-
-            # 优化更新
-            self.actor_optimizer.zero_grad()
-            total_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            self.actor_optimizer.step()
-
-            distil_actor_loss_list.append(total_loss.item())
+            # 4. 计算补偿项 (Reward = -KL_next)
+            # RL Loss = - (Reward * log_prob) = - (-KL * log_prob) = KL * log_prob
+            # [修正] 这里使用 + log_prob * kl_next
+            # 因为 log_prob 通常为负，乘积为负。最小化该负值 = 鼓励 log_prob 变小(负得更多) = 降低概率
+            # 等等，我们需要 PENALIZE (惩罚) 导致高 KL_next 的动作。
+            # 惩罚 = 降低概率。
+            # 最小化 (log_prob * KL_next):
+            #   若 KL=10, log=-2 -> -20
+            #   若 KL=10, log=-10 -> -100 (更小) -> 优化器会倾向于让 log_prob 变小 -> 降低概率。
+            #   逻辑正确。
+            
+            # N-distill 补偿损失
+            loss_compens = (log_prob_curr * kl_next.detach()) * valid_mask
+            
+            # 5. 总损失
+            # loss_sl = KL_curr (所有时刻都算 SL，包括最后一步，但这里为了对齐只算到 N-2，
+            # 也可以把最后一步单独加回来，但通常 N 很大忽略不计)
+            
+            # 如果希望对齐维度，也可以把最后一步补 0，这里简单起见只取前 N-1 步
+            total_loss_per_epoch = alpha * (kl_curr + loss_compens)
+            
             distil_grad_list.append(model_grad_norm(self.actor))
 
+            # 平均
+            final_loss = total_loss_per_epoch.mean()
+            distil_actor_loss_list.append(final_loss.item())
+
+            # 5. 优化更新
+            self.actor_optimizer.zero_grad()
+            final_loss.backward()
+            
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            self.actor_optimizer.step()
+            
+        # 6. 记录日志
         if len(distil_actor_loss_list) > 0:
-            self.dis_actor_loss = np.mean(distil_actor_loss_list)
-            self.dis_actor_grad = np.mean(distil_grad_list)
-            self.IL_samples = num_samples * self.epochs
+            avg_distil_loss = np.mean(distil_actor_loss_list)
+            avg_distil_grad = np.mean(distil_grad_list)
+
+            self.dis_actor_loss = avg_distil_loss
+            self.dis_actor_grad = avg_distil_grad # post-clip
+
             check_weights_bias_nan(self.actor, "actor", "distil后")
+

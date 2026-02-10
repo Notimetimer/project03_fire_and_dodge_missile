@@ -72,8 +72,8 @@ class UnifiedPolicyWrapper:
         获取价值函数值
         输入接口与 get_action 保持一致
         """
-        # if self.critic_info is None:
-        #     return float('inf')
+        if self.critic_info is None:
+            return float('inf')
 
         if isinstance(self.critic_info, list):
             critic_list = self.critic_info
