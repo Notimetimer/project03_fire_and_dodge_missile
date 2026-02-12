@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel2 import *
 from datetime import datetime
 
-mission_name = 'IL_and_RL_分阶段_打所有Rules 蒸馏 并行2'
+mission_name = 'IL_and_RL_分阶段_打所有Rules 蒸馏 并行1e-3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -14,7 +14,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1e-6  # 1e-2  # 设置为0就是纯强化学习
+alpha_il = 1e-3  # 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2=il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
