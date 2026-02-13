@@ -1051,11 +1051,18 @@ def run_MLP_simulation(
                         teacher_name = max(hall_of_fame, key=hall_of_fame.get)
                     
                     # 2. 否则从 elite_elo_ratings 轮盘赌 (避开最新 10 个 actor_rein)
-                    elif elite_elo_ratings:
+                    elif elite_elo_ratings and total_steps >= WARM_UP_STEPS:
+                        all_keys = list(elite_elo_ratings.keys())
                         rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith("actor_rein")]
                         exclude_keys = [] # debug
-                        # exclude_keys = set(rein_keys[-10:]) if len(rein_keys) >= 10 else set(rein_keys)
-                        candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
+                        
+                        # candidate_keys = [k for k in elite_elo_ratings.keys() if k not in exclude_keys and not k.startswith("__")]
+                        target_rules = ['Rule_3', 'Rule_4']
+                        # 过滤掉不在 elite_elo_ratings 中的 Rule 智能体
+                        valid_rules = [r for r in target_rules if r in elite_elo_ratings]
+                        
+                        # 3. 拼接作为最终的候选名单
+                        candidate_keys = rein_keys + valid_rules
                         
                         if candidate_keys:
                             candidate_elos = np.array([elite_elo_ratings[k] for k in candidate_keys], dtype=np.float64)
