@@ -269,8 +269,6 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         if not rein_keys: return np.array([]), []
         
         def extract_number(k):
-            # try: return int(k.replace("actor_rein", ''))
-            # except: return -1
             try: return int(re.search(r'actor_rein(\d+)', k).group(1))
             except: return -1
             
