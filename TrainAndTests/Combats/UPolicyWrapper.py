@@ -92,7 +92,10 @@ class UnifiedPolicyWrapper:
             #     val = critic(obs_tensor)
             #     return val.item() if val.numel() == 1 else val
         else:
-            # 非神经网络策略返回无穷大
+            # # 纯策略蒸馏临时全通过
+            # return float('inf')
+
+            # 正常模式
             fake_value = float('-inf')  # 这里需要负无穷
             check_obs = self.env.obs2obs_check(obs)
             state_check = self.env.unscale_state(check_obs)

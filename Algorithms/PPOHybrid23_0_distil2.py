@@ -557,6 +557,9 @@ class PPOHybrid:
         self.dis_actor_loss = 0
         self.dis_actor_grad = 0
 
+        self.ppo_advantage = torch.tensor([0.0])
+        self.old_log_probs = torch.tensor([0.0])
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
@@ -754,6 +757,9 @@ class PPOHybrid:
         num_samples = actor_inputs.size(0)
         if mini_batch_size is None:
             mini_batch_size = num_samples
+        
+        self.ppo_advantage = advantage
+        self.old_log_probs = old_log_probs
 
         for _ in range(self.epochs):
             
@@ -1398,6 +1404,14 @@ class PPOHybrid:
 
         num_samples = student_inputs_tensor.size(0)
 
+        dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
+        # 如果 transition_dict 中没有 active_masks，则默认所有样本均有效
+        if 'active_masks' in transition_dict:
+            active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
+        else:
+            # 创建与 dones 形状一致的全 1 张量
+            active_masks = torch.ones_like(dones)
+
         # 2. 获取 Teacher 的动作分布 (Soft Targets)
         # ---------------------------------------------------------------------
         # [核心修改] 使用 env.obs2obs_check 将 Batch Obs 转换为 List[Dict]
@@ -1458,99 +1472,150 @@ class PPOHybrid:
         indices = np.arange(num_samples)
         
 
-        for _ in range(1):  # self.epochs  (使用 PPO 相同的 epochs)
-            if shuffled:
-                np.random.shuffle(indices)
-                
-            for start in range(0, num_samples, mb):
-                end = min(start + mb, num_samples)
-                batch_idx = indices[start:end]
-                
-                # 准备 Mini-Batch 数据
-                mb_inputs = student_inputs_tensor[batch_idx]
-                
-                # 准备 Teacher Targets
-                mb_target_cat = [t[batch_idx] for t in target_probs_cat] # List of Tensors
-                mb_target_vals = target_vals[batch_idx]
-                
-                if not distil_only_maneuver:
-                    mb_target_bern = target_probs_bern[batch_idx]
-                
-                # Student Forward
-                student_outputs = self.actor.net(mb_inputs)
-                student_vals = self.critic(mb_inputs)
-                
-                distil_loss = torch.tensor(0.0, device=self.device)
-                
-                # --- A. Categorical Loss (KL Divergence) ---
-                # 计算门控：只有 Teacher 的 Value 高于 Student 时才允许蒸馏该样本
-                distil_mask = (mb_target_vals > student_vals).float()
-                mask_sum = distil_mask.sum() + 1e-8
+        # 1. 准备动作数据 (转 Tensor)
+        actions_on_device = {}
+        actions_from_buffer = transition_dict['actions']
+        # Buffer 传来的 actions 已经是 dict of arrays
+        if isinstance(actions_from_buffer, dict):
+            for key, val in actions_from_buffer.items():
+                if key == 'cat':
+                    actions_on_device[key] = to_tensor(val, torch.long)
+                else:
+                    actions_on_device[key] = to_tensor(val, torch.float)
+        else:
+            # 兼容旧代码 (list of dicts)
+            # 旧逻辑：List of Dicts (较慢)
+            all_keys = actions_from_buffer[0].keys()
+            for key in all_keys:
+                vals = [d[key] for d in actions_from_buffer]
+                if key == 'cat':
+                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
+                else:
+                    actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
 
-                if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-                    student_probs_list = student_outputs['cat'] # [Probs_Head1, ...]
-                    
-                    # 假设单头匹配
-                    for i, s_probs in enumerate(student_probs_list):
-                        if i < len(mb_target_cat):
-                            t_probs = mb_target_cat[i]
-                            
-                            # KL(Teacher || Student) = sum(P_t * log(P_t / P_s))
-                            # 最小化 KL 等价于最小化 CrossEntropy: - sum(P_t * log(P_s))
-                            if not reverse_kl:
-                                log_s_probs = torch.log(s_probs + 1e-10)
-                                'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
-                                '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
-                                # # # F.kl_div 期望 input=log_probs, target=probs
-                                # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
-                                # 使用 reduction='none' 配合门控
-                                kl_per_sample = F.kl_div(log_s_probs, t_probs, reduction='none').sum(dim=-1, keepdim=True)
-                                kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
-                                distil_loss += kl_loss
-                                '交叉熵 -sigma(p(a)log(q(a)))'
-                                # 只保留 - sum(P * log Q)（交叉熵）
-                                # ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
-                                # distil_loss += ce_loss
-                            else:
-                                log_t_probs = torch.log(t_probs + 1e-10)
-                                '反向KL散度'
-                                # kl_loss = F.kl_div(log_t_probs, s_probs, reduction='batchmean')
-                                kl_per_sample = F.kl_div(log_t_probs, s_probs, reduction='none').sum(dim=-1, keepdim=True)
-                                kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
-                                distil_loss += kl_loss
-                                '反向交叉熵'
-                                # ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
-                                # distil_loss += ce_loss
+        # for _ in range(1):  # self.epochs  (使用 PPO 相同的 epochs)
+        if shuffled:
+            np.random.shuffle(indices)
+            
+        for start in range(0, num_samples, mb):
+            end = min(start + mb, num_samples)
+            batch_idx = indices[start:end]
+            
+            # 准备 Mini-Batch 数据
+            mb_inputs = student_inputs_tensor[batch_idx]
+            
+            # 准备 Teacher Targets
+            mb_target_cat = [t[batch_idx] for t in target_probs_cat] # List of Tensors
+            mb_target_vals = target_vals[batch_idx]
+            advantage = self.ppo_advantage[batch_idx]
+            mb_active_masks = active_masks[batch_idx]
+
+            if not distil_only_maneuver:
+                mb_target_bern = target_probs_bern[batch_idx]
+            
+            # Student Forward
+            student_outputs = self.actor.net(mb_inputs)
+            student_vals = self.critic(mb_inputs)
+            
+            distil_loss = torch.tensor(0.0, device=self.device)
+            
+            # --- A. Categorical Loss (KL Divergence) ---
+            # 计算门控：只有 Teacher 的 Value 高于 Student 时才允许蒸馏该样本
+            distil_mask = (mb_target_vals > student_vals).float()
+            mask_sum = distil_mask.sum() + 1e-8
+
+            if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                student_probs_list = student_outputs['cat'] # [Probs_Head1, ...]
+                
+                # 假设单头匹配
+                for i, s_probs in enumerate(student_probs_list):
+                    if i < len(mb_target_cat):
+                        t_probs = mb_target_cat[i]
+                        
+                        # KL(Teacher || Student) = sum(P_t * log(P_t / P_s))
+                        # 最小化 KL 等价于最小化 CrossEntropy: - sum(P_t * log(P_s))
+                        if not reverse_kl:
+                            log_s_probs = torch.log(s_probs + 1e-10)
+                            'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
+                            '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
+                            # # # F.kl_div 期望 input=log_probs, target=probs
+                            # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                            # 使用 reduction='none' 配合门控
+                            kl_per_sample = F.kl_div(log_s_probs, t_probs, reduction='none').sum(dim=-1, keepdim=True)
+                            kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
+                            distil_loss += kl_loss
+                            '交叉熵 -sigma(p(a)log(q(a)))'
+                            # 只保留 - sum(P * log Q)（交叉熵）
+                            # ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
+                            # distil_loss += ce_loss
+                        else:
+                            log_t_probs = torch.log(t_probs + 1e-10)
+                            '反向KL散度'
+                            # kl_loss = F.kl_div(log_t_probs, s_probs, reduction='batchmean')
+                            kl_per_sample = F.kl_div(log_t_probs, s_probs, reduction='none').sum(dim=-1, keepdim=True)
+                            kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
+                            distil_loss += kl_loss
+                            '反向交叉熵'
+                            # ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
+                            # distil_loss += ce_loss
 
 
-                # --- B. Bernoulli Loss (BCELoss, 只考虑正向KL散度) ---
-                if (not distil_only_maneuver) and \
-                   ('bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0) and \
-                   (target_probs_bern is not None):
-                    
-                    s_logits = student_outputs['bern']
-                    s_probs = torch.sigmoid(s_logits)
-                    t_probs = mb_target_bern
-                    
-                    # BCE Loss: - [t * log(s) + (1-t) * log(1-s)]
-                    # bce_loss = F.binary_cross_entropy(s_probs, t_probs, reduction='mean')
-                    bce_per_sample = F.binary_cross_entropy(s_probs, t_probs, reduction='none')
-                    bce_loss = (bce_per_sample * distil_mask).sum() / mask_sum
-                    distil_loss += bce_loss
+            # --- B. Bernoulli Loss (BCELoss, 只考虑正向KL散度) ---
+            if (not distil_only_maneuver) and \
+                ('bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0) and \
+                (target_probs_bern is not None):
+                
+                s_logits = student_outputs['bern']
+                s_probs = torch.sigmoid(s_logits)
+                t_probs = mb_target_bern
+                
+                # BCE Loss: - [t * log(s) + (1-t) * log(1-s)]
+                # bce_loss = F.binary_cross_entropy(s_probs, t_probs, reduction='mean')
+                bce_per_sample = F.binary_cross_entropy(s_probs, t_probs, reduction='none')
+                bce_loss = (bce_per_sample * distil_mask).sum() / mask_sum
+                distil_loss += bce_loss
 
-                # Apply Alpha Scaling
-                final_loss = alpha * distil_loss
-                
-                # Update
-                self.actor_optimizer.zero_grad()
-                final_loss.backward()
-                
-                pre_clip_distil_grad.append(model_grad_norm(self.actor))
-                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-                self.actor_optimizer.step()
-                
-                distil_actor_loss_list.append(final_loss.item())
-                distil_grad_list.append(model_grad_norm(self.actor))
+
+            # PPO 损失函数
+            # 切片 Actions (Dict 结构)
+            mb_actions = {}
+            for k, v in actions_on_device.items():
+                mb_actions[k] = v[batch_idx]
+            mb_old_log_probs = self.old_log_probs[batch_idx]
+            log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_inputs, mb_actions, h=None, max_std=self.max_std)
+            
+            #  计算 log_ratio 用于更精准的 KL 计算
+            log_ratio = log_probs - mb_old_log_probs
+            ratio = torch.exp(log_ratio)
+            
+            #  计算 Approximate KL Divergence
+            with torch.no_grad():
+                #  KL 计算也最好应用 mask，但为了监控方便，这里先保持全局均值或应用mask均值
+                active_sum = mb_active_masks.sum()
+
+            
+            surr1 = ratio * advantage
+            surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
+            
+            #  Actor Loss 使用 mask 加权
+            surrogate_loss = -torch.min(surr1, surr2)
+            # active_sum 已经在上面计算过
+
+            PPO_loss = (surrogate_loss * mb_active_masks).sum() / (active_sum + 1e-5)
+
+            # Apply Alpha Scaling
+            final_loss = PPO_loss + alpha * distil_loss
+            
+            # Update
+            self.actor_optimizer.zero_grad()
+            final_loss.backward()
+            
+            pre_clip_distil_grad.append(model_grad_norm(self.actor))
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            self.actor_optimizer.step()
+            
+            distil_actor_loss_list.append(final_loss.item())
+            distil_grad_list.append(model_grad_norm(self.actor))
 
 
         # =====================================================================
