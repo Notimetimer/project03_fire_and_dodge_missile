@@ -618,14 +618,14 @@ def run_MLP_simulation(
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     critic_net = ValueNet(state_dim, hidden_dim).to(device)
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
-
+    epochs0 = epochs
     student_agent = PPOHybrid(
         actor=actor_wrapper, 
         critic=critic_net, 
         actor_lr=actor_lr, 
         critic_lr=critic_lr,
         lmbda=lmbda, 
-        epochs=epochs, 
+        epochs=epochs0, 
         eps=eps, 
         gamma=gamma, 
         device=device, 
@@ -732,6 +732,7 @@ def run_MLP_simulation(
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
     elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
     hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
+    teacher_history_path = os.path.join(log_dir, "teacher_history.json")
 
     # 尝试加载历史
     if os.path.exists(full_json_path):
@@ -740,6 +741,11 @@ def run_MLP_simulation(
         with open(elite_json_path, 'r', encoding='utf-8') as f: elite_elo_ratings = json.load(f)
     if os.path.exists(hof_json_path):
         with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
+    
+    # 加载 teacher 历史记录
+    teacher_history = []
+    if os.path.exists(teacher_history_path):
+        with open(teacher_history_path, 'r', encoding='utf-8') as f: teacher_history = json.load(f)
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
@@ -1091,6 +1097,29 @@ def run_MLP_simulation(
                     # 3. 根据选取结果执行加载逻辑，并设置 should_distil
                     # teacher_name = 'actor_rein0'  # debug
                     if teacher_name:
+                        # 记录本轮 teacher_name 和对应的 elo
+                        teacher_elo = None
+                        if teacher_name in elo_ratings:
+                            teacher_elo = elo_ratings[teacher_name]
+                        elif teacher_name in elite_elo_ratings:
+                            teacher_elo = elite_elo_ratings[teacher_name]
+                        elif teacher_name in hall_of_fame:
+                            teacher_elo = hall_of_fame[teacher_name]
+                        
+                        # 添加到历史记录
+                        teacher_record = {
+                            "step": total_steps,
+                            "batch_idx": batch_idx,
+                            "teacher_name": teacher_name,
+                            "teacher_elo": teacher_elo
+                        }
+                        teacher_history.append(teacher_record)
+                        
+                        # 保存到文件
+                        with open(teacher_history_path, 'w', encoding='utf-8') as f:
+                            json.dump(teacher_history, f, ensure_ascii=False, indent=2)
+                        
+                        
                         if teacher_name.startswith("actor_rein"):
                             # 加载神经网络参数
                             model_path = os.path.join(log_dir, f"{teacher_name}.pt")
@@ -1115,6 +1144,11 @@ def run_MLP_simulation(
                     
                     # 4. 执行更新
                     # 先执行常规 PPO 更新
+                    if should_distil:
+                        student_agent.epochs = epochs0-1
+                    else:
+                        student_agent.epochs = epochs0
+
                     student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
                     
                     # 如果标记为可蒸馏，则执行策略蒸馏
@@ -1149,13 +1183,13 @@ def run_MLP_simulation(
                 critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
                 # 梯度监控
-                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
-                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
+                # logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
+                # logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 # 损失函数监控
                 logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
                 logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
                 # 强化学习actor特殊项监控
-                logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
+                # logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
                 logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
                 logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
                 
@@ -1287,18 +1321,18 @@ def run_MLP_simulation(
                     if 'actor_key' in locals() and actor_key in valid_elos and actor_key not in keys_to_log:
                         keys_to_log.append(actor_key)
                         
-                    for k in keys_to_log:
-                        # 如果是规则智能体，使用其自身名字
-                        if k.startswith("Rule_"):
-                            raw_tag = f"Elo_Raw/{k}"
-                            centered_tag = f"Elo_Centered/{k}"
-                        # 否则，认为是最新智能体，使用固定标签 "Latest"
-                        else:
-                            raw_tag = "Elo_Raw/Latest"
-                            centered_tag = "Elo_Centered/Latest"
+                    # for k in keys_to_log:
+                    #     # 如果是规则智能体，使用其自身名字
+                    #     if k.startswith("Rule_"):
+                    #         raw_tag = f"Elo_Raw/{k}"
+                    #         centered_tag = f"Elo_Centered/{k}"
+                    #     # 否则，认为是最新智能体，使用固定标签 "Latest"
+                    #     else:
+                    #         raw_tag = "Elo_Raw/Latest"
+                    #         centered_tag = "Elo_Centered/Latest"
                         
-                        logger.add(raw_tag, valid_elos[k], total_steps)
-                        logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
+                    #     logger.add(raw_tag, valid_elos[k], total_steps)
+                    #     logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
 
                     # --- 插入: 记录 Latest(当前保存的 actor_key) 相对于所有存在的 Rule_* 的 ELO 差值 ---
                     if 'actor_key' in locals() and actor_key in valid_elos:
