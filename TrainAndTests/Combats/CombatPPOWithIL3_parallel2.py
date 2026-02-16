@@ -1031,15 +1031,18 @@ def run_MLP_simulation(
                 should_distil = False 
 
                 if use_sil:
-                    if target_pool_keys:
-                        M = max_il_exponent
-                        b = min(M, log10(alpha_il + 1e-6))
-                        k_shape = k_shape_il
-                        exponent = np.clip(b - k_shape * x_elo_diff, -20, M)
-                        dynamic_alpha_il = 10 ** max(exponent, -20)
-                    else:
-                        dynamic_alpha_il = alpha_il
-                        exponent = log10(alpha_il + 1e-6) # 防止后续记录 log 时出错
+                    # if target_pool_keys:
+                    #     M = max_il_exponent
+                    #     b = min(M, log10(alpha_il + 1e-6))
+                    #     k_shape = k_shape_il
+                    #     exponent = np.clip(b - k_shape * x_elo_diff, -20, M)
+                    #     dynamic_alpha_il = 10 ** max(exponent, -20)
+                    # else:
+                    #     dynamic_alpha_il = alpha_il
+                    #     exponent = log10(alpha_il + 1e-6) # 防止后续记录 log 时出错
+                    
+                    exponent = 0
+                    dynamic_alpha_il = alpha_il # 待续，随步数下降
                     
                     # 记录动态参数
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
