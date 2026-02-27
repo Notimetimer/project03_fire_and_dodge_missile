@@ -64,6 +64,11 @@ def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=0.02, kill_range=20):
     M1M2_ = M2 - M1
     M1T1_ = T1 - M1
     M2T2_ = T2 - M2
+    
+    # 超出5km跳过计算
+    if np.linalg.norm(M1-T1) > 5e3:
+        return False, M1, T1
+
     if np.linalg.norm(T1T2_ - M1M2_) < 1e-3:
         # 平行移动了，另一套公式
         d_min = np.linalg.norm(M1T1_)
