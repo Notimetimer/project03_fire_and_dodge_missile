@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_and_RL_分阶段_打所有Rules 并行'
+mission_name = 'IL_and_RL_分阶段_打所有Rules 并行 平衡'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
