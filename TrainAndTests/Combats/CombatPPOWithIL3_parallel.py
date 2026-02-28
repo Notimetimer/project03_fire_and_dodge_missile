@@ -977,14 +977,14 @@ def run_MLP_simulation(
                     'blue_birth': bb
                 }
                 
-                # 发送指令
+                # 发送指令 pipe.send
                 pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
 
             # C. 等待所有 Worker 完成 (Barrier)
             batch_results = []
             for rank in range(num_workers):
                 try: # <--- 【新增】
-                    res = pipes[rank].recv() # 阻塞等待
+                    res = pipes[rank].recv() # 阻塞等待  # pipe.send
                 except EOFError: # <--- 【新增】捕获管道断开错误
                     print(f"[Error] Worker {rank} crashed silently.")
                     for p in workers: p.terminate()
