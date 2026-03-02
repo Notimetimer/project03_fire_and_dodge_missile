@@ -847,8 +847,8 @@ def run_MLP_simulation(
                     # rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
                     rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+(_P\d+)?$', k)]
                     if rein_keys:
-                        # 找到数值最大的编号（即最新的已保存智能体）
-                        hof_key = max(rein_keys, key=lambda k: int(k.replace("actor_rein", '')))
+                        # 找到数值最大的编号（即最新的已保存智能体，忽略 _P 后缀）
+                        hof_key = max(rein_keys, key=lambda k: int(k.split('_P')[0].replace("actor_rein", '')))
                         
                         if hof_key not in hall_of_fame:
                             hall_of_fame[hof_key] = elo_ratings.get(hof_key, best_member.elo)
@@ -1169,6 +1169,35 @@ def run_MLP_simulation(
                     json.dump(save_elite, f, ensure_ascii=False, indent=2)
                 
                 print(f"Step {total_steps}: All members updated. Max ELO {max(m.elo for m in population):.0f}")
+
+                # =========================================================
+                # PBT 进化 (Exploit & Explore)
+                # =========================================================
+                # 此处暂时将进化频率硬编码为 20 次 batch，之后你可以基于步数或自由调节
+                if batch_idx > 0 and batch_idx % 2 == 0: # 20 == 0:
+                    print(f"\n--- PBT Evolution Step at Batch {batch_idx} ---")
+                    
+                    # 1. 评估种群 (依据 Elo 分数升序排序)
+                    sorted_population = sorted(population, key=lambda m: m.elo)
+                    worst_member = sorted_population[0]
+                    best_member = sorted_population[-1]
+                    
+                    print(f"  Best Member: P{best_member.id} (Elo: {best_member.elo:.1f})")
+                    print(f"  Worst Member: P{worst_member.id} (Elo: {worst_member.elo:.1f})")
+                    
+                    # 未来加超参数扰动在此处进行 (Explore)
+                    
+                    # 2. 淘汰与替换 (Exploit)
+                    worst_member.agent.actor.load_state_dict(best_member.agent.actor.state_dict())
+                    worst_member.agent.critic.load_state_dict(best_member.agent.critic.state_dict())
+                    
+                    # 3. 重置优化器 (重要！清楚旧的参数优化动量)
+                    worst_member.agent.reset_optimizer()
+                    
+                    # 同步 Elo 分数
+                    worst_member.elo = best_member.elo
+                    
+                    print(f"  -> Params & Elo of P{worst_member.id} replaced with P{best_member.id}\n")
             
                 # -----------------------------------------------------------
                 # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)

@@ -107,7 +107,7 @@ if __name__=='__main__':
         hist_agent_as_opponent = 0,
         rule_actor_rate = 0,  # 已经是打所有rules了，不需要再单独计算一次均匀采样
         device = device,
-        pop_size = 4,      # 种群大小
+        pop_size = 2,      # 种群大小
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
