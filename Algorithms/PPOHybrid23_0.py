@@ -1275,6 +1275,13 @@ class PPOHybrid:
                     clip_range=clip_range, shuffled=shuffled, 
                     mini_batch_size=mini_batch_size, alpha_logit_reg=alpha_logit_reg)
 
+        # 短路，如果没有专家数据，直接不做模仿学习
+        if len(il_transition_dict['states']) == 0:
+            # 更新样本计数
+            self.IL_samples = 0
+            self.IL_valid_samples = 0
+            return
+
         # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
         # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
         rl_total_size = len(transition_dict['states'])
