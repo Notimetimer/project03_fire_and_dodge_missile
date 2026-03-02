@@ -959,7 +959,7 @@ def run_MLP_simulation(
                     opp_type = 'nn'
                     adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
                     if os.path.exists(adv_path):
-                        opp_data = torch.load(adv_path, map_location='cpu') # 传给 Worker 必须是 CPU Tensor
+                        opp_data = torch.load(adv_path, map_location='cpu', weights_only=1) # 传给 Worker 必须是 CPU Tensor
                     else:
                         # Fallback
                         opp_type = 'rule'

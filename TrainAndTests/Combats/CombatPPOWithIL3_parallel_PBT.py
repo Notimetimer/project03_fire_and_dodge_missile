@@ -1086,7 +1086,6 @@ def run_MLP_simulation(
             logger.add("train/2 win", batch_wins[best_member] / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt[best_member] / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt[best_member] / num_workers, total_steps)
-            # logger.add("debug/胜负统计", batch_wins+batch_loss_cnt+batch_draw_cnt, total_steps)
             logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
 
 
