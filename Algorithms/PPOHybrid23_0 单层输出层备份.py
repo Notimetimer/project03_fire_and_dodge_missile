@@ -61,19 +61,9 @@ class PolicyNetHybrid(torch.nn.Module):
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
-            # self.fc_bern = nn.Linear(prev_size, bern_dim) # 原·单层输出
-            # 现·多层输出
-            layers = []
-            for _ in range(1):
-                layers.append(nn.Linear(prev_size, 64))
-                layers.append(nn.ReLU())
-                prev_size = 64
-            layers.append(nn.Linear(prev_size, bern_dim))
-            self.fc_bern = nn.Sequential(*layers)
-
+            self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            # nn.init.constant_(self.fc_bern.bias, -2.0) # 原·单层输出
-            nn.init.constant_(self.fc_bern[-1].bias, -2.0) # 现·多层输出
+            nn.init.constant_(self.fc_bern.bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temp=1.0)
