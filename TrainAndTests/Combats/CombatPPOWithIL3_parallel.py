@@ -1198,6 +1198,7 @@ def run_MLP_simulation(
                     
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
+                    logger.add("train_plus/il_data_size", len(il_data['returns']), total_steps)
                     
                     # 混合更新
                     student_agent.mixed_update(
