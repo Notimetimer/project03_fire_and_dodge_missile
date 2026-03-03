@@ -1567,9 +1567,9 @@ class PPOHybrid:
         self.entropy_mean = ppo_stats['entropy']
         self.ratio_mean = ppo_stats['ratio']
         
-        # 更新样本计数
-        self.IL_samples = il_samples_total
-        self.IL_valid_samples = il_valid_samples_total
+        # # 更新样本计数 错误做法，样本数量级和更新强度无关
+        # self.IL_samples = il_samples_total
+        # self.IL_valid_samples = il_valid_samples_total
 
         
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")

@@ -639,8 +639,8 @@ def run_MLP_simulation(
     k_entropy=None,
     alpha_il=1.0,
     il_batch_size=128,
-    il_batch_size2=128,
-    il_buffer_max_size=20000,
+    il_batch_size2=2e6,
+    il_buffer_max_size=2e6,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
     label_smoothing=0.3,
@@ -1241,9 +1241,10 @@ def run_MLP_simulation(
                 logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
                 # IL-PPO信号强度对比
-                if use_sil:
-                    logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
-                    logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
+                # 错误做法，更新强度数量级和样本数无关
+                # if use_sil:
+                #     logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
+                #     logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
                     
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
