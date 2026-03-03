@@ -241,7 +241,7 @@ class IL_transition_buffer:
         if total_len == 0:
             raise ValueError("IL_transition_buffer is empty.")
             
-        indices = np.random.randint(0, total_len, size=min(batch_size, total_len))
+        indices = np.random.randint(0, total_len, size=min(int(batch_size), total_len))
         
         # 采样（列表推导式，保持原始元素格式）
         sampled_obs = [self.addon_dict['obs'][i] for i in indices]
