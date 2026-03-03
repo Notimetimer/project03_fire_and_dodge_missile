@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_PFSP_混合模仿_混规则对手_平衡_并行_3s'
+mission_name = 'IL_and_RL_分阶段_固定打Rule4 并行+自模仿'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -14,14 +14,14 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 1e-3  # 1e-2  # 设置为0就是纯强化学习
+alpha_il = 1e-5  # 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 2e4 # il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3
 label_smoothing_mixed=0.01
-dt_decide = 3
+dt_decide = 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -99,31 +99,15 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
-        use_init_data=0,  # 是否留够他模仿的次数
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            "Rule_4": 1200,
             },
-        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1,
+        self_play_type = 'None', # PFSP, FSP, SP, None(非自博弈)
+        hist_agent_as_opponent = 0,
         use_sil = 1,
-        sigma_elo = 500,  # 200,
-        WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 300,  # 100
-        rule_actor_rate = 0.2, # “复习”概率
-        K_FACTOR = 16,  # 32 原先振荡太大了
-        randomized_birth = 1,
-        save_interval = 1, # 触发更新至少要经过多少批采样
-        opp_greedy_rate = 0.5, # 对手贪婪率
-        num_runs = 3, # 测试回合重复次数
         device = device,
-        max_il_exponent = -1.5,  # -2.0
-        k_shape_il = 0.005,  # 0.04, # 指数型函数改为线性函数
+        max_il_exponent = -2.0,
+        k_shape_il = 0,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
