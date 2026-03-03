@@ -99,6 +99,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
+        use_init_data=1, # 初始模仿数据集里包含外来数据
         init_elo_ratings = {
             "Rule_4": 1200,
             },

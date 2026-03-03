@@ -1205,7 +1205,7 @@ def run_MLP_simulation(
                     student_agent.mixed_update(
                         transition_dict,
                         il_data,
-                        init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
+                        init_il_transition_dict = None, # original_il_transition_dict0 if use_init_data else None,
                         eta = np.clip(1 - total_steps/3e6, 0, 1),
                         adv_normed=True,
                         label_smoothing=label_smoothing_mixed,

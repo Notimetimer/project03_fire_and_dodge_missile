@@ -1267,8 +1267,6 @@ class PPOHybrid:
         return avg_actor_loss, avg_critic_loss, avg_c
     
     # --- 新增功能 3: 混合更新 (PPO + MARWIL) ---
-    # --- 修改后的 mixed_update ---
-    # --- 修复后的 mixed_update (包含完整监控项) ---
     def mixed_update(self, transition_dict, il_transition_dict, init_il_transition_dict=None, eta=0.1,  # [新增] 专家数据与约束系数
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 

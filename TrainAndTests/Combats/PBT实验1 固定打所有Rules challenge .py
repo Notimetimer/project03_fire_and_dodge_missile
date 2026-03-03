@@ -68,7 +68,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=5, # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -107,7 +107,7 @@ if __name__=='__main__':
         hist_agent_as_opponent = 0,
         rule_actor_rate = 0,  # 已经是打所有rules了，不需要再单独计算一次均匀采样
         device = device,
-        pop_size = 2,      # 种群大小
+        pop_size = 4,      # 种群大小
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

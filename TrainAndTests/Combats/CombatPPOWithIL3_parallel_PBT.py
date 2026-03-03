@@ -525,11 +525,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 # PBT Population Helper Class
 # ==========================================
 class PBTMember:
-    def __init__(self, agent_id, agent, elo=1200, alpha_il=0.01):
+    def __init__(self, agent_id, agent, elo=1200, sigma_elo=400.0):
         self.id = agent_id
         self.agent = agent  # PPOHybrid instance
         self.elo = elo
-        self.alpha_il = alpha_il
+        self.sigma_elo = sigma_elo # 对手偏好超参数 (控制采样宽度)
         self.wins = 0
         self.matches = 0
 
@@ -594,6 +594,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     # --- PBT Params ---
     pop_size = 2,      # 种群大小
+    interval_of_pbt=20, # pbt 进化频率
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -736,14 +737,12 @@ def run_MLP_simulation(
             device=device, k_entropy=k_entropy, max_std=label_smoothing
         )
         
-        # 初始化 Alpha_IL: 对数均匀分布 [1e-4, 0.1] 之间
-        # log10(-4) = -4, log10(0.1) = -1
-        rnd_exp = np.random.uniform(-4, -1)
-        init_alpha = 10 ** rnd_exp
+        # 初始化 sigma_elo: 在 [100, 800] 之间随机采样 (值变向量的单分量)
+        init_sigma = np.random.uniform(100, 800)
         
-        member = PBTMember(i, new_agent_obj, elo=1200, alpha_il=init_alpha)
+        member = PBTMember(i, new_agent_obj, elo=1200, sigma_elo=init_sigma)
         population.append(member)
-        print(f"  Agent P{i}: alpha_il={init_alpha:.5f}")
+        print(f"  Agent P{i}: sigma_elo={init_sigma:.1f}")
 
         student_agent = population[i].agent
     # # 清理 base_agent 节省显存
@@ -951,13 +950,13 @@ def run_MLP_simulation(
                 # 拿出对应 member 的权重
                 current_member_weights = all_current_actor_weights[current_member_id]
 
-                # 采样对手
+                # 采样对手 (使用该 member 独有的 sigma_elo)
                 probs, opponent_keys = get_opponent_probabilities(
                     effective_pool,
                     hall_of_fame,
-                    target_elo = max_elo,  # max(m.elo for m in population), # 以种群最高 Elo 作为采样基准
-                    SP_type= 'PFSP_challenge', # self_play_type,
-                    sigma=sigma_elo,
+                    target_elo = max_elo,  
+                    SP_type= 'PFSP_challenge', 
+                    sigma=population[current_member_id].sigma_elo,
                     rule_rate=rule_actor_rate,
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
@@ -1163,6 +1162,7 @@ def run_MLP_simulation(
                     logger.add(f"train/{m_tag_prefix}-entropy_bern", m_agent.entropy_bern, total_steps)
                     logger.add(f"train/{m_tag_prefix}-elo", m_member.elo, total_steps)
                     logger.add(f"train/{m_tag_prefix}-elo_diff_x", x_elo_diff, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-sigma_elo", m_member.sigma_elo, total_steps)
                     
                     # 清空该成员的 Buffer
                     buffer[m_id] = copy.deepcopy(empty_transition_dict)
@@ -1213,7 +1213,7 @@ def run_MLP_simulation(
                 # PBT 进化 (Exploit & Explore)
                 # =========================================================
                 # 此处暂时将进化频率硬编码为 20 次 batch，之后你可以基于步数或自由调节
-                if batch_idx > 0 and batch_idx % 2 == 0: # 20 == 0:
+                if batch_idx > 0 and batch_idx % interval_of_pbt == 0: # 20 == 0:
                     print(f"\n--- PBT Evolution Step at Batch {batch_idx} ---")
                     
                     # 1. 评估种群 (依据 Elo 分数升序排序)
@@ -1224,19 +1224,28 @@ def run_MLP_simulation(
                     print(f"  Best Member: P{best_member.id} (Elo: {best_member.elo:.1f})")
                     print(f"  Worst Member: P{worst_member.id} (Elo: {worst_member.elo:.1f})")
                     
-                    # 未来加超参数扰动在此处进行 (Explore)
-                    
-                    # 2. 淘汰与替换 (Exploit)
-                    worst_member.agent.actor.load_state_dict(best_member.agent.actor.state_dict())
-                    worst_member.agent.critic.load_state_dict(best_member.agent.critic.state_dict())
-                    
-                    # 3. 重置优化器 (重要！清楚旧的参数优化动量)
-                    worst_member.agent.reset_optimizer()
-                    
-                    # 同步 Elo 分数
-                    worst_member.elo = best_member.elo
-                    
-                    print(f"  -> Params & Elo of P{worst_member.id} replaced with P{best_member.id}\n")
+                    # 2. 淘汰与替换 (Exploit & Explore)
+                    # 只有最强和最弱差距足够大时才执行进化，避免频繁震荡
+                    if best_member.elo - worst_member.elo >= 200:
+                        print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
+                        
+                        # 权重替换 (Exploit)
+                        worst_member.agent.actor.net.load_state_dict(best_member.agent.actor.net.state_dict())
+                        worst_member.agent.critic.net.load_state_dict(best_member.agent.critic.net.state_dict())
+                        
+                        # 超参数替换与扰动 (Explore)
+                        # 采用最佳成员的 sigma_elo 基础上给予 0.8 或 1.2 倍的扰动
+                        mutation = np.random.choice([0.8, 1.2])
+                        new_sigma = np.clip(best_member.sigma_elo * mutation, 50, 1000)
+                        worst_member.sigma_elo = new_sigma
+                        print(f"  -> Hyperparams: Mutated sigma_elo to {new_sigma:.1f} (from {best_member.sigma_elo:.1f})")
+
+                        # 3. 重置优化器 (重要！清楚旧的参数优化动量)
+                        worst_member.agent.reset_optimizer()
+                        
+                        # 同步 Elo 分数
+                        worst_member.elo = best_member.elo
+                        print(f"  -> Params & Elo of P{worst_member.id} replaced with P{best_member.id}\n")
             
                 # -----------------------------------------------------------
                 # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)
