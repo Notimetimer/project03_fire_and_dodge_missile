@@ -593,7 +593,7 @@ def run_MLP_simulation(
     num_runs = 3, # 测试回合重复次数
     device = torch.device("cpu"),
     # --- PBT Params ---
-    pop_size = 4,      # 种群大小
+    pop_size = 2,      # 种群大小
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -649,6 +649,46 @@ def run_MLP_simulation(
     
     save_meta_once(os.path.join(log_dir, "actor.meta.json"), base_agent.actor.state_dict())
     save_meta_once(os.path.join(log_dir, "critic.meta.json"), base_agent.critic.state_dict())
+
+    # 保存未训练的onnx模型供结构检查
+    dummy_state = torch.randn(1, state_dim).to(device)
+    # ==========================================
+    # 1. 导出 Actor 的底层网络（PolicyNetHybrid）
+    # ==========================================
+    actor_onnx_path = os.path.join(log_dir, "student_actor.onnx")
+    try:
+        torch.onnx.export(
+            base_agent.actor.net,           # 只导出纯网络结构，避开 Wrapper里的复杂采样操作
+            dummy_state,                       # 伪造的输入状态
+            actor_onnx_path,                   # 输出的文件名 / 路径
+            export_params=True,                # 是否连同参数一起导出（选 True 可以看权重信息）
+            opset_version=11,                  # 建议使用 11 或以上的算子集
+            do_constant_folding=True,          # 是否执行常量折叠优化
+            input_names=['state'],             # 命名的输入节点名称
+            output_names=['cat_output', 'bern_output'] # 按照返回顺序手动指定名字
+        )
+        print(f"Actor ONNX successfully exported to {actor_onnx_path}")
+    except Exception as e:
+        print(f"Error exporting Actor ONNX: {e}")
+    # ==========================================
+    # 2. 导出 Critic 的底层网络（ValueNet）
+    # ==========================================
+    critic_onnx_path = os.path.join(log_dir, "student_critic.onnx")
+    try:
+        torch.onnx.export(
+            base_agent.critic,              
+            dummy_state,                       
+            critic_onnx_path,                  
+            export_params=True,                
+            opset_version=11,                 
+            do_constant_folding=True,          
+            input_names=['state'],             
+            output_names=['value_estimate']    # Critic 返回的一般是标量价值
+        )
+        print(f"Critic ONNX successfully exported to {critic_onnx_path}")
+    except Exception as e:
+        print(f"Error exporting Critic ONNX: {e}")
+
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
     # 5. 模仿学习预训练 (只对 base_agent 做一次)
@@ -1056,7 +1096,7 @@ def run_MLP_simulation(
                 print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
 
             # 更新全局计数
-            total_steps += np.mean(batch_total_steps)  # 如果用累加步数的话会吃亏，因为分割经验池导致数据利用率低了
+            total_steps += np.sum(batch_total_steps)  # 如果用累加步数的话会吃亏，因为分割经验池导致数据利用率低了
             batch_idx += 1
             
             # --- 3.5 [新增] 记录所有 Member 分项指标 ---
@@ -1210,7 +1250,7 @@ def run_MLP_simulation(
                     mean_elo = np.mean(list(valid_elos.values()))
                     # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
                     # 这里为了简单，直接遍历
-                    sorted_keys = sorted(valid_elos.keys())
+                    # sorted_keys = sorted(valid_elos.keys())
                     
                     pop_max_elo = max(m.elo for m in population)
                     logger.add("Elo/Main_Agent_Raw", pop_max_elo, total_steps)
@@ -1243,44 +1283,21 @@ def run_MLP_simulation(
                     logger.add("Elo/History_Pool_Size", hist_count, total_steps)
 
                     # 记录详细分数
-                    best_m_id = max(range(pop_size), key=lambda i: population[i].elo)
-                    best_actor_key = f"actor_rein{batch_idx}_P{best_m_id}"
-                    
-                    keys_to_log = [k for k in sorted(valid_elos.keys()) if k.startswith("Rule_")]
-                    if best_actor_key in valid_elos and best_actor_key not in keys_to_log:
-                        keys_to_log.append(best_actor_key)
-                    
-                    for k in keys_to_log:
-                        tag_suffix = k if k.startswith("Rule_") else "Latest_Saved_Best"
-                        logger.add(f"Elo_Raw/{tag_suffix}", valid_elos[k], total_steps)
-                    
-                    # 只记录所有规则智能体和最新保存的智能体（best_actor_key）
-                    rule_keys = [k for k in sorted_keys if k.startswith("Rule_")]
-                    keys_to_log = list(sorted(rule_keys))
-                    
-                    if best_actor_key in valid_elos and best_actor_key not in keys_to_log:
-                        keys_to_log.append(best_actor_key)
-                        
-                    for k in keys_to_log:
-                        # 如果是规则智能体，使用其自身名字
-                        if k.startswith("Rule_"):
-                            raw_tag = f"Elo_Raw/{k}"
-                            centered_tag = f"Elo_Centered/{k}"
-                        # 否则，认为是最新智能体，使用固定标签 "Latest_Best"
-                        else:
-                            raw_tag = "Elo_Raw/Latest_Best"
-                            centered_tag = "Elo_Centered/Latest_Best"
-                        
-                        logger.add(raw_tag, valid_elos[k], total_steps)
-                        logger.add(centered_tag, valid_elos[k] - mean_elo, total_steps)
+                    # best_m_id = max(range(pop_size), key=lambda i: population[i].elo)
+                    # 记录最强个体的绝对分和相对均值的居中分
+                    logger.add("Elo_Centered/Latest_Best", pop_max_elo - mean_elo, total_steps)
 
-                    # --- 插入: 记录 Latest(当前保存的 best_actor_key) 相对于所有存在的 Rule_* 的 ELO 差值 ---
-                    if best_actor_key in valid_elos:
-                        latest_elo = float(valid_elos[best_actor_key])
-                        rule_keys_present = [rk for rk in valid_elos.keys() if rk.startswith("Rule_")]
-                        for rk in rule_keys_present:
-                            diff = latest_elo - float(valid_elos[rk])
-                            logger.add(f"Elo_Diff/Latest_Best_vs_{rk}", diff, total_steps)
+                    # 3. 提取所有的 Rule 对手并遍历，一步到位记录 Rule信息 和 差值
+                    rule_keys = [k for k in valid_elos.keys() if k.startswith("Rule_")]
+                    for rk in sorted(rule_keys):
+                        rule_elo = float(valid_elos[rk])
+                        
+                        # 记录 Rule 的绝对分与居中分
+                        logger.add(f"Elo_Raw/{rk}", rule_elo, total_steps)
+                        logger.add(f"Elo_Centered/{rk}", rule_elo - mean_elo, total_steps)
+                        
+                        # 直接计算并记录 最强个体 vs 规则对手 的差值
+                        logger.add(f"Elo_Diff/Latest_Best_vs_{rk}", pop_max_elo - rule_elo, total_steps)
 
         # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")
