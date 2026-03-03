@@ -204,8 +204,9 @@ class IL_transition_buffer:
         
         # 2. 基于添加顺序的剪裁（保留最后/最新的 max_size 条）
         current_len = len(self.addon_dict['states'])
-        if current_len > self.max_size:
-            keep_from = current_len - self.max_size
+        max_size_int = int(self.max_size)  # 确保 max_size 是整数
+        if current_len > max_size_int:
+            keep_from = current_len - max_size_int
             self.addon_dict['obs'] = self.addon_dict['obs'][keep_from:]
             self.addon_dict['states'] = self.addon_dict['states'][keep_from:]
             self.addon_dict['returns'] = self.addon_dict['returns'][keep_from:]
