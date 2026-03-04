@@ -736,9 +736,15 @@ def run_MLP_simulation(
             lmbda=lmbda, epochs=epochs, eps=eps, gamma=gamma, 
             device=device, k_entropy=k_entropy, max_std=label_smoothing
         )
+
+        # 复制预训练的优化器状态 (动量)
+        new_agent_obj.actor_optimizer.load_state_dict(base_agent.actor_optimizer.state_dict())
+        new_agent_obj.critic_optimizer.load_state_dict(base_agent.critic_optimizer.state_dict())
+        # 设置为强化学习的学习率
+        new_agent_obj.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
         
         # 初始化 sigma_elo: 在 [100, 800] 之间随机采样 (值变向量的单分量)
-        init_sigma = np.random.uniform(100, 800)
+        init_sigma = 400 # np.random.uniform(100, 800) # debug 单member能否和原先保持一致性？
         
         member = PBTMember(i, new_agent_obj, elo=1200, sigma_elo=init_sigma)
         population.append(member)
