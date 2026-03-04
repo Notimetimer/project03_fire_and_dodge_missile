@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_and_RL_分阶段_固定打Rule4 并行+自模仿 1e-2'
+mission_name = 'IL_and_RL_分阶段_固定打Rule4 并行+自模仿 1e-3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -16,7 +16,7 @@ eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
 alpha_il = 1e-2  # 1e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
-il_batch_size2= 2e4 # il_batch_size
+il_batch_size2= 1e4 # il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3
