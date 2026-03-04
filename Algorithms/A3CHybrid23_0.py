@@ -519,10 +519,10 @@ class HybridActorWrapper(nn.Module):
         
         return total_loss_per_sample
 # =============================================================================
-# 3. PPO 算法类 (精简版)
+# 3. A3C/A2C 算法类 (精简版)
 # =============================================================================
 
-class PPOHybrid:
+class A3CHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
                  k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
@@ -559,8 +559,6 @@ class PPOHybrid:
         self.pre_clip_critic_grad = 0
         
         #  额外的监控指标
-        self.approx_kl = 0        # 近似 KL 散度 (判断策略变化幅度)
-        self.clip_frac = 0        # 裁剪触发比例 (判断 eps 或 lr 是否合适)
         self.explained_var = 0    # 解释方差 (判断 Critic 拟合程度)
         #  分项 Entropy 监控
         self.entropy_cat = 0
@@ -713,12 +711,8 @@ class PPOHybrid:
                 td_delta = td_target - self.critic(critic_inputs)
                 advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
                 
-        # 3. 计算旧策略的 log_probs (使用 Wrapper)
+        # 3. 获取 Value (用于计算 Advantage 或 Log)
         with torch.no_grad():
-            # Actor 使用 actor_inputs (可能是 obs)
-            # [修改] 接收 5 个返回值
-            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
-            # Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
         # --- [2. 优势归一化 - 适配 active_masks] ---
@@ -742,14 +736,12 @@ class PPOHybrid:
                 adv_mean = active_adv.mean()
                 advantage = advantage - adv_mean
 
-        # 4. PPO Update Loop
-        actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
+        # 4. A3C Update Loop
+        actor_loss_list, critic_loss_list, entropy_list = [], [], []
         actor_grad_list, critic_grad_list = [], []
         pre_clip_actor_grad, pre_clip_critic_grad = [], []
 
         #  监控列表
-        kl_list = []
-        clip_frac_list = []
         #  分项 Entropy 列表
         entropy_cat_list = []
         entropy_bern_list = []
@@ -784,7 +776,6 @@ class PPOHybrid:
                 mb_critic_inputs = critic_inputs[batch_idx]
                 mb_advantage = advantage[batch_idx]
                 mb_td_target = td_target[batch_idx]
-                mb_old_log_probs = old_log_probs[batch_idx]
                 mb_active_masks = active_masks[batch_idx]
                 # v_pred_old_batch = v_pred_old[batch_idx] # 如果需要用到旧 Value
                 
@@ -794,35 +785,17 @@ class PPOHybrid:
                     mb_actions[k] = v[batch_idx]
 
                 # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
-                #  接收 entropy_details 和 actor_outputs
                 log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
                 
-                #  计算 log_ratio 用于更精准的 KL 计算
-                log_ratio = log_probs - mb_old_log_probs
-                ratio = torch.exp(log_ratio)
-                
-                #  计算 Approximate KL Divergence
+                #  计算一些不参与梯度的监控指标
                 with torch.no_grad():
-                    #  KL 计算也最好应用 mask，但为了监控方便，这里先保持全局均值或应用mask均值
                     active_sum = mb_active_masks.sum()
-                    approx_kl = (((ratio - 1) - log_ratio) * mb_active_masks).sum() / (active_sum + mask_eps)
-                    kl_list.append(approx_kl.item())
-                    
-                    #  计算 Clip Fraction (有多少样本触发了裁剪)
-                    clip_fracs = (((ratio - 1.0).abs() > self.eps).float() * mb_active_masks).sum() / (active_sum + mask_eps)
-                    clip_frac_list.append(clip_fracs.item())
-                
-                surr1 = ratio * mb_advantage
-                surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * mb_advantage
-                
-                #  Actor Loss 使用 mask 加权
-                surrogate_loss = -torch.min(surr1, surr2)
-                # active_sum 已经在上面计算过
-                
-                # [新增] 统计 PPO 样本
-                ppo_samples_total += mb_active_masks.numel()
-                ppo_valid_samples_total += mb_active_masks.sum().item()
+                    # [新增] 统计采样样本 (包含重复更新累加)
+                    ppo_samples_total += mb_active_masks.numel()
+                    ppo_valid_samples_total += active_sum
 
+                # [核心修改] A3C 损失: - log_prob * advantage
+                surrogate_loss = - (log_probs * mb_advantage)
                 actor_loss = (surrogate_loss * mb_active_masks).sum() / (active_sum + mask_eps)
                 
                 # [修改] 分项 Entropy Loss 计算
@@ -852,15 +825,8 @@ class PPOHybrid:
                 # Critic Loss
                 # Critic 使用 critic_inputs
                 v_pred = self.critic(mb_critic_inputs)
-                if clip_vf:
-                    v_pred_old_batch = v_pred_old[batch_idx]
-                    v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - clip_range, v_pred_old_batch + clip_range)
-                    vf_loss1 = (v_pred - mb_td_target).pow(2)
-                    vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
-                    critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
-                else:
-                    #  reduction='none' 使得我们可以应用 mask
-                    critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
+                #  reduction='none' 使得我们可以应用 mask
+                critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
                 
                 #  Critic Loss 使用 mask 加权
                 critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
@@ -887,7 +853,6 @@ class PPOHybrid:
                 # 记录总 Entropy (未加权)
                 entropy_total = (entropy * mb_active_masks).sum() / (active_sum + mask_eps)
                 entropy_list.append(entropy_total.item()) 
-                ratio_list.append(ratio.mean().item()) 
                 
                 #  [修改] 记录分项 Entropy (现在是 Tensor，需要 .mean().item())
                 if entropy_details['cont'] is not None:
@@ -902,7 +867,6 @@ class PPOHybrid:
         self.critic_loss = np.mean(critic_loss_list)
         self.critic_grad = np.mean(critic_grad_list)
         self.entropy_mean = np.mean(entropy_list)
-        self.ratio_mean = np.mean(ratio_list)
         self.pre_clip_critic_grad = np.mean(pre_clip_critic_grad)
         self.pre_clip_actor_grad = np.mean(pre_clip_actor_grad)
         
@@ -914,8 +878,6 @@ class PPOHybrid:
             self.advantage = 0
         
         #  汇总新指标
-        self.approx_kl = np.mean(kl_list)
-        self.clip_frac = np.mean(clip_frac_list)
         #  计算分项 Entropy 均值
         self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0

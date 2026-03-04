@@ -1,12 +1,5 @@
 '''
-大改动：PBT (Population Based Training) 版本
-1. 引入种群概念 (Population)，包含多个 Agent，每个 Agent 拥有独立的 alpha_il。
-2. 采用轮流采样 (Round-Robin) 机制，共享并行 Workers。
-3. 增加 PBT 进化步：
-   - Exploit: 末位淘汰，复制最优者权重。
-   - Momentum Reset: 复制后重置优化器。
-   - Explore: 扰动超参数 alpha_il。
-4. 保持原有的策略蒸馏和 Elo 匹配机制。
+调节超参数改为引导奖励权重
 '''
 
 import os
@@ -24,18 +17,18 @@ from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 import traceback # [新增]
 import random
+import csv # [新增] 用于记录 PBT 详细指标
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules_new import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
-from Algorithms.PPOHybrid23_0_distil2 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from prepare_il_datas import run_rules
 from VsBaseline_while_training2 import test_worker
-from UPolicyWrapper import UnifiedPolicyWrapper
 
 EXEC_COUNT = 0
 
@@ -218,6 +211,9 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
     # 只要 rule_rate > 0，就有概率强行进入规则池采样，防止“策略遗忘”
     rule_keys = [k for k in keys if k.startswith('Rule')]
     if np.random.rand() < rule_rate and rule_keys:
+        candidate_pool_keys = rule_keys
+        candidate_pool = {k: candidate_pool[k] for k in candidate_pool_keys}
+
         probs = np.ones(len(rule_keys)) / len(rule_keys)
         return probs, rule_keys
     
@@ -227,13 +223,13 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
     
     # 1. 处理 PFSP 系列 (高斯核采样)
     if SP_type.startswith('PFSP'):
-        if SP_type == 'PFSP_challenge':
-            actual_target = np.max(elos)
-        elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
-            actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
-        else: # 默认通用的 'PFSP' 逻辑
-            # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
-            actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
+        # if SP_type == 'PFSP_challenge':
+        actual_target = np.max(elos)
+        # elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
+        #     actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
+        # else: # 默认通用的 'PFSP' 逻辑
+        #     # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
+        #     actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
         
         diffs = elos - actual_target
         scores = np.exp(-0.5 * (diffs / float(sigma))**2)
@@ -245,34 +241,37 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         probs = np.ones(len(keys)) / len(keys)
         return probs, keys
 
-    # 3. 处理 deltaFSP (新旧池切分)
-    elif SP_type == 'deltaFSP':
-        n = len(keys)
-        new_count = max(1, int(np.ceil(n * 0.2)))
-        new_keys = keys[-new_count:]
-        old_keys = keys[:-new_count]
+    # # 3. 处理 deltaFSP (新旧池切分)
+    # elif SP_type == 'deltaFSP':
+    #     n = len(keys)
+    #     new_count = max(1, int(np.ceil(n * 0.2)))
+    #     new_keys = keys[-new_count:]
+    #     old_keys = keys[:-new_count]
         
-        # 这里的 deltaFSP_epsilon 建议直接作为参数传入或使用全局变量
-        if np.random.rand() < float(deltaFSP_epsilon) or not old_keys:
-            target_keys = new_keys
-        else:
-            target_keys = old_keys
+    #     # 这里的 deltaFSP_epsilon 建议直接作为参数传入或使用全局变量
+    #     if np.random.rand() < float(deltaFSP_epsilon) or not old_keys:
+    #         target_keys = new_keys
+    #     else:
+    #         target_keys = old_keys
             
-        probs = np.ones(len(target_keys)) / len(target_keys)
-        return probs, target_keys
+    #     probs = np.ones(len(target_keys)) / len(target_keys)
+    #     return probs, target_keys
 
-    # 4. 处理 SP (最强/最新历史版本)
-    elif SP_type == 'SP':
-        # rein_keys = [k for k in keys if re.match(r'^actor_rein\d+$', k)]
-        rein_keys = [k for k in keys if re.match(r'^actor_rein\d+(_P\d+)?$', k)]
-        if not rein_keys: return np.array([]), []
+    # # 4. 处理 SP (最强/最新历史版本)
+    # elif SP_type == 'SP':
+    #     # rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
+    #     # 严格匹配 actor_rein + 数字
+    #     rein_keys = [k for k in keys if re.match(r'^actor_rein\d+$', k)]
+    #     if not rein_keys: return np.array([]), []
         
-        def extract_number(k):
-            try: return int(re.search(r'actor_rein(\d+)', k).group(1))
-            except: return -1
+    #     def extract_number(k):
+    #         # try: return int(k.replace('actor_rein', ''))
+    #         # except: return -1
+    #         try: return int(re.search(r'actor_rein(\d+)', k).group(1))
+    #         except: return -1
             
-        best_key = max(rein_keys, key=extract_number)
-        return np.array([1.0]), [best_key]
+    #     best_key = max(rein_keys, key=extract_number)
+    #     return np.array([1.0]), [best_key]
 
     # 5. 兜底逻辑: Rule 均匀采样 (None)
     else:
@@ -304,7 +303,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, member_id=0):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -359,7 +358,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
             if cmd == 'RUN_EPISODE':
                 # 解包数据
-                (actor_weights, opponent_info, settings) = packet
+                (member_id, actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
                 local_agent.actor.load_state_dict(actor_weights)
@@ -507,7 +506,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         'draw': env.draw,
                         'm_fired': m_fired
                     },
-                    'opp_name': opp_name
+                    'opp_name': opp_name,
+                    'member_id': member_id,
                 }
                 
                 # 8. 发送回 Master
@@ -524,11 +524,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 # PBT Population Helper Class
 # ==========================================
 class PBTMember:
-    def __init__(self, agent_id, agent, elo=1200, alpha_il=0.01):
+    def __init__(self, agent_id, agent, elo=1200, sigma_elo=400.0, shaping_weight=0.0):
         self.id = agent_id
         self.agent = agent  # PPOHybrid instance
         self.elo = elo
-        self.alpha_il = alpha_il
+        self.sigma_elo = sigma_elo # 对手偏好超参数 (控制采样宽度)
+        self.shaping_weight = shaping_weight # [新增] 引导奖励权重 (可在 0-1 间调节)
         self.wins = 0
         self.matches = 0
 
@@ -538,9 +539,12 @@ class PBTMember:
         以此来彻底重建 Adam 优化器，清除动量缓存
         """
         self.agent.reset_optimizer()
+    
+    # todo 不调模仿率了，改为调对手偏好
+    
 
 def run_MLP_simulation(
-    num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
+    num_workers=5, # 每个member的并行进程数，根据CPU核数调整，建议 10-20
     mission_name='无名',
     actor_lr=1e-4,
     critic_lr=5e-4,
@@ -554,19 +558,14 @@ def run_MLP_simulation(
     epochs=4,
     eps=0.2,
     k_entropy=None,
-    alpha_il=1.0,
     il_batch_size=128,
-    il_batch_size2=128,
-    il_buffer_max_size=20000,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
     label_smoothing=0.3,
-    label_smoothing_mixed=0.01,
     action_cycle_multiplier=30,
     trigger0=50e3,
     trigger_delta=50e3,
     weight_reward_0=None,
-    IL_rule=2,
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
@@ -574,7 +573,6 @@ def run_MLP_simulation(
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
-    use_init_data = False,
     init_elo_ratings = {
         "Rule_0": 1200,
         "Rule_1": 1200,
@@ -582,8 +580,6 @@ def run_MLP_simulation(
     },
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
-    use_sil = True,
-    sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
@@ -596,13 +592,9 @@ def run_MLP_simulation(
     opp_greedy_rate = 0.5, # 对手贪婪率
     num_runs = 3, # 测试回合重复次数
     device = torch.device("cpu"),
-    max_il_exponent = -2.0,
-    k_shape_il = 0.004,
-    reverse_kl=0,
-    distil_only_maneuver=1,
     # --- PBT Params ---
-    pop_size = 4,      # 种群大小
-    pbt_interval = 5,  # 多少轮(Generations)进化一次
+    pop_size = 2,      # 种群大小
+    interval_of_pbt=20, # pbt 进化频率
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -624,11 +616,7 @@ def run_MLP_simulation(
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
-    # del dummy_env # 不允许删除了，后续还要用
-    # ==========================================
-    # 新增：teacher_agent类
-    # ==========================================
-    teacher_agent = UnifiedPolicyWrapper(dummy_env)
+    del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
@@ -653,17 +641,6 @@ def run_MLP_simulation(
         max_std=label_smoothing
     )
     
-    # 【新增】定义 Teacher Actor 容器 (用于加载历史策略进行蒸馏)
-    # 结构必须与 student_agent.actor 完全一致
-    teacher_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-    teacher_actor = HybridActorWrapper(teacher_net, action_dims_dict, None, device).to(device)
-    teacher_actor.eval() # 永远处于验证模式，不更新梯度
-    for param in teacher_actor.parameters():
-        param.requires_grad = False # 彻底冻结
-    teacher_critic = ValueNet(state_dim, hidden_dim).to(device)
-    teacher_critic.eval()
-    for param in teacher_critic.parameters():
-        param.requires_grad = False # 彻底冻结
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
@@ -673,6 +650,46 @@ def run_MLP_simulation(
     
     save_meta_once(os.path.join(log_dir, "actor.meta.json"), base_agent.actor.state_dict())
     save_meta_once(os.path.join(log_dir, "critic.meta.json"), base_agent.critic.state_dict())
+
+    # 保存未训练的onnx模型供结构检查
+    dummy_state = torch.randn(1, state_dim).to(device)
+    # ==========================================
+    # 1. 导出 Actor 的底层网络（PolicyNetHybrid）
+    # ==========================================
+    actor_onnx_path = os.path.join(log_dir, "student_actor.onnx")
+    try:
+        torch.onnx.export(
+            base_agent.actor.net,           # 只导出纯网络结构，避开 Wrapper里的复杂采样操作
+            dummy_state,                       # 伪造的输入状态
+            actor_onnx_path,                   # 输出的文件名 / 路径
+            export_params=True,                # 是否连同参数一起导出（选 True 可以看权重信息）
+            opset_version=11,                  # 建议使用 11 或以上的算子集
+            do_constant_folding=True,          # 是否执行常量折叠优化
+            input_names=['state'],             # 命名的输入节点名称
+            output_names=['cat_output', 'bern_output'] # 按照返回顺序手动指定名字
+        )
+        print(f"Actor ONNX successfully exported to {actor_onnx_path}")
+    except Exception as e:
+        print(f"Error exporting Actor ONNX: {e}")
+    # ==========================================
+    # 2. 导出 Critic 的底层网络（ValueNet）
+    # ==========================================
+    critic_onnx_path = os.path.join(log_dir, "student_critic.onnx")
+    try:
+        torch.onnx.export(
+            base_agent.critic,              
+            dummy_state,                       
+            critic_onnx_path,                  
+            export_params=True,                
+            opset_version=11,                 
+            do_constant_folding=True,          
+            input_names=['state'],             
+            output_names=['value_estimate']    # Critic 返回的一般是标量价值
+        )
+        print(f"Critic ONNX successfully exported to {critic_onnx_path}")
+    except Exception as e:
+        print(f"Error exporting Critic ONNX: {e}")
+
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
     # 5. 模仿学习预训练 (只对 base_agent 做一次)
@@ -720,15 +737,16 @@ def run_MLP_simulation(
             device=device, k_entropy=k_entropy, max_std=label_smoothing
         )
         
-        # 初始化 Alpha_IL: 对数均匀分布 [1e-4, 0.1] 之间
-        # log10(-4) = -4, log10(0.1) = -1
-        rnd_exp = np.random.uniform(-4, -1)
-        init_alpha = 10 ** rnd_exp
+        # 初始化 sigma_elo: 固定为 400 (如果不调它的话)
+        init_sigma = sigma_elo 
+        # 初始化 shaping_weight: 在 [0, 1] 之间随机采样
+        init_shaping = np.random.uniform(0, 1)
         
-        member = PBTMember(i, new_agent_obj, elo=1200, alpha_il=init_alpha)
+        member = PBTMember(i, new_agent_obj, elo=1200, sigma_elo=init_sigma, shaping_weight=init_shaping)
         population.append(member)
-        print(f"  Agent P{i}: alpha_il={init_alpha:.5f}")
+        print(f"  Agent P{i}: shaping_weight={init_shaping:.2f}")
 
+        student_agent = population[i].agent
     # # 清理 base_agent 节省显存
     # del base_agent
     # torch.cuda.empty_cache()
@@ -755,16 +773,19 @@ def run_MLP_simulation(
     worker_device = torch.device('cpu') # Worker 使用 CPU 推理
     
     print(f"Initializing {num_workers} training workers...")
-    for i in range(num_workers):
-        parent_conn, child_conn = mp.Pipe()
-        p = mp.Process(target=worker_process, args=(
-            i, child_conn, args, state_dim, hidden_dim, 
-            action_dims_dict, worker_device, dt_maneuver, 
-            seed, opp_greedy_rate, dt_move, no_crash
-        ))
-        p.start()
-        workers.append(p)
-        pipes.append(parent_conn)
+
+    # 初始化采样子进程
+    for member_id in range(pop_size): # 加套一层
+        for i in range(num_workers):
+            parent_conn, child_conn = mp.Pipe()
+            p = mp.Process(target=worker_process, args=(
+                i, child_conn, args, state_dim, hidden_dim, 
+                action_dims_dict, worker_device, dt_maneuver, 
+                seed, opp_greedy_rate, dt_move, no_crash, member_id
+            ))
+            p.start()
+            workers.append(p)
+            pipes.append(parent_conn)
 
     # ELO 初始化
     elo_ratings = copy.deepcopy(init_elo_ratings)
@@ -775,6 +796,46 @@ def run_MLP_simulation(
     elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
     hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
 
+    # # 尝试加载历史，为了接着之前的训练（但从来都没有这么做）
+    # if os.path.exists(full_json_path):
+    #     with open(full_json_path, 'r', encoding='utf-8') as f: elo_ratings = json.load(f)
+    # if os.path.exists(elite_json_path):
+    #     with open(elite_json_path, 'r', encoding='utf-8') as f: elite_elo_ratings = json.load(f)
+    # if os.path.exists(hof_json_path):
+    #     with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
+
+    # --- [新增] PBT 详细指标 CSV 初始化 ---
+    csv_paths = {
+        'win': os.path.join(log_dir, "pbt_wins.csv"),
+        'lose': os.path.join(log_dir, "pbt_loss.csv"),
+        'draw': os.path.join(log_dir, "pbt_draw.csv"),
+        'return': os.path.join(log_dir, "pbt_return.csv"),
+        'shaping_weight': os.path.join(log_dir, "pbt_shaping_weight.csv"),
+        'elo': os.path.join(log_dir, "pbt_elo.csv")
+    }
+    for label, path in csv_paths.items():
+        while True:
+            try:
+                with open(path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    header = ["batch_idx"] + [f"member_{i}" for i in range(pop_size)]
+                    writer.writerow(header)
+                break
+            except PermissionError:
+                print(f"Waiting for CSV initialization: {path} is locked (Excel?). Please close it...", end='\r')
+                time.sleep(2)
+
+    # 初始化种群成员的 Elo (如果 elo_ratings 中存了 __CURRENT_MAIN__，则以此为基准)
+    init_main_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
+    for member in population:
+        member.elo = init_main_elo
+
+    # 初始对手
+    if (not elo_ratings) or IL_epoches > 0:
+        init_opponent_name = "actor_rein0"
+        torch.save(base_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
+        if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
+
     # 训练循环变量
     total_steps = 0
     pbt_generation_cnt = 0 # PBT 进化代数
@@ -782,12 +843,19 @@ def run_MLP_simulation(
     trigger = trigger0
     current_max_steps = int(max_steps)
     
+    # 全局 Buffer (用于攒够 Batch 训练)
     empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     
-    # 历史记录初始化：用 P0 的参数存为初始对手
-    init_opponent_name = "actor_rein0"
-    torch.save(population[0].agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
-    if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
+    buffer = []
+
+    for member in population:
+        transition_dict = copy.deepcopy(empty_transition_dict)
+        buffer.append(transition_dict)
+
+    # # 历史记录初始化：用 P0 的参数存为初始对手
+    # init_opponent_name = "actor_rein0"
+    # torch.save(population[0].agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
+    # if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
 
     # =========================================================
     # 主循环 (Master Process) - PBT 结构
@@ -828,8 +896,8 @@ def run_MLP_simulation(
                     # rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
                     rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+(_P\d+)?$', k)]
                     if rein_keys:
-                        # 找到数值最大的编号（即最新的已保存智能体）
-                        hof_key = max(rein_keys, key=lambda k: int(k.replace("actor_rein", '')))
+                        # 找到数值最大的编号（即最新的已保存智能体，忽略 _P 后缀）
+                        hof_key = max(rein_keys, key=lambda k: int(k.split('_P')[0].replace("actor_rein", '')))
                         
                         if hof_key not in hall_of_fame:
                             hall_of_fame[hof_key] = elo_ratings.get(hof_key, best_member.elo)
@@ -842,265 +910,429 @@ def run_MLP_simulation(
             # ==================================================================
             # 每个 Generation，所有成员都走一遍
             
-            for member in population:
-                # ---------------------------------------------
-                # 2. 准备训练 Batch (针对当前 Member)
-                # ---------------------------------------------
-                transition_dict = copy.deepcopy(empty_transition_dict)
-                
-                # A. 获取当前 Agent 权重
-                current_actor_weights = {k: v.cpu() for k, v in member.agent.actor.state_dict().items()}
-                
-                # B. 分发任务
-                if not init_elo_ratings:
-                    sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
-                                                       key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
-                                                       reverse=True) if not k.startswith("__")]
-                    effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
-                else:
-                    effective_pool = elite_elo_ratings
-                
-                for rank in range(num_workers):
-                    # 对手采样: 种群里的 Agent 也和历史/规则打，产生相对 Elo
-                    probs, opponent_keys = get_opponent_probabilities(
-                        effective_pool,
-                        hall_of_fame,
-                        target_elo=member.elo,
-                        SP_type=self_play_type,
-                        sigma=sigma_elo,
-                        rule_rate=rule_actor_rate,
-                        deltaFSP_epsilon=deltaFSP_epsilon,
-                    )
-                    selected_opponent_name = np.random.choice(opponent_keys, p=probs)
-                    
-                    # 准备对手数据
-                    opp_type = 'rule'
-                    opp_data = 0
-                    if "Rule" in selected_opponent_name:
-                        try:
-                            rule_num = int(selected_opponent_name.split('_')[1])
-                        except:
-                            rule_num = 0
-                        opp_data = rule_num
-                    else:
-                        opp_type = 'nn'
-                        adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
-                        if os.path.exists(adv_path):
-                            opp_data = torch.load(adv_path, map_location='cpu', weights_only=1)
-                        else:
-                            # Fallback
-                            opp_type = 'rule'
-                            opp_data = 0
-                    
-                    opp_info = (selected_opponent_name, opp_type, opp_data)
-                    
-                    # 初始位置配置
-                    rb, bb = create_initial_state_worker(randomized_birth)
-                    settings = {
-                        'randomized_birth': randomized_birth,
-                        'action_cycle_multiplier': action_cycle_multiplier,
-                        'weight_reward': weight_reward_0,
-                        'red_birth': rb,
-                        'blue_birth': bb
-                    }
-                    
-                    # 发送指令
-                    pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
 
-                # C. 收集数据
-                batch_results = []
-                for rank in range(num_workers):
-                    try:
-                        res = pipes[rank].recv()
-                    except EOFError:
-                        for p in workers: p.terminate()
-                        raise RuntimeError(f"Worker {rank} crashed.")
-                    if isinstance(res, dict) and 'error' in res:
-                        # 关闭所有子进程防止残留
-                        for p in workers: p.terminate()
-                        # 抛出具体的运行时错误
-                        raise RuntimeError(f"Worker {rank} crashed: {res['error']}")
-                        
-                    batch_results.append(res)
-                
-                # D. 数据处理与 Elo 更新
-                batch_total_steps = 0
-                batch_return = 0
-                batch_wins = 0
-                
-                for res in batch_results:
-                    l_tr = res['trans']
-                    metrics = res['metrics']
-                    opp_name = res['opp_name']
-                    
-                    batch_total_steps += metrics['steps']
-                    batch_return += metrics['return']
-                    if metrics['win']: batch_wins += 1
-                    
-                    for k in transition_dict: transition_dict[k].extend(l_tr[k])
-                    
-                    # Update Elo for this member
-                    actual_score = 1.0 if metrics['win'] else (0.0 if metrics['lose'] else 0.5)
-                    if opp_name in elo_ratings:
-                        adv_elo = elo_ratings[opp_name]
-                        member.elo = update_elo(member.elo, adv_elo, actual_score, K_FACTOR)
-                        # 如果是历史池里的对手，也更新一下它的分
-                        new_adv_elo = update_elo(adv_elo, member.elo, 1.0 - actual_score, K_FACTOR)
-                        elo_ratings[opp_name] = new_adv_elo
-                        if opp_name in elite_elo_ratings:
-                             elite_elo_ratings[opp_name] = new_adv_elo
-                # [新增] 在 PPO 更新前打印本轮详细战况
-                if batch_idx % 1 == 0:
-                    print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
 
-                # 更新全局计数
-                total_steps += batch_total_steps
-                
-                # E. 模型更新 (Training)
-                if len(transition_dict['dones']) >= transition_dict_threshold:
-                    transition_dict['actions'] = restructure_actions(transition_dict['actions'])
-                    
-                    # Teacher Selection for Distillation
-                    # 种群成员依然共用外部的 Teacher Pool
-                    teacher_name = None
-                    should_distil = False
-                    
-                    # 简化版 Teacher 选取
-                    rein_keys = [k for k in elite_elo_ratings.keys() if k.startswith("actor_rein")]
-                    target_rules = ['Rule_3', 'Rule_4']
-                    valid_rules = [r for r in target_rules if r in elite_elo_ratings]
-                    candidate_keys = rein_keys + valid_rules
-                    
-                    if candidate_keys:
-                         candidate_elos = np.array([elite_elo_ratings[k] for k in candidate_keys], dtype=np.float64)
-                         # 简单的概率分布
-                         probs = np.exp((candidate_elos - np.min(candidate_elos))/100)
-                         probs /= np.sum(probs)
-                         teacher_name = np.random.choice(candidate_keys, p=probs)
-                    
-                    if teacher_name:
-                        teacher_agent.agent_info = None; teacher_agent.critic_info = None
-                        if teacher_name.startswith("actor_rein"):
-                            model_path = os.path.join(log_dir, f"{teacher_name}.pt")
-                            if os.path.exists(model_path):
-                                teacher_actor.load_state_dict(torch.load(model_path, map_location=device, weights_only=1))
-                                teacher_agent.agent_info = ('NN', teacher_actor)
-                                should_distil = True
-                        elif teacher_name.startswith('Rule'):
-                            match = re.search(r'\d+', teacher_name)
-                            if match:
-                                teacher_agent.agent_info = ('rule', int(match.group()))
-                                should_distil = True
-                    
-                    # 先做基础 PPO
-                    member.agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
-                    
-                    # 再做蒸馏 (使用该 Member 自己的 alpha_il)
-                    if use_sil and should_distil:
-                        # PBT 核心: 使用 member.alpha_il
-                        member.agent.distil(transition_dict, teacher_agent=teacher_agent,
-                                           alpha=member.alpha_il, distil_only_maneuver=distil_only_maneuver,
-                                           shuffled=1, mini_batch_size=mini_batch_size_mixed, reverse_kl=reverse_kl)
 
-                    # Member Logging
-                    prefix = f"P{member.id}"
-                    logger.add(f"{prefix}/return", batch_return/num_workers, total_steps)
-                    logger.add(f"{prefix}/win_rate", batch_wins/num_workers, total_steps)
-                    logger.add(f"{prefix}/elo", member.elo, total_steps)
-                    logger.add(f"{prefix}/actor_loss", member.agent.actor_loss, total_steps)
+            # --- 2. 准备训练 Batch (Synchronous) ---
             
-            # End of Population Generation
-            pbt_generation_cnt += 1
+            # 1. 计算当前排位 rank_pos
+            valid_elo_values = [v for k, v in elite_elo_ratings.items() if not k.startswith("__")]
+            if not valid_elo_values:
+                rank_pos = 0.5
+                min_elo, max_elo = init_main_elo, init_main_elo
+            else:
+                min_elo = np.min(valid_elo_values)
+                max_elo = np.max(valid_elo_values)
+                denom = float(max_elo - min_elo)
+                # 如果分母为0，视为0.5中位
+                if denom == 0.0:
+                    rank_pos = 0.5
+                else:
+                    pop_max_elo = max(m.elo for m in population)
+                    rank_pos = float((pop_max_elo - min_elo) / denom)
+
+
+            # A. 获取当前策略权重 (CPU)
+            all_current_actor_weights = []
+            for member_id in range(pop_size):
+                student_agent = population[member_id].agent
+                current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
+                all_current_actor_weights.append(current_actor_weights)
+
+            # B. 分发任务给 Worker
+            # 这一步 Master 决定每个 Worker 打谁
+            worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
+            
+            # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
+            if not init_elo_ratings:
+                # 按照 Elo 分数降序排列，排除内部特殊键
+                sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
+                                                   key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                                                   reverse=True) if not k.startswith("__")]
+                effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
+            else:
+                effective_pool = elite_elo_ratings
+            
+            # 分发采样任务到子进程
+            for rank in range(num_workers * pop_size):
+
+                current_member_id = rank // num_workers
+                # 拿出对应 member 的权重
+                current_member_weights = all_current_actor_weights[current_member_id]
+
+                # 采样对手 (使用该 member 独有的 sigma_elo)
+                probs, opponent_keys = get_opponent_probabilities(
+                    effective_pool,
+                    hall_of_fame,
+                    target_elo = max_elo,  
+                    SP_type= 'PFSP_challenge', 
+                    sigma=population[current_member_id].sigma_elo,
+                    rule_rate=rule_actor_rate,
+                    deltaFSP_epsilon=deltaFSP_epsilon,
+                )
+                selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+                
+                # 准备对手数据
+                opp_type = 'rule'
+                opp_data = 0
+                if "Rule" in selected_opponent_name:
+                    try:
+                        rule_num = int(selected_opponent_name.split('_')[1])
+                    except:
+                        rule_num = 0
+                    opp_data = rule_num
+                else:
+                    opp_type = 'nn'
+                    adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
+                    if os.path.exists(adv_path):
+                        opp_data = torch.load(adv_path, map_location='cpu', weights_only=1) # 传给 Worker 必须是 CPU Tensor
+                    else:
+                        # Fallback
+                        opp_type = 'rule'
+                        opp_data = 0
+                
+                opp_info = (selected_opponent_name, opp_type, opp_data)
+                
+                # 初始位置配置
+                rb, bb = create_initial_state_worker(randomized_birth)
+                # [核心修改] 根据该成员当前的 shaping_weight 构造奖励权重
+                current_weight_reward = np.array([1.0, 1.0, population[current_member_id].shaping_weight])
+                
+                settings = {
+                    'randomized_birth': randomized_birth,
+                    'action_cycle_multiplier': action_cycle_multiplier,
+                    'weight_reward': current_weight_reward,
+                    'red_birth': rb,
+                    'blue_birth': bb
+                }
+                
+                # 发送指令 pipe.send
+
+                pipes[rank].send(('RUN_EPISODE', (current_member_id, current_member_weights, opp_info, settings)))
+
+            # C. 等待所有 采样 Worker 完成 (Barrier)
+            batch_results = []
+            for rank in range(pop_size * num_workers):
+                try: # <--- 【新增】
+                    res = pipes[rank].recv() # 阻塞等待 pipe.recv
+                except EOFError: # <--- 【新增】捕获管道断开错误
+                    print(f"[Error] Worker {rank} crashed silently.")
+                    for p in workers: p.terminate()
+                    raise RuntimeError(f"Worker {rank} crashed.")
+                    
+                # [新增] 检查 Worker 是否传回了奔溃信息
+                if isinstance(res, dict) and 'error' in res:
+                    print(f"--- Master received error from Worker {rank}, aborting. ---")
+                    # 关闭所有子进程防止残留
+                    for p in workers: p.terminate()
+                    # 抛出具体的运行时错误
+                    raise RuntimeError(f"Worker {rank} crashed with error:\n{res['error']}")
+                    
+                batch_results.append(res)
+            
+            # --- 3. 数据聚合与处理 ---
+            batch_total_steps = np.zeros(pop_size)
+            batch_wins = np.zeros(pop_size)
+            batch_loss_cnt = np.zeros(pop_size)
+            batch_draw_cnt = np.zeros(pop_size)        # 新增统计
+            batch_total_return = np.zeros(pop_size)    # 新增统计
+            batch_total_m_fired = np.zeros(pop_size)   # 新增统计
+            
+            # 在这里，已经把每个worker的经验都加到对应的member的buffer里了
+            for res in batch_results:
+                # res 结构: {'trans':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
+                l_tr = res['trans'] # PPO 训练数据 (含探索)
+                ego_tr = res['ego_trans'] # SIL 蓝方数据
+                enm_tr = res['enm_trans'] # SIL 红方数据
+                metrics = res['metrics']
+                opp_name = res['opp_name']
+
+                member_id = res['member_id'] # member 编号
+
+                # 3.1 聚合 PPO 数据到全局 Buffer
+                transition_dict = buffer[member_id]
+
+                for k in transition_dict:
+                    transition_dict[k].extend(l_tr[k])
+                
+                # [新增] 填充 buffer 用户打印详情
+                result_str = "Win" if metrics['win'] else ("Lose" if metrics['lose'] else "Draw")
+                worker_metrics_buffer.append(f"{opp_name}: {result_str}")
+                
+                batch_total_steps[member_id] += metrics['steps']
+                batch_total_return[member_id] += metrics['return']
+                batch_total_m_fired[member_id] += metrics['m_fired']
+
+                if metrics['win']: batch_wins[member_id] += 1
+                elif metrics['lose']: batch_loss_cnt[member_id] += 1
+                else: batch_draw_cnt[member_id] += 1
+                
+                
+                
+                
+                # 3.3 ELO 更新 (实时更新)
+                actual_score = 0.5
+                if metrics['win']: actual_score = 1.0
+                elif metrics['lose']: actual_score = 0.0
+                
+                is_rule_agent = "Rule" in opp_name
+                # 简单的踢出逻辑 check
+                should_update = True
+                if should_kick and not is_rule_agent:
+                    # 如果对手表现极差（例如无脑不开火且输了），可以不更新 ELO 甚至踢出
+                    # 这里简化处理，暂时都更新
+                    pass
+                
+                if opp_name in elo_ratings:
+                    prev_member_elo = population[member_id].elo
+                    adv_elo = elo_ratings[opp_name]
+                    
+                    # 更新该成员的 Elo 分
+                    new_member_elo = update_elo(prev_member_elo, adv_elo, actual_score, K_FACTOR)
+                    population[member_id].elo = new_member_elo
+                    
+                    # 更新对手 Elo 分
+                    new_adv_elo = update_elo(adv_elo, prev_member_elo, 1.0 - actual_score, K_FACTOR)
+                    elo_ratings[opp_name] = new_adv_elo
+                    
+                    # 记录主分数（用于兼容旧逻辑，保存当前最高分为主智能体分）
+                    elo_ratings["__CURRENT_MAIN__"] = max(m.elo for m in population)
+                    
+                    if opp_name in elite_elo_ratings:
+                        elite_elo_ratings[opp_name] = new_adv_elo
+                else:
+                    print(f'警告，elo_ratings没有收录对手: {opp_name}!!!')
+            
+            # [新增] 在 PPO 更新前打印本轮详细战况
+            if batch_idx % 1 == 0:
+                print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
+
+            # 更新全局计数
+            total_steps += np.sum(batch_total_steps)  # 如果用累加步数的话会吃亏，因为分割经验池导致数据利用率低了
             batch_idx += 1
             
-            print(f"Gen {pbt_generation_cnt}: Total Steps {total_steps}. Best Elo: {max([m.elo for m in population]):.0f}")
+            # --- 3.5 [新增] 记录所有 Member 分项指标 ---
+            # A. 写入 CSV (以迭代次数 batch_idx 为行，member_id 为列)
+            csv_data = {
+                'win': batch_wins / num_workers,
+                'lose': batch_loss_cnt / num_workers,
+                'draw': batch_draw_cnt / num_workers,
+                'return': batch_total_return / num_workers,
+                'shaping_weight': np.array([m.shaping_weight for m in population]),
+                'elo': np.array([m.elo for m in population])
+            }
+            for label, values in csv_data.items():
+                while True:
+                    try:
+                        with open(csv_paths[label], 'a', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow([batch_idx] + list(values))
+                        break # 写入成功，退出循环
+                    except PermissionError:
+                        # 如果名被 Excel 占用，循环等待并提示
+                        print(f"Warning: CSV file {label} is locked by another program (Excel?). Please close it. Retrying in 2 seconds...", end='\r')
+                        time.sleep(2)
+            
+            # # B. 写入 TensorBoard (分成员记录，方便对比)
+            # for m_id in range(pop_size):
+            #     m_tag = f"pbt_member/P{m_id}"
+            #     logger.add(f"{m_tag}/win", batch_wins[m_id] / num_workers, total_steps)
+            #     logger.add(f"{m_tag}/return", batch_total_return[m_id] / num_workers, total_steps)
 
-            # ==================================================================
-            # PBT Evolution Step (Exploit & Explore)
-            # ==================================================================
-            if pbt_generation_cnt % pbt_interval == 0:
-                print(f"\n>>> Executing PBT Evolution at Gen {pbt_generation_cnt}...")
-                
-                # 1. Sort by Elo
-                sorted_pop = sorted(population, key=lambda m: m.elo)
-                best_member = sorted_pop[-1]
-                worst_member = sorted_pop[0] # 这里只淘汰最差的一个，也可以淘汰后25%
-                
-                print(f"  Best: P{best_member.id} (Elo {best_member.elo:.0f}, Alpha {best_member.alpha_il:.5f})")
-                print(f"  Worst: P{worst_member.id} (Elo {worst_member.elo:.0f}, Alpha {worst_member.alpha_il:.5f})")
-                
-                # 2. Exploit: Worst copies Best
-                worst_member.agent.actor.load_state_dict(best_member.agent.actor.state_dict())
-                worst_member.agent.critic.load_state_dict(best_member.agent.critic.state_dict())
-                worst_member.elo = best_member.elo # 继承分数
-                
-                # 3. Momentum Reset: Clear optimizer state
-                worst_member.reset_optimizer()
-                
-                # 4. Explore: Mutate Hyperparams (Alpha_IL)
-                # 扰动: x 0.8 or x 1.2
-                perturb = np.random.choice([0.8, 1.2])
-                new_alpha = best_member.alpha_il * perturb
-                # Clip alpha to reasonable bounds
-                new_alpha = np.clip(new_alpha, 1e-6, 1.0)
-                worst_member.alpha_il = new_alpha
-                
-                print(f"  -> P{worst_member.id} mutated: New Alpha {worst_member.alpha_il:.5f}")
-                
-                # Log PBT Stats
-                logger.add("PBT/Best_Elo", best_member.elo, total_steps)
-                logger.add("PBT/Best_Alpha", best_member.alpha_il, total_steps)
+            # C. 记录原有聚合指标
+            logger.add("special/0 发射的导弹总数", np.mean(batch_total_m_fired), total_steps)
+            # 记录平均回报与胜率
+            best_member = np.argmax(batch_wins) # 记录胜率最高的智能体的回报
+            logger.add("train/1 avg_episode_return", batch_total_return[best_member] / num_workers, total_steps)
+            logger.add("train/2 win", batch_wins[best_member] / num_workers, total_steps)
+            logger.add("train/2 lose", batch_loss_cnt[best_member] / num_workers, total_steps)
+            logger.add("train/2 draw", batch_draw_cnt[best_member] / num_workers, total_steps)
+            logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
 
-            # ==================================================================
-            # 保存与历史池维护 (使用 Best Member)
-            # ==================================================================
-            if batch_idx % save_interval == 0:
-                best_member = max(population, key=lambda m: m.elo)
+
+            # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
+            if batch_idx % save_interval == 0 and \
+                any(len(buffer[m_id]['dones']) >= transition_dict_threshold for m_id in range(pop_size)):
                 
-                actor_key = f"actor_rein{batch_idx}_P{best_member.id}"
-                critic_key = f"critic_rein{batch_idx}_P{best_member.id}"
-                
-                torch.save(best_member.agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                torch.save(best_member.agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                
-                # Elo json update
-                main_agent_elo = best_member.elo # 记录当前最强
-                elo_ratings[actor_key] = main_agent_elo
-                elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
+                # 遍历每一个 member 进行更新
+                for m_id in range(pop_size):
+                    m_trans_dict = buffer[m_id]
+                    m_member = population[m_id]
+                    m_agent = m_member.agent
+                    
+                    # 重构 Action 结构
+                    m_trans_dict['actions'] = restructure_actions(m_trans_dict['actions'])
+                    
+                    # --- 计算该成员相对于对手池的 Elo 差值，用于 超参数 调节 ---
+                    all_keys = list(elo_ratings.keys())
+                    rule_keys = [k for k in all_keys if k.startswith('Rule')]
+                    rein_keys = [k for k in all_keys if k.startswith('actor_rein')]
+                    # 取最后（最新插入）的300个
+                    latest_rein_keys = rein_keys[-300:] if len(rein_keys) > 300 else rein_keys
+                    target_pool_keys = rule_keys + latest_rein_keys
+                    avg_pool_elo = np.mean([elo_ratings[k] for k in target_pool_keys])
+                    x_elo_diff = m_member.elo - avg_pool_elo
+                    
+                    # 执行 PPO 更新
+                    m_agent.update(m_trans_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
+                    
+                    # 记录 Log (按 Member 区分)
+                    m_tag_prefix = f"{m_id}"
+                    logger.add(f"train/{m_tag_prefix}-actor_loss", m_agent.actor_loss, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-critic_loss", m_agent.critic_loss, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-entropy_cat", m_agent.entropy_cat, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-entropy_bern", m_agent.entropy_bern, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-elo", m_member.elo, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-elo_diff_x", x_elo_diff, total_steps)
+                    logger.add(f"train/{m_tag_prefix}-shaping_weight", m_member.shaping_weight, total_steps)
+                    
+                    # 清空该成员的 Buffer
+                    buffer[m_id] = copy.deepcopy(empty_transition_dict)
+                    
+                    # A. 保存模型
+                    actor_key = f"actor_rein{batch_idx}_P{m_id}"
+                    torch.save(m_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                    # Critic 如果是共享的话可以只存一份，或者每个 member 存一份
+                    torch.save(m_agent.critic.state_dict(), os.path.join(log_dir, f"critic_P{m_id}.pt"))
+
+                    # B. 维护精英池 (每个成员独立判断是否入池)
+                    if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
+                        valid_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                        if not valid_elos: valid_elos = [1200]
+                        r_min, r_max = min(valid_elos), max(valid_elos)
+                        denom = r_max - r_min if r_max != r_min else 1.0
+                        m_rank = (m_member.elo - r_min) / denom
+                        
+                        if m_rank >= ADMISSION_THRESHOLD:
+                            history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
+                            while len(history_keys) >= MAX_HISTORY_SIZE:
+                                weakest_history_key = min(history_keys, key=lambda k: elite_elo_ratings[k])
+                                del elite_elo_ratings[weakest_history_key]
+                                history_keys.remove(weakest_history_key)
+                            elite_elo_ratings[actor_key] = m_member.elo
+                            print(f"Accepted {actor_key} into Elite Pool (Rank: {m_rank:.2f}).")
+                    
+                    # 无论是否进入精英池，全量表都要记录
+                    elo_ratings[actor_key] = m_member.elo
+
+                # 全量日志与快照保存
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
-                
-                # Admission to Elite Pool
-                if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                     # 简单的 Admission 逻辑，直接看是不是比池子里的一半强
-                     valid_elos = [v for k, v in elite_elo_ratings.items() if not k.startswith("__")]
-                     if not valid_elos: valid_elos = [1200]
-                     avg_elo = np.mean(valid_elos)
-                     
-                     if best_member.elo > avg_elo * 0.95: # 稍微放宽一点
-                         # Cleanup
-                         history_keys = [k for k in elite_elo_ratings.keys() if k.startswith("actor_rein")]
-                         if len(history_keys) >= MAX_HISTORY_SIZE:
-                             weakest = min(history_keys, key=lambda k: elite_elo_ratings[k])
-                             del elite_elo_ratings[weakest]
-                         
-                         elite_elo_ratings[actor_key] = best_member.elo
-                         print(f"Saved Checkpoint {actor_key} (Elo {main_agent_elo:.0f}) to Elite Pool.")
-
-                # Save JSONs
                 with open(full_json_path, "w", encoding="utf-8") as f:
                     json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
-                
+
+                # -----------------------------------------------------------
+                # 逻辑分支 C: 保存“精英池快照” (Elite JSON)
+                # -----------------------------------------------------------
+                # 这才是下次训练 resume 时应该读取的文件
                 save_elite = copy.deepcopy(elite_elo_ratings)
-                save_elite["__CURRENT_MAIN__"] = main_agent_elo
+                save_elite["__CURRENT_MAIN__"] = max(m.elo for m in population)
                 with open(elite_json_path, "w", encoding="utf-8") as f:
                     json.dump(save_elite, f, ensure_ascii=False, indent=2)
                 
+                print(f"Step {total_steps}: All members updated. Max ELO {max(m.elo for m in population):.0f}")
+
+                # =========================================================
+                # PBT 进化 (Exploit & Explore)
+                # =========================================================
+                # 此处暂时将进化频率硬编码为 20 次 batch，之后你可以基于步数或自由调节
+                if batch_idx > 0 and batch_idx % interval_of_pbt == 0: # 20 == 0:
+                    print(f"\n--- PBT Evolution Step at Batch {batch_idx} ---")
+                    
+                    # 1. 评估种群 (依据 Elo 分数升序排序)
+                    sorted_population = sorted(population, key=lambda m: m.elo)
+                    worst_member = sorted_population[0]
+                    best_member = sorted_population[-1]
+                    
+                    print(f"  Best Member: P{best_member.id} (Elo: {best_member.elo:.1f})")
+                    print(f"  Worst Member: P{worst_member.id} (Elo: {worst_member.elo:.1f})")
+                    
+                    # 2. 淘汰与替换 (Exploit & Explore)
+                    # 只有最强和最弱差距足够大时才执行进化，避免频繁震荡
+                    if best_member.elo - worst_member.elo >= 200:
+                        print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
+                        
+                        # 权重替换 (Exploit)
+                        worst_member.agent.actor.net.load_state_dict(best_member.agent.actor.net.state_dict())
+                        worst_member.agent.critic.net.load_state_dict(best_member.agent.critic.net.state_dict())
+                        
+                        # 超参数替换与扰动 (Explore)
+                        # [核心修改] 变异奖励权重，扰动后 clip 到 [0, 1]
+                        mutation = np.random.choice([0.8, 1.2])
+                        new_shaping = np.clip(best_member.shaping_weight * mutation, 0.0, 1.0)
+                        worst_member.shaping_weight = new_shaping
+                        print(f"  -> Hyperparams: Mutated shaping_weight to {new_shaping:.2f} (from {best_member.shaping_weight:.2f})")
+
+                        # 3. 重置优化器 (重要！清楚旧的参数优化动量)
+                        worst_member.agent.reset_optimizer()
+                        
+                        # 同步 Elo 分数
+                        worst_member.elo = best_member.elo
+                        print(f"  -> Params & Elo of P{worst_member.id} replaced with P{best_member.id}\n")
+            
+                # -----------------------------------------------------------
+                # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)
+                # -----------------------------------------------------------
                 with open(hof_json_path, "w", encoding="utf-8") as f:
                     json.dump(hall_of_fame, f, ensure_ascii=False, indent=2)
 
+                # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
+                valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
+                if valid_elos:
+                    mean_elo = np.mean(list(valid_elos.values()))
+                    # 排序 (Rule 在前，rein 按数字) - 简单按 key 字符串排序即可，或者 lambda
+                    # 这里为了简单，直接遍历
+                    # sorted_keys = sorted(valid_elos.keys())
+                    
+                    pop_max_elo = max(m.elo for m in population)
+                    logger.add("Elo/Main_Agent_Raw", pop_max_elo, total_steps)
+                    
+                    # 记录主智能体在当前所有 ELO 中的归一化排名位置：
+                    # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
+                    min_elo = np.min(list(valid_elos.values()))
+                    max_elo = np.max(list(valid_elos.values()))
+                    denom = float(max_elo - min_elo)
+                    if denom == 0.0:
+                        rank_pos = 0.5
+                    else:
+                        rank_pos = float((pop_max_elo - min_elo) / denom)
+                    # 现有日志
+                    logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                    
+                    # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
+                    elo_spread = float(max_elo - min_elo)
+                    print('elo分极差：', elo_spread)
+                    logger.add("Elo/Spread", elo_spread, total_steps)
+                    
+                    rule_vals = [v for k, v in valid_elos.items() if k.startswith("Rule")]
+                    if rule_vals:
+                        r_min, r_max = np.min(rule_vals), np.max(rule_vals)
+                        denom = float(r_max - r_min)
+                        curr_rank = 0.5 if denom == 0 else (pop_max_elo - r_min) / denom
+                        logger.add("Elo_Centered/Current_Rank %", curr_rank * 100, total_steps)
+                    
+                    hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
+                    logger.add("Elo/History_Pool_Size", hist_count, total_steps)
+
+                    # 记录详细分数
+                    # best_m_id = max(range(pop_size), key=lambda i: population[i].elo)
+                    # 记录最强个体的绝对分和相对均值的居中分
+                    logger.add("Elo_Centered/Latest_Best", pop_max_elo - mean_elo, total_steps)
+
+                    # 3. 提取所有的 Rule 对手并遍历，一步到位记录 Rule信息 和 差值
+                    rule_keys = [k for k in valid_elos.keys() if k.startswith("Rule_")]
+                    for rk in sorted(rule_keys):
+                        rule_elo = float(valid_elos[rk])
                         
+                        # 记录 Rule 的绝对分与居中分
+                        logger.add(f"Elo_Raw/{rk}", rule_elo, total_steps)
+                        logger.add(f"Elo_Centered/{rk}", rule_elo - mean_elo, total_steps)
+                        
+                        # 直接计算并记录 最强个体 vs 规则对手 的差值
+                        logger.add(f"Elo_Diff/Latest_Best_vs_{rk}", pop_max_elo - rule_elo, total_steps)
+
         # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")
+        # 【新增】明确告知用户 Worker 当前状态
         print("All simulation workers are now idling safely. System is paused.") 
         
         inp = input(f"Enter new max_steps (current {total_steps}), or press Enter to exit: ")

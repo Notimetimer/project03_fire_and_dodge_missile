@@ -1021,12 +1021,12 @@ class PPOHybrid:
 
     
     # =========================================================================
-    #  [New Method] BC_update (Critic 同 MARWIL, Actor 用 MSE+F)
+    #  [New Method] BC_update (Actor 用 MSE 更新，Critic 不更新)
     # =========================================================================
     def BC_update(self, il_transition_dict, batch_size=64, c_v=1.0, shuffled=1, max_weight=100.0):
         """
         行为克隆更新 (Behavior Cloning with F-function Constraint)。
-        Critic: 使用 MARWIL 风格的回归更新 (拟合 R)。
+        # Critic: 使用 MARWIL 风格的回归更新 (拟合 R)。
         Actor: 使用 MSE 回归，但仅在 Advantage > 0 时通过 F 函数生效。
         """
         # 1. 数据准备
@@ -1102,29 +1102,29 @@ class PPOHybrid:
             )
 
             # --- B. Critic Loss (同 MARWIL) ---
-            v_pred = self.critic(critic_input_batch)
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            # v_pred = self.critic(critic_input_batch)
+            # critic_loss = F.mse_loss(v_pred, r_batch) * c_v
             
             # --- C. Optimize ---
             self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
+            # self.critic_optimizer.zero_grad()
             
             actor_loss.backward()
-            critic_loss.backward()
+            # critic_loss.backward()
             
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            # nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
             
             self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            # self.critic_optimizer.step()
 
             total_actor_loss += actor_loss.item()
-            total_critic_loss += critic_loss.item()
+            # total_critic_loss += critic_loss.item()
             total_valid_samples += F_mask.sum().item()
             batch_count += 1
 
         avg_actor_loss = total_actor_loss / batch_count if batch_count > 0 else 0
-        avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0
+        avg_critic_loss = 0  # total_critic_loss / batch_count if batch_count > 0 else 0
         
         return avg_actor_loss, avg_critic_loss, total_valid_samples
     

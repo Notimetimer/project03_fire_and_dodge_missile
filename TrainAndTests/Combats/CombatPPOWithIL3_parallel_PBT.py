@@ -807,13 +807,21 @@ def run_MLP_simulation(
         'win': os.path.join(log_dir, "pbt_wins.csv"),
         'lose': os.path.join(log_dir, "pbt_loss.csv"),
         'draw': os.path.join(log_dir, "pbt_draw.csv"),
-        'return': os.path.join(log_dir, "pbt_return.csv")
+        'return': os.path.join(log_dir, "pbt_return.csv"),
+        'sigma_elo': os.path.join(log_dir, "pbt_sigma_elo.csv"),
+        'elo': os.path.join(log_dir, "pbt_elo.csv")
     }
     for label, path in csv_paths.items():
-        with open(path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            header = ["batch_idx"] + [f"member_{i}" for i in range(pop_size)]
-            writer.writerow(header)
+        while True:
+            try:
+                with open(path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    header = ["batch_idx"] + [f"member_{i}" for i in range(pop_size)]
+                    writer.writerow(header)
+                break
+            except PermissionError:
+                print(f"Waiting for CSV initialization: {path} is locked (Excel?). Please close it...", end='\r')
+                time.sleep(2)
 
     # 初始化种群成员的 Elo (如果 elo_ratings 中存了 __CURRENT_MAIN__，则以此为基准)
     init_main_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
@@ -1104,12 +1112,21 @@ def run_MLP_simulation(
                 'win': batch_wins / num_workers,
                 'lose': batch_loss_cnt / num_workers,
                 'draw': batch_draw_cnt / num_workers,
-                'return': batch_total_return / num_workers
+                'return': batch_total_return / num_workers,
+                'sigma_elo': np.array([m.sigma_elo for m in population]),
+                'elo': np.array([m.elo for m in population])
             }
             for label, values in csv_data.items():
-                with open(csv_paths[label], 'a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([batch_idx] + list(values))
+                while True:
+                    try:
+                        with open(csv_paths[label], 'a', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow([batch_idx] + list(values))
+                        break # 写入成功，退出循环
+                    except PermissionError:
+                        # 如果名被 Excel 占用，循环等待并提示
+                        print(f"Warning: CSV file {label} is locked by another program (Excel?). Please close it. Retrying in 2 seconds...", end='\r')
+                        time.sleep(2)
             
             # # B. 写入 TensorBoard (分成员记录，方便对比)
             # for m_id in range(pop_size):

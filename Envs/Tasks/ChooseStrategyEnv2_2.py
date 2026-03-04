@@ -262,7 +262,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_shaping += (alt - enm.alt)/5000 * reward_weights['height_advantage']
 
         # 防御引导
-        if warning:
+        if warning and d_hor >= 10e3:
             threat_directio_n = np.array([cos(delta_theta_threat)*cos(delta_psi_threat), 
                                          sin(delta_theta_threat), 
                                          cos(delta_theta_threat)*sin(delta_psi_threat)])
@@ -280,19 +280,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if missile_time_since_shoot >= 20 and not missile_in_mid_term and not (distance > 12e3 and abs(AA_hor) < 30*pi/180):
                 should_fire_missile = True
         
-        reward_shoot_coach = 0
-        if shoot == 1:
-            if should_fire_missile:
-                reward_shoot_coach += 10
-            else:
-                reward_shoot_coach -= 10
-        if shoot == 0:
-            if should_fire_missile:
-                reward_shoot_coach -= 10
-            else:
-                reward_shoot_coach += 0.01
+        # reward_shoot_coach = 0
+        # if shoot == 1:
+        #     if should_fire_missile:
+        #         reward_shoot_coach += 10
+        #     else:
+        #         reward_shoot_coach -= 10
+        # if shoot == 0:
+        #     if should_fire_missile:
+        #         reward_shoot_coach -= 10
+        #     else:
+        #         reward_shoot_coach += 0.01
         
-        r_shaping += reward_shoot_coach # 归入引导奖励
+        # r_shaping += reward_shoot_coach # 归入引导奖励
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         # 逃脱导弹
