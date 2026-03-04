@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel_PBT import *
 from datetime import datetime
 
-mission_name = 'PBT试验_打所有Rules 并行 挑战'
+mission_name = 'PBT试验1_打所有Rules 并行 挑战'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -30,6 +30,8 @@ IL_rule = 4 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
+pop_size = 1 # 种群数量
+
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 10*60 # 回合最长时间，单位s
@@ -73,7 +75,7 @@ if __name__=='__main__':
         actor_lr=actor_lr,
         critic_lr=critic_lr,
         IL_epoches=IL_epoches,
-        max_steps=max_steps,
+        max_steps = max_steps * pop_size,  # 不可能用冗余路径和一条训练路径比效率
         hidden_dim=hidden_dim,
         gamma=gamma,
         lmbda=lmbda,
@@ -107,7 +109,7 @@ if __name__=='__main__':
         hist_agent_as_opponent = 0,
         rule_actor_rate = 0,  # 已经是打所有rules了，不需要再单独计算一次均匀采样
         device = device,
-        pop_size = 4,      # 种群大小
+        pop_size = pop_size,      # 种群大小
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
