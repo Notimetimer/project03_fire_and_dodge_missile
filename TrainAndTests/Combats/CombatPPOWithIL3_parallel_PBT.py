@@ -742,7 +742,21 @@ def run_MLP_simulation(
         new_agent_obj.critic_optimizer.load_state_dict(base_agent.critic_optimizer.state_dict())
         # 设置为强化学习的学习率
         new_agent_obj.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
-        
+        """
+        # 保存权重和优化器状态到本地
+        checkpoint = {
+            'model_state_dict': student_agent.actor.state_dict(),
+            'optimizer_state_dict': student_agent.actor_optimizer.state_dict(),
+            'epoch': current_epoch,
+            'elo': current_elo
+        }
+        torch.save(checkpoint, "checkpoint.pt")
+
+        # 从本地读取模型和优化器
+        checkpoint = torch.load("checkpoint.pt")
+        student_agent.actor.load_state_dict(checkpoint['model_state_dict'])
+        student_agent.actor_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        """
         # 初始化 sigma_elo: 在 [100, 800] 之间随机采样 (值变向量的单分量)
         init_sigma = 400 # np.random.uniform(100, 800) # debug 单member能否和原先保持一致性？
         
