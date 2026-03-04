@@ -1023,7 +1023,8 @@ class PPOHybrid:
     # =========================================================================
     #  [New Method] BC_update (Actor 用 MSE 更新，Critic 不更新)
     # =========================================================================
-    def BC_update(self, il_transition_dict, batch_size=64, c_v=1.0, shuffled=1, max_weight=100.0):
+    def BC_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
+                    tau=0.8):
         """
         行为克隆更新 (Behavior Cloning with F-function Constraint)。
         # Critic: 使用 MARWIL 风格的回归更新 (拟合 R)。
