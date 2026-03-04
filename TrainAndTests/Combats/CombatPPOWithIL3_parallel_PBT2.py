@@ -739,8 +739,8 @@ def run_MLP_simulation(
         
         # 初始化 sigma_elo: 固定为 400 (如果不调它的话)
         init_sigma = sigma_elo 
-        # 初始化 shaping_weight: 在 [0, 1] 之间随机采样
-        init_shaping = np.random.uniform(0, 1)
+        # 初始化 shaping_weight: 不再随机，而是从 0.05 到 5 之间按指数级等比分布
+        init_shaping = 0.05 * ((5 / 0.05) ** (i / pop_size))
         
         member = PBTMember(i, new_agent_obj, elo=1200, sigma_elo=init_sigma, shaping_weight=init_shaping)
         population.append(member)
