@@ -528,6 +528,7 @@ class PBTMember:
         self.id = agent_id
         self.agent = agent  # PPOHybrid instance
         self.elo = elo
+        self.rank = 0       # [新增] 实时排名 (0 为第一名)
         self.sigma_elo = sigma_elo # 对手偏好超参数 (控制采样宽度)
         self.shaping_weight = shaping_weight # [新增] 引导奖励权重 (可在 0-1 间调节)
         self.wins = 0
@@ -1244,37 +1245,49 @@ def run_MLP_simulation(
                 if batch_idx > 0 and batch_idx % interval_of_pbt == 0: # 20 == 0:
                     print(f"\n--- PBT Evolution Step at Batch {batch_idx} ---")
                     
-                    # 1. 评估种群 (依据 Elo 分数升序排序)
-                    sorted_population = sorted(population, key=lambda m: m.elo)
-                    worst_member = sorted_population[0]
-                    best_member = sorted_population[-1]
+                    # 1. 评估种群并更新 Rank (降序：Elo 最高者 Rank=0)
+                    sorted_population = sorted(population, key=lambda m: m.elo, reverse=True)
+                    worst_member = sorted_population[-1]
+                    best_member = sorted_population[0]
+                    for rank, m in enumerate(sorted_population):
+                        m.rank = rank
                     
                     print(f"  Best Member: P{best_member.id} (Elo: {best_member.elo:.1f})")
                     print(f"  Worst Member: P{worst_member.id} (Elo: {worst_member.elo:.1f})")
-                    
-                    # 2. 淘汰与替换 (Exploit & Explore)
-                    # 只有最强和最弱差距足够大时才执行进化，避免频繁震荡
-                    if best_member.elo - worst_member.elo >= 50: # 200差异太大了，跑了很久都没有触发权重替换
-                        print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
-                        
-                        # 权重替换 (Exploit)
-                        worst_member.agent.actor.net.load_state_dict(best_member.agent.actor.net.state_dict())
-                        worst_member.agent.critic.net.load_state_dict(best_member.agent.critic.net.state_dict())
-                        
-                        # 超参数替换与扰动 (Explore)
-                        # [核心修改] 变异奖励权重，扰动后 clip 到 [0, 1]
-                        mutation = np.random.choice([0.8, 1.2])
-                        new_shaping = np.clip(best_member.shaping_weight * mutation, 0.0, 1.0)
-                        worst_member.shaping_weight = new_shaping
-                        print(f"  -> Hyperparams: Mutated shaping_weight to {new_shaping:.2f} (from {best_member.shaping_weight:.2f})")
 
-                        # 3. 优化器状态替换 (确保优化路径的连续性)
-                        worst_member.agent.actor_optimizer.load_state_dict(best_member.agent.actor_optimizer.state_dict())
-                        worst_member.agent.critic_optimizer.load_state_dict(best_member.agent.critic_optimizer.state_dict())
-                        
-                        # 同步 Elo 分数
-                        worst_member.elo = best_member.elo
-                        print(f"  -> Params & Elo of P{worst_member.id} replaced with P{best_member.id}\n")
+                    # 2. 淘汰与演化 (仅处理排名在 70% 之后的成员)
+                    # 判定阈值：如果 Rank >= pop_size * 0.7，则属于需要被优化的“后 30%”
+                    threshold_rank = pop_size * 0.7
+                    
+                    if best_member.elo - worst_member.elo >= 0: # 200差异太大了，跑了很久都没有触发权重替换
+                        print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
+                        for m in population:
+                            if m.rank >= threshold_rank:
+                                print(f"  -> P{m.id} (Rank {m.rank}) in Bottom 30%, evolving...")
+                                
+                                # A. 模型复制 (Exploit)
+                                # 注意：我们需要访问 .agent.actor (Wrapper) 及其内部的 .net
+                                m.agent.actor.load_state_dict(best_member.agent.actor.state_dict())
+                                m.agent.critic.load_state_dict(best_member.agent.critic.state_dict())
+                                
+                                # 优化器状态同步
+                                m.agent.actor_optimizer.load_state_dict(best_member.agent.actor_optimizer.state_dict())
+                                m.agent.critic_optimizer.load_state_dict(best_member.agent.critic_optimizer.state_dict())
+                                
+                                # B. 超参数交叉 (Crossover)
+                                # 公式：0.01 * Best + 0.99 * Current
+                                crossed_weight = 0.01 * best_member.shaping_weight + 0.99 * m.shaping_weight
+                                
+                                # C. 小幅突变 (Explore)
+                                mutation = np.random.choice([0.9, 1.1]) # $\pm 10\%$ 的小扰动
+                                new_shaping = np.clip(crossed_weight * mutation, 0, 10.0) 
+                                
+                                print(f"     Weight: {m.shaping_weight:.4f} -> {new_shaping:.4f} (Crossover + Mutation)")
+                                m.shaping_weight = new_shaping
+                                
+                                # 同步 Elo
+                                m.elo = best_member.elo
+                                print(f"  -> P{m.id} synchronized with P{best_member.id}\n")
             
                 # -----------------------------------------------------------
                 # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)
