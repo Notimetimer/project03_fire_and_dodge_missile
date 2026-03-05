@@ -1,4 +1,4 @@
-from CombatPPOWithIL3_parallel import *
+from CombatPPOWithIL3_parallel_A3C import *
 from datetime import datetime
 
 mission_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行 A3C'
@@ -112,6 +112,7 @@ if __name__=='__main__':
             'Rule_4': 1200,
             # 'Rule_5': 1200,
             },
+        adv_normed=1, # 启用优势归一化
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,

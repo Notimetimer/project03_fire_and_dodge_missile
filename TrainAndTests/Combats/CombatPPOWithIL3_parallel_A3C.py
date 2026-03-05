@@ -664,6 +664,7 @@ def run_MLP_simulation(
         "Rule_1": 1200,
         "Rule_2": 1200,
     },
+    adv_normed=1,
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
@@ -1206,7 +1207,7 @@ def run_MLP_simulation(
                         il_data,
                         init_il_transition_dict = None, # original_il_transition_dict0 if use_init_data else None,
                         eta = np.clip(1 - total_steps/3e6, 0, 1),
-                        adv_normed=True,
+                        adv_normed=adv_normed,
                         label_smoothing=label_smoothing_mixed,
                         alpha=dynamic_alpha_il,
                         beta=beta_mixed,
@@ -1216,7 +1217,7 @@ def run_MLP_simulation(
                 else:
                     #====================
                     # 原有强化学习部分
-                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
+                    student_agent.update(transition_dict, adv_normed=adv_normed, mini_batch_size=mini_batch_size_mixed)
                     #====================
                 # 记录 Log
 
