@@ -99,6 +99,7 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
+        use_init_data=0,  # 是否留够他模仿的次数
         init_elo_ratings = {
             'Rule_0': 1200, # debug
             "Rule_1": 1200,

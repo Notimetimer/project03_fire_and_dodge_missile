@@ -482,7 +482,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
 
                 # D. 环境重置
-                randomized_birth = settings['randomized_birth']
+                # randomized_birth = settings['randomized_birth']
                 action_cycle_multiplier = settings['action_cycle_multiplier']
                 reward_weight = settings['weight_reward']
                 # 在子环境中重新计算出生状态

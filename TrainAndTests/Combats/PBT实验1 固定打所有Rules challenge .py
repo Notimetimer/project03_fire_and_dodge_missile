@@ -107,7 +107,15 @@ if __name__=='__main__':
             },
         self_play_type = 'PFSP_challenge', # PFSP, FSP, SP, None(非自博弈)
         hist_agent_as_opponent = 0,
-        rule_actor_rate = 0,  # 已经是打所有rules了，不需要再单独计算一次均匀采样
+        WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = 0.5,
+        MAX_HISTORY_SIZE = 300,  # 100
+        rule_actor_rate = 0.2, # “复习”概率
+        K_FACTOR = 16,  # 32 原先振荡太大了
+        randomized_birth = 1,
+        save_interval = 1, # 触发更新至少要经过多少批采样
+        opp_greedy_rate = 0.5, # 对手贪婪率
+        num_runs = 3, # 测试回合重复次数
         device = device,
         pop_size = pop_size,      # 种群大小
     )
