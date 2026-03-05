@@ -825,7 +825,7 @@ def run_MLP_simulation(
             try:
                 with open(path, 'w', newline='') as f:
                     writer = csv.writer(f)
-                    header = ["batch_idx"] + [f"member_{i}" for i in range(pop_size)]
+                    header = ["batch_idx", "total_steps"] + [f"member_{i}" for i in range(pop_size)]
                     writer.writerow(header)
                 break
             except PermissionError:
@@ -1125,7 +1125,7 @@ def run_MLP_simulation(
                 'lose': batch_loss_cnt / num_workers,
                 'draw': batch_draw_cnt / num_workers,
                 'return': batch_total_return / num_workers,
-                'shaping_weight': np.array([m.shaping_weight for m in population]),
+                # 'shaping_weight' 已挪到 PBT 进化阶段记录
                 'elo': np.array([m.elo for m in population])
             }
             for label, values in csv_data.items():
@@ -1133,7 +1133,7 @@ def run_MLP_simulation(
                     try:
                         with open(csv_paths[label], 'a', newline='') as f:
                             writer = csv.writer(f)
-                            writer.writerow([batch_idx] + list(values))
+                            writer.writerow([batch_idx, total_steps] + list(values))
                         break # 写入成功，退出循环
                     except PermissionError:
                         # 如果名被 Excel 占用，循环等待并提示
@@ -1242,7 +1242,7 @@ def run_MLP_simulation(
                 # PBT 进化 (Exploit & Explore)
                 # =========================================================
                 # 此处暂时将进化频率硬编码为 20 次 batch，之后你可以基于步数或自由调节
-                if batch_idx > 0 and batch_idx % interval_of_pbt == 0: # 20 == 0:
+                if batch_idx > 0 and batch_idx % interval_of_pbt == 0: # interval_of_pbt=20
                     print(f"\n--- PBT Evolution Step at Batch {batch_idx} ---")
                     
                     # 1. 评估种群并更新 Rank (降序：Elo 最高者 Rank=0)
@@ -1259,7 +1259,7 @@ def run_MLP_simulation(
                     # 判定阈值：如果 Rank >= pop_size * 0.7，则属于需要被优化的“后 30%”
                     threshold_rank = pop_size * 0.7
                     
-                    if best_member.elo - worst_member.elo >= 0: # 200差异太大了，跑了很久都没有触发权重替换
+                    if best_member.elo - worst_member.elo >= 50: # 200差异太大了，跑了很久都没有触发权重替换
                         print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
                         for m in population:
                             if m.rank >= threshold_rank:
@@ -1275,8 +1275,8 @@ def run_MLP_simulation(
                                 m.agent.critic_optimizer.load_state_dict(best_member.agent.critic_optimizer.state_dict())
                                 
                                 # B. 超参数交叉 (Crossover)
-                                # 公式：0.01 * Best + 0.99 * Current
-                                crossed_weight = 0.01 * best_member.shaping_weight + 0.99 * m.shaping_weight
+                                # 公式：0.02 * Best + 0.98 * Current
+                                crossed_weight = 0.02 * best_member.shaping_weight + 0.98 * m.shaping_weight
                                 
                                 # C. 小幅突变 (Explore)
                                 mutation = np.random.choice([0.9, 1.1]) # $\pm 10\%$ 的小扰动
@@ -1288,6 +1288,19 @@ def run_MLP_simulation(
                                 # 同步 Elo
                                 m.elo = best_member.elo
                                 print(f"  -> P{m.id} synchronized with P{best_member.id}\n")
+
+                        # [新增] 参数变动时记录 shaping_weight 到 CSV
+                        label = 'shaping_weight'
+                        values = np.array([m.shaping_weight for m in population])
+                        while True:
+                            try:
+                                with open(csv_paths[label], 'a', newline='') as f:
+                                    writer = csv.writer(f)
+                                    writer.writerow([batch_idx, total_steps] + list(values))
+                                break
+                            except PermissionError:
+                                print(f"Warning: {label}.csv locked. 请关闭excel", end='\r')
+                                time.sleep(1)
             
                 # -----------------------------------------------------------
                 # 逻辑分支 D: 保存名人堂 (hall_of_fame.json)

@@ -119,6 +119,7 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         pop_size = pop_size,      # 种群大小
+        interval_of_pbt=10, # pbt 进化频率
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
