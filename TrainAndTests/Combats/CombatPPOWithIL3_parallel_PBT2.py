@@ -746,7 +746,7 @@ def run_MLP_simulation(
         # 初始化 sigma_elo: 固定为 400 (如果不调它的话)
         init_sigma = sigma_elo 
         # 初始化 shaping_weight: 不再随机，而是从 0.05 到 5 之间按指数级等比分布
-        init_shaping = 0.05 * ((5 / 0.05) ** (i / pop_size))
+        init_shaping = 0.05 * ((20 / 0.05) ** (i / pop_size))
         
         member = PBTMember(i, new_agent_obj, elo=1200, sigma_elo=init_sigma, shaping_weight=init_shaping)
         population.append(member)
@@ -1254,7 +1254,7 @@ def run_MLP_simulation(
                     
                     # 2. 淘汰与替换 (Exploit & Explore)
                     # 只有最强和最弱差距足够大时才执行进化，避免频繁震荡
-                    if best_member.elo - worst_member.elo >= 200:
+                    if best_member.elo - worst_member.elo >= 50: # 200差异太大了，跑了很久都没有触发权重替换
                         print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
                         
                         # 权重替换 (Exploit)
@@ -1268,8 +1268,9 @@ def run_MLP_simulation(
                         worst_member.shaping_weight = new_shaping
                         print(f"  -> Hyperparams: Mutated shaping_weight to {new_shaping:.2f} (from {best_member.shaping_weight:.2f})")
 
-                        # 3. 重置优化器 (重要！清楚旧的参数优化动量)
-                        worst_member.agent.reset_optimizer()
+                        # 3. 优化器状态替换 (确保优化路径的连续性)
+                        worst_member.agent.actor_optimizer.load_state_dict(best_member.agent.actor_optimizer.state_dict())
+                        worst_member.agent.critic_optimizer.load_state_dict(best_member.agent.critic_optimizer.state_dict())
                         
                         # 同步 Elo 分数
                         worst_member.elo = best_member.elo
