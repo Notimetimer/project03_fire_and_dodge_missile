@@ -1250,8 +1250,10 @@ def run_MLP_simulation(
                     sorted_population = sorted(population, key=lambda m: m.elo, reverse=True)
                     worst_member = sorted_population[-1]
                     best_member = sorted_population[0]
+                    weights_list = []
                     for rank, m in enumerate(sorted_population):
                         m.rank = rank
+                        weights_list.append(m.shaping_weight)
                     
                     print(f"  Best Member: P{best_member.id} (Elo: {best_member.elo:.1f})")
                     print(f"  Worst Member: P{worst_member.id} (Elo: {worst_member.elo:.1f})")
@@ -1281,9 +1283,12 @@ def run_MLP_simulation(
                                 # crossed_weight = (1-maintain_weight) * best_member.shaping_weight + maintain_weight * m.shaping_weight
 
                                 # 随距离变化更为距离的超参数交叉方式：
-                                crossed_weight = (best_member.shaping_weight+1e-6)**(1-maintain_weight) * \
-                                                    (m.shaping_weight+1e-6)**maintain_weight
-                                
+                                if m.shaping_weight > min(weights_list):
+                                    crossed_weight = (best_member.shaping_weight+1e-6)**(1-maintain_weight) * \
+                                                        (m.shaping_weight+1e-6)**maintain_weight
+                                else:
+                                    crossed_weight = m.shaping_weight  # 权重最小的再差都不允许提高权重
+
                                 new_shaping = crossed_weight
                                 # # C. 小幅突变 (Explore) 取消
                                 # mutation = np.random.choice([0.9, 1.1]) # $\pm 10\%$ 的小扰动

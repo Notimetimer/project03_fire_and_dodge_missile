@@ -1078,14 +1078,16 @@ def run_MLP_simulation(
                 
                 # 3.2 SIL 数据收集 (需计算 return)
                 if use_sil:
-                    if not metrics['lose']: # 赢或平，学自己
-                        # 计算回报 (Master 端计算)
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
+                    il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
+
+                    # if not metrics['lose']: # 赢或平，学自己
+                    #     # 计算回报 (Master 端计算)
+                    #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    #     il_transition_buffer.add(ego_tr)
                     
-                    if not metrics['win']: # 输或平，学对手
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
+                    # if not metrics['win']: # 输或平，学对手
+                    #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                    #     il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1204,8 +1206,8 @@ def run_MLP_simulation(
                     student_agent.mixed_update(
                         transition_dict,
                         il_data,
-                        init_il_transition_dict = None, # original_il_transition_dict0 if use_init_data else None,
-                        eta = np.clip(1 - total_steps/3e6, 0, 1),
+                        init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
+                        eta = np.clip(1 - total_steps/3e6, 0.01, 1),
                         adv_normed=True,
                         label_smoothing=label_smoothing_mixed,
                         alpha=dynamic_alpha_il,
