@@ -1,7 +1,7 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
 
-mission_name = 'IL_and_PFSP_带自模仿_混规则对手_挑战_并行1e-2'
+mission_name = 'IL_and_PFSP_带自模仿含开火_混规则对手_挑战_并行1e-2'
 
 # IL_and_PFSP_带自模仿_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_带自模仿_混规则对手_平衡对手   PFSP_balanced
@@ -116,6 +116,7 @@ if __name__=='__main__':
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 1,
+        sil_only_maneuver = 0, # 自模仿除了机动也模仿开火
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
