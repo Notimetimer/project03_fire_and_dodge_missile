@@ -748,7 +748,9 @@ def run_MLP_simulation(
         # 初始化 sigma_elo: 固定为 400 (如果不调它的话)
         init_sigma = sigma_elo 
         # 初始化 shaping_weight: 不再随机，而是从 0.05 到 5 之间按指数级等比分布
-        init_shaping = 0.05 * ((20 / 0.05) ** (i / pop_size))
+        init_shaping = 0.001 * 40**i
+        
+        # 0.05 * ((20 / 0.05) ** (i / pop_size))
         
         member = PBTMember(i, new_agent_obj, elo=1200, sigma_elo=init_sigma, shaping_weight=init_shaping)
         population.append(member)
@@ -1278,14 +1280,11 @@ def run_MLP_simulation(
                                 m.agent.critic_optimizer.load_state_dict(best_member.agent.critic_optimizer.state_dict())
                                 
                                 # B. 超参数交叉 (Crossover)
-                                # 0.02 * Best + 0.98 * Current
-                                # 跨数量级不太适合这么交叉
-                                # crossed_weight = (1-maintain_weight) * best_member.shaping_weight + maintain_weight * m.shaping_weight
-
                                 # 随距离变化更为距离的超参数交叉方式：
                                 if m.shaping_weight > min(weights_list):
-                                    crossed_weight = (best_member.shaping_weight+1e-6)**(1-maintain_weight) * \
-                                                        (m.shaping_weight+1e-6)**maintain_weight
+                                    crossed_weight = (1-maintain_weight) * best_member.shaping_weight + maintain_weight * m.shaping_weight
+                                    # crossed_weight = (best_member.shaping_weight+1e-6)**(1-maintain_weight) * \
+                                    #                     (m.shaping_weight+1e-6)**maintain_weight
                                 else:
                                     crossed_weight = m.shaping_weight  # 权重最小的再差都不允许提高权重
 
