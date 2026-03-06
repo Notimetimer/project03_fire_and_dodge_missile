@@ -212,26 +212,7 @@ class IL_transition_buffer:
             self.addon_dict['returns'] = self.addon_dict['returns'][keep_from:]
             self.addon_dict['actions'] = self.addon_dict['actions'][keep_from:]
     
-        # # 2. 基于 Return 的原子化排序与剪裁
-        # # 通过 zip 绑定每一行数据，确保 S, A, R 在排序和删除时永远同步
-        # combined = list(zip(
-        #     self.addon_dict['obs'],
-        #     self.addon_dict['states'],
-        #     self.addon_dict['returns'],
-        #     self.addon_dict['actions']
-        # ))
-        # # 按 returns (索引为 2) 降序排列（从高质量到低质量）
-        # combined.sort(key=lambda x: x[2], reverse=True)
-        
-        # # 保留前 max_size 条高质量经验
-        # top_data = combined[:self.max_size]
-        
-        # # 解包回列表
-        # unzipped = list(zip(*top_data)) if top_data else ([], [], [], [])
-        # self.addon_dict['obs'] = list(unzipped[0])
-        # self.addon_dict['states'] = list(unzipped[1])
-        # self.addon_dict['returns'] = list(unzipped[2])
-        # self.addon_dict['actions'] = list(unzipped[3])
+
     
     def read(self, batch_size):
         """
@@ -1078,6 +1059,7 @@ def run_MLP_simulation(
                 
                 # 3.2 SIL 数据收集 (需计算 return)
                 if use_sil:
+                    ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
                     il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
 
                     # if not metrics['lose']: # 赢或平，学自己
