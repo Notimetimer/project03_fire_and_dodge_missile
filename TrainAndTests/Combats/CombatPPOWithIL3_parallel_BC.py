@@ -676,7 +676,7 @@ def run_MLP_simulation(
     rule_actor_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
-    save_interval = 2, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
+    save_interval = 1, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
     opp_greedy_rate = 0.5, # 对手贪婪率
     num_runs = 3, # 测试回合重复次数
     device = torch.device("cpu"),

@@ -589,13 +589,14 @@ def run_MLP_simulation(
     rule_actor_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
-    save_interval = 2, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
+    save_interval = 1, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
     opp_greedy_rate = 0.5, # 对手贪婪率
     num_runs = 3, # 测试回合重复次数
     device = torch.device("cpu"),
     # --- PBT Params ---
     pop_size = 2,      # 种群大小
     interval_of_pbt=20, # pbt 进化频率
+    maintain_weight = 0.8, 
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -1241,8 +1242,8 @@ def run_MLP_simulation(
                 # =========================================================
                 # PBT 进化 (Exploit & Explore)
                 # =========================================================
-                # 此处暂时将进化频率硬编码为 20 次 batch，之后你可以基于步数或自由调节
-                if batch_idx > 0 and batch_idx % interval_of_pbt == 0: # interval_of_pbt=20
+                # interval_of_pbt / save_interval = 网络更新多少次，超参数更新一次
+                if batch_idx > 0 and batch_idx % int(interval_of_pbt) == 0:
                     print(f"\n--- PBT Evolution Step at Batch {batch_idx} ---")
                     
                     # 1. 评估种群并更新 Rank (降序：Elo 最高者 Rank=0)
@@ -1259,7 +1260,7 @@ def run_MLP_simulation(
                     # 判定阈值：如果 Rank >= pop_size * 0.7，则属于需要被优化的“后 30%”
                     threshold_rank = pop_size * 0.7
                     
-                    if best_member.elo - worst_member.elo >= 50: # 200差异太大了，跑了很久都没有触发权重替换
+                    if best_member.elo - worst_member.elo >= 0: # 200差异太大了，跑了很久都没有触发权重替换
                         print(f"  -> P{worst_member.id} (Weak) will exploit P{best_member.id} (Best)")
                         for m in population:
                             if m.rank >= threshold_rank:
@@ -1275,12 +1276,18 @@ def run_MLP_simulation(
                                 m.agent.critic_optimizer.load_state_dict(best_member.agent.critic_optimizer.state_dict())
                                 
                                 # B. 超参数交叉 (Crossover)
-                                # 公式：0.02 * Best + 0.98 * Current
-                                crossed_weight = 0.02 * best_member.shaping_weight + 0.98 * m.shaping_weight
+                                # 0.02 * Best + 0.98 * Current
+                                # 跨数量级不太适合这么交叉
+                                # crossed_weight = (1-maintain_weight) * best_member.shaping_weight + maintain_weight * m.shaping_weight
+
+                                # 随距离变化更为距离的超参数交叉方式：
+                                crossed_weight = (best_member.shaping_weight+1e-6)**(1-maintain_weight) * \
+                                                    (m.shaping_weight+1e-6)**maintain_weight
                                 
-                                # C. 小幅突变 (Explore)
-                                mutation = np.random.choice([0.9, 1.1]) # $\pm 10\%$ 的小扰动
-                                new_shaping = np.clip(crossed_weight * mutation, 0, 10.0) 
+                                new_shaping = crossed_weight
+                                # # C. 小幅突变 (Explore) 取消
+                                # mutation = np.random.choice([0.9, 1.1]) # $\pm 10\%$ 的小扰动
+                                # new_shaping = np.clip(crossed_weight * mutation, 0, 10.0) 
                                 
                                 print(f"     Weight: {m.shaping_weight:.4f} -> {new_shaping:.4f} (Crossover + Mutation)")
                                 m.shaping_weight = new_shaping
