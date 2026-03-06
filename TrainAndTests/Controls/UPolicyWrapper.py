@@ -28,7 +28,7 @@ class UnifiedPolicyWrapper:
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
         self.PIDController = F16PIDController()
-        self.dt = 
+        self.dt = dt
     
     def get_action(self, obs, weights=1, explore=None):
         """
@@ -67,17 +67,15 @@ class UnifiedPolicyWrapper:
     def _get_rule_action(self, check_obs):
         """处理规则策略"""
         # 将check_obs转换为状态
-        comand = 
-        delta_height_cmd, delta_psi_cmd, speed_cmd = comand
-
-
-
         state_check = self.env.unscale_state(check_obs)
-        
+        comand = state_check["flight_cmd"] # 必须合并到 check_obs 中
+        cos_delta_psi, sin_delta_psi, delta_height_cmd, delta_speed_cmd = comand
+        delta_psi_cmd = np.arctan2(sin_delta_psi, cos_delta_psi)
         ego_height = state_check["ego_main"][1]
         delta_heading = delta_psi_cmd
         theta = np.arcsin(state_check["ego_main"][2])
         speed = state_check["ego_main"][0]
+        speed_cmd = speed + delta_speed_cmd
         phi = np.arctan2(state_check["ego_main"][4], state_check["ego_main"][5])
         alpha_air = state_check["ego_control"][5]
         beta_air = state_check["ego_control"][6]
@@ -86,7 +84,6 @@ class UnifiedPolicyWrapper:
         r = state_check["ego_control"][2]
         theta_v = state_check["ego_control"][3]
         delta_psi_v = state_check["ego_control"][4]
-
 
         set_height = ego_height + delta_height_cmd
 
@@ -107,7 +104,7 @@ class UnifiedPolicyWrapper:
         obs_jsbsim[13] = ego_height / 5000  # 高度/5000
 
 
-        norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)
+        norm_act = self.PIDController.flight_output(obs_jsbsim, dt=dt)
 
         
         # 构造action_exec格式

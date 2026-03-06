@@ -145,6 +145,7 @@ class track_env():
 
         theta_v = own.theta_v
         psi_v = own.psi_v
+        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
         alpha_air = own.alpha_air
         beta_air = own.beta_air
@@ -170,7 +171,7 @@ class track_env():
                 float(q),  # 1 q rad/s act2_last
                 float(r),  # 2 r rad/s act3_last
                 float(theta_v),  # 3
-                float(psi_v),  # 4
+                float(delta_psi_v),  # 4
                 float(alpha_air),  # 5 rad
                 float(beta_air)  # 6 rad
             ]),
@@ -194,10 +195,23 @@ class track_env():
         s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
         s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
 
-        s["flight_cmd"][2] /= pi*2
+        s["flight_cmd"][2]
         s["flight_cmd"][3] /= 340
         return s
-        
+
+    def unscale_state(self, obs_input):
+        # 使用 deepcopy 避免修改传入对象
+        o = copy.deepcopy(obs_input)
+        o["ego_main"][0] *= 340
+        o["ego_main"][1] *= 5e3
+        o["ego_control"][0] *= (2 * pi)  # (2 * pi) 5000
+        o["ego_control"][1] *= (2 * pi)  # (2 * pi) pi
+        o["ego_control"][2] *= (2 * pi)  # (2 * pi) 340
+
+        o["flight_cmd"][2]
+        o["flight_cmd"][3] *= 340
+        return o
+    
     def base_obs(self, side='r', pomdp=0):
         # 处理部分可观测、默认值问题、并尺度缩放
         # 输出保持字典的形式
@@ -263,97 +277,7 @@ class track_env():
             done = 1
             self.RUAV.dead = 1
         return done
-
-    # def get_reward(self, ):
-    #     ruav_state = self.get_state()
-    #     v = ruav_state["ego_main"][0]
-    #     alt = ruav_state["ego_main"][1]
-    #     sin_theta = ruav_state["ego_main"][2]
-    #     cos_theta = ruav_state["ego_main"][3]
-    #     sin_phi = ruav_state["ego_main"][4]
-    #     cos_phi = ruav_state["ego_main"][5]
-    #     p = ruav_state["ego_control"][0]
-    #     q = ruav_state["ego_control"][1]
-    #     r = ruav_state["ego_control"][2]
-    #     theta_v = ruav_state["ego_control"][3]
-    #     psi_v = ruav_state["ego_control"][4]
-    #     alpha_air = ruav_state["ego_control"][5]*180/pi
-    #     beta_air = ruav_state["ego_control"][6]*180/pi
-    #     climb_rate = self.RUAV.vu
-
-    #     self.get_done()
-
-    #     # 存活奖励
-    #     reward_alive = 0 # 10
-
-    #     # 失败惩罚
-    #     reward_end = 0
-    #     if self.fail:
-    #         reward_end -= 100
-
-    #     # 高度奖励（高度变化率惩罚与高度限制惩罚）
-    #     reward_height = 0
-    #     height_error = np.clip(self.height_req-alt, -5000, 5000)
-    #     theta_v_req = height_error/5000*pi/2
-        
-    #     self.theta_v_req = theta_v_req
-    #     reward_height += 1-abs(theta_v-theta_v_req)/pi
-
-    #     # if abs(height_error) < 500:
-    #     #     reward_height += 1-abs(climb_rate)/100
-
-    #     if alt<self.min_alt_safe:
-    #         reward_height += climb_rate/100 + (alt-self.min_alt)/(self.min_alt_safe-self.min_alt)
-        
-    #     # 航向奖励（误差惩罚）
-    #     # psi_error = sub_of_radian(self.psi_req, psi_v)
-    #     # reward_psi_error = 1-abs(psi_error)/pi
-
-    #     # 角度奖励
-    #     L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
-    #     ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
-    #     reward_psi_error = 1 - ATA/pi
-
-    #     # 速度奖励（速度误差惩罚）
-    #     reward_v = 1-abs(self.v_req-v)/340
-
-    #     # 滚转角奖励
-    #     reward_phi = min(cos_phi, 0)
-
-    #     # pqr奖励(快到位时候pqr越小越好)
-    #     reward_pqr = 0
-    #     reward_pqr = -abs(p/(2*pi))-abs(q/(20*pi/180))-abs(r/(20*pi/180))
-    #     if abs(alpha_air) > 15:
-    #         reward_pqr -= abs(p/(90*pi/180))
-
-    #     # 迎角过载奖励(惩罚负迎角和过大的正迎角)
-    #     reward_alpha = 0.5
-    #     if alpha_air >= 15:
-    #         reward_alpha -= alpha_air/15
-    #     if alpha_air < 0:
-    #         reward_alpha += alpha_air/2       
-    #     ny = self.RUAV.Ny
-    #     if ny<=-1 or ny > 9:
-    #         reward_alpha -= 2
-            
-
-    #     # 侧滑角奖励（尽量少侧滑）
-    #     reward_beta = 0.5-abs(beta_air/5)
-
-    #     reward = np.sum([
-    #         1 * reward_alive,
-    #         1 * reward_end,
-    #         2 * reward_height,
-    #         2 * reward_psi_error,
-    #         1 * reward_v,
-    #         0.3 * reward_phi,
-    #         0.1 * reward_pqr,
-    #         1 * reward_alpha,
-    #         1 * reward_beta,
-    #     ])
-
-    #     return reward
-    
+  
 
     def get_reward(self, ):
         ruav_state = self.get_state()
