@@ -53,6 +53,7 @@ class UAVModel(object):
         self.speed_max = 2 * 340
         self.speed_min = 120
         # 无人机轨迹
+        self.target_heading = 0
         self.trajectory = np.empty((0, 3))  # 新增轨迹列表
         self.vellist = np.empty((0, 3))
         self.lon = None
@@ -225,6 +226,7 @@ class UAVModel(object):
 
         current_heading = self.sim["attitude/psi-deg"] * pi / 180
         target_heading = sub_of_radian(current_heading + delta_heading, 0) * 180/pi
+        self.target_heading = sub_of_radian(current_heading + delta_heading, 0)  # 目标航向
 
         obs_jsbsim = np.zeros(14)
         # obs_jsbsim[0] = target_theta * pi / 180  # 期望俯仰角 # 测试姿态控制器

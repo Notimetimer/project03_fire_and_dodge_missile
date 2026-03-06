@@ -639,9 +639,10 @@ class Battle(object):
 
         theta_v = own.theta_v
         psi_v = own.psi_v
+        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
-        alpha_air = own.alpha_air
-        beta_air = own.beta_air
+        alpha_air = own.alpha_air # 弧度制
+        beta_air = own.beta_air # 弧度制
 
         speed_T = adv.speed
 
@@ -722,7 +723,7 @@ class Battle(object):
                 float(q),  # 1 q rad/s act2_last
                 float(r),  # 2 r rad/s act3_last
                 float(theta_v),  # 3
-                float(psi_v),  # 4
+                float(delta_psi_v),  # 4
                 float(alpha_air),  # 5 rad
                 float(beta_air)  # 6 rad
             ]),

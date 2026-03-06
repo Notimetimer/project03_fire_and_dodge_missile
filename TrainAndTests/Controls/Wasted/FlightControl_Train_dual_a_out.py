@@ -19,22 +19,39 @@ import matplotlib.pyplot as plt
 import json
 import glob
 
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(project_root)
+
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
-from _context import *
+# # 获取project目录
+# def get_current_file_dir():
+#     # 判断是否在 Jupyter Notebook 环境
+#     try:
+#         shell = get_ipython().__class__.__name__  # ← 误报，不用管
+#         if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
+#             # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
+#             return os.getcwd()
+#         else:  # 其他 shell
+#             return os.path.dirname(os.path.abspath(__file__))
+#     except NameError:
+#         # 普通 Python 脚本
+#         return os.path.dirname(os.path.abspath(__file__))
+# current_dir = get_current_file_dir()
+# sys.path.append(os.path.dirname(current_dir))
+
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.PPOHybrid23_0_distil2_one_step_KL import *
+from Algorithms.Wasted.PPOcontinues_dual_a_out import *
 from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
-from Controller.F16PIDController2 import *
 
 class track_env():
     def __init__(self, dt_move=0.02, tacview_show=0):
