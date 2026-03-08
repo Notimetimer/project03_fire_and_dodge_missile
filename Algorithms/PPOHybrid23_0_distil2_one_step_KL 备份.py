@@ -1084,13 +1084,21 @@ class PPOHybrid:
         return avg_actor_loss, avg_critic_loss, avg_c
 
     def distil(self, transition_dict, teacher_agent=None, 
-               shuffled=1, mini_batch_size=None, epochs=1, alpha=1.0):
-        """
-        基于 PID 控制器（UnifiedPolicyWrapper）的纯连续动作策略蒸馏。
-        抛弃了 Cat 和 Bern 逻辑，并且取消了 Value 门控，直接逼近 Teacher 的期望输出。
-        """
+                                # 公共参数
+                                shuffled=1, mini_batch_size=None,
+                                # 策略蒸馏参数  
+                                alpha=1.0, distil_only_maneuver=True, reverse_kl=False):
         
-        # 如果没有提供教师代理，或者教师代理为 None，则直接跳过蒸馏
+        # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
+        # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
+        rl_total_size = len(transition_dict['states'])
+        mb = mini_batch_size if mini_batch_size is not None else rl_total_size
+        ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
+        
+        # =====================================================================
+        # Phase 2: 策略蒸馏
+        # =====================================================================
+        # 如果没有提供教师代理，或者教师代理为 None，则直接跳过蒸馏，返回 PPO 结果
         if teacher_agent is None:
             return
 
@@ -1101,6 +1109,7 @@ class PPOHybrid:
             return torch.tensor(np.array(x), dtype=dtype).to(self.device)
 
         # 1. 准备蒸馏输入数据 (优先使用 Obs)
+        # 这里的输入数据将用于 Student (Net forward) 和 Teacher (Label generation)
         if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
             student_inputs_tensor = to_tensor(transition_dict['obs'], torch.float)
             teacher_inputs_np = np.array(transition_dict['obs']) # (Batch, Dim)
@@ -1109,37 +1118,79 @@ class PPOHybrid:
             teacher_inputs_np = np.array(transition_dict['states'])
 
         num_samples = student_inputs_tensor.size(0)
-        mb = mini_batch_size if mini_batch_size is not None else num_samples
 
-        # 2. 检查动作空间
-        if 'cont' not in self.actor.action_dims or self.actor.action_dims['cont'] == 0:
-            print("Warning: distil called but no continuous action space is defined.")
-            return
+        # 2. 获取 Teacher 的动作分布 (Soft Targets)
+        # ---------------------------------------------------------------------
+        # [核心修改] 使用 env.obs2obs_check 将 Batch Obs 转换为 List[Dict]
+        # ---------------------------------------------------------------------
+        # # 假设 teacher_agent.env 指向环境实例
+        # if hasattr(teacher_agent, 'env'):
+        #     # 调用我们在 Environment 中新写的支持 Batch 的转换函数
+        #     # 返回: [ {dict_1}, {dict_2}, ... ]
+        #     # list_check_obs = teacher_agent.env.obs2obs_check(teacher_inputs_np)
+        # else:
+        #     raise AttributeError("teacher_agent must have 'env' attribute to call obs2obs_check")
 
-        # 初始化目标数组
-        cont_dim = self.actor.action_dims['cont']
-        target_mu_cont_np = np.zeros((num_samples, cont_dim), dtype=np.float32)
-
-        # 3. 遍历样本获取 Teacher (PID) 的动作
+        
+        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+            cont_dim = self.actor.action_dims['cont']
+            target_mu_cont_np = np.zeros((num_samples, cont_dim), dtype=np.float32)
+        else:
+            target_mu_cont_np = None
+        cat_dim = teacher_agent.env.fly_act_dim[0]
+        target_probs_cat_np = np.zeros((num_samples, cat_dim), dtype=np.float32)
+        target_probs_bern_np = np.zeros((num_samples, 1), dtype=np.float32)
+        target_vals_np = np.zeros((num_samples, 1), dtype=np.float32)
+        
+        # 遍历每一个样本，逐个生成 Teacher Label
+        # 这样做虽然比 Batch 慢，但能完美兼容 Rule Policy，且保证 check_obs 结构正确
         for i in range(num_samples):
-            s_obs = teacher_inputs_np[i]       
+            # 获取单条数据的 obs (Numpy) 和 check_obs (Dict)
+            s_obs = teacher_inputs_np[i]       # (Dim, )
+            # s_check_obs = list_check_obs[i]    # Dict
             
-            # UnifiedPolicyWrapper 返回: {'cont': array([x, x, x, x])}
-            t_out = teacher_agent.get_action(s_obs)
+            # 调用 Teacher 获取分布
+            # 注意：teacher_agent 必须封装好，get_action 接收 (obs, check_obs)
+            # 对于 Rule，它会忽略 obs 只看 check_obs；对于 NN，它可能看 obs
+            # explore=None 意味着 Teacher 可能会返回确定性动作或默认分布，这取决于 Wrapper 实现
+            # 这里我们需要的是 action_check (即概率分布部分)
+            _, t_out_check = teacher_agent.get_action(s_obs)
+            t_out_val = teacher_agent.get_value(s_obs)
             
-            if 'cont' in t_out and t_out['cont'] is not None:
-                target_mu_cont_np[i] = t_out['cont']
+            # 收集结果 debug here
+            target_probs_cat_np[i] = t_out_check['cat'][0] if type(t_out_check['cat']) is list else t_out_check['cat'] # debug
+            target_probs_bern_np[i] = t_out_check['bern']
+            target_vals_np[i] = t_out_val
 
-        # 4. 将收集到的动作目标堆叠回 Tensor
-        target_mu_cont = to_tensor(target_mu_cont_np, torch.float)
+            if target_mu_cont_np is not None and 'cont' in t_out_check:
+                target_mu_cont_np[i] = t_out_check['cont']
 
-        # 5. 蒸馏训练循环
+        # 3. 将收集到的 List 堆叠回 Tensor (Batch Processing)
+        # 处理 Categorical (可能是 List of Arrays，如果有多头的话；或者单个 Array)
+        # 假设 t_out_check['cat'] 是一个 numpy array (14, )
+        
+        # 堆叠为 (Batch, 14) -> 转 Tensor
+        target_probs_cat = [to_tensor(target_probs_cat_np, torch.float)]
+        target_vals = to_tensor(target_vals_np, torch.float)
+        if target_mu_cont_np is not None:
+            target_mu_cont = to_tensor(target_mu_cont_np, torch.float)
+
+        # 处理 Bernoulli
+        if not distil_only_maneuver:
+            # 堆叠为 (Batch, 1) -> 转 Tensor
+            target_probs_bern = to_tensor(target_probs_bern_np, torch.float)
+        else:
+            target_probs_bern = None
+
+        # 4. 蒸馏训练循环
         distil_actor_loss_list = []
-        distil_grad_list =[]
+        distil_grad_list = []
+        pre_clip_distil_grad = []
         
         indices = np.arange(num_samples)
+        
 
-        for _ in range(int(epochs)):  # 蒸馏更新默认跑 1 个 epoch (防止过度干扰 RL)
+        for _ in range(1):  # self.epochs  (使用 PPO 相同的 epochs)
             if shuffled:
                 np.random.shuffle(indices)
                 
@@ -1149,39 +1200,116 @@ class PPOHybrid:
                 
                 # 准备 Mini-Batch 数据
                 mb_inputs = student_inputs_tensor[batch_idx]
-                t_mu = target_mu_cont[batch_idx]
                 
-                # Student Forward 计算
+                # 准备 Teacher Targets
+                mb_target_cat = [t[batch_idx] for t in target_probs_cat] # List of Tensors
+                mb_target_vals = target_vals[batch_idx]
+                
+                if not distil_only_maneuver:
+                    mb_target_bern = target_probs_bern[batch_idx]
+                
+                # Student Forward
                 student_outputs = self.actor.net(mb_inputs)
+                student_vals = self.critic(mb_inputs)
                 
-                # student_outputs['cont'] 返回 (mu, std)，其中 mu 是未经过 tanh 激活的原始 logits
-                s_mu, s_std = student_outputs['cont']
+                distil_loss = torch.tensor(0.0, device=self.device)
                 
-                # PID 返回的是归一化在界限内(如 [-1,1])的执行级动作
-                # 因此，我们需要对 Student 的 mu 加上 tanh，保证两者处于同一特征空间计算 MSE 
-                s_action_expected = torch.tanh(s_mu)
+                # --- A. Categorical Loss (KL Divergence) ---
+                # 计算门控：只有 Teacher 的 Value 高于 Student 时才允许蒸馏该样本
+                distil_mask = (mb_target_vals > student_vals).float()
+                mask_sum = distil_mask.sum() + 1e-8
+
+                if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0 and target_mu_cont_np is not None:
+                    # student_outputs['cont'] 返回 (mu, std)
+                    s_mu, s_std = student_outputs['cont']
+                    t_mu = target_mu_cont[batch_idx]
+                    
+                    # 仅针对 mu 计算均方误差
+                    mse_per_sample = F.mse_loss(s_mu, t_mu, reduction='none').sum(dim=-1, keepdim=True)
+                    
+                    # 同样应用 Value 门控 (Teacher 预期价值高于 Student 时才进行蒸馏)
+                    cont_loss = (mse_per_sample * distil_mask).sum() / mask_sum
+                    distil_loss += cont_loss
+                    
+                if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                    student_probs_list = student_outputs['cat'] # [Probs_Head1, ...]
+                    
+                    # 假设单头匹配
+                    for i, s_probs in enumerate(student_probs_list):
+                        if i < len(mb_target_cat):
+                            t_probs = mb_target_cat[i]
+                            
+                            # KL(Teacher || Student) = sum(P_t * log(P_t / P_s))
+                            # 最小化 KL 等价于最小化 CrossEntropy: - sum(P_t * log(P_s))
+                            if not reverse_kl:
+                                log_s_probs = torch.log(s_probs + 1e-10)
+                                'KL散度，sigma(p(a)(log(p(a)-log(q(a))))),p(a)是teacher，q(a)是student，'
+                                '离散动作空间下这样会拖着一个常数项sigma(p(a)log(p(a))'
+                                # # # F.kl_div 期望 input=log_probs, target=probs
+                                # kl_loss = F.kl_div(log_s_probs, t_probs, reduction='batchmean')
+                                # 使用 reduction='none' 配合门控
+                                kl_per_sample = F.kl_div(log_s_probs, t_probs, reduction='none').sum(dim=-1, keepdim=True)
+                                kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
+                                distil_loss += kl_loss
+                                '交叉熵 -sigma(p(a)log(q(a)))'
+                                # 只保留 - sum(P * log Q)（交叉熵）
+                                # ce_loss = -(t_probs * log_s_probs).sum(dim=-1).mean()
+                                # distil_loss += ce_loss
+                            else:
+                                log_t_probs = torch.log(t_probs + 1e-10)
+                                '反向KL散度'
+                                # kl_loss = F.kl_div(log_t_probs, s_probs, reduction='batchmean')
+                                kl_per_sample = F.kl_div(log_t_probs, s_probs, reduction='none').sum(dim=-1, keepdim=True)
+                                kl_loss = (kl_per_sample * distil_mask).sum() / mask_sum
+                                distil_loss += kl_loss
+                                '反向交叉熵'
+                                # ce_loss = -(s_probs * log_t_probs).sum(dim=-1).mean()
+                                # distil_loss += ce_loss
+
+
+                # --- B. Bernoulli Loss (BCELoss, 只考虑正向KL散度) ---
+                if (not distil_only_maneuver) and \
+                   ('bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0) and \
+                   (target_probs_bern is not None):
+                    
+                    s_logits = student_outputs['bern']
+                    s_probs = torch.sigmoid(s_logits)
+                    t_probs = mb_target_bern
+                    
+                    # BCE Loss: - [t * log(s) + (1-t) * log(1-s)]
+                    # bce_loss = F.binary_cross_entropy(s_probs, t_probs, reduction='mean')
+                    bce_per_sample = F.binary_cross_entropy(s_probs, t_probs, reduction='none')
+                    bce_loss = (bce_per_sample * distil_mask).sum() / mask_sum
+                    distil_loss += bce_loss
+
+                # Apply Alpha Scaling
+                final_loss = alpha * distil_loss
                 
-                # 计算 MSE 损失
-                cont_loss = F.mse_loss(s_action_expected, t_mu, reduction='mean')
-                
-                # 乘上蒸馏强度系数 (Alpha)
-                final_loss = alpha * cont_loss
-                
-                # 反向传播与参数更新
+                # Update
                 self.actor_optimizer.zero_grad()
                 final_loss.backward()
                 
+                pre_clip_distil_grad.append(model_grad_norm(self.actor))
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 self.actor_optimizer.step()
                 
                 distil_actor_loss_list.append(final_loss.item())
                 distil_grad_list.append(model_grad_norm(self.actor))
 
-        # 6. 统计指标融合与记录
+
+        # =====================================================================
+        # Phase 3: 统计指标融合
+        # =====================================================================
+        # distil_num_batches = max(1, (num_samples + mb - 1) // mb) * self.epochs
+
         if len(distil_actor_loss_list) > 0:
             avg_distil_loss = np.mean(distil_actor_loss_list)
             avg_distil_grad = np.mean(distil_grad_list)
+            # avg_pre_clip = np.mean(pre_clip_distil_grad)
             
+            # 记录 IL/Distil 样本数
+            self.IL_samples = num_samples * self.epochs 
+            self.IL_valid_samples = num_samples * self.epochs
             
             check_weights_bias_nan(self.actor, "actor", "distil后")
             

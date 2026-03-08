@@ -28,41 +28,13 @@ class UnifiedPolicyWrapper:
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
         self.PIDController = F16PIDController()
-        self.dt = dt
+        self.dt = 0.02
     
     def get_action(self, obs, weights=1, explore=None):
-        """
-        统一接口获取动作
-        
-        Args:
-            obs: 观测值 (用于NN)
-            check_obs: 检查用观测值 (用于规则)
-            weights: 权重，默认为1。如果 agent_info 是列表且 weights 形状不符，则平分权重。
-            explore: 探索参数字典 (用于NN)
-        
-        Returns:
-            action: {'cont': array([*4])} 同PID输出
-            action_exec: {'cat': array([动作标签]), 'bern': array([开火概率])}
-            action_check: {'cat': array([14维概率分布]), 'bern': array([开火概率])}
-        """
-        if self.agent_info is None:
-            raise ValueError("agent_info has not been set.")
 
-        if isinstance(self.agent_info, list):
-            agent_list = self.agent_info
-            if not isinstance(weights, list) or len(weights) != len(agent_list):
-                weight_list = [1.0 / len(agent_list)] * len(agent_list)
-            else:
-                weight_list = weights
-        else:
-            agent_list = [self.agent_info]
-            weight_list = [1.0]
-
-        # 暂时采用列表中的第一个 agent，后续实现权重融合
-        agent_type, actor = agent_list[0]
         check_obs = self.env.obs2obs_check(obs)
         
-        return self._get_rule_action(check_obs, actor)
+        return self._get_rule_action(check_obs)
         
     def _get_rule_action(self, check_obs):
         """处理规则策略"""
@@ -73,9 +45,9 @@ class UnifiedPolicyWrapper:
         delta_psi_cmd = np.arctan2(sin_delta_psi, cos_delta_psi)
         ego_height = state_check["ego_main"][1]
         delta_heading = delta_psi_cmd
-        theta = np.arcsin(state_check["ego_main"][2])
+        theta = np.arcsin(np.clip(state_check["ego_main"][2], -0.9999, 0.9999))
         speed = state_check["ego_main"][0]
-        speed_cmd = speed + delta_speed_cmd
+        set_speed = speed + delta_speed_cmd
         phi = np.arctan2(state_check["ego_main"][4], state_check["ego_main"][5])
         alpha_air = state_check["ego_control"][5]
         beta_air = state_check["ego_control"][6]
@@ -90,7 +62,7 @@ class UnifiedPolicyWrapper:
         obs_jsbsim = np.zeros(14)
         obs_jsbsim[0] = set_height / 5000  # 期望高度 # 测试飞行控制器
         obs_jsbsim[1] = delta_heading  # 期望相对航向角
-        obs_jsbsim[2] = speed_cmd / 340  # 期望速度
+        obs_jsbsim[2] = set_speed / 340  # 期望速度
         obs_jsbsim[3] = theta  # 当前俯仰角
         obs_jsbsim[4] = speed / 340  # 当前速度
         obs_jsbsim[5] = phi  # 当前滚转角
@@ -104,8 +76,8 @@ class UnifiedPolicyWrapper:
         obs_jsbsim[13] = ego_height / 5000  # 高度/5000
 
 
-        norm_act = self.PIDController.flight_output(obs_jsbsim, dt=dt)
-
+        norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)
+        # aileron, elevetor, rudder, throttle
         
         # 构造action_exec格式
         action = {

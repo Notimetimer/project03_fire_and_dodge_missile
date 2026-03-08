@@ -148,7 +148,7 @@ class UAVModel(object):
         ve = self.sim["velocities/v-east-fps"] * 0.3048  # 向东分量
         vu = -self.sim["velocities/v-down-fps"] * 0.3048  # 向上分量（正表示上升）
         self.climb_rate = vu
-        self.vn, self.ne, self.vu = vn, ve, vu
+        self.vn, self.ve, self.vu = vn, ve, vu
         
         # 过载量
         self.Ny = self.sim["accelerations/Nz"]  # 垂直过载
@@ -211,7 +211,7 @@ class UAVModel(object):
         ve = self.sim["velocities/v-east-fps"] * 0.3048  # 向东分量
         vu = -self.sim["velocities/v-down-fps"] * 0.3048  # 向上分量（正表示上升）
         self.climb_rate = vu
-        self.vn, self.ne, self.vu = vn, ve, vu
+        self.vn, self.ve, self.vu = vn, ve, vu
 
         # 过载量
         self.Ny = self.sim["accelerations/Nz"]  # 垂直过载

@@ -210,10 +210,10 @@ class F16PIDController:
         # 体轴系的两个基当做向量转到“转过一个航向角的惯性系”
         y_b_ = active_rotation(np.array([0, 1, 0]), 0, theta, phi)
         z_b_ = active_rotation(np.array([0, 0, 1]), 0, theta, phi)
-        L_xy_b_ = L_ - np.dot(L_, z_b_) * z_b_ / norm(z_b_)
-        x_b_2L_xy_b_ = np.cross(x_b_, L_xy_b_) / norm(L_xy_b_)
+        L_xy_b_ = L_ - np.dot(L_, z_b_) * z_b_ / (norm(z_b_)+1e-8)
+        x_b_2L_xy_b_ = np.cross(x_b_, L_xy_b_) / (norm(L_xy_b_)+1e-8)
         x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, z_b_)
-        x_b_2L_xy_b_cos = np.dot(x_b_, L_xy_b_) / norm(L_xy_b_)
+        x_b_2L_xy_b_cos = np.dot(x_b_, L_xy_b_) / (norm(L_xy_b_)+1e-8)
         delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
 
         # 重写的位置式pid
@@ -226,10 +226,10 @@ class F16PIDController:
 
         # 副翼战术机动控制
         # combat flight
-        L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / norm(x_b_)
-        y_b_2L_yz_b_ = np.cross(y_b_, L_yz_b_) / norm(L_yz_b_)
+        L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / (norm(x_b_)+1e-8)
+        y_b_2L_yz_b_ = np.cross(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
         y_b_2L_yz_b_sin = np.dot(y_b_2L_yz_b_, x_b_)
-        y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / norm(L_yz_b_)
+        y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
         delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
 
         # 特例：压机头能够得着的，就不翻转机身
