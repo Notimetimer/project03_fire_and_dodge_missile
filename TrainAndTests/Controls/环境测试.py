@@ -541,9 +541,9 @@ if __name__=='__main__':
 
             while not done:  # 每个训练回合
                 # 舞龙
-                if 1: # round(env.t, 3) % 1 == 0:
-                    env.psi_req += np.random.uniform(-1, 1) *5*pi/180
-                    env.height_req += np.random.uniform(-1, 1) * 100
+                if round(env.t, 3) % 1 == 0:
+                    env.psi_req += np.random.uniform(-1, 1) *60*pi/180
+                    env.height_req += np.random.uniform(-1, 1) * 2000
                     env.height_req = np.clip(env.height_req, 4000, 13000)
 
                 # 1.执行动作得到环境反馈

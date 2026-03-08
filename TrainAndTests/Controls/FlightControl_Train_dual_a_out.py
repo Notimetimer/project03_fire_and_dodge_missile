@@ -485,7 +485,7 @@ eps = 0.2
 dt_decide = 0.2 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 
-state_dim = 7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
+state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
 action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 mission_name = 'FlightControl'
@@ -509,9 +509,13 @@ if __name__=='__main__':
 
     teacher_agent = UnifiedPolicyWrapper(dummy_env)
 
-    # TODO 使用写好的带策略蒸馏的PPO算法构建student智能体
-    agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                      lmbda, epochs, eps, gamma, device)
+    action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
+    policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
+    from Algorithms.MLP_heads import ValueNet
+    critic = ValueNet(state_dim, hidden_dim).to(device)
+    
+    agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
         
     os.makedirs(log_dir, exist_ok=True)
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
@@ -562,24 +566,24 @@ if __name__=='__main__':
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
                 obs, obs_check = env.get_obs()
-                action, u = agent.take_action(obs, action_bounds=action_bound, explore=True)
+                action, u, _, _  = agent.take_action(obs, explore=True)
                 rl_steps += 1
 
-                if abs(env.t % 0.5) <= env.dt_move:
-                    print("----")
-                    print("delta_psi", np.arctan2(obs_check["flight_cmd"][1], obs_check["flight_cmd"][0]) * 180 / pi)
-                    temp_state = env.unscale_state(obs_check)
-                    print("delta_height", temp_state["flight_cmd"][2])
-                    print("delta_speed", temp_state["flight_cmd"][3])
-                    print("--")
-                    print("aileron", action['cont'][0])
-                    print("elevator", action['cont'][1])
-                    print("rudder", action['cont'][2])
-                    print("throttle", action['cont'][3])
-                    print('--')
-                    print("obs_check", obs_check)
-                    print("----")
-                    print(f"Episode {i_episode}, Step {rl_steps}, time: {env.t}")
+                # if abs(env.t % 0.5) <= env.dt_move:
+                    # print("----")
+                    # print("delta_psi", np.arctan2(obs_check["flight_cmd"][1], obs_check["flight_cmd"][0]) * 180 / pi)
+                    # temp_state = env.unscale_state(obs_check)
+                    # print("delta_height", temp_state["flight_cmd"][2])
+                    # print("delta_speed", temp_state["flight_cmd"][3])
+                    # print("--")
+                    # print("aileron", action['cont'][0])
+                    # print("elevator", action['cont'][1])
+                    # print("rudder", action['cont'][2])
+                    # print("throttle", action['cont'][3])
+                    # print('--')
+                    # print("obs_check", obs_check)
+                    # print("----")
+                    # print(f"Episode {i_episode}, Step {rl_steps}, time: {env.t}")
 
                 
                 next_obs, reward, done = env.step(action)
@@ -609,6 +613,7 @@ if __name__=='__main__':
                 out_range_count+=1
             return_list.append(episode_return)
             agent.update(transition_dict)
+            agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=1, alpha=1.0)
 
             # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
             if i_episode % 10 == 1:
@@ -641,6 +646,8 @@ if __name__=='__main__':
             logger.add("train/5 entropy", agent.entropy_mean, rl_steps)
             logger.add("train/6 ratio", agent.ratio_mean, rl_steps)
             logger.add("train/7 steps", i_episode + 1, rl_steps)
+            if hasattr(agent, 'dis_actor_loss') and agent.dis_actor_loss != 0:
+                logger.add("train/8 distil_loss", agent.dis_actor_loss, rl_steps)
 
 
     except KeyboardInterrupt:
