@@ -120,7 +120,7 @@ if __name__=='__main__':
         device = device,
         pop_size = pop_size,      # 种群大小
         interval_of_pbt=10, # pbt 进化频率
-        maintain_weight = 0.93, # 交叉原超参数保有率
+        maintain_weight = 0.91, # 交叉原超参数保有率 0.93
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
