@@ -18,6 +18,7 @@ import copy
 import matplotlib.pyplot as plt
 import json
 import glob
+import argparse
 
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -34,7 +35,7 @@ from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
-from Controller.F16PIDController2 import *
+from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
     def __init__(self, dt_move=0.02, tacview_show=0):
@@ -61,8 +62,8 @@ class track_env():
 
         self.flight_key_order = [
             "ego_main",  # 7
-            # "ego_control",  # 7
-            "flight_cmd", # 3
+            "ego_control",  # 7
+            "flight_cmd", # 4
         ]
         self.tacview_show = tacview_show
         if tacview_show:
@@ -90,10 +91,10 @@ class track_env():
         UAV.dead = 0
         UAV.color = np.array([1, 0, 0])
         # 红方出生点
-        UAV.pos_ = self.DEFAULT_RED_BIRTH_STATE['position']
+        UAV.pos_ = birth_state['position']
         UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
         speed = UAV.speed
-        UAV.psi = self.DEFAULT_RED_BIRTH_STATE['psi']
+        UAV.psi = birth_state['psi']
         UAV.theta = 0 * pi / 180
         UAV.gamma = 0 * pi / 180
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
@@ -153,7 +154,7 @@ class track_env():
         delta_psi_control = sub_of_radian(self.psi_req, self.RUAV.psi)
         cos_delta_psi = cos(delta_psi_control)
         sin_delta_psi = sin(delta_psi_control)
-        delta_theta_control = np.clip((self.height_req-self.RUAV.alt)/5000, -1, 1)*pi/2
+        delta_height_control = np.clip((self.height_req-self.RUAV.alt), -5000, 5000)
 
         one_side_states = {
             "ego_main": np.array([
@@ -179,7 +180,7 @@ class track_env():
             "flight_cmd":  np.array([
                 cos_delta_psi,
                 sin_delta_psi,
-                delta_theta_control - self.RUAV.theta_v,
+                delta_height_control,
                 self.v_req - self.RUAV.speed,
             ])
         }
@@ -195,7 +196,7 @@ class track_env():
         s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
         s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
 
-        s["flight_cmd"][2]
+        s["flight_cmd"][2] /= 5000
         s["flight_cmd"][3] /= 340
         return s
 
@@ -208,10 +209,64 @@ class track_env():
         o["ego_control"][1] *= (2 * pi)  # (2 * pi) pi
         o["ego_control"][2] *= (2 * pi)  # (2 * pi) 340
 
-        o["flight_cmd"][2]
+        o["flight_cmd"][2] *= 5000
         o["flight_cmd"][3] *= 340
         return o
     
+    def obs2obs_check(self, obs):
+        """
+        将扁平化的 obs (numpy array) 还原为 check_obs (dict)。
+        该 check_obs 处于 scale 后的状态 (即可以直接输入 unscale_state)。
+        
+        Args:
+            obs: (Dim, ) 或 (Batch, Dim) 的 numpy 数组或 tensor
+        
+        Returns:
+            check_obs: 字典形式的状态
+        """
+        # 1. 确保 obs 是 numpy 数组
+        if isinstance(obs, torch.Tensor):
+            obs = obs.cpu().detach().numpy()
+            
+        key_dims = {
+            "ego_main": 7,        # bool -> 1
+            "ego_control": 7,   # int -> 1
+            "flight_cmd": 4,       # bool -> 1
+        }
+        
+        is_batch = (obs.ndim > 1)
+        
+        obs_dict = {}
+        ptr = 0
+        
+        # 4. 按顺序切分重构
+        for key in key_dims:
+            if key not in key_dims:
+                # 理论上 key_order_1v1 里的 key 都应该有定义，防御性编程
+                continue
+                
+            dim = key_dims[key]
+            
+            # 切片
+            if is_batch:
+                val = obs[:, ptr : ptr + dim]
+            else:
+                val = obs[ptr : ptr + dim]
+            
+            ptr += dim
+            
+            if dim == 1:
+                if not is_batch:
+                    val = val[0] # 还原为标量
+                # Batch 模式下通常保留 (B, 1) 维度以便后续处理
+            
+            obs_dict[key] = val
+
+        # 注意：ego_control 不在 key_order_1v1 中，因此无法恢复。
+        # unscale_state 函数中有 `if "ego_control" in s` 的检查，所以这是安全的。
+            
+        return obs_dict
+
     def base_obs(self, side='r', pomdp=0):
         # 处理部分可观测、默认值问题、并尺度缩放
         # 输出保持字典的形式
@@ -238,7 +293,7 @@ class track_env():
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.flight_key_order}
         
-        # 不能被看到
+        # 弹药量不能被看到
         full_obs["ego_main"][6] = 0
         # full_obs["ego_control"][4] = 0
 
@@ -248,11 +303,15 @@ class track_env():
 
     def step(self, action):
         self.action = action
-        target_height, delta_heading, target_speed, rudder = action
+        # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
+        aileron, elevator, rudder, throttle = action['cont']
         self.t += self.dt_report
         time_rate = int(round(self.dt_report/self.dt_move))
         for _ in range(time_rate):
-            self.RUAV.move(target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rudder)
+            # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
+            # 第四个参数对应 throttle, rudder 参数单独传递
+            self.RUAV.move(target_height=elevator, delta_heading=aileron, target_speed=throttle, \
+                relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rudder)
             done = self.get_done()
             if done:
                 break
@@ -277,7 +336,7 @@ class track_env():
             done = 1
             self.RUAV.dead = 1
         return done
-  
+
 
     def get_reward(self, ):
         ruav_state = self.get_state()
@@ -440,6 +499,17 @@ log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + 
 
 if __name__=='__main__':
     env = track_env(tacview_show=use_tacview)
+    parser = argparse.ArgumentParser("UAV swarm confrontation")
+    parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
+    parser.add_argument("--R-cage", type=float, default=np.inf, help="")
+    args = parser.parse_args()
+
+    # 创建一个 dummy env 获取维度
+    dummy_env = track_env(args)
+
+    teacher_agent = UnifiedPolicyWrapper(dummy_env)
+
+    # TODO 使用写好的带策略蒸馏的PPO算法构建student智能体
     agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
                       lmbda, epochs, eps, gamma, device)
         
@@ -456,11 +526,6 @@ if __name__=='__main__':
 
     save_meta_once(actor_meta_path, agent.actor.state_dict())
     save_meta_once(critic_meta_path, agent.critic.state_dict())
-
-    from Math_calculates.ScaleLearningRate import scale_learning_rate
-    # 根据参数数量缩放学习率
-    actor_lr = scale_learning_rate(actor_lr, agent.actor)
-    critic_lr = scale_learning_rate(critic_lr, agent.critic)
 
     from Visualize.tensorboard_visualize import TensorBoardLogger
 
@@ -485,38 +550,55 @@ if __name__=='__main__':
                                 'psi': np.random.uniform(-pi/6, pi/6)
                                 }
             
-            delta_height_generate = np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 * np.clip(i_episode/1000, 0, 1)
             height_req = np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
             psi_req = np.random.uniform(-pi, pi) * np.clip(i_episode/1000, 0, 1)
             v_req = np.random.uniform(0.8, 2.5)*340
 
             env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
-            state, state_check = env.get_obs()
+
+            obs, obs_check = env.get_obs()
             done = False
 
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
-                state, state_check = env.get_obs()
-                action, u = agent.take_action(state, action_bounds=action_bound, explore=True)
+                obs, obs_check = env.get_obs()
+                action, u = agent.take_action(obs, action_bounds=action_bound, explore=True)
                 rl_steps += 1
+
+                if abs(env.t % 0.5) <= env.dt_move:
+                    print("----")
+                    print("delta_psi", np.arctan2(obs_check["flight_cmd"][1], obs_check["flight_cmd"][0]) * 180 / pi)
+                    temp_state = env.unscale_state(obs_check)
+                    print("delta_height", temp_state["flight_cmd"][2])
+                    print("delta_speed", temp_state["flight_cmd"][3])
+                    print("--")
+                    print("aileron", action['cont'][0])
+                    print("elevator", action['cont'][1])
+                    print("rudder", action['cont'][2])
+                    print("throttle", action['cont'][3])
+                    print('--')
+                    print("obs_check", obs_check)
+                    print("----")
+                    print(f"Episode {i_episode}, Step {rl_steps}, time: {env.t}")
+
                 
-                next_state, reward, done = env.step(action)
+                next_obs, reward, done = env.step(action)
 
                 # debug 用
-                height_req = env.height_req/1000
-                height = env.RUAV.alt/1000
-                psi_req = env.psi_req*180/pi
-                psi = env.RUAV.psi*180/pi
-                v_req = env.v_req
-                v = env.RUAV.speed
+                height_req_show = env.height_req/1000
+                height_show = env.RUAV.alt/1000
+                psi_req_show = env.psi_req*180/pi
+                psi_show = env.RUAV.psi*180/pi
+                v_req_show = env.v_req
+                v_show = env.RUAV.speed
 
-                transition_dict['states'].append(state)
+                transition_dict['states'].append(obs)
                 transition_dict['actions'].append(u)
-                transition_dict['next_states'].append(next_state)
+                transition_dict['next_states'].append(next_obs)
                 transition_dict['rewards'].append(reward)
                 transition_dict['dones'].append(done)
                 transition_dict['action_bounds'].append(action_bound)
-                state = next_state
+                obs = next_obs
                 episode_return += reward * env.dt_report # 奖励按秒分析
                 env.render(t_bias)
 

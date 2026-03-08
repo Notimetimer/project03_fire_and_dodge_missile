@@ -1,8 +1,5 @@
 '''
-当前做法的一个问题：
-所有奖励是相加的，而且目标方向并不会随着姿态的变化而改变，当前训练的是什么？
-是沿着一条安排好的轨迹动态跟踪，还是说只是照着指令里的速度、角速度和俯仰角去飞？
-如果是后者，应该要区分“指令要你俯冲你俯冲撞地和指令没有要你俯冲你俯冲撞地的情况”
+调试飞控训练环境和PID teacher的合并使用
 '''
 
 use_tacview = 1
@@ -25,7 +22,6 @@ plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 from _context import *
-
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
 from Visualize.tensorboard_visualize import *
@@ -36,7 +32,6 @@ from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
-from Controller.F16PIDController2 import *
 from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
@@ -185,13 +180,6 @@ class track_env():
                 delta_height_control,
                 self.v_req - self.RUAV.speed,
             ])
-
-            # "flight_cmd":  np.array([
-            #     cos(0*pi/180),
-            #     sin(0*pi/180),
-            #     5000,
-            #     30,
-            # ])
         }
         return one_side_states
     
@@ -315,6 +303,7 @@ class track_env():
         # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
         aileron, elevator, rudder, throttle = action['cont']
         self.t += self.dt_report
+        self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
         for _ in range(time_rate):
             # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
@@ -437,7 +426,7 @@ class track_env():
             data_to_send = ''
             loc_LLH = self.RUAV.lon, self.RUAV.lat, self.RUAV.alt
             if not self.RUAV.dead:
-                pilot = 'Fool'
+                pilot = 'Dragon'
                 color = 'Red'
                 data_to_send += (
                             f"#{send_t:.2f}\n"
@@ -456,7 +445,7 @@ class track_env():
                 data_to_send += (
                             f"#{send_t:.2f}\n"
                             f"{self.RUAV.id+1},T={(lon_T):.6f}|{(lat_T):.6f}|{delta_H:.6f},"
-                            f"Name=Target,Color=Blue\n"
+                            f"Name=DragonBall,Color=Blue\n"
                         )
 
             else:
@@ -541,24 +530,29 @@ if __name__=='__main__':
                                 'psi': np.random.uniform(-pi/6, pi/6)
                                 }
             
-            # delta_height_generate = np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 * np.clip(i_episode/1000, 0, 1)
-            height_req = init_height  # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-            psi_req = birth_state['psi'] # np.random.uniform(-pi, pi) * np.clip(i_episode/1000, 0, 1)
-            v_req = 340 # np.random.uniform(0.8, 2.5)*340
+            height_req = init_height-2000  # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
+            psi_req = birth_state['psi']+-179*pi/180  # np.random.uniform(-pi, pi) * np.clip(i_episode/1000, 0, 1)
+            v_req = 200 # np.random.uniform(0.8, 2.5)*340
 
             env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
 
-            state, state_check = env.get_obs()
+            obs, obs_check = env.get_obs()
             done = False
 
             while not done:  # 每个训练回合
+                # 舞龙
+                if 1: # round(env.t, 3) % 1 == 0:
+                    env.psi_req += np.random.uniform(-1, 1) *5*pi/180
+                    env.height_req += np.random.uniform(-1, 1) * 100
+                    env.height_req = np.clip(env.height_req, 4000, 13000)
+
                 # 1.执行动作得到环境反馈
                 obs, obs_check = env.get_obs()
                 # action, u = agent.take_action(state, action_bounds=action_bound, explore=True)
                 action = teacher_agent.get_action(obs)
                 rl_steps += 1
 
-                if abs(env.t % 0.5) <= env.dt_move:
+                if round(env.t, 3) % 0.5 == 0:
                     print("----")
                     print("delta_psi", np.arctan2(obs_check["flight_cmd"][1], obs_check["flight_cmd"][0]) * 180 / pi)
                     temp_state = env.unscale_state(obs_check)

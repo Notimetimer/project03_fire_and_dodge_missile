@@ -241,7 +241,7 @@ class F16PIDController:
 
         # 通用
         roll_error = delta_x_angle
-        aileron = roll_error / pi * 3 - p / pi * 1 # 1
+        aileron = roll_error / pi * 3 - p / pi * 3 # 1
         # aileron = roll_error/pi*3 - p/pi * 2
 
         # # debug
@@ -262,10 +262,10 @@ class F16PIDController:
         if acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi < steady_switch_angle and \
                 abs(theta_req) < 60 * pi / 180:
             k_steady_yaw = 3 / steady_switch_angle
-            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3)
+            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3) #   /2 #debug
             roll_error = phi_req - phi
             # aileron = (roll_error / pi * 6 - p / pi * 3) / 2
-            aileron = (roll_error / pi * 6 - p / pi * 3) / 2
+            aileron = (roll_error / pi * 6 /2 - p / pi * 3) / 2
 
             self.type = 0  # steady
         else:
@@ -294,7 +294,8 @@ if __name__ == '__main__':
         print('please prepare tacview')
         # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from Visualize.tacview_visualize import Tacview
-        # from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
         tacview = Tacview()
 
     # 记录轨迹和状态数据
@@ -371,22 +372,22 @@ if __name__ == '__main__':
 
         # target_heading = np.random.rand()*10
 
-        # 逗猫
-        # if current_t < 15:
-        #     target_height = 5000  # m
-        #     target_heading = 90  # 度 to rad
-        #     target_speed = 300
-        # elif current_t < 1 * 60:
-        #     target_height = 10000  # m
-        #     target_heading = -120  # 度 to rad
-        # elif current_t < 1 * 60 + 27:
-        #     target_height = 7000  # m
-        #     target_heading = 0  # 度 to rad
-        # elif current_t < 2 * 60 + 10:
-        #     target_height = 8000  # m
-        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
-        # else:
-        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
+        # 舞狮
+        if current_t < 15:
+            target_height = 5000  # m
+            target_heading = 90  # 度 to rad
+            target_speed = 300
+        elif current_t < 1 * 60:
+            target_height = 10000  # m
+            target_heading = -120  # 度 to rad
+        elif current_t < 1 * 60 + 27:
+            target_height = 7000  # m
+            target_heading = 0  # 度 to rad
+        elif current_t < 2 * 60 + 10:
+            target_height = 8000  # m
+            target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
+        else:
+            target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
 
         sim.run()
         current_time = step * dt
@@ -494,7 +495,6 @@ if __name__ == '__main__':
             # 画飞机
             data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
                 float(send_t), name_R, loc_r[0], loc_r[1], loc_r[2], phi, theta, psi)
-
             # # 画绣球
             # data_to_send += (
             #                 # f"#{send_t:.2f}\n"
