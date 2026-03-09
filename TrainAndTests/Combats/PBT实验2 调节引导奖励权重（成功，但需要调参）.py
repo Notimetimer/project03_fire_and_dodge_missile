@@ -1,3 +1,8 @@
+"""
+1、间隔40倍的初始参数差距太大，改为间隔20
+2、0.91的交叉超参数还是有些大，超参数收敛得还是不够快
+"""
+
 from CombatPPOWithIL3_parallel_PBT2 import *
 from datetime import datetime
 

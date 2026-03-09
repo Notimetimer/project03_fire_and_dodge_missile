@@ -22,7 +22,7 @@ from Algorithms.MLP_heads import ValueNet
 critic = ValueNet(state_dim, hidden_dim).to(device)
 
 agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
-     
+
 env = track_env(tacview_show=1)
 
 # pre_log_dir = os.path.join("./logs")
