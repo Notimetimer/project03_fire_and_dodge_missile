@@ -477,7 +477,7 @@ class track_env():
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 max_steps = 10 * 65e4
-hidden_dim = [128, 128]  # 128, 128
+hidden_dim = [128, 128] # [64, 64]
 gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
@@ -487,7 +487,8 @@ pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
-action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+# action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
 mission_name = 'FlightControl'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -566,7 +567,7 @@ if __name__=='__main__':
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
                 obs, obs_check = env.get_obs()
-                action, u, _, _  = agent.take_action(obs, explore=True)
+                action, u, _, _ = agent.take_action(obs, explore=True)
                 rl_steps += 1
 
                 # if abs(env.t % 0.5) <= env.dt_move:
