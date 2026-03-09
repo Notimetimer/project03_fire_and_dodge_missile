@@ -583,7 +583,7 @@ if __name__=='__main__':
     
     # env = track_env(tacview_show=use_tacview)
     parser = argparse.ArgumentParser("UAV flight control training parallel")
-    parser.add_argument("--num_workers", type=int, default=10, help="number of parallel workers")
+    parser.add_argument("--num_workers", type=int, default=2, help="number of parallel workers") # 10
     parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
     parser.add_argument("--R-cage", type=float, default=np.inf, help="")
     args = parser.parse_args()
