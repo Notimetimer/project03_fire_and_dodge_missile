@@ -554,10 +554,10 @@ if __name__=='__main__':
         # 强化学习训练
         rl_steps = 0
         i_episode = 0
+        transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
         while rl_steps < max_steps:
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             
             init_height = np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
 
@@ -630,8 +630,11 @@ if __name__=='__main__':
             if env.fail==1:
                 out_range_count+=1
             return_list.append(episode_return)
-            agent.update(transition_dict, adv_normed=1, mini_batch_size=512)
-            agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
+
+            if i_episode % 5 == 0:
+                agent.update(transition_dict, adv_normed=1, mini_batch_size=512)
+                agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
+                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
             # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
             if i_episode % 10 == 1:
