@@ -18,40 +18,24 @@ import copy
 import matplotlib.pyplot as plt
 import json
 import glob
-
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(project_root)
+import argparse
 
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
-# # 获取project目录
-# def get_current_file_dir():
-#     # 判断是否在 Jupyter Notebook 环境
-#     try:
-#         shell = get_ipython().__class__.__name__  # ← 误报，不用管
-#         if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
-#             # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
-#             return os.getcwd()
-#         else:  # 其他 shell
-#             return os.path.dirname(os.path.abspath(__file__))
-#     except NameError:
-#         # 普通 Python 脚本
-#         return os.path.dirname(os.path.abspath(__file__))
-# current_dir = get_current_file_dir()
-# sys.path.append(os.path.dirname(current_dir))
-
+from _context import *
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
 from Visualize.tensorboard_visualize import *
-from Algorithms.Wasted.PPOcontinues_dual_a_out import *
+from Algorithms.PPOHybrid23_0_distil2_one_step_KL import *
 from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
+from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
     def __init__(self, dt_move=0.02, tacview_show=0):
@@ -78,8 +62,8 @@ class track_env():
 
         self.flight_key_order = [
             "ego_main",  # 7
-            # "ego_control",  # 7
-            "flight_cmd", # 3
+            "ego_control",  # 7
+            "flight_cmd", # 4
         ]
         self.tacview_show = tacview_show
         if tacview_show:
@@ -107,10 +91,10 @@ class track_env():
         UAV.dead = 0
         UAV.color = np.array([1, 0, 0])
         # 红方出生点
-        UAV.pos_ = self.DEFAULT_RED_BIRTH_STATE['position']
+        UAV.pos_ = birth_state['position']
         UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
         speed = UAV.speed
-        UAV.psi = self.DEFAULT_RED_BIRTH_STATE['psi']
+        UAV.psi = birth_state['psi']
         UAV.theta = 0 * pi / 180
         UAV.gamma = 0 * pi / 180
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
@@ -162,6 +146,7 @@ class track_env():
 
         theta_v = own.theta_v
         psi_v = own.psi_v
+        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
         alpha_air = own.alpha_air
         beta_air = own.beta_air
@@ -169,7 +154,7 @@ class track_env():
         delta_psi_control = sub_of_radian(self.psi_req, self.RUAV.psi)
         cos_delta_psi = cos(delta_psi_control)
         sin_delta_psi = sin(delta_psi_control)
-        delta_theta_control = np.clip((self.height_req-self.RUAV.alt)/5000, -1, 1)*pi/2
+        delta_height_control = np.clip((self.height_req-self.RUAV.alt), -5000, 5000)
 
         one_side_states = {
             "ego_main": np.array([
@@ -187,7 +172,7 @@ class track_env():
                 float(q),  # 1 q rad/s act2_last
                 float(r),  # 2 r rad/s act3_last
                 float(theta_v),  # 3
-                float(psi_v),  # 4
+                float(delta_psi_v),  # 4
                 float(alpha_air),  # 5 rad
                 float(beta_air)  # 6 rad
             ]),
@@ -195,7 +180,7 @@ class track_env():
             "flight_cmd":  np.array([
                 cos_delta_psi,
                 sin_delta_psi,
-                delta_theta_control - self.RUAV.theta_v,
+                delta_height_control,
                 self.v_req - self.RUAV.speed,
             ])
         }
@@ -211,10 +196,77 @@ class track_env():
         s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
         s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
 
-        s["flight_cmd"][2] /= pi*2
+        s["flight_cmd"][2] /= 5000
         s["flight_cmd"][3] /= 340
         return s
+
+    def unscale_state(self, obs_input):
+        # 使用 deepcopy 避免修改传入对象
+        o = copy.deepcopy(obs_input)
+        o["ego_main"][0] *= 340
+        o["ego_main"][1] *= 5e3
+        o["ego_control"][0] *= (2 * pi)  # (2 * pi) 5000
+        o["ego_control"][1] *= (2 * pi)  # (2 * pi) pi
+        o["ego_control"][2] *= (2 * pi)  # (2 * pi) 340
+
+        o["flight_cmd"][2] *= 5000
+        o["flight_cmd"][3] *= 340
+        return o
+    
+    def obs2obs_check(self, obs):
+        """
+        将扁平化的 obs (numpy array) 还原为 check_obs (dict)。
+        该 check_obs 处于 scale 后的状态 (即可以直接输入 unscale_state)。
         
+        Args:
+            obs: (Dim, ) 或 (Batch, Dim) 的 numpy 数组或 tensor
+        
+        Returns:
+            check_obs: 字典形式的状态
+        """
+        # 1. 确保 obs 是 numpy 数组
+        if isinstance(obs, torch.Tensor):
+            obs = obs.cpu().detach().numpy()
+            
+        key_dims = {
+            "ego_main": 7,        # bool -> 1
+            "ego_control": 7,   # int -> 1
+            "flight_cmd": 4,       # bool -> 1
+        }
+        
+        is_batch = (obs.ndim > 1)
+        
+        obs_dict = {}
+        ptr = 0
+        
+        # 4. 按顺序切分重构
+        for key in key_dims:
+            if key not in key_dims:
+                # 理论上 key_order_1v1 里的 key 都应该有定义，防御性编程
+                continue
+                
+            dim = key_dims[key]
+            
+            # 切片
+            if is_batch:
+                val = obs[:, ptr : ptr + dim]
+            else:
+                val = obs[ptr : ptr + dim]
+            
+            ptr += dim
+            
+            if dim == 1:
+                if not is_batch:
+                    val = val[0] # 还原为标量
+                # Batch 模式下通常保留 (B, 1) 维度以便后续处理
+            
+            obs_dict[key] = val
+
+        # 注意：ego_control 不在 key_order_1v1 中，因此无法恢复。
+        # unscale_state 函数中有 `if "ego_control" in s` 的检查，所以这是安全的。
+            
+        return obs_dict
+
     def base_obs(self, side='r', pomdp=0):
         # 处理部分可观测、默认值问题、并尺度缩放
         # 输出保持字典的形式
@@ -241,7 +293,7 @@ class track_env():
         full_obs = {k: (pre_full_obs[k].copy() if hasattr(pre_full_obs[k], "copy") else pre_full_obs[k]) \
                     for k in self.flight_key_order}
         
-        # 不能被看到
+        # 弹药量不能被看到
         full_obs["ego_main"][6] = 0
         # full_obs["ego_control"][4] = 0
 
@@ -251,11 +303,15 @@ class track_env():
 
     def step(self, action):
         self.action = action
-        target_height, delta_heading, target_speed, rudder = action
+        # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
+        aileron, elevator, rudder, throttle = action['cont']
         self.t += self.dt_report
         time_rate = int(round(self.dt_report/self.dt_move))
         for _ in range(time_rate):
-            self.RUAV.move(target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rudder)
+            # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
+            # 第四个参数对应 throttle, rudder 参数单独传递
+            self.RUAV.move(target_height=elevator, delta_heading=aileron, target_speed=throttle, \
+                relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rudder)
             done = self.get_done()
             if done:
                 break
@@ -281,96 +337,6 @@ class track_env():
             self.RUAV.dead = 1
         return done
 
-    # def get_reward(self, ):
-    #     ruav_state = self.get_state()
-    #     v = ruav_state["ego_main"][0]
-    #     alt = ruav_state["ego_main"][1]
-    #     sin_theta = ruav_state["ego_main"][2]
-    #     cos_theta = ruav_state["ego_main"][3]
-    #     sin_phi = ruav_state["ego_main"][4]
-    #     cos_phi = ruav_state["ego_main"][5]
-    #     p = ruav_state["ego_control"][0]
-    #     q = ruav_state["ego_control"][1]
-    #     r = ruav_state["ego_control"][2]
-    #     theta_v = ruav_state["ego_control"][3]
-    #     psi_v = ruav_state["ego_control"][4]
-    #     alpha_air = ruav_state["ego_control"][5]*180/pi
-    #     beta_air = ruav_state["ego_control"][6]*180/pi
-    #     climb_rate = self.RUAV.vu
-
-    #     self.get_done()
-
-    #     # 存活奖励
-    #     reward_alive = 0 # 10
-
-    #     # 失败惩罚
-    #     reward_end = 0
-    #     if self.fail:
-    #         reward_end -= 100
-
-    #     # 高度奖励（高度变化率惩罚与高度限制惩罚）
-    #     reward_height = 0
-    #     height_error = np.clip(self.height_req-alt, -5000, 5000)
-    #     theta_v_req = height_error/5000*pi/2
-        
-    #     self.theta_v_req = theta_v_req
-    #     reward_height += 1-abs(theta_v-theta_v_req)/pi
-
-    #     # if abs(height_error) < 500:
-    #     #     reward_height += 1-abs(climb_rate)/100
-
-    #     if alt<self.min_alt_safe:
-    #         reward_height += climb_rate/100 + (alt-self.min_alt)/(self.min_alt_safe-self.min_alt)
-        
-    #     # 航向奖励（误差惩罚）
-    #     # psi_error = sub_of_radian(self.psi_req, psi_v)
-    #     # reward_psi_error = 1-abs(psi_error)/pi
-
-    #     # 角度奖励
-    #     L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
-    #     ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
-    #     reward_psi_error = 1 - ATA/pi
-
-    #     # 速度奖励（速度误差惩罚）
-    #     reward_v = 1-abs(self.v_req-v)/340
-
-    #     # 滚转角奖励
-    #     reward_phi = min(cos_phi, 0)
-
-    #     # pqr奖励(快到位时候pqr越小越好)
-    #     reward_pqr = 0
-    #     reward_pqr = -abs(p/(2*pi))-abs(q/(20*pi/180))-abs(r/(20*pi/180))
-    #     if abs(alpha_air) > 15:
-    #         reward_pqr -= abs(p/(90*pi/180))
-
-    #     # 迎角过载奖励(惩罚负迎角和过大的正迎角)
-    #     reward_alpha = 0.5
-    #     if alpha_air >= 15:
-    #         reward_alpha -= alpha_air/15
-    #     if alpha_air < 0:
-    #         reward_alpha += alpha_air/2       
-    #     ny = self.RUAV.Ny
-    #     if ny<=-1 or ny > 9:
-    #         reward_alpha -= 2
-            
-
-    #     # 侧滑角奖励（尽量少侧滑）
-    #     reward_beta = 0.5-abs(beta_air/5)
-
-    #     reward = np.sum([
-    #         1 * reward_alive,
-    #         1 * reward_end,
-    #         2 * reward_height,
-    #         2 * reward_psi_error,
-    #         1 * reward_v,
-    #         0.3 * reward_phi,
-    #         0.1 * reward_pqr,
-    #         1 * reward_alpha,
-    #         1 * reward_beta,
-    #     ])
-
-    #     return reward
-    
 
     def get_reward(self, ):
         ruav_state = self.get_state()
@@ -519,7 +485,7 @@ eps = 0.2
 dt_decide = 0.2 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 
-state_dim = 7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
+state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
 action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 mission_name = 'FlightControl'
@@ -531,10 +497,108 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 from datetime import datetime
 log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
+import torch.multiprocessing as mp
+import random
+import traceback
+import time
+
+def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, device_worker, seed):
+    try:
+        worker_seed = seed + rank * 1000
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
+        
+        env = track_env(tacview_show=0)
+        dt_decide = 0.2
+        
+        local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        from Algorithms.MLP_heads import ValueNet
+        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+
+        local_agent = PPOHybrid(
+            actor=HybridActorWrapper(local_actor, action_dims_dict, action_bounds=action_bound, device=device_worker).to(device_worker),
+            critic=local_dummy_critic,
+            actor_lr=0, critic_lr=0,
+            lmbda=0, eps=0, gamma=0, epochs=0,
+            device=device_worker
+        )
+        
+        while True:
+            cmd, packet = pipe.recv()
+            if cmd == 'EXIT':
+                break
+            if cmd == 'RUN_EPISODE':
+                actor_weights, episode_idx = packet
+                local_agent.actor.load_state_dict(actor_weights)
+                
+                init_height = np.random.uniform(4000, 10000)
+                birth_state={'position': np.array([0.0, init_height, 0.0]),
+                                'psi': np.random.uniform(-pi/6, pi/6)}
+                height_req = np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
+                psi_req = np.random.uniform(-pi, pi) * np.clip(episode_idx/1000, 0, 1)
+                v_req = np.random.uniform(0.8, 2.5)*340
+
+                env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
+                
+                obs, obs_check = env.get_obs()
+                done = False
+                
+                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+                episode_return = 0
+                steps_run = 0
+                
+                while not done:
+                    obs, obs_check = env.get_obs()
+                    action, u, _, _ = local_agent.take_action(obs, explore=True)
+                    steps_run += 1
+                    
+                    next_obs, reward, done = env.step(action)
+                    
+                    transition_dict['states'].append(obs)
+                    transition_dict['actions'].append(u)
+                    transition_dict['next_states'].append(next_obs)
+                    transition_dict['rewards'].append(reward)
+                    transition_dict['dones'].append(done)
+                    transition_dict['action_bounds'].append(action_bound)
+                    
+                    obs = next_obs
+                    episode_return += reward * env.dt_report
+                
+                metrics = {
+                    'return': episode_return,
+                    'steps': steps_run,
+                    'fail': env.fail,
+                    't': env.t
+                }
+                pipe.send({'trans': transition_dict, 'metrics': metrics})
+                
+    except Exception as e:
+        tb = traceback.format_exc()
+        try: pipe.send({'error': tb})
+        except: pass
+
 if __name__=='__main__':
-    env = track_env(tacview_show=use_tacview)
-    agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                      lmbda, epochs, eps, gamma, device)
+    mp.set_start_method('spawn', force=True)
+    
+    # env = track_env(tacview_show=use_tacview)
+    parser = argparse.ArgumentParser("UAV flight control training parallel")
+    parser.add_argument("--num_workers", type=int, default=10, help="number of parallel workers")
+    parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
+    parser.add_argument("--R-cage", type=float, default=np.inf, help="")
+    args = parser.parse_args()
+
+    # 创建一个 dummy env 获取维度
+    dummy_env = track_env(args)
+    teacher_agent = UnifiedPolicyWrapper(dummy_env)
+    
+    action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
+    policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
+    from Algorithms.MLP_heads import ValueNet
+    critic = ValueNet(state_dim, hidden_dim).to(device)
+    
+    agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
         
     os.makedirs(log_dir, exist_ok=True)
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
@@ -550,115 +614,118 @@ if __name__=='__main__':
     save_meta_once(actor_meta_path, agent.actor.state_dict())
     save_meta_once(critic_meta_path, agent.critic.state_dict())
 
-    from Math_calculates.ScaleLearningRate import scale_learning_rate
-    # 根据参数数量缩放学习率
-    actor_lr = scale_learning_rate(actor_lr, agent.actor)
-    critic_lr = scale_learning_rate(critic_lr, agent.critic)
-
     from Visualize.tensorboard_visualize import TensorBoardLogger
-
-    out_range_count = 0
-    return_list = []
-    steps_count = 0
-
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True)
+    
+    # 启动多进程
+    workers = []
+    pipes = []
+    worker_device = torch.device('cpu')  # Worker一般用CPU采样
+    seed = 42
+
+    print(f"Initializing {args.num_workers} training workers...")
+    for i in range(args.num_workers):
+        parent_conn, child_conn = mp.Pipe()
+        p = mp.Process(target=worker_process, args=(
+            i, child_conn, args, state_dim, hidden_dim, 
+            action_dims_dict, action_bound, worker_device, seed
+        ))
+        p.start()
+        workers.append(p)
+        pipes.append(parent_conn)
+
     try:
-        t_bias = 0
-        # 强化学习训练
         rl_steps = 0
         i_episode = 0
+        
         while rl_steps < max_steps:
-            i_episode += 1
-            episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+            # 1. 深度拷贝当前 Actor 权重到 CPU
+            current_weights = {k: v.cpu().clone() for k, v in agent.actor.state_dict().items()}
             
-            init_height = np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
-
-            birth_state={'position': np.array([0.0, init_height, 0.0]),
-                                'psi': np.random.uniform(-pi/6, pi/6)
-                                }
+            # 2. 分发任务
+            for rank in range(args.num_workers):
+                pipes[rank].send(('RUN_EPISODE', (current_weights, i_episode + rank)))
             
-            delta_height_generate = np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 * np.clip(i_episode/1000, 0, 1)
-            height_req = np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-            psi_req = np.random.uniform(-pi, pi) * np.clip(i_episode/1000, 0, 1)
-            v_req = np.random.uniform(0.8, 2.5)*340
-
-            env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
-            state, state_check = env.get_obs()
-            done = False
-
-            while not done:  # 每个训练回合
-                # 1.执行动作得到环境反馈
-                state, state_check = env.get_obs()
-                action, u = agent.take_action(state, action_bounds=action_bound, explore=True)
-                rl_steps += 1
+            # 3. 阻塞等待结果
+            batch_results = []
+            for rank in range(args.num_workers):
+                try: 
+                    res = pipes[rank].recv() # 阻塞等待
+                except EOFError: 
+                    print(f"[Error] Worker {rank} crashed silently.")
+                    for p in workers: p.terminate()
+                    raise RuntimeError(f"Worker {rank} crashed.")
+                    
+                if isinstance(res, dict) and 'error' in res:
+                    print(f"--- Master received error from Worker {rank}, aborting. ---")
+                    for p in workers: p.terminate()
+                    raise RuntimeError(f"Worker {rank} crashed with error:\n{res['error']}")
+                    
+                batch_results.append(res)
+            
+            # 4. 汇总数据
+            master_transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+            batch_return_list = []
+            batch_fail_cnt = 0
+            batch_steps_run = 0
+            
+            for res in batch_results:
+                tr = res['trans']
+                metrics = res['metrics']
                 
-                next_state, reward, done = env.step(action)
-
-                # debug 用
-                height_req = env.height_req/1000
-                height = env.RUAV.alt/1000
-                psi_req = env.psi_req*180/pi
-                psi = env.RUAV.psi*180/pi
-                v_req = env.v_req
-                v = env.RUAV.speed
-
-                transition_dict['states'].append(state)
-                transition_dict['actions'].append(u)
-                transition_dict['next_states'].append(next_state)
-                transition_dict['rewards'].append(reward)
-                transition_dict['dones'].append(done)
-                transition_dict['action_bounds'].append(action_bound)
-                state = next_state
-                episode_return += reward * env.dt_report # 奖励按秒分析
-                env.render(t_bias)
-
-            env.clear_render(t_bias)
-            t_bias += env.t
-
-            if env.fail==1:
-                out_range_count+=1
-            return_list.append(episode_return)
-            agent.update(transition_dict)
-
-            # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
-            if i_episode % 10 == 1:
-                # critic overwrite
+                batch_return_list.append(metrics['return'])
+                if metrics['fail']: batch_fail_cnt += 1
+                batch_steps_run += metrics['steps']
+                
+                for k in master_transition_dict:
+                    master_transition_dict[k].extend(tr[k])
+                    
+            rl_steps += batch_steps_run
+            i_episode += args.num_workers
+            
+            # 5. 模型更新
+            agent.update(master_transition_dict)
+            agent.distil(master_transition_dict, teacher_agent=teacher_agent, epochs=1, alpha=1.0)
+            
+            # --- 保存模型 ---
+            if (i_episode // args.num_workers) % 10 == 0:
                 critic_path = os.path.join(log_dir, "critic.pt")
                 th.save(agent.critic.state_dict(), critic_path)
-                # actor RL snapshot
                 actor_name = f"actor_rein{i_episode}.pt"
                 actor_path = os.path.join(log_dir, actor_name)
                 th.save(agent.actor.state_dict(), actor_path)
 
-            
-            # tqdm 训练进度显示
-            if (i_episode + 1) >= 10:
-                print(f"episode {i_episode+1}, 进度: {rl_steps / max_steps:.3f}, return: {np.mean(return_list[-10:]):.3f}")
+            # --- 日志和控制台输出 ---
+            mean_return = np.mean(batch_return_list)
+            survive_rate = 1.0 - (batch_fail_cnt / args.num_workers)
+            print(f"Episodes {i_episode}, 进度: {rl_steps / max_steps:.3f}, batch_return: {mean_return:.3f}, survive_rate: {survive_rate:.2f}")
 
-            # tensorboard 训练进度显示
-            logger.add("train/0 episode_return", episode_return, rl_steps)
-            logger.add("train/0 survive", 1-env.fail, rl_steps)
+            logger.add("train/0 episode_return", mean_return, rl_steps)
+            logger.add("train/0 survive", survive_rate, rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)
-            # 梯度监控
             logger.add("train/1 actor_grad_norm", actor_grad_norm, rl_steps)
             logger.add("train/2 critic_grad_norm", critic_grad_norm, rl_steps)
-            # 损失函数监控
             logger.add("train/3 actor_loss", agent.actor_loss, rl_steps)
             logger.add("train/4 critic_loss", agent.critic_loss, rl_steps)
-            # 强化学习actor特殊项监控
             logger.add("train/5 entropy", agent.entropy_mean, rl_steps)
             logger.add("train/6 ratio", agent.ratio_mean, rl_steps)
-            logger.add("train/7 steps", i_episode + 1, rl_steps)
-
+            logger.add("train/7 steps", i_episode, rl_steps)
+            if hasattr(agent, 'dis_actor_loss') and agent.dis_actor_loss != 0:
+                logger.add("train/8 distil_loss", agent.dis_actor_loss, rl_steps)
 
     except KeyboardInterrupt:
         print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
     finally:
+        for pipe in pipes:
+            try: pipe.send(('EXIT', None))
+            except: pass
+                
+        for p in workers:
+            p.join(timeout=5)
+            if p.is_alive(): p.terminate()
+            
         logger.close()
-
-
         print(f"日志已保存到：{logger.run_dir}")
 

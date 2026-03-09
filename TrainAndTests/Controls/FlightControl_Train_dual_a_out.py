@@ -566,7 +566,7 @@ if __name__=='__main__':
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
                 obs, obs_check = env.get_obs()
-                action, u, _, _  = agent.take_action(obs, explore=True)
+                action, u, _, _ = agent.take_action(obs, explore=True)
                 rl_steps += 1
 
                 # if abs(env.t % 0.5) <= env.dt_move:

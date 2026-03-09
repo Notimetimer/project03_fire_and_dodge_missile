@@ -5,41 +5,30 @@ from numpy.linalg import norm
 import torch as th
 from math import *
 
-# # 获取project目录
-# def get_current_file_dir():
-#     # 判断是否在 Jupyter Notebook 环境
-#     try:
-#         shell = get_ipython().__class__.__name__  # ← 误报，不用管
-#         if shell == 'ZMQInteractiveShell':  # Jupyter Notebook 或 JupyterLab
-#             # 推荐用 os.getcwd()，指向启动 Jupyter 的目录
-#             return os.getcwd()
-#         else:  # 其他 shell
-#             return os.path.dirname(os.path.abspath(__file__))
-#     except NameError:
-#         # 普通 Python 脚本
-#         return os.path.dirname(os.path.abspath(__file__))
-# current_dir = get_current_file_dir()
-# sys.path.append(os.path.dirname(current_dir))
-
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
 from TrainAndTests.Controls.FlightControl_Train_dual_a_out import *
 
-dt_maneuver= 0.2
 action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
 
 from Utilities.LocateDirAndAgents import *
 
 # 测试训练效果
-agent = PPOContinuous(state_dim, hidden_dim, action_dim, actor_lr, critic_lr,
-                lmbda, epochs, eps, gamma, device)
+action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
+policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
+from Algorithms.MLP_heads import ValueNet
+critic = ValueNet(state_dim, hidden_dim).to(device)
+
+agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
+     
 env = track_env(tacview_show=1)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
-log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "Attack-run-20251031-094218")
+# log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
 actor_path = load_actor_from_log(log_dir, number=None)
@@ -71,25 +60,25 @@ while i_episode<=3:
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
     env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
-    state, state_check = env.get_obs()
+    obs, obs_check = env.get_obs()
     done = False
 
     while not done:  # 每个训练回合
         # 1.执行动作得到环境反馈
-        state, state_check = env.get_obs()
-        action, u = agent.take_action(state, action_bounds=action_bound, explore=0)
+        obs, obs_check = env.get_obs()
+        action, u, _, _ = agent.take_action(obs, explore=0)
         rl_steps += 1
         
         action[2] = 1  # 强制油门推满
-        next_state, reward, done = env.step(action)
+        next_obs, reward, done = env.step(action)
 
         # debug 用
-        height_req = env.height_req/1000
-        height = env.RUAV.alt/1000
-        psi_req = env.psi_req*180/pi
-        psi = env.RUAV.psi*180/pi
-        v_req = env.v_req
-        v = env.RUAV.speed
+        height_req_show = env.height_req/1000
+        height_show = env.RUAV.alt/1000
+        psi_req_show = env.psi_req*180/pi
+        psi_show = env.RUAV.psi*180/pi
+        v_req_show = env.v_req
+        v_show = env.RUAV.speed
 
         env.render(t_bias)
 
