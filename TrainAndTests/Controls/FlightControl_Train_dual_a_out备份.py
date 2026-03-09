@@ -366,14 +366,14 @@ class track_env():
         if self.fail:
             reward_end -= 100
 
-        height_error = np.clip(self.height_req-alt, -5000, 5000)
-        theta_v_req = height_error/5000*pi/2
+        height2req = np.clip(self.height_req-alt, -5000, 5000)
+        theta_v_req = height2req/5000*pi/2
         
         self.theta_v_req = theta_v_req
         
         # 航向奖励（误差惩罚）
-        # psi_error = sub_of_radian(self.psi_req, psi_v)
-        # reward_psi_error = 1-abs(psi_error)/pi
+        # psi2req = sub_of_radian(self.psi_req, psi_v)
+        # reward_psi2req = 1-abs(psi2req)/pi
 
         L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
         ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
@@ -393,7 +393,7 @@ class track_env():
                 (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
 
         # 速度奖励
-        r_speed = abs(self.v_req-speed) / (340)
+        r_speed = 0  #  abs(self.v_req-speed) / (340) # DEBUG
 
         # 迎角过载奖励(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
@@ -489,7 +489,7 @@ state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # t
 action_dim = 4 # test
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])
-mission_name = 'FlightControl'
+mission_name = 'FlightControl备份'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

@@ -366,14 +366,14 @@ class track_env():
         if self.fail:
             reward_end -= 100
 
-        height_error = np.clip(self.height_req-alt, -5000, 5000)
-        theta_v_req = height_error/5000*pi/2
+        height2req = np.clip(self.height_req-alt, -5000, 5000)
+        theta_v_req = height2req/5000*pi/2
         
         self.theta_v_req = theta_v_req
         
         # 航向奖励（误差惩罚）
-        # psi_error = sub_of_radian(self.psi_req, psi_v)
-        # reward_psi_error = 1-abs(psi_error)/pi
+        # psi2req = sub_of_radian(self.psi_req, psi_v)
+        # reward_psi2req = 1-abs(psi2req)/pi
 
         L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
         ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
@@ -488,7 +488,7 @@ pre_train_rate = 0 # 0.25 # 0.25
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
 action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-mission_name = 'FlightControl'
+mission_name = 'FlightControl_parallel备份'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

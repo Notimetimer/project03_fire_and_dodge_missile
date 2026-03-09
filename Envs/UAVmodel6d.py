@@ -151,9 +151,9 @@ class UAVModel(object):
         self.vn, self.ve, self.vu = vn, ve, vu
         
         # 过载量
-        self.Ny = self.sim["accelerations/Nz"]  # 垂直过载
+        self.Ny = self.sim["accelerations/Nz"]  # 法向过载
         self.Nz = self.sim["accelerations/Ny"]  # 侧向过载
-        self.Nx = self.sim["accelerations/Nx"]  # 纵向过载
+        self.Nx = self.sim["accelerations/Nx"]  # 前向过载
 
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角

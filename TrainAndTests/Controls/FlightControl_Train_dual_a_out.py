@@ -97,6 +97,7 @@ class track_env():
         UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
         speed = UAV.speed
         UAV.psi = birth_state['psi']
+        UAV.last_psi = UAV.psi
         UAV.theta = 0 * pi / 180
         UAV.gamma = 0 * pi / 180
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
@@ -310,6 +311,7 @@ class track_env():
         self.t += self.dt_report
         self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
+        self.RUAV.last_psi = self.RUAV.psi
         for _ in range(time_rate):
             # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
             # 第四个参数对应 throttle, rudder 参数单独传递
@@ -359,8 +361,8 @@ class track_env():
         beta_air = ruav_state["ego_control"][6]*180/pi
         cos_delta_psi = ruav_state["flight_cmd"][0]
         sin_delta_psi = ruav_state["flight_cmd"][1]
-        height_error = ruav_state["flight_cmd"][2]
-        speed_error = ruav_state["flight_cmd"][3]
+        height2req = ruav_state["flight_cmd"][2]
+        speed2req = ruav_state["flight_cmd"][3]
         climb_rate = self.RUAV.vu
 
         delta_psi = np.arctan2(sin_delta_psi, cos_delta_psi)
@@ -376,36 +378,45 @@ class track_env():
             reward_end -= 400
 
         # 误差计算
-        psi_error = delta_psi_v
+        psi2req = delta_psi_v
 
         # 和奖励无关，方便画图
-        self.theta_v_req = height_error/5000*pi/2
+        self.theta_v_req = height2req/5000*pi/2
         
         # L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
         # ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
         # r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
 
         # 高度误差惩罚
-        r_alt = -abs(height_error)/5000
-        # r_alt += np.clip(self.RUAV.vu / 100, -1, 1) * height_error * np.sign(height_error)
-                
+        r_alt = + np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
+        r_alt += - abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
+
+        # r_alt = -abs(height2req)/5000 * ()
+
+        # r_alt += np.clip(self.RUAV.vu / 100, -1, 1) * height2req * np.sign(height2req)
+
         # 高度限制奖励/惩罚
         r_alt += (alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
                 (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
 
         # 航向误差惩罚
         r_angle = 1
-        r_angle += -abs(delta_psi)/pi  # 航向的水平误差psi_error，或者头部的水平误差 delta_psi
+        psi_dot = sub_of_radian(self.RUAV.psi, self.RUAV.last_psi)/self.dt_report
+        r_angle += np.sign(delta_psi) * psi_dot
+        r_angle += -abs(psi_dot) * (1-abs(delta_psi)/pi)
+
+        # r_angle += -abs(delta_psi)/pi  # 航向的水平误差psi2req，或者头部的水平误差 delta_psi
 
         # 俯仰角惩罚
         r_angle += -0.05 * abs(np.arcsin(sin_theta))
         # 滚转角惩罚
-        r_angle += -0.05 * abs(phi)
+        r_angle += -0.05 * abs(phi) * 0.01
         # 滚转角速度惩罚
         r_angle += -0.01 * abs(p)
 
-        # 速度误差惩罚
-        r_speed = -abs(speed_error) / 340
+        # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
+        # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
+        r_speed = self.RUAV.Nx * np.sign(speed2req) * 0.5
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
@@ -636,7 +647,7 @@ if __name__=='__main__':
             return_list.append(episode_return)
 
             if i_episode % 10 == 0:
-                # agent.update(transition_dict, adv_normed=1, mini_batch_size=512) # DEBUG 奖励函数可能写得不对，纯策略蒸馏看看效果
+                agent.update(transition_dict, adv_normed=1, mini_batch_size=512)
                 agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=1.0) # alpha=alpha_distill
                 transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 

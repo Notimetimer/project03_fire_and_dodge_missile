@@ -354,8 +354,8 @@ class track_env():
         beta_air = ruav_state["ego_control"][6]*180/pi
         cos_delta_psi = ruav_state["flight_cmd"][0]
         sin_delta_psi = ruav_state["flight_cmd"][1]
-        height_error = ruav_state["flight_cmd"][2]
-        speed_error = ruav_state["flight_cmd"][3]
+        height2req = ruav_state["flight_cmd"][2]
+        speed2req = ruav_state["flight_cmd"][3]
         climb_rate = self.RUAV.vu
 
         delta_psi = np.arctan2(sin_delta_psi, cos_delta_psi)
@@ -371,18 +371,18 @@ class track_env():
             reward_end -= 400
 
         # 误差计算
-        psi_error = delta_psi_v
+        psi2req = delta_psi_v
 
         # 和奖励无关，方便画图
-        self.theta_v_req = height_error/5000*pi/2
+        self.theta_v_req = height2req/5000*pi/2
         
         # L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
         # ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
         # r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
 
         # 高度误差惩罚
-        r_alt = -abs(height_error)/5000
-        # r_alt += np.clip(self.RUAV.vu / 100, -1, 1) * height_error * np.sign(height_error)
+        r_alt = -abs(height2req)/5000
+        # r_alt += np.clip(self.RUAV.vu / 100, -1, 1) * height2req * np.sign(height2req)
                 
         # 高度限制奖励/惩罚
         r_alt += (alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
@@ -390,7 +390,7 @@ class track_env():
 
         # 航向误差惩罚
         r_angle = 1
-        r_angle += -abs(delta_psi)/pi  # 航向的水平误差psi_error，或者头部的水平误差 delta_psi
+        r_angle += -abs(delta_psi)/pi  # 航向的水平误差psi2req，或者头部的水平误差 delta_psi
 
         # 俯仰角惩罚
         r_angle += -0.05 * abs(np.arcsin(sin_theta))
@@ -400,7 +400,7 @@ class track_env():
         r_angle += -0.01 * abs(p)
 
         # 速度误差惩罚
-        r_speed = -abs(speed_error) / 340
+        r_speed = -abs(speed2req) / 340
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
