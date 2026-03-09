@@ -32,8 +32,8 @@ env = track_env(tacview_show=1)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
-log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-# log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
+# log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
 actor_path = load_actor_from_log(log_dir, number=None)

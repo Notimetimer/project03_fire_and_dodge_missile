@@ -489,12 +489,12 @@ class track_env():
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 max_steps = 30 * 65e4
-hidden_dim = [64, 64] # [128, 128]
+hidden_dim = [128, 128] # [128, 128]
 gamma = 0.9
 lmbda = 0.9
 epochs = 5  # 10
 eps = 0.2
-dt_decide = 0.1 # 0.2
+dt_decide = 0.2 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
@@ -635,9 +635,9 @@ if __name__=='__main__':
                 out_range_count+=1
             return_list.append(episode_return)
 
-            if i_episode % 5 == 0:
-                agent.update(transition_dict, adv_normed=1, mini_batch_size=512)
-                agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
+            if i_episode % 10 == 0:
+                # agent.update(transition_dict, adv_normed=1, mini_batch_size=512) # DEBUG 奖励函数可能写得不对，纯策略蒸馏看看效果
+                agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=1.0) # alpha=alpha_distill
                 transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
             # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）

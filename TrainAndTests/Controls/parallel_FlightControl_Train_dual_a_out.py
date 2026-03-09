@@ -405,7 +405,7 @@ class track_env():
         r_angle += -0.01 * abs(p)
 
         # 速度误差惩罚
-        r_speed = -abs(speed_error) / 340
+        r_speed = -abs(speed_error) / 340 / 5
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
@@ -490,11 +490,11 @@ actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
 max_steps = 30 * 65e4
 hidden_dim = [128, 128] # [128, 128]
-gamma = 0.9
-lmbda = 0.9
+gamma = 0.95
+lmbda = 0.95
 epochs = 5  # 10
 eps = 0.2
-dt_decide = 0.1 # 0.2
+dt_decide = 0.2 # 0.2 可以， 0.1很难
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
