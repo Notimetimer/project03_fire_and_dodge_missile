@@ -17,7 +17,11 @@ from Utilities.LocateDirAndAgents import *
 # 测试训练效果
 action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
 policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+print(action_bound)
 actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
+# action_bounds 检查
+print(actor.action_bounds)
+
 from Algorithms.MLP_heads import ValueNet
 critic = ValueNet(state_dim, hidden_dim).to(device)
 
@@ -42,8 +46,11 @@ else:
 t_bias = 0
 out_range_count = 0
 
+# action_bounds 检查
+print(agent.actor.action_bounds)
+
 t_bias = 0
-# 强化学习训练
+# 强化学习测试
 rl_steps = 0
 i_episode = 0
 while i_episode<=3:
@@ -68,8 +75,13 @@ while i_episode<=3:
         obs, obs_check = env.get_obs()
         action, u, _, _ = agent.take_action(obs, explore=0)
         rl_steps += 1
+
+        if abs(env.t % 0.5) <= env.dt_move:
+            print("action", action["cont"])
+            print("tanh(u)", np.tanh(u["cont"]))
+            print("--")
         
-        action[2] = 1  # 强制油门推满
+        # action[2] = 1  # 强制油门推满
         next_obs, reward, done = env.step(action)
 
         # debug 用
