@@ -36,7 +36,9 @@ from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
+from TrainAndTests.Controls.FlightControl_Train_dual_a_out import track_env
 
+# DEBUG 用，否则完全可以用调用代替重写
 class track_env():
     def __init__(self, dt_move=0.02, tacview_show=0):
         super(track_env, self).__init__()
