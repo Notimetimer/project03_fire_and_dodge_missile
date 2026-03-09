@@ -306,6 +306,7 @@ class track_env():
         # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
         aileron, elevator, rudder, throttle = action['cont']
         self.t += self.dt_report
+        self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
         for _ in range(time_rate):
             # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
@@ -351,51 +352,60 @@ class track_env():
         q = ruav_state["ego_control"][1]
         r = ruav_state["ego_control"][2]
         theta_v = ruav_state["ego_control"][3]
-        psi_v = ruav_state["ego_control"][4]
+        delta_psi_v = ruav_state["ego_control"][4]
         alpha_air = ruav_state["ego_control"][5]*180/pi
         beta_air = ruav_state["ego_control"][6]*180/pi
+        cos_delta_psi = ruav_state["flight_cmd"][0]
+        sin_delta_psi = ruav_state["flight_cmd"][1]
+        height_error = ruav_state["flight_cmd"][2]
+        speed_error = ruav_state["flight_cmd"][3]
         climb_rate = self.RUAV.vu
+
+        delta_psi = np.arctan2(sin_delta_psi, cos_delta_psi)
 
         self.get_done()
 
         # 存活奖励
-        reward_alive = 0 # 10
+        reward_alive = 0.01 # 10
 
         # 失败惩罚
         reward_end = 0
         if self.fail:
-            reward_end -= 100
+            reward_end -= 400
 
-        height_error = np.clip(self.height_req-alt, -5000, 5000)
-        theta_v_req = height_error/5000*pi/2
+        # 误差计算
+        psi_error = delta_psi_v
+
+        # 和奖励无关，方便画图
+        self.theta_v_req = height_error/5000*pi/2
         
-        self.theta_v_req = theta_v_req
-        
-        # 航向奖励（误差惩罚）
-        # psi_error = sub_of_radian(self.psi_req, psi_v)
-        # reward_psi_error = 1-abs(psi_error)/pi
+        # L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
+        # ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
+        # r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
 
-        L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
-        ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
-        
-        # 角度奖励
-        r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
-        r_angle -= 0.05 * abs(phi) # 滚转角惩罚
-
-        # 高度奖励
-        pre_alt_opt = self.height_req
-        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
-
-        r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
-                (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
+        # 高度误差惩罚
+        r_alt = -abs(height_error)/5000
+        # r_alt += np.clip(self.RUAV.vu / 100, -1, 1) * height_error * np.sign(height_error)
+                
         # 高度限制奖励/惩罚
-        r_alt += (alt <= self.min_alt_safe + 1e3) * np.clip(self.RUAV.vu / 100, -1, 1) + \
+        r_alt += (alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
                 (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
 
-        # 速度奖励
-        r_speed = abs(self.v_req-speed) / (340)
+        # 航向误差惩罚
+        r_angle = 1
+        r_angle += -abs(delta_psi)/pi  # 航向的水平误差psi_error，或者头部的水平误差 delta_psi
 
-        # 迎角过载奖励(惩罚负迎角和过大的正迎角)
+        # 俯仰角惩罚
+        r_angle += -0.05 * abs(np.arcsin(sin_theta))
+        # 滚转角惩罚
+        r_angle += -0.05 * abs(phi)
+        # 滚转角速度惩罚
+        r_angle += -0.01 * abs(p)
+
+        # 速度误差惩罚
+        r_speed = -abs(speed_error) / 340
+
+        # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
         if alpha_air >= 15:
             reward_alpha -= alpha_air/15
@@ -405,14 +415,14 @@ class track_env():
         if ny<=-1 or ny > 9:
             reward_alpha -= 2
             
-        # 侧滑角奖励（尽量少侧滑）
-        reward_beta = 0.5-abs(beta_air/5)
+        # 侧滑角惩罚（尽量少侧滑）
+        reward_beta = - abs(beta_air/5)
 
         reward = np.sum([
             1 * reward_alive,
             1 * reward_end,
-            2 * r_angle,
-            2 * r_alt,
+            1 * r_angle,
+            1 * r_alt,
             1 * r_speed,
             1 * reward_alpha,
             1 * reward_beta,
@@ -476,13 +486,13 @@ class track_env():
 # 超参数
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-max_steps = 10 * 65e4
-hidden_dim = [128, 128] # [64, 64]
+max_steps = 30 * 65e4
+hidden_dim = [64, 64] # [128, 128]
 gamma = 0.9
 lmbda = 0.9
-epochs = 10  # 10
+epochs = 5  # 10
 eps = 0.2
-dt_decide = 0.2 # 0.2
+dt_decide = 0.04 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
@@ -555,8 +565,11 @@ if __name__=='__main__':
                                 'psi': np.random.uniform(-pi/6, pi/6)
                                 }
             
-            height_req = np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-            psi_req = np.random.uniform(-pi, pi) * np.clip(i_episode/1000, 0, 1)
+            height_req = np.clip(init_height + \
+                    np.clip(rl_steps/max_steps / 0.3, 0, 1) * np.random.uniform(-1, 1)*5000, \
+                        3000, 13000)
+
+            psi_req = np.random.uniform(-pi, pi) * np.clip(rl_steps/max_steps / 0.3, 0, 1) # 预热，0.3以后真正开始动真格
             v_req = np.random.uniform(0.8, 2.5)*340
 
             env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
@@ -604,7 +617,7 @@ if __name__=='__main__':
                 transition_dict['dones'].append(done)
                 transition_dict['action_bounds'].append(action_bound)
                 obs = next_obs
-                episode_return += reward * env.dt_report # 奖励按秒分析
+                episode_return += reward
                 env.render(t_bias)
 
             env.clear_render(t_bias)
@@ -613,7 +626,7 @@ if __name__=='__main__':
             if env.fail==1:
                 out_range_count+=1
             return_list.append(episode_return)
-            agent.update(transition_dict)
+            agent.update(transition_dict, adv_normed=1, mini_batch_size=128)
             agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=1, alpha=1.0)
 
             # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
