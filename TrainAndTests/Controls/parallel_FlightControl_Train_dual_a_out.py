@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import json
 import glob
 import argparse
+import time  # 确保引入 time 模块
+from datetime import datetime
 
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -592,6 +594,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
         except: pass
 
 if __name__=='__main__':
+    start_time = datetime.now()
+    print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     mp.set_start_method('spawn', force=True)
     
     # env = track_env(tacview_show=use_tacview)
@@ -750,4 +754,9 @@ if __name__=='__main__':
 
 
         print(f"日志已保存到：{logger.run_dir}")
+
+        end_time = datetime.now()
+        print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
+        elapsed_hours = (end_time - start_time).total_seconds() / 3600.0
+        print(f"Simulation duration: {elapsed_hours:.4f} hours")
 

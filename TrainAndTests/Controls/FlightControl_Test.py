@@ -8,7 +8,8 @@ from math import *
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from TrainAndTests.Controls.FlightControl_Train_dual_a_out import *
+# from TrainAndTests.Controls.FlightControl_Train_dual_a_out import *
+from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
 
 action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
 
