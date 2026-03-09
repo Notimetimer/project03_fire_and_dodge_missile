@@ -486,8 +486,8 @@ class track_env():
 # 超参数
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-max_steps = 10 * 65e4
-hidden_dim = [128, 128]  # 128, 128
+max_steps = 30 * 65e4
+hidden_dim = [128, 128] # [128, 128]
 gamma = 0.9
 lmbda = 0.9
 epochs = 5  # 10
@@ -513,7 +513,7 @@ import random
 import traceback
 import time
 
-def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, device_worker, seed):
+def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, device_worker, seed, dt_decide):
     try:
         worker_seed = seed + rank * 1000
         random.seed(worker_seed)
@@ -521,7 +521,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
         torch.manual_seed(worker_seed)
         
         env = track_env(tacview_show=0)
-        dt_decide = dt_decide  # 0.2
+        # dt_decide 已作为参数传入
         
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
         from Algorithms.MLP_heads import ValueNet
@@ -576,7 +576,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     transition_dict['action_bounds'].append(action_bound)
                     
                     obs = next_obs
-                    episode_return += reward * env.dt_report
+                    episode_return += reward
                 
                 metrics = {
                     'return': episode_return,
@@ -642,7 +642,7 @@ if __name__=='__main__':
         parent_conn, child_conn = mp.Pipe()
         p = mp.Process(target=worker_process, args=(
             i, child_conn, args, state_dim, hidden_dim, 
-            action_dims_dict, action_bound, worker_device, seed
+            action_dims_dict, action_bound, worker_device, seed, dt_decide
         ))
         p.start()
         workers.append(p)

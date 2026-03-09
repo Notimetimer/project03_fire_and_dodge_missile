@@ -256,10 +256,10 @@ class F16PIDController:
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
         steady_switch_angle = 15  # 20 15 30
 
-        self.check_switch1 = acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi
+        self.check_switch1 = acos(np.dot(L_, v_) / (norm(L_) * norm(v_) + 1e-8)) * 180 / pi
         self.check_switch2 = abs(theta_req)*180/pi
 
-        if acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi < steady_switch_angle and \
+        if acos(np.dot(L_, v_) / (norm(L_)*norm(v_)+1e-8)) * 180 / pi < steady_switch_angle and \
                 abs(theta_req) < 60 * pi / 180:
             k_steady_yaw = 3 / steady_switch_angle
             phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3) #   /2 #debug
