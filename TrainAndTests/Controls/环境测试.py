@@ -489,7 +489,7 @@ gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
-dt_decide = 0.04 # 0.2
+dt_decide = 0.04 # 0.2 原先的0.2会不好飞，现在缩小dt_decide会不好训
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
