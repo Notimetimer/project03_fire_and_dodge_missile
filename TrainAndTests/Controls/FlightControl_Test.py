@@ -33,6 +33,7 @@ env = track_env(tacview_show=1)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
+mission_name = 'FlightControl_parallel'
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
@@ -46,6 +47,10 @@ else:
     actor.load_state_dict(sd)
     print(f"Loaded actor for test from: {actor_path}")
 
+# 舞龙测试
+dragon_dance = 1
+
+dt_decide = 0.2
 
 out_range_count = 0
 
@@ -57,7 +62,7 @@ t_bias = 0
 # 强化学习测试
 rl_steps = 0
 i_episode = 0
-while i_episode<=3:
+while i_episode<=6:
     i_episode += 1
     episode_return = 0
     
@@ -70,11 +75,24 @@ while i_episode<=3:
     psi_req = np.random.uniform(-pi, pi)
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
-    env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=0.04)
+    env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide) # 0.04
     obs, obs_check = env.get_obs()
     done = False
 
+    psi_req_dot = 0
+    height_req_dot = 0
+
     while not done:  # 每个训练回合
+        # 舞龙测试
+        if dragon_dance:
+            psi_req_dot += np.random.uniform(-1, 1) *0.1*pi/180
+            psi_req_dot = np.clip(psi_req_dot, -8*pi/180, 8*pi/180)
+            env.psi_req += psi_req_dot * dt_decide
+            height_req_dot += np.random.uniform(-1, 1) * 20
+            height_req_dot = np.clip(height_req_dot, -100, 100)
+            env.height_req += height_req_dot * dt_decide
+            env.height_req = np.clip(env.height_req, 4000, 12000)
+
         # 1.执行动作得到环境反馈
         obs, obs_check = env.get_obs()
         # action, u, _, _ = agent.take_action(obs, explore=0)
