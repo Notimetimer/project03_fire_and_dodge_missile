@@ -4,6 +4,7 @@ import numpy as np
 from numpy.linalg import norm
 import torch as th
 from math import *
+import time
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -32,8 +33,8 @@ env = track_env(tacview_show=1)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
-# log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
-log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
+log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
+# log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
 # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
 actor_path = load_actor_from_log(log_dir, number=None)
@@ -44,7 +45,7 @@ else:
     agent.actor.load_state_dict(sd)
     print(f"Loaded actor for test from: {actor_path}")
 
-t_bias = 0
+
 out_range_count = 0
 
 # action_bounds 检查
@@ -67,7 +68,7 @@ while i_episode<=3:
     psi_req = np.random.uniform(-pi, pi)
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
-    env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
+    env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=0.04)
     obs, obs_check = env.get_obs()
     done = False
 
@@ -77,10 +78,11 @@ while i_episode<=3:
         action, u, _, _ = agent.take_action(obs, explore=0)
         rl_steps += 1
 
-        if abs(env.t % 0.5) <= env.dt_move:
-            print("action", action["cont"])
-            print("tanh(u)", np.tanh(u["cont"]))
-            print("--")
+        # if abs(env.t % 0.5) <= env.dt_move:
+        #     print("action", action["cont"])
+        #     print("tanh(u)", np.tanh(u["cont"]))
+        #     print("--")
+            # time.sleep(0.5)
         
         # action[2] = 1  # 强制油门推满
         next_obs, reward, done = env.step(action)
@@ -94,6 +96,7 @@ while i_episode<=3:
         v_show = env.RUAV.speed
 
         env.render(t_bias)
+        
 
     env.clear_render(t_bias)
     t_bias += env.t
