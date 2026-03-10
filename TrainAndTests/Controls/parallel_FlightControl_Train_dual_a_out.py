@@ -259,7 +259,7 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 1.0 * (1 - 0.9 * warm_up)
+            alpha_distill = 1.0 * (1 - 0.8 * warm_up)
             distil_epochs = max(int(10 * (1 - 0.9 * warm_up)), 1)
 
             # 5. 模型更新

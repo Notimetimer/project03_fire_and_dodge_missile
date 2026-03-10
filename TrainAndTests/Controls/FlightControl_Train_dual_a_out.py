@@ -149,7 +149,7 @@ class track_env():
 
         theta_v = own.theta_v
         psi_v = own.psi_v
-        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
+        delta_psi_v = sub_of_radian(self.psi_req, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
         alpha_air = own.alpha_air
         beta_air = own.beta_air
@@ -416,7 +416,7 @@ class track_env():
         r_angle += - 0.05 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
         # r_angle += - 0.5 * abs(delta_psi_v)/pi
 
-        # r_angle += - 1 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
+        r_angle += - 0.1 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
 
         # 俯仰角惩罚
         desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
