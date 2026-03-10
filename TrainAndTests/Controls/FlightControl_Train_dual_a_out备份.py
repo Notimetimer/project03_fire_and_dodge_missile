@@ -148,7 +148,7 @@ class track_env():
 
         theta_v = own.theta_v
         psi_v = own.psi_v
-        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
+        delta_psi_v = sub_of_radian(self.psi_req, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
         alpha_air = own.alpha_air
         beta_air = own.beta_air

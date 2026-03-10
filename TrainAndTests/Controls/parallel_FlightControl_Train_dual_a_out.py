@@ -138,19 +138,17 @@ if __name__=='__main__':
     # 超参数
     actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
     critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-    max_steps = 30 * 65e4
+    max_steps = 50 * 65e4
     
     gamma = 0.95
     lmbda = 0.95
     epochs = 5  # 10
     eps = 0.2
-    dt_decide = 0.1 # 0.2 可以， 0.1很难 必须是0.02的整数倍
-    pre_train_rate = 0 # 0.25 # 0.25
-
+    dt_decide = 0.06 # 0.2 可以， 0.1很难 必须是0.02的整数倍
 
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
-    parser.add_argument("--max-episode-len", type=float, default=7*60, help="maximum episode time length")
+    parser.add_argument("--max-episode-len", type=float, default=5*60, help="maximum episode time length") # 7分钟有些长
     args = parser.parse_args()
 
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
