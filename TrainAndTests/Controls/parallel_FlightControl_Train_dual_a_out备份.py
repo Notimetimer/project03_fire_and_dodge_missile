@@ -36,7 +36,7 @@ from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
-from TrainAndTests.Controls.FlightControl_Train_dual_a_out import track_env
+# from TrainAndTests.Controls.FlightControl_Train_dual_a_out import track_env
 
 # DEBUG 用，否则完全可以用调用代替重写
 class track_env():
@@ -494,7 +494,8 @@ pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
-action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+# action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])
 mission_name = 'FlightControl_parallel备份'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
