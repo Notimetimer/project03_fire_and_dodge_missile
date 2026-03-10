@@ -24,10 +24,10 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 # action_bounds 检查
 print(actor.action_bounds)
 
-from Algorithms.MLP_heads import ValueNet
-critic = ValueNet(state_dim, hidden_dim).to(device)
+# from Algorithms.MLP_heads import ValueNet
+# critic = ValueNet(state_dim, hidden_dim).to(device)
 
-agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
+# agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
 
 env = track_env(tacview_show=1)
 
@@ -42,14 +42,16 @@ if not actor_path:
     print(f"No actor checkpoint found in {log_dir}")
 else:
     sd = th.load(actor_path, map_location=device, weights_only=True)
-    agent.actor.load_state_dict(sd)
+    # agent.actor.load_state_dict(sd)
+    actor.load_state_dict(sd)
     print(f"Loaded actor for test from: {actor_path}")
 
 
 out_range_count = 0
 
 # action_bounds 检查
-print(agent.actor.action_bounds)
+# print(agent.actor.action_bounds)
+print(actor.action_bounds)
 
 t_bias = 0
 # 强化学习测试
@@ -75,7 +77,8 @@ while i_episode<=3:
     while not done:  # 每个训练回合
         # 1.执行动作得到环境反馈
         obs, obs_check = env.get_obs()
-        action, u, _, _ = agent.take_action(obs, explore=0)
+        # action, u, _, _ = agent.take_action(obs, explore=0)
+        action, u, _, _ = actor.get_action(obs, explore=0)
         rl_steps += 1
 
         # if abs(env.t % 0.5) <= env.dt_move:

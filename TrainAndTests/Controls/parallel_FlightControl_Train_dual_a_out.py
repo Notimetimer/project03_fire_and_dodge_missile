@@ -124,13 +124,22 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
         try: pipe.send({'error': tb})
         except: pass
 
+# 网络结构参数
+state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
+hidden_dim = [128, 128] # [128, 128]
+action_dim = 4 # test
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+# action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
+mission_name = 'FlightControl_parallel'
+
 if __name__=='__main__':
     # dof = 3
     # 超参数
     actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
     critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
     max_steps = 30 * 65e4
-    hidden_dim = [128, 128] # [128, 128]
+    
     gamma = 0.95
     lmbda = 0.95
     epochs = 5  # 10
@@ -138,13 +147,6 @@ if __name__=='__main__':
     dt_decide = 0.1 # 0.2 可以， 0.1很难 必须是0.02的整数倍
     pre_train_rate = 0 # 0.25 # 0.25
 
-    state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
-    action_dim = 4 # test
-    # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-    action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-    mission_name = 'FlightControl_parallel'
-
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10

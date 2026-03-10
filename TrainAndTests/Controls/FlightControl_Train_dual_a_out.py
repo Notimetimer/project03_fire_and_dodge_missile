@@ -349,6 +349,7 @@ class track_env():
         alt = ruav_state["ego_main"][1]
         sin_theta = ruav_state["ego_main"][2]
         cos_theta = ruav_state["ego_main"][3]
+        theta = np.arctan2(sin_theta, cos_theta)
         sin_phi = ruav_state["ego_main"][4]
         cos_phi = ruav_state["ego_main"][5]
         phi = atan2(sin_phi, cos_phi)
@@ -376,7 +377,7 @@ class track_env():
         reward_end = 0
         if self.fail:
             steps_wasted = (self.time_limit-self.t)/self.dt_report
-            reward_end -= 400 + steps_wasted * 5
+            reward_end -= 400 + steps_wasted * 0.1
 
         # 误差计算
         psi2req = delta_psi_v
@@ -411,20 +412,28 @@ class track_env():
         # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
         # #     print()
         
-        # r_angle += np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
-        r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
+        r_angle += np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
+        r_angle += - 0.05 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
         # r_angle += - 0.5 * abs(delta_psi_v)/pi
 
-        r_angle += - 1 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
+        # r_angle += - 1 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
 
         # 俯仰角惩罚
         desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
                         (height2req<0)*height2req/5000*pi/2
-        r_angle += -1.5 * abs(np.arcsin(sin_theta) - desired_theta)
+        r_angle += -1.5 * abs(theta - desired_theta)
         # 滚转角惩罚
-        r_angle += -0.05 * abs(phi) * 0.1
+        r_angle += -0.01 * abs(phi)/pi
+
+        if abs(theta)*180/pi <=70:
+            # 需要右拐的时候 左倾带来惩罚，需要左拐的时候右倾带来惩罚
+            sin_phi = np.sin(phi)  # (abs(sub_of_radian(phi,-pi/2))-abs(sub_of_radian(phi, pi/2)))/2
+
+            r_angle += 0.1 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
+                        (delta_psi < 0) * -max(sin_phi, 0)/pi)
+
         # 滚转角速度惩罚
-        r_angle += -0.01 * abs(p)
+        r_angle += -0.1 * abs(p)/pi  # -0.01 * abs(p)
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
