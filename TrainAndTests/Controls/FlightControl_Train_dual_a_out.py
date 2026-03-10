@@ -701,6 +701,11 @@ if __name__=='__main__':
             logger.add("train/4 critic_loss", agent.critic_loss, rl_steps)
             # 强化学习actor特殊项监控
             logger.add("train/5 entropy", agent.entropy_mean, rl_steps)
+
+            if hasattr(agent.actor.net, 'log_std_cont'):
+                current_std = torch.exp(agent.actor.net.log_std_cont).mean().item()
+                logger.add("train/5 std", current_std, rl_steps)
+
             logger.add("train/6 ratio", agent.ratio_mean, rl_steps)
             logger.add("train/7 steps", i_episode + 1, rl_steps)
             if hasattr(agent, 'dis_actor_loss') and agent.dis_actor_loss != 0:
