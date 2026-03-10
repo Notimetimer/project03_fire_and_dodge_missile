@@ -389,7 +389,7 @@ class track_env():
 
         # 高度误差惩罚
         r_alt = + np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
-        r_alt += - abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
+        r_alt += -0.3 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
 
         # r_alt = -abs(height2req)/5000 * ()
 
@@ -410,17 +410,19 @@ class track_env():
         #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
         #     print()
         
-        r_angle += np.sign(delta_psi) * psi_dot  # 转弯角速度的奖励
-        r_angle += -abs(psi_dot) * (1-abs(delta_psi)/pi)  # 遏制超调
+        r_angle += np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
+        r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
 
-        r_angle += -abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
+        r_angle += - 0.5 * abs(delta_psi_v)/pi  # 航向误差绝对值的惩罚还是要存在
 
         # 俯仰角惩罚
-        r_angle += -0.05 * abs(np.arcsin(sin_theta)) * 0.1
+        desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
+                        (height2req<0)*height2req/5000*pi/2
+        r_angle += -1.5 * abs(np.arcsin(sin_theta) - desired_theta)
         # 滚转角惩罚
-        r_angle += -0.05 * abs(phi) * 0.01
+        r_angle += -0.05 * abs(phi) * 0.1
         # 滚转角速度惩罚
-        r_angle += -0.01 * abs(p) * 0.1
+        r_angle += -0.01 * abs(p)
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
