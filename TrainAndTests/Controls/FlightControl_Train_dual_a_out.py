@@ -40,7 +40,7 @@ from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
-    def __init__(self, dt_move=0.02, tacview_show=0):
+    def __init__(self, dt_move=0.02, tacview_show=0, time_limit=3*60):
         super(track_env, self).__init__()
         self.RUAV_ids = None
         self.dt_report = None
@@ -55,7 +55,7 @@ class track_env():
                                'psi': 0
                                }
         
-        self.time_limit = 3*60 # 8*60 t_last
+        self.time_limit = time_limit
         self.min_alt = 1e3
         self.min_alt_safe = 3e3
 
@@ -535,14 +535,14 @@ log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + 
 if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
-    env = track_env(tacview_show=use_tacview)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
     parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
-    parser.add_argument("--R-cage", type=float, default=np.inf, help="")
     args = parser.parse_args()
+    
+    env = track_env(tacview_show=use_tacview, time_limit=args.max_episode_len)
 
     # 创建一个 dummy env 获取维度
-    dummy_env = track_env(args)
+    dummy_env = track_env(time_limit=args.max_episode_len)
 
     teacher_agent = UnifiedPolicyWrapper(dummy_env)
 

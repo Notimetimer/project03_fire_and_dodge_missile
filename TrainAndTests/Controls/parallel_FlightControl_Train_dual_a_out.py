@@ -80,7 +80,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
         np.random.seed(worker_seed)
         torch.manual_seed(worker_seed)
         
-        env = track_env(tacview_show=0)
+        env = track_env(tacview_show=0, time_limit=args.max_episode_len)
         # dt_decide 已作为参数传入
         
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
@@ -160,11 +160,10 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
     parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
-    parser.add_argument("--R-cage", type=float, default=np.inf, help="")
     args = parser.parse_args()
 
     # 创建一个 dummy env 获取维度
-    dummy_env = track_env(args)
+    dummy_env = track_env(time_limit=args.max_episode_len)
 
     teacher_agent = UnifiedPolicyWrapper(dummy_env)
 
