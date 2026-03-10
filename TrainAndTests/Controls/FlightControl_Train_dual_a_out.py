@@ -413,17 +413,17 @@ class track_env():
         # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
         # #     print()
         
-        r_angle += np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
-        r_angle += - 0.05 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
+        r_angle += 10 * np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
+        r_angle += - 10 * 0.05 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
         # r_angle += - 0.5 * abs(delta_psi_v)/pi
 
-        r_angle += - 0.5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
+        r_angle += - 10 * 0.5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
         # 0.1 有些弱了
 
         # 俯仰角惩罚
         desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
                         (height2req<0)*height2req/5000*pi/2
-        r_angle += -1.5 * abs(theta - desired_theta)
+        r_angle += -1.5 * abs(theta - desired_theta) * 2
 
         # 滚转角惩罚
         r_angle += -0.001 * abs(phi)/pi
@@ -433,7 +433,7 @@ class track_env():
             # 需要右拐的时候 左倾带来惩罚，需要左拐的时候右倾带来惩罚
             sin_phi = np.sin(phi)  # (abs(sub_of_radian(phi,-pi/2))-abs(sub_of_radian(phi, pi/2)))/2
 
-            r_angle += 0.2 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
+            r_angle += 10 * 0.2 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
                         (delta_psi < 0) * -max(sin_phi, 0)/pi)
                         # 0.1 小了？
 
@@ -464,7 +464,7 @@ class track_env():
             1 * reward_alive,
             1 * reward_end,
             1 * r_angle,
-            1 * r_alt,
+            2 * r_alt,
             1 * r_speed,
             1 * reward_alpha,
             1 * reward_beta,

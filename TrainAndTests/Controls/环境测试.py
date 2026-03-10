@@ -35,7 +35,7 @@ from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
-    def __init__(self, dt_move=0.02, tacview_show=0):
+    def __init__(self, dt_move=0.02, tacview_show=0, time_limit=3*60):
         super(track_env, self).__init__()
         self.RUAV_ids = None
         self.dt_report = None
@@ -50,7 +50,7 @@ class track_env():
                                'psi': 0
                                }
         
-        self.time_limit = 8*60 # 300 t_last
+        self.time_limit = time_limit
         self.min_alt = 1e3
         self.min_alt_safe = 3e3
 
@@ -92,6 +92,7 @@ class track_env():
         UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
         speed = UAV.speed
         UAV.psi = birth_state['psi']
+        UAV.last_psi_v = UAV.psi
         UAV.theta = 0 * pi / 180
         UAV.gamma = 0 * pi / 180
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
@@ -143,7 +144,7 @@ class track_env():
 
         theta_v = own.theta_v
         psi_v = own.psi_v
-        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
+        delta_psi_v = sub_of_radian(self.psi_req, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
         alpha_air = own.alpha_air
         beta_air = own.beta_air
@@ -305,6 +306,7 @@ class track_env():
         self.t += self.dt_report
         self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
+        self.RUAV.last_psi_v = self.RUAV.psi_v
         for _ in range(time_rate):
             # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
             # 第四个参数对应 throttle, rudder 参数单独传递
@@ -342,6 +344,7 @@ class track_env():
         alt = ruav_state["ego_main"][1]
         sin_theta = ruav_state["ego_main"][2]
         cos_theta = ruav_state["ego_main"][3]
+        theta = np.arctan2(sin_theta, cos_theta)
         sin_phi = ruav_state["ego_main"][4]
         cos_phi = ruav_state["ego_main"][5]
         phi = atan2(sin_phi, cos_phi)
@@ -489,7 +492,7 @@ gamma = 0.9
 lmbda = 0.9
 epochs = 10  # 10
 eps = 0.2
-dt_decide = 0.04 # 0.2 原先的0.2会不好飞，现在缩小dt_decide会不好训
+dt_decide = 0.2 # 0.2 原先的0.2会不好飞，现在缩小dt_decide会不好训
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
@@ -506,14 +509,14 @@ from datetime import datetime
 log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 if __name__=='__main__':
-    env = track_env(tacview_show=use_tacview)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
-    parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
-    parser.add_argument("--R-cage", type=float, default=np.inf, help="")
+    parser.add_argument("--max-episode-len", type=float, default=8*60, help="maximum episode time length")
     args = parser.parse_args()
+    
+    env = track_env(tacview_show=use_tacview, time_limit=args.max_episode_len)
 
     # 创建一个 dummy env 获取维度
-    dummy_env = track_env(args)
+    dummy_env = track_env(tacview_show=0, time_limit=args.max_episode_len)
 
     teacher_agent = UnifiedPolicyWrapper(dummy_env)
 
@@ -549,12 +552,23 @@ if __name__=='__main__':
             obs, obs_check = env.get_obs()
             done = False
 
+            psi_req_dot = 0
+            height_req_dot = 0
+
             while not done:  # 每个训练回合
-                # 舞龙
-                if round(env.t, 3) % 10 == 0:
-                    env.psi_req += np.random.uniform(-1, 1) *60*pi/180
-                    env.height_req += np.random.uniform(-1, 1) * 2000
-                    env.height_req = np.clip(env.height_req, 4000, 13000)
+                # # 舞龙
+                # if round(env.t, 3) % 10 == 0:
+                #     env.psi_req += np.random.uniform(-1, 1) *60*pi/180
+                #     env.height_req += np.random.uniform(-1, 1) * 2000
+                #     env.height_req = np.clip(env.height_req, 4000, 13000)
+                if 1: # round(env.t, 3) % 10 == 0:
+                    psi_req_dot += np.random.uniform(-1, 1) *0.1*pi/180
+                    psi_req_dot = np.clip(psi_req_dot, -8*pi/180, 8*pi/180)
+                    env.psi_req += psi_req_dot * dt_decide
+                    height_req_dot += np.random.uniform(-1, 1) * 20
+                    height_req_dot = np.clip(height_req_dot, -100, 100)
+                    env.height_req += height_req_dot * dt_decide
+                    env.height_req = np.clip(env.height_req, 4000, 12000)
 
                 # 1.执行动作得到环境反馈
                 obs, obs_check = env.get_obs()

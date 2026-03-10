@@ -144,7 +144,7 @@ if __name__=='__main__':
     lmbda = 0.95
     epochs = 5  # 10
     eps = 0.2
-    dt_decide = 0.06 # 0.2 可以， 0.1很难 必须是0.02的整数倍
+    dt_decide = 0.16 # 0.2 可以， 0.1很难 必须是0.02的整数倍
 
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
