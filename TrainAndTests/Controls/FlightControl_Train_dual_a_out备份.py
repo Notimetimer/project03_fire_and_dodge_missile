@@ -435,7 +435,7 @@ class track_env():
             data_to_send = ''
             loc_LLH = self.RUAV.lon, self.RUAV.lat, self.RUAV.alt
             if not self.RUAV.dead:
-                pilot = 'Fool'
+                pilot = 'Donkey'
                 color = 'Red'
                 data_to_send += (
                             f"#{send_t:.2f}\n"
@@ -454,7 +454,7 @@ class track_env():
                 data_to_send += (
                             f"#{send_t:.2f}\n"
                             f"{self.RUAV.id+1},T={(lon_T):.6f}|{(lat_T):.6f}|{delta_H:.6f},"
-                            f"Name=Target,Color=Blue\n"
+                            f"Name=Carrot,Color=Blue\n"
                         )
 
             else:
