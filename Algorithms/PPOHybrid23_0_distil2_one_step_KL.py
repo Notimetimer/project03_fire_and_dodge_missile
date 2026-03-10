@@ -79,7 +79,7 @@ class PolicyNetHybrid(torch.nn.Module):
             mu = self.fc_mu(shared_features)
             # 计算 std
             std = torch.exp(self.log_std_cont)
-            std = torch.clamp(std, min=min_std, max=max_std)
+            std = torch.clamp(std, min=min_std, max=max_std) # 在处在边界外时，其相对于输入变量的 导数（梯度）是 0
             # 扩展维度以匹配 batch
             if mu.dim() > 1:
                 std = std.unsqueeze(0).expand_as(mu)
@@ -505,7 +505,7 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.3):
+                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
