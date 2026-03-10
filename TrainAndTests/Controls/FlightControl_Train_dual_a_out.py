@@ -375,7 +375,8 @@ class track_env():
         # 失败惩罚
         reward_end = 0
         if self.fail:
-            reward_end -= 400
+            steps_wasted = (self.time_limit-self.t)/self.dt_report
+            reward_end -= 400 + steps_wasted * 5
 
         # 误差计算
         psi2req = delta_psi_v
@@ -401,7 +402,7 @@ class track_env():
 
         # 航向误差惩罚
         r_angle = 0  # 1 # DEBUG
-        # psi_dot = sub_of_radian(self.RUAV.psi_v, self.RUAV.last_psi_v)/self.dt_report  # 使用航迹角而非航向角，减少噪声
+        psi_dot = sub_of_radian(self.RUAV.psi_v, self.RUAV.last_psi_v)/self.dt_report  # 使用航迹角而非航向角，减少噪声
         # # # DEBUG
         # # if psi_dot < 0:
         # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
@@ -411,7 +412,7 @@ class track_env():
         # #     print()
         
         # r_angle += np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
-        # r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
+        r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
         # r_angle += - 0.5 * abs(delta_psi_v)/pi
 
         r_angle += - 1 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在

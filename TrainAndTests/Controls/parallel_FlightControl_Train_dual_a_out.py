@@ -41,33 +41,6 @@ from TrainAndTests.Controls.UPolicyWrapper import *
 
 from TrainAndTests.Controls.FlightControl_Train_dual_a_out import track_env
 
-
-# dof = 3
-# 超参数
-actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
-critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-max_steps = 30 * 65e4
-hidden_dim = [128, 128] # [128, 128]
-gamma = 0.95
-lmbda = 0.95
-epochs = 5  # 10
-eps = 0.2
-dt_decide = 0.2 # 0.2 可以， 0.1很难
-pre_train_rate = 0 # 0.25 # 0.25
-
-state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
-action_dim = 4 # test
-# action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel'
-
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-# --- 仅保存一次网络形状（meta json），如果已存在则跳过
-# log_dir = "./logs"
-from datetime import datetime
-log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-
 import torch.multiprocessing as mp
 import random
 import traceback
@@ -152,19 +125,42 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
         except: pass
 
 if __name__=='__main__':
+    # dof = 3
+    # 超参数
+    actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
+    critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
+    max_steps = 30 * 65e4
+    hidden_dim = [128, 128] # [128, 128]
+    gamma = 0.95
+    lmbda = 0.95
+    epochs = 5  # 10
+    eps = 0.2
+    dt_decide = 0.1 # 0.2 可以， 0.1很难
+    pre_train_rate = 0 # 0.25 # 0.25
+
+    state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
+    action_dim = 4 # test
+    # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+    action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
+    mission_name = 'FlightControl_parallel'
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+    parser = argparse.ArgumentParser("UAV flight control training parallel")
+    parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
+    parser.add_argument("--max-episode-len", type=float, default=7*60, help="maximum episode time length")
+    args = parser.parse_args()
+
+    # --- 仅保存一次网络形状（meta json），如果已存在则跳过
+    # log_dir = "./logs"
+    from datetime import datetime
+    log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     mp.set_start_method('spawn', force=True)
-    
-    # env = track_env(tacview_show=use_tacview)
-    parser = argparse.ArgumentParser("UAV flight control training parallel")
-    parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
-    parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
-    args = parser.parse_args()
-
     # 创建一个 dummy env 获取维度
     dummy_env = track_env(time_limit=args.max_episode_len)
-
     teacher_agent = UnifiedPolicyWrapper(dummy_env)
 
     action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
