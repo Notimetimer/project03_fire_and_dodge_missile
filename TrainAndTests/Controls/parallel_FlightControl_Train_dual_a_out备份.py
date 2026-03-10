@@ -395,7 +395,12 @@ class track_env():
                 (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
 
         # 速度奖励
-        r_speed = abs(self.v_req-speed) / (340)
+        # # 原·有问题的速度奖励
+        # r_speed = abs(self.v_req-speed) / (340)
+        
+        # 现·新速度奖励函数
+        speed2req = ruav_state["flight_cmd"][3]
+        r_speed = self.RUAV.Nx * np.sign(speed2req) * 0.5
 
         # 迎角过载奖励(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
@@ -585,9 +590,7 @@ if __name__=='__main__':
     
     # env = track_env(tacview_show=use_tacview)
     parser = argparse.ArgumentParser("UAV flight control training parallel")
-    parser.add_argument("--num_workers", type=int, default=2, help="number of parallel workers") # 10
-    parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
-    parser.add_argument("--R-cage", type=float, default=np.inf, help="")
+    parser.add_argument("--num_workers", type=int, default=10, help="number of parallel workers") # 10
     args = parser.parse_args()
 
     # 创建一个 dummy env 获取维度
