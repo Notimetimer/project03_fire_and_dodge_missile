@@ -135,7 +135,7 @@ if __name__=='__main__':
     lmbda = 0.95
     epochs = 5  # 10
     eps = 0.2
-    dt_decide = 0.1 # 0.2 可以， 0.1很难
+    dt_decide = 0.1 # 0.2 可以， 0.1很难 必须是0.02的整数倍
     pre_train_rate = 0 # 0.25 # 0.25
 
     state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
