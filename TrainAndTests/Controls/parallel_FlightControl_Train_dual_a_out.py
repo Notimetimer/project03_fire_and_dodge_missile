@@ -144,7 +144,7 @@ if __name__=='__main__':
     lmbda = 0.95
     epochs = 5  # 10
     eps = 0.2
-    dt_decide = 0.16 # 0.2 可以， 0.1很难 必须是0.02的整数倍
+    dt_decide = 0.2 # 0.2 可以， 0.1很难 必须是0.02的整数倍  0.16 也挺快
 
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
@@ -296,6 +296,10 @@ if __name__=='__main__':
             logger.add("train/7 steps", i_episode, rl_steps)
             if hasattr(agent, 'dis_actor_loss') and agent.dis_actor_loss != 0:
                 logger.add("train/8 distil_loss", agent.dis_actor_loss, rl_steps)
+
+            logger.add("train_plus/warm_up", warm_up, rl_steps)
+            logger.add("train_plus/distil_epochs", distil_epochs, rl_steps)
+            logger.add("train_plus/alpha_distill", alpha_distill, rl_steps)
 
     except KeyboardInterrupt:
         print("\n检测到 KeyboardInterrupt，正在关闭 logger ...")
