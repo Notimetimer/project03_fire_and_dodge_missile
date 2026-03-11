@@ -67,7 +67,7 @@ class Battle(object):
         
         # 加载训练好的模型
         self.control_env = track_env(tacview_show=0)
-        action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
+        action_dims_dict = {'cont': 4, 'cat': [], 'bern': 0}
         state_dim = 7+7+4
         hidden_dim = [128, 128]
         action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
