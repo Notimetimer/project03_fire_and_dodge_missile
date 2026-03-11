@@ -389,10 +389,9 @@ class track_env():
         # ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
         # r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
 
-        # 高度误差惩罚
-        r_alt = + np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
-        r_alt += -0.8 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
-        # 0.3 有些弱了
+        # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
+        r_alt = 0.8 * np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
+        r_alt += -0.06 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
 
         # r_alt = -abs(height2req)/5000 * ()
 
@@ -423,7 +422,7 @@ class track_env():
         # 俯仰角惩罚
         desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
                         (height2req<0)*height2req/5000*pi/2
-        r_angle += -1.5 * abs(theta - desired_theta) * 2
+        r_angle += -3 * abs(theta - desired_theta)
 
         # 滚转角惩罚
         r_angle += -0.001 * abs(phi)/pi

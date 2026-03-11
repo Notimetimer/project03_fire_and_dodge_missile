@@ -131,7 +131,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel'
+mission_name = 'FlightControl_parallel无蒸馏'
 
 if __name__=='__main__':
     # dof = 3
@@ -257,12 +257,12 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 1.0 * (1 - 0.8 * warm_up)
-            distil_epochs = max(int(10 * (1 - 0.9 * warm_up)), 1)
+            alpha_distill = 0.0 # 1.0 * (1 - 0.8 * warm_up)
+            distil_epochs = 0 # max(int(10 * (1 - 0.9 * warm_up)), 1)
 
             # 5. 模型更新
             agent.update(master_transition_dict, adv_normed=1, mini_batch_size=512)
-            agent.distil(master_transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
+            # agent.distil(master_transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
             
             # --- 保存模型 ---
             if (i_episode // args.num_workers) % 10 == 0:

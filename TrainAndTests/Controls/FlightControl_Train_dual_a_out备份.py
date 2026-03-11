@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import json
 import glob
 import argparse
+import time  # 确保引入 time 模块
+from datetime import datetime
 
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -36,11 +38,9 @@ from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
-# from TrainAndTests.Controls.FlightControl_Train_dual_a_out import track_env
 
-# DEBUG 用，否则完全可以用调用代替重写
 class track_env():
-    def __init__(self, dt_move=0.02, tacview_show=0):
+    def __init__(self, dt_move=0.02, tacview_show=0, time_limit=3*60):
         super(track_env, self).__init__()
         self.RUAV_ids = None
         self.dt_report = None
@@ -55,7 +55,7 @@ class track_env():
                                'psi': 0
                                }
         
-        self.time_limit = 8*60 # 300 t_last
+        self.time_limit = time_limit
         self.min_alt = 1e3
         self.min_alt_safe = 3e3
 
@@ -97,6 +97,7 @@ class track_env():
         UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
         speed = UAV.speed
         UAV.psi = birth_state['psi']
+        UAV.last_psi_v = UAV.psi
         UAV.theta = 0 * pi / 180
         UAV.gamma = 0 * pi / 180
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
@@ -308,7 +309,9 @@ class track_env():
         # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
         aileron, elevator, rudder, throttle = action['cont']
         self.t += self.dt_report
+        self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
+        self.RUAV.last_psi_v = self.RUAV.psi_v
         for _ in range(time_rate):
             # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
             # 第四个参数对应 throttle, rudder 参数单独传递
@@ -346,6 +349,7 @@ class track_env():
         alt = ruav_state["ego_main"][1]
         sin_theta = ruav_state["ego_main"][2]
         cos_theta = ruav_state["ego_main"][3]
+        theta = np.arctan2(sin_theta, cos_theta)
         sin_phi = ruav_state["ego_main"][4]
         cos_phi = ruav_state["ego_main"][5]
         phi = atan2(sin_phi, cos_phi)
@@ -353,56 +357,97 @@ class track_env():
         q = ruav_state["ego_control"][1]
         r = ruav_state["ego_control"][2]
         theta_v = ruav_state["ego_control"][3]
-        psi_v = ruav_state["ego_control"][4]
+        delta_psi_v = ruav_state["ego_control"][4]
         alpha_air = ruav_state["ego_control"][5]*180/pi
         beta_air = ruav_state["ego_control"][6]*180/pi
+        cos_delta_psi = ruav_state["flight_cmd"][0]
+        sin_delta_psi = ruav_state["flight_cmd"][1]
+        height2req = ruav_state["flight_cmd"][2]
+        speed2req = ruav_state["flight_cmd"][3]
         climb_rate = self.RUAV.vu
+
+        delta_psi = np.arctan2(sin_delta_psi, cos_delta_psi)
 
         self.get_done()
 
         # 存活奖励
-        reward_alive = 0 # 10
+        reward_alive = 0.01 # 10
 
         # 失败惩罚
         reward_end = 0
         if self.fail:
-            reward_end -= 100
+            steps_wasted = (self.time_limit-self.t)/self.dt_report
+            reward_end -= 400 + steps_wasted * 0.1
 
-        height2req = np.clip(self.height_req-alt, -5000, 5000)
-        theta_v_req = height2req/5000*pi/2
+        # 误差计算
+        psi2req = delta_psi_v
+
+        # 和奖励无关，方便画图
+        self.theta_v_req = height2req/5000*pi/2
         
-        self.theta_v_req = theta_v_req
-        
-        # 航向奖励（误差惩罚）
-        # psi2req = sub_of_radian(self.psi_req, psi_v)
-        # reward_psi2req = 1-abs(psi2req)/pi
+        # L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
+        # ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
+        # r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
 
-        L_ = np.array([cos(theta_v_req)*cos(self.psi_req), sin(theta_v_req), cos(theta_v_req)*sin(self.psi_req)])
-        ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
-        
-        # 角度奖励
-        r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
-        r_angle -= 0.05 * abs(phi) # 滚转角惩罚
+        # 高度误差惩罚
+        r_alt = + np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
+        r_alt += -0.8 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
+        # 0.3 有些弱了
 
-        # 高度奖励
-        pre_alt_opt = self.height_req
-        alt_opt = np.clip(pre_alt_opt, self.min_alt_safe, self.max_alt_safe)
+        # r_alt = -abs(height2req)/5000 * ()
 
-        r_alt = (alt <= alt_opt) * (alt - self.min_alt) / (alt_opt - self.min_alt) + \
-                (alt > alt_opt) * (1 - (alt - alt_opt) / (self.max_alt - alt_opt))
+        # r_alt += np.clip(self.RUAV.vu / 100, -1, 1) * height2req * np.sign(height2req)
+
         # 高度限制奖励/惩罚
-        r_alt += (alt <= self.min_alt_safe + 1e3) * np.clip(self.RUAV.vu / 100, -1, 1) + \
+        r_alt += (alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
                 (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
 
-        # 速度奖励
-        # # 原·有问题的速度奖励
-        # r_speed = abs(self.v_req-speed) / (340)
+        # 航向误差惩罚
+        r_angle = 0  # 1 # DEBUG
+        psi_dot = sub_of_radian(self.RUAV.psi_v, self.RUAV.last_psi_v)/self.dt_report  # 使用航迹角而非航向角，减少噪声
+        # # # DEBUG
+        # # if psi_dot < 0:
+        # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
+        # #     print()
+        # # if psi_dot > 0:
+        # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
+        # #     print()
         
-        # 现·新速度奖励函数
-        speed2req = ruav_state["flight_cmd"][3]/340
+        r_angle += 10 * np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
+        r_angle += - 10 * 0.05 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
+        # r_angle += - 0.5 * abs(delta_psi_v)/pi
+
+        r_angle += - 10 * 0.5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
+        # 0.1 有些弱了
+
+        # 俯仰角惩罚
+        desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
+                        (height2req<0)*height2req/5000*pi/2
+        r_angle += -1.5 * abs(theta - desired_theta) * 2
+
+        # 滚转角惩罚
+        r_angle += -0.001 * abs(phi)/pi
+        # 0.01 有些强了
+
+        if abs(theta)*180/pi <= 70:
+            # 需要右拐的时候 左倾带来惩罚，需要左拐的时候右倾带来惩罚
+            sin_phi = np.sin(phi)  # (abs(sub_of_radian(phi,-pi/2))-abs(sub_of_radian(phi, pi/2)))/2
+
+            r_angle += 10 * 0.2 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
+                        (delta_psi < 0) * -max(sin_phi, 0)/pi)
+                        # 0.1 小了？
+
+        # 滚转角速度惩罚
+        if abs(psi2req) < 20 * pi/180:
+            r_angle += -0.4 * abs(p)/pi
+        else:
+            r_angle += -0.01 * abs(p)/pi # 范围内0.01太弱了
+
+        # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
+        # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
         r_speed = self.RUAV.Nx * np.sign(speed2req) * 0.5
 
-        # 迎角过载奖励(惩罚负迎角和过大的正迎角)
+        # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.5
         if alpha_air >= 15:
             reward_alpha -= alpha_air/15
@@ -412,13 +457,13 @@ class track_env():
         if ny<=-1 or ny > 9:
             reward_alpha -= 2
             
-        # 侧滑角奖励（尽量少侧滑）
-        reward_beta = 0.5-abs(beta_air/5)
+        # 侧滑角惩罚（尽量少侧滑）
+        reward_beta = - abs(beta_air/5)
 
         reward = np.sum([
             1 * reward_alive,
             1 * reward_end,
-            2 * r_angle,
+            1 * r_angle,
             2 * r_alt,
             1 * r_speed,
             1 * reward_alpha,
@@ -483,11 +528,11 @@ class track_env():
 # 超参数
 actor_lr = 1e-4 # 1e-4 1e-6  # 2e-5 警告，学习率过大会出现"nan"
 critic_lr = actor_lr * 5  # *10 为什么critic学习率大于一都不会梯度爆炸？ 为什么设置成1e-5 也会爆炸？ chatgpt说要actor的2~10倍
-max_steps = 10 * 65e4
-hidden_dim = [128, 128] # [64, 64]
+max_steps = 30 * 65e4
+hidden_dim = [128, 128] # [128, 128]
 gamma = 0.9
 lmbda = 0.9
-epochs = 10  # 10
+epochs = 5  # 10
 eps = 0.2
 dt_decide = 0.2 # 0.2
 pre_train_rate = 0 # 0.25 # 0.25
@@ -495,8 +540,8 @@ pre_train_rate = 0 # 0.25 # 0.25
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 action_dim = 4 # test
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])
-mission_name = 'FlightControl备份'
+action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
+mission_name = 'FlightControl'
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -506,12 +551,16 @@ from datetime import datetime
 log_dir = os.path.join(project_root, "./logs/control", mission_name + "-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 if __name__=='__main__':
-    env = track_env(tacview_show=use_tacview)
+    start_time = datetime.now()
+    print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     parser = argparse.ArgumentParser("UAV swarm confrontation")
+    parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
     args = parser.parse_args()
+    
+    env = track_env(tacview_show=use_tacview, time_limit=args.max_episode_len)
 
     # 创建一个 dummy env 获取维度
-    dummy_env = track_env(args)
+    dummy_env = track_env(time_limit=args.max_episode_len)
 
     teacher_agent = UnifiedPolicyWrapper(dummy_env)
 
@@ -549,20 +598,27 @@ if __name__=='__main__':
         # 强化学习训练
         rl_steps = 0
         i_episode = 0
+        transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
         while rl_steps < max_steps:
             i_episode += 1
             episode_return = 0
-            transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             
             init_height = np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
 
             birth_state={'position': np.array([0.0, init_height, 0.0]),
                                 'psi': np.random.uniform(-pi/6, pi/6)
                                 }
+            warm_up = np.clip(rl_steps/30e4, 0, 1) # 预热，0.3 的步数后开始动真格
             
-            height_req = np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-            psi_req = np.random.uniform(-pi, pi) * np.clip(i_episode/1000, 0, 1)
+            height_req = np.clip(init_height + \
+                    warm_up * np.random.uniform(-1, 1)*5000, \
+                        3000, 13000)
+
+            psi_req = np.random.uniform(-pi, pi) * warm_up # 预热，0.3以后真正开始动真格
             v_req = np.random.uniform(0.8, 2.5)*340
+
+            alpha_distill = 1.0 * (1- 0.9 * warm_up)
+            distil_epochs = max(int(10 * (1 - 0.9 * warm_up)), 1)
 
             env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
 
@@ -609,7 +665,7 @@ if __name__=='__main__':
                 transition_dict['dones'].append(done)
                 transition_dict['action_bounds'].append(action_bound)
                 obs = next_obs
-                episode_return += reward * env.dt_report # 奖励按秒分析
+                episode_return += reward
                 env.render(t_bias)
 
             env.clear_render(t_bias)
@@ -618,8 +674,11 @@ if __name__=='__main__':
             if env.fail==1:
                 out_range_count+=1
             return_list.append(episode_return)
-            agent.update(transition_dict)
-            agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=1, alpha=1.0)
+
+            if i_episode % 10 == 0:
+                agent.update(transition_dict, adv_normed=1, mini_batch_size=512)
+                agent.distil(transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=1.0) # alpha=alpha_distill
+                transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
 
             # --- 保存模型（强化学习阶段：actor_rein + i_episode，critic 每次覆盖）
             if i_episode % 10 == 1:
@@ -668,4 +727,9 @@ if __name__=='__main__':
 
 
         print(f"日志已保存到：{logger.run_dir}")
+
+        end_time = datetime.now()
+        print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
+        elapsed_hours = (end_time - start_time).total_seconds() / 3600.0
+        print(f"Simulation duration: {elapsed_hours:.4f} hours")
 
