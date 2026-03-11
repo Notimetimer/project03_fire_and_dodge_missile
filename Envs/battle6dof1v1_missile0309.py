@@ -73,9 +73,10 @@ class Battle(object):
         action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
         policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
         self.control_actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
-        pre_log_dir = os.path.join(project_root, "logs/control")
-        log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
-        actor_path = load_actor_from_log(log_dir, number=None)
+        actor_path = os.path.join(project_root, "Controller/NNController", "01.pt")
+        # pre_log_dir = os.path.join(project_root, "logs/control")
+        # log_dir = os.path.join(pre_log_dir, "FlightControl_parallel-run-20260310-225856")
+        # actor_path = load_actor_from_log(log_dir, number=None)
         sd = th.load(actor_path, map_location=device, weights_only=True)
         self.control_actor.load_state_dict(sd)
 
@@ -336,6 +337,8 @@ class Battle(object):
                 target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
                 delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
+
+                UAV.target_heading = sub_of_radian(UAV.psi + delta_heading, 0)
                 # if len(action)==4:
                 #     rudder = action[3]
                 # else:
@@ -388,11 +391,36 @@ class Battle(object):
                     # p2p = False # 只能用PID来按回
 
                 # 在这里插入强化学习的控制器
-                # 从 UAV.current_state 转为控制器可以接受的输入
+                # 实时从 UAV 对象读取物理量，与训练环境 get_state() 完全对齐
+                # （不能使用 UAV.current_state 字典缓存——它在整个内层子步循环中不更新，是陈旧的旧状态）
+                _ego_main_realtime = np.array([
+                    float(UAV.speed),          # 0 本机速度 m/s
+                    float(UAV.alt),            # 1 本机高度 m
+                    float(sin(UAV.theta)),     # 2
+                    float(cos(UAV.theta)),     # 3
+                    float(sin(UAV.phi)),       # 4
+                    float(cos(UAV.phi)),       # 5
+                    0,                         # 6 弹药量（控制器训练时始终置0）
+                ])
+                _delta_psi_v = sub_of_radian(UAV.target_heading, UAV.psi_v)
+                _ego_control_realtime = np.array([
+                    float(UAV.p),             # 0 p rad/s
+                    float(UAV.q),             # 1 q rad/s
+                    float(UAV.r),             # 2 r rad/s
+                    float(UAV.theta_v),       # 3
+                    float(_delta_psi_v),      # 4 目标航向与速度方向差角
+                    float(UAV.alpha_air),     # 5 rad
+                    float(UAV.beta_air),      # 6 rad
+                ])
                 control_input_state = {
-                    "ego_main": UAV.current_state["ego_main"],
-                    "ego_control": UAV.current_state["ego_control"],
-                    "flight_cmd": np.array([cos(delta_heading), sin(delta_heading), target_height, target_speed - UAV.speed])
+                    "ego_main": _ego_main_realtime,
+                    "ego_control": _ego_control_realtime,
+                    "flight_cmd": np.array([
+                        cos(delta_heading),
+                        sin(delta_heading),
+                        np.clip(target_height, -5000, 5000),   # 与训练环境 clip 对齐
+                        target_speed - UAV.speed,
+                    ])
                 }
                 # 拼接完成后再从control_input_state调用self.control_env.scale_state 做缩放
                 scaled_control_input_state = self.control_env.scale_state(control_input_state)

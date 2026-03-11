@@ -50,9 +50,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     # # 2. 根据目标相对高度选择基础进攻机动
     
-    if abs(delta_theta) < pi/6:
+    if abs(delta_theta) < 30:
         base_offensive_action = 0  # 平飞追踪
-    elif delta_theta >= pi/6:
+    elif delta_theta >= 30:
         base_offensive_action = 1  # 爬升追踪
     else: # delta_theta < -pi/6
         base_offensive_action = 3  # 下降追踪
@@ -135,6 +135,24 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     return action_number, fire_missile_affirmative
 
+"""
+action_optionsLR = {
+                    0: "track",
+                    1: "30track",
+                    2: "60track",
+                    3: "-30track",
+                    4: "-60track",
+                    5: "L60crank",
+                    6: "R60crank",
+                    7: "snake",
+                    8: "splitS",
+                    9: "3",
+                    10: "9",
+                    11: "fastTurn",
+                    12: "-30turn",
+                    13: "-60turn",
+                }
+"""
 
 if __name__=='__main__':
     print("\n根目录为：", project_root, "\n")
@@ -253,14 +271,14 @@ if __name__=='__main__':
 
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(env.obs2obs_check(r_obs))  # r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, 5) # i_episode
+                    r_action_label, r_fire = basic_rules(r_state_check, 4) # i_episode 或 5 
                     last_r_action_label = r_action_label
                     if r_fire:
                         launch_missile_immediately(env, 'r')
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(env.obs2obs_check(b_obs))  # b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, 2)
+                    b_action_label, b_fire = basic_rules(b_state_check, 4)
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')

@@ -50,7 +50,7 @@ else:
 # 舞龙测试
 dragon_dance = 1
 
-dt_decide = 0.2
+dt_decide = 0.2 # 0.05
 
 out_range_count = 0
 
@@ -58,7 +58,7 @@ out_range_count = 0
 # print(agent.actor.action_bounds)
 print(actor.action_bounds)
 
-env = track_env(tacview_show=1, time_limit=8*60)
+env = track_env(dt_move=0.025, tacview_show=1, time_limit=8*60)
 
 t_bias = 0
 # 强化学习测试
@@ -68,13 +68,13 @@ while i_episode<=6:
     i_episode += 1
     episode_return = 0
     
-    init_height = np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
+    init_height = 10000 # np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
 
     birth_state={'position': np.array([0.0, init_height, 0.0]),
                         'psi': np.random.uniform(-pi/6, pi/6)
                         }
-    height_req = np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-    psi_req = np.random.uniform(-pi, pi)
+    height_req = np.clip(init_height-5000, 4000, 12000) # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
+    psi_req = sub_of_radian(birth_state['psi'] + pi + np.random.uniform(-pi/6, pi/6), 0) # np.random.uniform(-pi, pi)
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
     env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide) # 0.04
@@ -88,12 +88,22 @@ while i_episode<=6:
         # 舞龙测试
         if dragon_dance:
             psi_req_dot += np.random.uniform(-1, 1) *0.2*pi/180
-            psi_req_dot = np.clip(psi_req_dot, -10*pi/180, 10*pi/180)
+            # psi_req_dot = np.clip(psi_req_dot, -10*pi/180, 10*pi/180)
+            if abs(psi_req_dot)>=10*pi/180:
+                psi_req_dot = 0
             env.psi_req += psi_req_dot * dt_decide
             height_req_dot += np.random.uniform(-1, 1) * 20
             height_req_dot = np.clip(height_req_dot, -100, 100)
             env.height_req += height_req_dot * dt_decide
             env.height_req = np.clip(env.height_req, 4000, 12000)
+            
+        # else:
+        #     if round(env.t, 3) % 20 == 0:
+        #         env.psi_req += pi
+        #         env.psi_req = sub_of_radian(env.psi_req, 0)
+        #         env.height_req -= 3000
+        #         env.height_req = np.clip(env.height_req, 4000, 12000)
+                
 
         # 1.执行动作得到环境反馈
         obs, obs_check = env.get_obs()

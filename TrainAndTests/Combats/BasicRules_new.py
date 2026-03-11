@@ -50,9 +50,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     # # 2. 根据目标相对高度选择基础进攻机动
     
-    if abs(delta_theta) < pi/6:
+    if abs(delta_theta) < pi/6: # 30: # pi/6:
         base_offensive_action = 0  # 平飞追踪
-    elif delta_theta >= pi/6:
+    elif delta_theta >= pi/6: # 30: # pi/6:
         base_offensive_action = 1  # 爬升追踪
     else: # delta_theta < -pi/6
         base_offensive_action = 3  # 下降追踪
