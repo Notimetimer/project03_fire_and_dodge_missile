@@ -74,7 +74,7 @@ while i_episode<=6:
                         'psi': np.random.uniform(-pi/6, pi/6)
                         }
     height_req = np.clip(init_height-3000, 3000, 12000) # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-    psi_req = sub_of_radian(birth_state['psi'] + pi + np.random.uniform(-pi/6, pi/6), 0) # np.random.uniform(-pi, pi)
+    psi_req = sub_of_radian(birth_state['psi'] + pi + np.random.choice([-0.1, 0.1]), 0) # + np.random.uniform(-pi/6, pi/6), 0) # np.random.uniform(-pi, pi)
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
     env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide) # 0.04
