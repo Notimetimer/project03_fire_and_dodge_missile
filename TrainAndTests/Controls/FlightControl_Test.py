@@ -29,7 +29,7 @@ print(actor.action_bounds)
 
 # agent = PPOHybrid(actor, critic, actor_lr, critic_lr, lmbda, epochs, eps, gamma, device)
 
-env = track_env(tacview_show=1)
+
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
@@ -58,6 +58,8 @@ out_range_count = 0
 # print(agent.actor.action_bounds)
 print(actor.action_bounds)
 
+env = track_env(tacview_show=1, time_limit=8*60)
+
 t_bias = 0
 # 强化学习测试
 rl_steps = 0
@@ -85,8 +87,8 @@ while i_episode<=6:
     while not done:  # 每个训练回合
         # 舞龙测试
         if dragon_dance:
-            psi_req_dot += np.random.uniform(-1, 1) *0.1*pi/180
-            psi_req_dot = np.clip(psi_req_dot, -8*pi/180, 8*pi/180)
+            psi_req_dot += np.random.uniform(-1, 1) *0.2*pi/180
+            psi_req_dot = np.clip(psi_req_dot, -10*pi/180, 10*pi/180)
             env.psi_req += psi_req_dot * dt_decide
             height_req_dot += np.random.uniform(-1, 1) * 20
             height_req_dot = np.clip(height_req_dot, -100, 100)
