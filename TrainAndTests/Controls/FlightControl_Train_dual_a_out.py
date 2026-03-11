@@ -437,7 +437,8 @@ class track_env():
                         # 0.1 小了？
 
         # 滚转角速度惩罚
-        if abs(psi2req) < 20 * pi/180:
+        if abs(psi2req) < 20 * pi/180 \
+            or abs(theta)*180/pi > 45:  # 大俯仰机动应该降低滚转角速度
             r_angle += -0.4 * abs(p)/pi
         else:
             r_angle += -0.01 * abs(p)/pi # 范围内0.01太弱了

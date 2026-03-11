@@ -33,7 +33,7 @@ print(actor.action_bounds)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = 'FlightControl_parallel'
+mission_name = 'FlightControl_parallel无蒸馏'
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
@@ -48,7 +48,7 @@ else:
     print(f"Loaded actor for test from: {actor_path}")
 
 # 舞龙测试
-dragon_dance = 1
+dragon_dance = 0
 
 dt_decide = 0.2 # 0.05
 
@@ -68,12 +68,12 @@ while i_episode<=6:
     i_episode += 1
     episode_return = 0
     
-    init_height = 10000 # np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
+    init_height = 6000 # np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
 
     birth_state={'position': np.array([0.0, init_height, 0.0]),
                         'psi': np.random.uniform(-pi/6, pi/6)
                         }
-    height_req = np.clip(init_height-5000, 4000, 12000) # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
+    height_req = np.clip(init_height-3000, 3000, 12000) # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
     psi_req = sub_of_radian(birth_state['psi'] + pi + np.random.uniform(-pi/6, pi/6), 0) # np.random.uniform(-pi, pi)
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
