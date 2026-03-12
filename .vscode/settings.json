@@ -8,6 +8,7 @@
     "http.proxySupport": "override",
     "http.noProxy": [],
     "cursor.general.disableHttp2": true,
+    "git.ignoreLimitWarning": true,
     // "python-envs.defaultEnvManager": "ms-python.python:conda",
     // "python-envs.defaultPackageManager": "ms-python.python:conda",
 }

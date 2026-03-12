@@ -46,7 +46,8 @@ import random
 import traceback
 import time
 
-def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, device_worker, seed, dt_decide, dt_move=0.02):
+def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, \
+    device_worker, seed, dt_decide, dt_move=0.02, k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}):
     try:
         worker_seed = seed + rank * 1000
         random.seed(worker_seed)
@@ -65,7 +66,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
             critic=local_dummy_critic,
             actor_lr=0, critic_lr=0,
             lmbda=0, eps=0, gamma=0, epochs=0,
-            device=device_worker
+            device=device_worker,
+            k_entropy=k_entropy,
         )
         
         while True:
@@ -131,7 +133,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel无课程无蒸馏'
+mission_name = 'FlightControl_parallel无课程无蒸馏删高度误差惩罚'
 
 if __name__=='__main__':
     # dof = 3
@@ -146,6 +148,7 @@ if __name__=='__main__':
     eps = 0.2
     dt_decide = 0.2 # 0.2 可以， 0.1很难 必须是0.02的整数倍  0.16 也挺快
     dt_move = 0.05
+    k_entropy={'cont':0.08, 'cat':0.0, 'bern':0.0} # 0.01
 
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
@@ -200,7 +203,8 @@ if __name__=='__main__':
         parent_conn, child_conn = mp.Pipe()
         p = mp.Process(target=worker_process, args=(
             i, child_conn, args, state_dim, hidden_dim, 
-            action_dims_dict, action_bound, worker_device, seed, dt_decide, dt_move
+            action_dims_dict, action_bound, worker_device, 
+            seed, dt_decide, dt_move, k_entropy
         ))
         p.start()
         workers.append(p)

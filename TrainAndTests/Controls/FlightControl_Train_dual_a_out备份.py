@@ -385,10 +385,6 @@ class track_env():
         # 和奖励无关，方便画图
         self.theta_v_req = height2req/5000*pi/2
         
-        # L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
-        # ATA = np.arccos(np.dot(L_, self.RUAV.point_) / (1*1 + 0.0001))  # 防止计算误差导致分子>分母
-        # r_angle = 1 - ATA / (pi / 3)  # 超出雷达范围就惩罚狠一点
-
         # 高度误差惩罚
         r_alt = + np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
         r_alt += -0.8 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
@@ -405,20 +401,11 @@ class track_env():
         # 航向误差惩罚
         r_angle = 0  # 1 # DEBUG
         psi_dot = sub_of_radian(self.RUAV.psi_v, self.RUAV.last_psi_v)/self.dt_report  # 使用航迹角而非航向角，减少噪声
-        # # # DEBUG
-        # # if psi_dot < 0:
-        # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
-        # #     print()
-        # # if psi_dot > 0:
-        # #     print("psi_dot", psi_dot, "delta_psi", delta_psi)
-        # #     print()
         
         r_angle += 10 * np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
-        r_angle += - 10 * 0.05 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
-        # r_angle += - 0.5 * abs(delta_psi_v)/pi
-
-        r_angle += - 10 * 0.5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
-        # 0.1 有些弱了
+        r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
+        r_angle += - 5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
+        
 
         # 俯仰角惩罚
         desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
@@ -433,12 +420,13 @@ class track_env():
             # 需要右拐的时候 左倾带来惩罚，需要左拐的时候右倾带来惩罚
             sin_phi = np.sin(phi)  # (abs(sub_of_radian(phi,-pi/2))-abs(sub_of_radian(phi, pi/2)))/2
 
-            r_angle += 10 * 0.2 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
+            r_angle += 2 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
                         (delta_psi < 0) * -max(sin_phi, 0)/pi)
-                        # 0.1 小了？
+
 
         # 滚转角速度惩罚
-        if abs(psi2req) < 20 * pi/180:
+        if abs(psi2req) < 20 * pi/180 \
+            or abs(theta)*180/pi > 45:  # 大俯仰机动应该降低滚转角速度
             r_angle += -0.4 * abs(p)/pi
         else:
             r_angle += -0.01 * abs(p)/pi # 范围内0.01太弱了
@@ -456,7 +444,7 @@ class track_env():
         ny = self.RUAV.Ny
         if ny<=-1 or ny > 9:
             reward_alpha -= 2
-            
+        
         # 侧滑角惩罚（尽量少侧滑）
         reward_beta = - abs(beta_air/5)
 
