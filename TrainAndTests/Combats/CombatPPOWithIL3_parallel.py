@@ -1189,7 +1189,7 @@ def run_MLP_simulation(
                         transition_dict,
                         il_data,
                         init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                        eta = np.clip(1 - total_steps/3e6, 0.01, 1),
+                        eta = np.clip(1 - total_steps/5e6, 0.01, 1),  # 3e6
                         adv_normed=True,
                         label_smoothing=label_smoothing_mixed,
                         alpha=dynamic_alpha_il,
