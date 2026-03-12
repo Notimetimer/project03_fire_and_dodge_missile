@@ -1120,11 +1120,19 @@ class PPOHybrid:
             print("Warning: distil called but no continuous action space is defined.")
             return
 
+        # 提取 dones 用于同步重置教师 PID 状态
+        if 'dones' in transition_dict:
+            dones_np = np.array(transition_dict['dones'])
+        else:
+            dones_np = np.zeros(num_samples)
+
         # 初始化目标数组
         cont_dim = self.actor.action_dims['cont']
         target_mu_cont_np = np.zeros((num_samples, cont_dim), dtype=np.float32)
 
         # 3. 遍历样本获取 Teacher (PID) 的动作
+        # 注意：PID 是有状态的，必须在每回合开始前 reset
+        teacher_agent.reset() 
         for i in range(num_samples):
             s_obs = teacher_inputs_np[i]       
             
@@ -1133,6 +1141,10 @@ class PPOHybrid:
             
             if 'cont' in t_out and t_out['cont'] is not None:
                 target_mu_cont_np[i] = t_out['cont']
+            
+            # [修复] 如果该步是回合结束，重置教师状态，防止积分项污染下一个回合
+            if dones_np[i]:
+                teacher_agent.reset()
 
         # 4. 将收集到的动作目标堆叠回 Tensor
         target_mu_cont = to_tensor(target_mu_cont_np, torch.float)

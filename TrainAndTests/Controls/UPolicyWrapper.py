@@ -13,7 +13,7 @@ class UnifiedPolicyWrapper:
     输出格式统一为: {'cont': array([4维概率分布])}
     """
     
-    def __init__(self, env, agent_info=None, critic_info=None, epsilon=0.3, device=None):
+    def __init__(self, env, agent_info=None, critic_info=None, epsilon=0.3, device=None, dt_decide=0.02):
         """
         Args:
             env: 环境实例，用于获取状态缩放等信息
@@ -28,7 +28,7 @@ class UnifiedPolicyWrapper:
         self.epsilon = epsilon
         self.device = device if device is not None else torch.device("cpu")
         self.PIDController = F16PIDController()
-        self.dt = 0.02
+        self.dt = dt_decide
     
     def get_action(self, obs, weights=1, explore=None):
 

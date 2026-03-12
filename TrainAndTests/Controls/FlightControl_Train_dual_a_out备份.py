@@ -535,6 +535,8 @@ lmbda = 0.9
 epochs = 5  # 10
 eps = 0.2
 dt_decide = 0.2 # 0.2
+dt_move=0.02
+
 pre_train_rate = 0 # 0.25 # 0.25
 
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
@@ -557,12 +559,12 @@ if __name__=='__main__':
     parser.add_argument("--max-episode-len", type=float, default=3*60, help="maximum episode time length")
     args = parser.parse_args()
     
-    env = track_env(tacview_show=use_tacview, time_limit=args.max_episode_len)
+    env = track_env(dt_move=dt_move, tacview_show=use_tacview, time_limit=args.max_episode_len)
 
     # 创建一个 dummy env 获取维度
-    dummy_env = track_env(time_limit=args.max_episode_len)
+    dummy_env = track_env(dt_move=dt_move, time_limit=args.max_episode_len)
 
-    teacher_agent = UnifiedPolicyWrapper(dummy_env)
+    teacher_agent = UnifiedPolicyWrapper(dummy_env, dt_decide=dt_decide)
 
     action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
     policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
