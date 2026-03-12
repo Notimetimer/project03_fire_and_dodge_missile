@@ -16,6 +16,8 @@ action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
 
 from Utilities.LocateDirAndAgents import *
 
+# hidden_dim = [64,64]
+
 # 测试训练效果
 action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
 policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
@@ -50,7 +52,7 @@ else:
 # 舞龙测试
 dragon_dance = 0
 
-dt_decide = 0.2 # 0.05
+dt_decide = 0.1 # 0.05 0.2
 
 out_range_count = 0
 
@@ -58,7 +60,7 @@ out_range_count = 0
 # print(agent.actor.action_bounds)
 print(actor.action_bounds)
 
-env = track_env(dt_move=0.025, tacview_show=1, time_limit=8*60)
+env = track_env(dt_move=0.02, tacview_show=1, time_limit=8*60)
 
 t_bias = 0
 # 强化学习测试
@@ -74,7 +76,7 @@ while i_episode<=6:
                         'psi': np.random.uniform(-pi/6, pi/6)
                         }
     height_req = np.clip(init_height-3000, 3000, 12000) # np.clip(init_height + np.random.choice([1,-1])*(np.random.uniform(0, 1)**2)*5000 , 3000, 13000)
-    psi_req = sub_of_radian(birth_state['psi'] + pi + np.random.choice([-0.1, 0.1]), 0) # + np.random.uniform(-pi/6, pi/6), 0) # np.random.uniform(-pi, pi)
+    psi_req = sub_of_radian(birth_state['psi'] + pi + (2*(i_episode%2)-1)*1*pi/180) # + np.random.uniform(-pi/6, pi/6), 0) # np.random.uniform(-pi, pi)
     v_req = 340 # np.random.uniform(0.8, 2.5)*340
 
     env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide) # 0.04
