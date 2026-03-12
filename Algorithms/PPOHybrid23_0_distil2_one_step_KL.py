@@ -1093,6 +1093,10 @@ class PPOHybrid:
         # 如果没有提供教师代理，或者教师代理为 None，则直接跳过蒸馏
         if teacher_agent is None:
             return
+        
+        # epochs 或者 alpha 为0，那就跳过蒸馏减少计算开销
+        if alpha == 0.0 or epochs == 0:
+            return
 
         # 辅助函数：转 Tensor
         def to_tensor(x, dtype):
