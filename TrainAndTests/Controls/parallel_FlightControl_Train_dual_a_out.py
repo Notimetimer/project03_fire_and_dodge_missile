@@ -258,8 +258,8 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 10 # 原先是从1开始衰减 1.0 * (1 - 0.8 * warm_up)
-            distil_epochs = max(int(10 * (1 - 1.0 * warm_up)), 0)
+            alpha_distill = 5.0 * (1 - 1.0 * warm_up)  # 0.8 * warm_up
+            distil_epochs = 2 # max(int(3 * (1 - 1.0 * warm_up)), 0)
 
             # 5. 模型更新
             agent.update(master_transition_dict, adv_normed=1, mini_batch_size=512)
