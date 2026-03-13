@@ -35,7 +35,7 @@ print(actor.action_bounds)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = 'FlightControl_parallel无蒸馏'
+mission_name = 'FlightControl_parallel无课程无蒸馏删高度误差惩罚'
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
@@ -50,9 +50,9 @@ else:
     print(f"Loaded actor for test from: {actor_path}")
 
 # 舞龙测试
-dragon_dance = 0
+dragon_dance = 1
 
-dt_decide = 0.1 # 0.05 0.2
+dt_decide = 0.2 # 0.05 0.2
 
 out_range_count = 0
 
@@ -60,7 +60,7 @@ out_range_count = 0
 # print(agent.actor.action_bounds)
 print(actor.action_bounds)
 
-env = track_env(dt_move=0.02, tacview_show=1, time_limit=8*60)
+env = track_env(dt_move=0.05, tacview_show=1, time_limit=8*60)
 
 t_bias = 0
 # 强化学习测试
