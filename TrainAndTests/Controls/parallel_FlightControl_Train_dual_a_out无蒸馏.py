@@ -97,6 +97,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 episode_return = 0
                 steps_run = 0
                 ao_ema_episode = 0.0
+                v_error_ema_episode = 0.0
                 
                 while not done:
                     obs, obs_check = env.get_obs()
@@ -105,6 +106,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     
                     next_obs, reward, done = env.step(action)
                     ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
+                    v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
                     
                     transition_dict['states'].append(obs)
                     transition_dict['actions'].append(u)
@@ -122,7 +124,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     'fail': env.fail,
                     't': env.t,
                     'ao_ema': ao_ema_episode,
-                    'height_overshoot': env.height_overshoot
+                    'v_error_ema': v_error_ema_episode,
+                    'height_overshoot': env.height_overshoot,
+                    'heading_overshoot': env.heading_overshoot
                 }
                 pipe.send({'trans': transition_dict, 'metrics': metrics})
                 
@@ -293,11 +297,19 @@ if __name__=='__main__':
             
             # 记录平均高度超调量
             mean_height_overshoot = np.mean([abs(res['metrics']['height_overshoot']) for res in batch_results])
-            logger.add("train/0 height_overshoot", mean_height_overshoot, rl_steps)
+            logger.add("train_plus/0 height_overshoot", mean_height_overshoot, rl_steps)
             
+            # 记录平均航向超调量
+            mean_heading_overshoot = np.mean([abs(res['metrics']['heading_overshoot']) for res in batch_results])
+            logger.add("train_plus/0 heading_overshoot", mean_heading_overshoot * 180 / pi, rl_steps)
+
             # 记录平均 AO (回合 EMA 的算术平均，消除初始为0的偏差)
             mean_ao_batch = np.mean([res['metrics']['ao_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
-            logger.add("train/0 avg AO", mean_ao_batch, rl_steps)
+            logger.add("train_plus/0 avg AO", mean_ao_batch, rl_steps)
+
+            # 记录平均速度误差 (回合 EMA 的算术平均)
+            mean_v_error_batch = np.mean([res['metrics']['v_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            logger.add("train_plus/0 avg v_e", mean_v_error_batch, rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)
