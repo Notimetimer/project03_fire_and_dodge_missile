@@ -157,7 +157,7 @@ if __name__=='__main__':
     eps = 0.2
     dt_decide = 0.2 # 0.2 可以， 0.1很难 必须是0.02的整数倍  0.16 也挺快
     dt_move = 0.05
-    k_entropy={'cont':0.08, 'cat':0.0, 'bern':0.0} # 0.01
+    k_entropy={'cont':0.5, 'cat':0.0, 'bern':0.0} # 0.01
 
     beta_ao = 0.01 ** (dt_decide / 10.0)
     parser = argparse.ArgumentParser("UAV flight control training parallel")
