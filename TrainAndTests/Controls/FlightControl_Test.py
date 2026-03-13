@@ -11,15 +11,12 @@ sys.path.append(project_root)
 
 # from TrainAndTests.Controls.FlightControl_Train_dual_a_out import *
 from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
-
-action_eps = 0 # np.array([0.5, 0.8, 0]) # 0.7 # 动作平滑度
-
 from Utilities.LocateDirAndAgents import *
 
 # hidden_dim = [64,64]
 
 # 测试训练效果
-action_dims_dict = {'cont': action_dim, 'cat': [], 'bern': 0}
+action_dims_dict = {'cont': 4, 'cat': [], 'bern': 0}
 policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
 print(action_bound)
 actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
@@ -35,7 +32,7 @@ print(actor.action_bounds)
 
 # pre_log_dir = os.path.join("./logs")
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = 'FlightControl_parallel无课程无蒸馏删高度误差惩罚'
+mission_name = 'FlightControl_parallel无课程无蒸馏半高度误差惩罚'
 log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
 # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
@@ -45,16 +42,21 @@ if not actor_path:
     print(f"No actor checkpoint found in {log_dir}")
 else:
     sd = th.load(actor_path, map_location=device, weights_only=True)
-    # agent.actor.load_state_dict(sd)
     actor.load_state_dict(sd)
     print(f"Loaded actor for test from: {actor_path}")
 
 # 舞龙测试
 dragon_dance = 1
-
+num_tests = 6
 dt_decide = 0.2 # 0.05 0.2
 
-out_range_count = 0
+avg_height_overshoot = 0
+avg_heading_overshoot = 0
+avg_v_error = 0
+avg_ao = 0
+survive_rate = 0
+
+beta_ao = 0.01 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不计
 
 # action_bounds 检查
 # print(agent.actor.action_bounds)
@@ -65,9 +67,10 @@ env = track_env(dt_move=0.05, tacview_show=1, time_limit=8*60)
 t_bias = 0
 # 强化学习测试
 rl_steps = 0
-i_episode = 0
-while i_episode<=6:
-    i_episode += 1
+for i_episode in range(num_tests):
+    ao_ema_episode = 0
+    v_error_ema_episode = 0
+
     episode_return = 0
     
     init_height = 6000 # np.random.uniform(4000, 10000)  # 生成一个介于 4000 和 10000 的均匀分布值
@@ -109,7 +112,6 @@ while i_episode<=6:
 
         # 1.执行动作得到环境反馈
         obs, obs_check = env.get_obs()
-        # action, u, _, _ = agent.take_action(obs, explore=0)
         action, u, _, _ = actor.get_action(obs, explore=0)
         rl_steps += 1
 
@@ -119,8 +121,10 @@ while i_episode<=6:
         #     print("--")
             # time.sleep(0.5)
         
-        # action[2] = 1  # 强制油门推满
         next_obs, reward, done = env.step(action)
+        ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
+        v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
+
 
         # debug 用
         height_req_show = env.height_req/1000
@@ -136,5 +140,18 @@ while i_episode<=6:
     env.clear_render(t_bias)
     t_bias += env.t
 
-    if env.fail==1:
-        out_range_count+=1
+    if not env.fail:
+        survive_rate += 1/num_tests
+    
+    steps_run = int(env.t/dt_decide)
+    avg_height_overshoot += abs(env.height_overshoot)/num_tests
+    avg_heading_overshoot += abs(env.heading_overshoot)*180/pi/num_tests
+    avg_ao += ao_ema_episode/(1 - beta_ao**max(1, steps_run))
+    avg_v_error += v_error_ema_episode/(1 - beta_ao**max(1, steps_run))
+
+
+print("survive_rate", survive_rate)
+print("avg_height_overshoot", avg_height_overshoot)
+print("avg_heading_overshoot", avg_heading_overshoot)
+print("avg_v_error", avg_v_error)
+print("avg_ao", avg_ao)
