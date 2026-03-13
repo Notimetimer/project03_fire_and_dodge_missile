@@ -71,6 +71,7 @@ class track_env():
         if tacview_show:
             self.tacview = Tacview()
             self.tacview.handshake()
+        self.AO = 0
     
     def reset(self, o00=None, birth_state=None, height_req=8e3, psi_req=0, v_req=340, dt_report=0.2, t0=0):
         self.t = t0
@@ -112,6 +113,10 @@ class track_env():
         self.height_req = height_req
         self.psi_req = psi_req
         self.v_req = v_req
+
+        # 高度超调量
+        self.height_overshoot = 0
+        self.init_height_error = self.RUAV.alt - self.height_req
 
 
     def get_state(self, side='r'):
@@ -317,6 +322,13 @@ class track_env():
             # 第四个参数对应 throttle, rudder 参数单独传递
             self.RUAV.move(target_height=elevator, delta_heading=aileron, target_speed=throttle, \
                 relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rudder)
+            
+            # 记录高度超调量: 误差方向与初始误差相反，且取绝对值最大的值
+            height_error = self.RUAV.alt - self.height_req
+            if height_error * self.init_height_error < 0:
+                if abs(height_error) > abs(self.height_overshoot):
+                    self.height_overshoot = height_error
+
             done = self.get_done()
             if done:
                 break
@@ -384,6 +396,9 @@ class track_env():
 
         # 和奖励无关，方便画图
         self.theta_v_req = height2req/5000*pi/2
+        
+        L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
+        self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1))
         
         # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
         # r_alt = 0.8 * np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
@@ -585,6 +600,7 @@ if __name__=='__main__':
         rl_steps = 0
         i_episode = 0
         transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
+        beta_ao = 0.01 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不计
         while rl_steps < max_steps:
             i_episode += 1
             episode_return = 0
@@ -607,9 +623,10 @@ if __name__=='__main__':
             distil_epochs = max(int(10 * (1 - 0.9 * warm_up)), 1)
 
             env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
-
+            ao_ema_episode = 0.0
             obs, obs_check = env.get_obs()
             done = False
+            steps_in_epi = 0
 
             while not done:  # 每个训练回合
                 # 1.执行动作得到环境反馈
@@ -635,6 +652,7 @@ if __name__=='__main__':
 
                 
                 next_obs, reward, done = env.step(action)
+                ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
 
                 # debug 用
                 height_req_show = env.height_req/1000
@@ -653,6 +671,7 @@ if __name__=='__main__':
                 obs = next_obs
                 episode_return += reward
                 env.render(t_bias)
+                steps_in_epi += 1
 
             env.clear_render(t_bias)
             t_bias += env.t
@@ -684,6 +703,10 @@ if __name__=='__main__':
             # tensorboard 训练进度显示
             logger.add("train/0 episode_return", episode_return, rl_steps)
             logger.add("train/0 survive", 1-env.fail, rl_steps)
+            logger.add("train/0 height_overshoot", abs(env.height_overshoot), rl_steps)
+            
+            # 记录平均 AO (回合结束时的 EMA 值，消除初始偏差)
+            logger.add("train/0 avg AO", ao_ema_episode/(1 - beta_ao**max(1, steps_in_epi)), rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)

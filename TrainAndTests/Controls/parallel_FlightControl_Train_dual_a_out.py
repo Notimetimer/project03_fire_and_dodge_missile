@@ -46,8 +46,10 @@ import random
 import traceback
 import time
 
-def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, device_worker, seed, dt_decide, dt_move=0.02):
+def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, \
+    device_worker, seed, dt_decide, dt_move=0.02, k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}):
     try:
+        beta_ao = 0.01 ** (dt_decide / 10.0)
         worker_seed = seed + rank * 1000
         random.seed(worker_seed)
         np.random.seed(worker_seed)
@@ -65,7 +67,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
             critic=local_dummy_critic,
             actor_lr=0, critic_lr=0,
             lmbda=0, eps=0, gamma=0, epochs=0,
-            device=device_worker
+            device=device_worker,
+            k_entropy=k_entropy,
         )
         
         while True:
@@ -81,8 +84,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                                 'psi': np.random.uniform(-pi/6, pi/6)}
                 
                 # 使用传入的 warm_up 调整难度
-                height_req = np.clip(init_height + warm_up * np.random.uniform(-1, 1) * 5000, 3000, 13000)
-                psi_req = np.random.uniform(-pi, pi) * warm_up
+                height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 3000, 13000)
+                psi_req = np.random.uniform(-pi, pi) # * warm_up
                 v_req = np.random.uniform(0.8, 2.5) * 340
 
                 env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
@@ -93,6 +96,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
                 episode_return = 0
                 steps_run = 0
+                ao_ema_episode = 0.0
                 
                 while not done:
                     obs, obs_check = env.get_obs()
@@ -100,6 +104,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     steps_run += 1
                     
                     next_obs, reward, done = env.step(action)
+                    ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
                     
                     transition_dict['states'].append(obs)
                     transition_dict['actions'].append(u)
@@ -115,7 +120,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     'return': episode_return,
                     'steps': steps_run,
                     'fail': env.fail,
-                    't': env.t
+                    't': env.t,
+                    'ao_ema': ao_ema_episode,
+                    'height_overshoot': env.height_overshoot
                 }
                 pipe.send({'trans': transition_dict, 'metrics': metrics})
                 
@@ -131,7 +138,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel强蒸馏'
+mission_name = 'FlightControl_parallel无课程'
 
 if __name__=='__main__':
     # dof = 3
@@ -146,7 +153,9 @@ if __name__=='__main__':
     eps = 0.2
     dt_decide = 0.2 # 0.2 可以， 0.1很难 必须是0.02的整数倍  0.16 也挺快
     dt_move = 0.05
+    k_entropy={'cont':0.08, 'cat':0.0, 'bern':0.0} # 0.01
 
+    beta_ao = 0.01 ** (dt_decide / 10.0)
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
     parser.add_argument("--max-episode-len", type=float, default=5*60, help="maximum episode time length") # 7分钟有些长
@@ -200,7 +209,8 @@ if __name__=='__main__':
         parent_conn, child_conn = mp.Pipe()
         p = mp.Process(target=worker_process, args=(
             i, child_conn, args, state_dim, hidden_dim, 
-            action_dims_dict, action_bound, worker_device, seed, dt_decide, dt_move
+            action_dims_dict, action_bound, worker_device, 
+            seed, dt_decide, dt_move, k_entropy
         ))
         p.start()
         workers.append(p)
@@ -259,7 +269,7 @@ if __name__=='__main__':
             
             # 计算蒸馏参数 (Master 使用)
             alpha_distill = 5.0 * (1 - 1.0 * warm_up)  # 0.8 * warm_up
-            distil_epochs = 2 # max(int(3 * (1 - 1.0 * warm_up)), 0)
+            distil_epochs = 1 # max(int(3 * (1 - 1.0 * warm_up)), 0)
 
             # 5. 模型更新
             agent.update(master_transition_dict, adv_normed=1, mini_batch_size=512)
@@ -280,6 +290,14 @@ if __name__=='__main__':
 
             logger.add("train/0 episode_return", mean_return, rl_steps)
             logger.add("train/0 survive", survive_rate, rl_steps)
+            
+            # 记录平均高度超调量
+            mean_height_overshoot = np.mean([abs(res['metrics']['height_overshoot']) for res in batch_results])
+            logger.add("train/0 height_overshoot", mean_height_overshoot, rl_steps)
+            
+            # 记录平均 AO (回合 EMA 的算术平均，消除初始为0的偏差)
+            mean_ao_batch = np.mean([res['metrics']['ao_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            logger.add("train/0 avg AO", mean_ao_batch, rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)
