@@ -1084,10 +1084,14 @@ class PPOHybrid:
         return avg_actor_loss, avg_critic_loss, avg_c
 
     def distil(self, transition_dict, teacher_agent=None, 
-               shuffled=1, mini_batch_size=None, epochs=1, alpha=1.0):
+               shuffled=1, mini_batch_size=None, epochs=1, alpha=1.0, 
+               grad_clip_ratio=0.5):
         """
         基于 PID 控制器（UnifiedPolicyWrapper）的纯连续动作策略蒸馏。
         抛弃了 Cat 和 Bern 逻辑，并且取消了 Value 门控，直接逼近 Teacher 的期望输出。
+        
+        Args:
+            grad_clip_ratio: 蒸馏梯度相对于 PPO 平均梯度的比例，用于防止蒸馏破坏 PPO 学习成果。
         """
         
         # 如果没有提供教师代理，或者教师代理为 None，则直接跳过蒸馏
@@ -1177,8 +1181,12 @@ class PPOHybrid:
                 # 因此，我们需要对 Student 的 mu 加上 tanh，保证两者处于同一特征空间计算 MSE 
                 s_action_expected = torch.tanh(s_mu)
                 
-                # 计算 MSE 损失
-                cont_loss = F.mse_loss(s_action_expected, t_mu, reduction='mean')
+                # 原有MSE损失
+                # cont_loss = F.mse_loss(s_action_expected, t_mu, reduction='mean')
+                
+                # 计算 Huber Loss (Smooth L1) 以提高对离散/异常样本的鲁棒性
+                # beta=0.2 意味着当误差大于 0.2 时，梯度不再随误差平方增长，而是线性增长
+                cont_loss = F.smooth_l1_loss(s_action_expected, t_mu, reduction='mean', beta=0.2)
                 
                 # 乘上蒸馏强度系数 (Alpha)
                 final_loss = alpha * cont_loss
@@ -1187,7 +1195,15 @@ class PPOHybrid:
                 self.actor_optimizer.zero_grad()
                 final_loss.backward()
                 
-                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+                # --- [改进的梯度限幅逻辑] ---
+                # 1. 局部 Value Clip: 防止个别权重产生极大的梯度突变（第一道锁）
+                nn.utils.clip_grad_value_(self.actor.parameters(), clip_value=0.5)
+                
+                # 2. 自适应 L2 Norm Clip: 根据 PPO 阶段的平均梯度大小动态限制蒸馏的总步伐（第二道锁）
+                # 确保蒸馏的物理更新距离永远被锚定在 PPO 进展的一定比例内
+                adaptive_l2_limit = max(self.actor_grad, 1e-4) * grad_clip_ratio
+                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=adaptive_l2_limit)
+                
                 self.actor_optimizer.step()
                 
                 distil_actor_loss_list.append(final_loss.item())

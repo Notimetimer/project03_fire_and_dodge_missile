@@ -272,12 +272,17 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 10.0 * (1 - 1.0 * warm_up)  # 5.0 *
+            alpha_distill = 10.0 * (1 - 1.0 * warm_up)  # 5.0 刚好，10过大，所以有了下面的 distil_clip_ratio
             distil_epochs = 1 # max(int(3 * (1 - 1.0 * warm_up)), 0)
 
             # 5. 模型更新
             agent.update(master_transition_dict, adv_normed=1, mini_batch_size=512)
-            agent.distil(master_transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
+            
+            # 根据 warm_up 动态调节蒸馏梯度限制：早期可以大点，后期必须严格压制
+            distil_clip_ratio = 0.5 # 1.0 - 0.9 * warm_up 
+            agent.distil(master_transition_dict, teacher_agent=teacher_agent, 
+                         epochs=distil_epochs, alpha=alpha_distill, 
+                         grad_clip_ratio=distil_clip_ratio)
             
             # --- 保存模型 ---
             if (i_episode // args.num_workers) % 10 == 0:
