@@ -137,12 +137,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
 
 # 网络结构参数
 state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
-hidden_dim = [128, 128] # [128, 128]
+hidden_dim = [128, 128] # [128, 128] 极限了，64,64 训练出来的会有稳态误差，跟踪总差个3度
 action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel无课程无蒸馏半高度误差惩罚'
+mission_name = 'FlightControl_parallel无蒸馏删高度误差惩罚'
 
 if __name__=='__main__':
     # dof = 3
@@ -228,7 +228,7 @@ if __name__=='__main__':
             current_weights = {k: v.cpu().clone() for k, v in agent.actor.state_dict().items()}
             
             # 计算预热参数 (同步到 Worker)
-            warm_up = 1 # np.clip(rl_steps / 30e4, 0, 1)
+            warm_up = np.clip(rl_steps / 30e4, 0, 1)
 
             # 2. 分发任务
             for rank in range(args.num_workers):

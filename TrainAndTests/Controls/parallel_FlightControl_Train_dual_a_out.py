@@ -142,7 +142,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel无课程'
+mission_name = 'FlightControl_parallel无课程有蒸馏半高度惩罚'
 
 if __name__=='__main__':
     # dof = 3
@@ -272,7 +272,7 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 5.0 * (1 - 1.0 * warm_up)  # 0.8 * warm_up
+            alpha_distill = 10.0 * (1 - 1.0 * warm_up)  # 5.0 *
             distil_epochs = 1 # max(int(3 * (1 - 1.0 * warm_up)), 0)
 
             # 5. 模型更新
