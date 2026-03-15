@@ -355,9 +355,12 @@ class track_env():
         alt = ruav_state["ego_main"][1]
         alpha_air = ruav_state["ego_control"][5]*180/pi
         beta_air = ruav_state["ego_control"][6]*180/pi
+        ny = self.RUAV.Ny
         # 失败条件：失速、高度过低
         self.fail = 0
-        if alt < self.min_alt or alpha_air < -20 or alpha_air > 45 or abs(beta_air) > 15:
+        if alt < self.min_alt or \
+            alpha_air < -20 or alpha_air > 29 or \
+                abs(beta_air) > 15 or ny > 10 or ny < -5:
             self.fail = 1
             done = 1
             self.RUAV.dead = 1
@@ -463,8 +466,8 @@ class track_env():
         if alpha_air < 0:
             reward_alpha += alpha_air/2       
         ny = self.RUAV.Ny
-        if ny<=-1 or ny > 9:
-            reward_alpha -= 2
+        if ny<=-1 or ny >= 8:
+            reward_alpha -= 2 + max(ny-8, -1-ny)*0.5
         
         # 侧滑角惩罚（尽量少侧滑）
         reward_beta = - abs(beta_air/5)

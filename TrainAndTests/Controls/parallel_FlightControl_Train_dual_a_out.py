@@ -272,7 +272,7 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 10.0 * (1 - 1.0 * warm_up)  # 5.0 刚好，10过大，所以有了下面的 distil_clip_ratio
+            alpha_distill = 5.0 * (1 - 1.0 * warm_up)  # 5.0 刚好，10过大，所以有了下面的 distil_clip_ratio
             distil_epochs = 1 # max(int(3 * (1 - 1.0 * warm_up)), 0)
 
             # 5. 模型更新
