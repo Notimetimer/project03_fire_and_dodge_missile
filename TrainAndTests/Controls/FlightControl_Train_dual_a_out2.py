@@ -414,7 +414,7 @@ class track_env():
         reward_end = 0
         if self.fail:
             steps_wasted = (self.time_limit-self.t)/self.dt_report
-            reward_end -= 400 + steps_wasted * 1 # 0.1 可能小了
+            reward_end -= 800 # 400 + steps_wasted * 1 # 0.1 可能小了
 
         # 误差计算
         psi2req = delta_psi_v
