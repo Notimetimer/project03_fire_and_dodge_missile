@@ -127,6 +127,11 @@ class PolicyNetHybrid(torch.nn.Module):
             
         return outputs
 
+    def clamp_log_std(self, max_std):
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
+            with torch.no_grad():
+                self.log_std_cont.clamp_(max=np.log(max_std))
+
 # =============================================================================
 # 2. Actor 适配器 (Wrapper) - 核心重构点
 # =============================================================================
@@ -1183,7 +1188,7 @@ class PPOHybrid:
                 
                 # 原有MSE损失
                 # cont_loss = F.mse_loss(s_action_expected, t_mu, reduction='mean')
-                
+
                 # 计算 Huber Loss (Smooth L1) 以提高对离散/异常样本的鲁棒性
                 # beta=0.2 意味着当误差大于 0.2 时，梯度不再随误差平方增长，而是线性增长
                 cont_loss = F.smooth_l1_loss(s_action_expected, t_mu, reduction='mean', beta=0.2)

@@ -317,9 +317,15 @@ if __name__=='__main__':
             mean_heading_overshoot = np.mean([abs(res['metrics']['heading_overshoot']) for res in batch_results])
             logger.add("train_plus/0 heading_overshoot", mean_heading_overshoot * 180 / pi, rl_steps)
 
-            # 记录平均 AO (回合 EMA 的算术平均，消除初始为0的偏差)
+            # 记录平均 AO (回合结束时的 EMA 的算术平均，消除初始为0的偏差)
             mean_ao_batch = np.mean([res['metrics']['ao_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
             logger.add("train_plus/0 avg AO", mean_ao_batch, rl_steps)
+
+            # 当轨迹跟踪已经较好时，降低探索幅度降低解体失速率
+            if mean_ao_batch < 15: # and survive_rate < 0.95:
+                agent.max_std = min(agent.max_std, 0.15)
+                # 切断之前的过大 std 的历史，直接物理限制网络底层的 std 值
+                agent.actor.net.clamp_log_std(agent.max_std)
 
             # 记录平均速度误差 (回合 EMA 的算术平均)
             mean_v_error_batch = np.mean([res['metrics']['v_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
