@@ -151,6 +151,8 @@ class UAVModel(object):
         self.vn, self.ve, self.vu = vn, ve, vu
         
         # 过载量
+        # JSBsim 的过载量是左手系，前右上顺序。
+        # 我们这里用右手系，前上右顺序.
         self.Ny = self.sim["accelerations/Nz"]  # 法向过载
         self.Nz = self.sim["accelerations/Ny"]  # 侧向过载
         self.Nx = self.sim["accelerations/Nx"]  # 前向过载

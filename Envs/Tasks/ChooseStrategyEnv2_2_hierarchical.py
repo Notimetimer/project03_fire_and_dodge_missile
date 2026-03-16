@@ -25,7 +25,7 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
-from Envs.battle6dof1v1_missile0309 import *
+from Envs.battle6dof1v1_missile0309_hierarchical import *
 from .ChooseStrategyEnv2_0_hierarchical import ChooseStrategyEnv as BaseChooseStrategyEnv
 from .ChooseStrategyEnv2_0_hierarchical import action_options, action_optionsLR
 

@@ -9,7 +9,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 
 
-from Envs.battle6dof1v1_missile0309 import launch_missile_if_possible
+from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_if_possible
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 三元组奖励
 from Math_calculates.sub_of_angles import *
 import re

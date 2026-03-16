@@ -26,7 +26,7 @@ def get_current_file_dir():
 current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
-from Envs.battle6dof1v1_missile0309 import *
+from Envs.battle6dof1v1_missile0309_hierarchical import *
 
 
 # 通过继承构建观测空间、奖励函数和终止条件
