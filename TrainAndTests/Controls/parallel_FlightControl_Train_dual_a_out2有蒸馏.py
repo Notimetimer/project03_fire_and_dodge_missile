@@ -231,7 +231,7 @@ if __name__=='__main__':
             current_weights = {k: v.cpu().clone() for k, v in agent.actor.state_dict().items()}
             
             # 计算预热参数 (同步到 Worker)
-            warm_up = np.clip(rl_steps / 10e6, 0, 1)
+            warm_up = 1.0 # np.clip(rl_steps / 10e6, 0, 1)
 
             # 2. 分发任务
             for rank in range(args.num_workers):
@@ -281,8 +281,11 @@ if __name__=='__main__':
             i_episode += args.num_workers
             
             # 计算蒸馏参数 (Master 使用)
-            alpha_distill = 5.0 * (1 - 1.0 * warm_up)  # 5.0 刚好，10过大，所以有了下面的 distil_clip_ratio
-            distil_epochs = 1 # max(int(3 * (1 - 1.0 * warm_up)), 0)
+            mean_ao_batch = np.mean([res['metrics']['ao_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            warm_up1 = np.clip((20.0 - mean_ao_batch) / (20.0 - 5.0), 0.0, 1.0)
+
+            alpha_distill = 5.0 * (1 - 1.0 * warm_up1)  # 5.0 刚好，10过大，所以有了下面的 distil_clip_ratio
+            distil_epochs = 1
 
             # 5. 模型更新
             agent.update(master_transition_dict, adv_normed=1, mini_batch_size=512)
@@ -378,7 +381,7 @@ if __name__=='__main__':
             if hasattr(agent, 'dis_actor_loss') and agent.dis_actor_loss != 0:
                 logger.add("train/8 distil_loss", agent.dis_actor_loss, rl_steps)
 
-            logger.add("train_plus/warm_up", warm_up, rl_steps)
+            logger.add("train_plus/warm_up", warm_up1, rl_steps)
             logger.add("train_plus/distil_epochs", distil_epochs, rl_steps)
             logger.add("train_plus/alpha_distill", alpha_distill, rl_steps)
 
