@@ -365,11 +365,11 @@ class track_env():
             self.crash = 1
             self.fail = 1
         # 失速
-        if alpha_air < -20 or alpha_air > 29 or abs(beta_air) > 15:
+        if alpha_air < -5 or alpha_air > 29 or abs(beta_air) > 15: # 负过载机动的限制可能比我想的还要严格
             self.stall = 1
             self.fail = 1
         # 结构过载
-        if ny > 10 or ny < -5:
+        if ny > 10 or ny < -3: # 负过载机动的限制可能比我想的还要严格
             self.break_up = 1
             self.fail = 1
         # 任何一种失败都结束回合
@@ -414,7 +414,7 @@ class track_env():
         reward_end = 0
         if self.fail:
             steps_wasted = (self.time_limit-self.t)/self.dt_report
-            reward_end -= 400 + steps_wasted * 0.1
+            reward_end -= 400 + steps_wasted * 1 # 0.1 可能小了
 
         # 误差计算
         psi2req = delta_psi_v
@@ -473,14 +473,28 @@ class track_env():
         r_speed = self.RUAV.Nx * np.sign(speed2req) * 0.5
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
+        "笔记本上跑的，可能有错，但以结果为准"
+        # reward_alpha = 0.5
+        # if alpha_air >= 15:
+        #     reward_alpha -= (alpha_air-15)/15 * 10/(29-15)
+        # if alpha_air < 0:
+        #     reward_alpha += alpha_air/2 *10/(0 - -5)
+        # ny = self.RUAV.Ny
+        # if ny<=-1:
+        #     reward_alpha -= 3 + (-1-ny)*6 *2
+        # if ny >= 6:
+        #     reward_alpha -= 3 + (ny-6)*3 *2
+        "台式机要跑的"
         reward_alpha = 0.5
         if alpha_air >= 15:
-            reward_alpha -= alpha_air/15
-        if alpha_air < 0:
-            reward_alpha += alpha_air/2       
+            reward_alpha -= (alpha_air-15) * 10/(29-15)
+        if alpha_air < -2:
+            reward_alpha -= ((-2) - alpha_air) * 15/((-2) - (-5))
         ny = self.RUAV.Ny
-        if ny<=-1 or ny >= 7:
-            reward_alpha -= 2 + max(ny-7, -1-ny)*1
+        if ny<=-1:
+            reward_alpha -= 3 + ((-1)-ny)*6 *2
+        if ny >= 6:
+            reward_alpha -= 3 + (ny-6)*3 *2
         
         # 侧滑角惩罚（尽量少侧滑）
         reward_beta = - abs(beta_air/5)
