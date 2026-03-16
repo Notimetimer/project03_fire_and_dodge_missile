@@ -430,7 +430,7 @@ class Battle(object):
                     scaled_control_input_state["ego_control"],
                     scaled_control_input_state["flight_cmd"]
                 ])
-                # 智能体决策
+                # 控制器作用
                 control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                 aileron, elevator, rudder, throttle = control_action['cont']
 
