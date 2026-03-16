@@ -295,6 +295,22 @@ if __name__=='__main__':
                 actor_name = f"actor_rein{i_episode}.pt"
                 actor_path = os.path.join(log_dir, actor_name)
                 th.save(agent.actor.state_dict(), actor_path)
+                
+                # [新增] 记录当前模型的详细性能到 JSON
+                # 由于 mean_return 等变量在下方定义，这里先提前计算一下基础指标
+                summary_data = {
+                    "actor_name": actor_name,
+                    "rl_steps": int(rl_steps),
+                    "i_episode": int(i_episode),
+                    "mean_return": float(np.mean(batch_return_list)),
+                    "survive_rate": float(1.0 - (batch_fail_cnt / args.num_workers)),
+                    # 下面这些如果在这还没算，就用当时的全局记录
+                    "max_std": float(agent.max_std),
+                    "k_entropy": {k: float(v) for k, v in agent.k_entropy.items()}
+                }
+                summary_log_path = os.path.join(log_dir, "checkpoints_summary.json")
+                with open(summary_log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(summary_data, ensure_ascii=False) + "\n")
 
             # --- 日志和控制台输出 ---
             mean_return = np.mean(batch_return_list)
@@ -321,11 +337,20 @@ if __name__=='__main__':
             mean_ao_batch = np.mean([res['metrics']['ao_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
             logger.add("train_plus/0 avg AO", mean_ao_batch, rl_steps)
 
-            # 当轨迹跟踪已经较好时，降低探索幅度降低解体失速率
-            if mean_ao_batch < 15: # and survive_rate < 0.95:
-                agent.max_std = min(agent.max_std, 0.15)
-                # 切断之前的过大 std 的历史，直接物理限制网络底层的 std 值
-                agent.actor.net.clamp_log_std(agent.max_std)
+            # [重构] 平滑衰减逻辑：
+            # 当 mean_ao_batch 从 20 减小到 5 时，线性地压制 max_std (0.2 -> 0.1) 和 k_entropy (0.5 -> 1e-5)
+            # 因子 alpha: 5->0.0, 20->1.0
+            alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
+            
+            # 平滑调整 max_std
+            agent.max_std = 0.1 + (0.2 - 0.1) * alpha_decay
+            agent.actor.net.clamp_log_std(agent.max_std)
+            
+            # 平滑调整熵系数 (假设初始 cont 熵为 0.5)
+            agent.k_entropy['cont'] = 1e-5 + (0.5 - 1e-5) * alpha_decay
+            # logger 记录一下当前的干预值
+            logger.add("train_plus/agent_max_std", agent.max_std, rl_steps)
+            logger.add("train_plus/agent_k_entropy_cont", agent.k_entropy['cont'], rl_steps)
 
             # 记录平均速度误差 (回合 EMA 的算术平均)
             mean_v_error_batch = np.mean([res['metrics']['v_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
