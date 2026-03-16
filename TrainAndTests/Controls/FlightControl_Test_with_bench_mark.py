@@ -9,8 +9,8 @@ import time
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-# from TrainAndTests.Controls.FlightControl_Train_dual_a_out import *
-from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
+from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
+# from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
 from Utilities.LocateDirAndAgents import *
 from TrainAndTests.Controls.UPolicyWrapper import *
 
