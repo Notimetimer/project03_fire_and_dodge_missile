@@ -25,10 +25,11 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = 'PID'
+mission_name = "FlightControl_parallel无课程无蒸馏_有过载限制"
 # 可选其它控制器
 "PID"
-'FlightControl_parallel无课程无蒸馏半高度误差惩罚'
+"FlightControl_parallel无课程无蒸馏_有过载限制"
+"FlightControl_parallel无课程无蒸馏半高度误差惩罚"
 
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)

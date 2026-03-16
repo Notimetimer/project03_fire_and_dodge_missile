@@ -415,12 +415,12 @@ class track_env():
 
         # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
         r_alt = 0
-        # r_alt += 0.8 * np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
-        r_alt += -0.06 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
+        # r_alt += 0.16 * np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
+        r_alt += -0.15 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
 
         # 高度限制奖励/惩罚
-        r_alt += (alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
-                (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1)
+        r_alt += 2*((alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
+                (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 1))
 
         # 航向误差惩罚
         r_angle = 0  # 1 # DEBUG
@@ -466,8 +466,8 @@ class track_env():
         if alpha_air < 0:
             reward_alpha += alpha_air/2       
         ny = self.RUAV.Ny
-        if ny<=-1 or ny >= 8:
-            reward_alpha -= 2 + max(ny-8, -1-ny)*0.5
+        if ny<=-1 or ny >= 7:
+            reward_alpha -= 2 + max(ny-7, -1-ny)*1
         
         # 侧滑角惩罚（尽量少侧滑）
         reward_beta = - abs(beta_air/5)
@@ -476,7 +476,7 @@ class track_env():
             1 * reward_alive,
             1 * reward_end,
             1 * r_angle,
-            2 * r_alt,
+            1 * r_alt,
             1 * r_speed,
             1 * reward_alpha,
             1 * reward_beta,
