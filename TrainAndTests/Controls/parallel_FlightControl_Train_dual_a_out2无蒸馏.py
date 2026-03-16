@@ -122,6 +122,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     'return': episode_return,
                     'steps': steps_run,
                     'fail': env.fail,
+                    'crash': env.crash,
+                    'stall': env.stall,
+                    'break_up': env.break_up,
                     't': env.t,
                     'ao_ema': ao_ema_episode,
                     'v_error_ema': v_error_ema_episode,
@@ -255,6 +258,9 @@ if __name__=='__main__':
             master_transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             batch_return_list = []
             batch_fail_cnt = 0
+            batch_crash_cnt = 0
+            batch_stall_cnt = 0
+            batch_breakup_cnt = 0
             batch_steps_run = 0
             
             for res in batch_results:
@@ -263,6 +269,9 @@ if __name__=='__main__':
                 
                 batch_return_list.append(metrics['return'])
                 if metrics['fail']: batch_fail_cnt += 1
+                if metrics.get('crash', 0): batch_crash_cnt += 1
+                if metrics.get('stall', 0): batch_stall_cnt += 1
+                if metrics.get('break_up', 0): batch_breakup_cnt += 1
                 batch_steps_run += metrics['steps']
                 
                 for k in master_transition_dict:
@@ -299,6 +308,11 @@ if __name__=='__main__':
             mean_height_overshoot = np.mean([abs(res['metrics']['height_overshoot']) for res in batch_results])
             logger.add("train_plus/0 height_overshoot", mean_height_overshoot, rl_steps)
             
+            # 记录失败分类比率
+            logger.add("train_plus/fail_rate_crash", batch_crash_cnt / args.num_workers, rl_steps)
+            logger.add("train_plus/fail_rate_stall", batch_stall_cnt / args.num_workers, rl_steps)
+            logger.add("train_plus/fail_rate_breakup", batch_breakup_cnt / args.num_workers, rl_steps)
+
             # 记录平均航向超调量
             mean_heading_overshoot = np.mean([abs(res['metrics']['heading_overshoot']) for res in batch_results])
             logger.add("train_plus/0 heading_overshoot", mean_heading_overshoot * 180 / pi, rl_steps)

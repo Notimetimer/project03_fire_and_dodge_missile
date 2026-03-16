@@ -43,10 +43,11 @@ class track_env():
         self.dt_report = None
         self.dt_move = dt_move
         self.t = None
-        # self.done = None
-        self.success = None # 胜
         self.fail = None # 负
-        self.draw = None # 平
+        self.crash = 0
+        self.stall = 0
+        self.break_up = 0
+        
         self.action_space = [spaces.Box(low=-1, high=+1, shape=(4,), dtype=np.float32)]
         self.DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
                                'psi': 0
@@ -73,10 +74,11 @@ class track_env():
     
     def reset(self, o00=None, birth_state=None, height_req=8e3, psi_req=0, v_req=340, dt_report=0.2, t0=0):
         self.t = t0
-        self.success = 0
-        # self.done = 0
         self.fail = 0
-        self.draw = 0
+        self.crash = 0
+        self.stall = 0
+        self.break_up = 0
+        
         if o00 == None:
             o00 = np.array([118, 30])  # 地理原点的经纬
             self.o00 = o00
@@ -358,12 +360,23 @@ class track_env():
         ny = self.RUAV.Ny
         # 失败条件：失速、高度过低
         self.fail = 0
-        if alt < self.min_alt or \
-            alpha_air < -20 or alpha_air > 29 or \
-                abs(beta_air) > 15 or ny > 10 or ny < -5:
+        # 撞地
+        if alt < self.min_alt:
+            self.crash = 1
             self.fail = 1
+        # 失速
+        if alpha_air < -20 or alpha_air > 29 or abs(beta_air) > 15:
+            self.stall = 1
+            self.fail = 1
+        # 结构过载
+        if ny > 10 or ny < -5:
+            self.break_up = 1
+            self.fail = 1
+        # 任何一种失败都结束回合
+        if self.fail:
             done = 1
             self.RUAV.dead = 1
+
         return done
 
 
