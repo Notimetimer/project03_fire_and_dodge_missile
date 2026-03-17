@@ -511,7 +511,7 @@ class track_env():
             1 * reward_beta,
         ])
 
-        self.v_error = abs(speed2req)
+        self.v_error = -(speed2req)
         self.psi_error = -psi2req*180/pi
         self.theta_error = (theta - desired_theta)*180/pi
 
@@ -700,7 +700,7 @@ if __name__=='__main__':
                 
                 next_obs, reward, done = env.step(action)
                 ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-                v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
+                v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
 
                 # debug 用
                 height_req_show = env.height_req/1000

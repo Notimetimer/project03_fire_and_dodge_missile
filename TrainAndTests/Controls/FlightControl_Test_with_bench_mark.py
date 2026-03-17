@@ -146,7 +146,7 @@ for init_h in height_list:
             
             # 累加采样误差
             ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-            v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
+            v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
 
             case_steps += 1
             case_speed_err_sum += abs(env.RUAV.speed - env.v_req)

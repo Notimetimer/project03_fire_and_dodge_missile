@@ -123,7 +123,7 @@ for i_episode in range(num_tests):
         
         next_obs, reward, done = env.step(action)
         ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-        v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
+        v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
 
 
         # debug 用

@@ -411,7 +411,7 @@ class track_env():
         
         L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
         self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1)) * 180/pi
-        self.v_error = abs(speed2req)
+        self.v_error = -(speed2req)
 
         # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
         r_alt = 0
@@ -667,7 +667,7 @@ if __name__=='__main__':
                 
                 next_obs, reward, done = env.step(action)
                 ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-                v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
+                v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
 
                 # debug 用
                 height_req_show = env.height_req/1000
