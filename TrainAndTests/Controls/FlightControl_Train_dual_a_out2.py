@@ -1,5 +1,9 @@
 '''
 增加过载量的可见性
+# 训练不稳定 三问:
+    # 1、也许是常数的惩罚项太大导致了不稳定？
+    # 2、critic loss 要使用hubber loss代替mse？
+    # 3、学习率需要动态衰减？
 '''
 
 use_tacview = 0
@@ -416,7 +420,7 @@ class track_env():
         reward_end = 0
         if self.fail:
             steps_wasted = (self.time_limit-self.t)/self.dt_report
-            reward_end -= 800 # 400 + steps_wasted * 1 # 0.1 可能小了
+            reward_end -= 800 # 400 + steps_wasted * 1 
 
         # 误差计算
         psi2req = delta_psi_v
