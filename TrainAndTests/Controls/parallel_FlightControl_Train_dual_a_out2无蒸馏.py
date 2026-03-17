@@ -151,7 +151,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel无课程无蒸馏_有过载限制'
+mission_name = 'FlightControl_parallel无课程无蒸馏_有过载限制_动态lr'
 
 if __name__=='__main__':
     # dof = 3
@@ -354,9 +354,17 @@ if __name__=='__main__':
             
             # 平滑调整熵系数 (假设初始 cont 熵为 0.5)
             agent.k_entropy['cont'] = 1e-5 + (0.5 - 1e-5) * alpha_decay
+            
+            # [新增] 动态调整学习率：从初始 lr 下降到 1/20
+            current_actor_lr = actor_lr * (1/20 + (19/20) * alpha_decay)
+            current_critic_lr = critic_lr * (1/20 + (19/20) * alpha_decay)
+            agent.set_learning_rate(actor_lr=current_actor_lr, critic_lr=current_critic_lr)
+
             # logger 记录一下当前的干预值
             logger.add("train_plus/agent_max_std", agent.max_std, rl_steps)
             logger.add("train_plus/agent_k_entropy_cont", agent.k_entropy['cont'], rl_steps)
+            logger.add("train_plus/actor_lr", current_actor_lr, rl_steps)
+            logger.add("train_plus/critic_lr", current_critic_lr, rl_steps)
 
             # 记录平均速度误差 (回合 EMA 的算术平均)
             mean_v_error_batch = np.mean([res['metrics']['v_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
