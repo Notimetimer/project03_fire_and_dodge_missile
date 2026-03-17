@@ -53,7 +53,8 @@ class track_env():
         self.stall = 0
         self.break_up = 0
         
-        self.action_space = [spaces.Box(low=-1, high=+1, shape=(4,), dtype=np.float32)]
+        self.action = np.array([0,0,0,0.5])
+
         self.DEFAULT_RED_BIRTH_STATE = {'position': np.array([-38000.0, 8000.0, 0.0]),
                                'psi': 0
                                }
@@ -86,6 +87,8 @@ class track_env():
         self.stall = 0
         self.break_up = 0
         
+        self.action = np.array([0,0,0,0.5])
+
         if o00 == None:
             o00 = np.array([118, 30])  # 地理原点的经纬
             self.o00 = o00
@@ -323,18 +326,28 @@ class track_env():
         return flat_obs, full_obs
 
     def step(self, action):
-        self.action = action
-        # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
-        aileron, elevator, rudder, throttle = action['cont']
+        
         self.t += self.dt_report
         self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
         self.RUAV.last_psi_v = self.RUAV.psi_v
+        target_action = np.array(action['cont'])
         for _ in range(time_rate):
+            # 速率限制 (Slew Rate Limit): 0.1s 内完成从全负到全正的调节 (幅度为 2.0)
+            # 最大速率 = 2.0 / 0.1 = 20.0 units/s
+            max_delta = (2.0 / 0.1) * self.dt_move
+            
+            delta = target_action - self.action
+            actual_delta = np.clip(delta, -max_delta, max_delta)
+            self.action += actual_delta
+            
+            # 使用平滑及速率限制后的动作 [aileron, elevator, rudder, throttle]
+            ail, ele, rud, thr = self.action
+
             # UAVModel.move(p2p=True) 期望第一个参数对应 elevator, 第二个参数对应 aileron, 
             # 第四个参数对应 throttle, rudder 参数单独传递
-            self.RUAV.move(target_height=elevator, delta_heading=aileron, target_speed=throttle, \
-                relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rudder)
+            self.RUAV.move(target_height=ele, delta_heading=ail, target_speed=thr, \
+                relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=rud)
             
             # 记录高度超调量: 误差方向与初始误差相反，且取绝对值最大的值
             height_error = self.RUAV.alt - self.height_req

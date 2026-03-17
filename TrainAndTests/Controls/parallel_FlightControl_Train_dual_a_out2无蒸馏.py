@@ -165,7 +165,7 @@ if __name__=='__main__':
     epochs = 5  # 10
     eps = 0.2
     dt_decide = 0.15 # 0.2 可以， 0.1很难 必须是dt_move的整数倍  0.16 也挺快
-    dt_move = 0.05
+    dt_move = 0.025
     k_entropy={'cont':0.5, 'cat':0.0, 'bern':0.0} # 0.01
 
     beta_ao = 0.01 ** (dt_decide / 10.0)
