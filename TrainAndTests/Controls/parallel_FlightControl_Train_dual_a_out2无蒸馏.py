@@ -98,6 +98,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 steps_run = 0
                 ao_ema_episode = 0.0
                 v_error_ema_episode = 0.0
+                psi_error_ema_episode = 0.0
+                theta_error_ema_episode = 0.0
                 
                 while not done:
                     obs, obs_check = env.get_obs()
@@ -105,8 +107,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     steps_run += 1
                     
                     next_obs, reward, done = env.step(action)
-                    ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
+                    ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
                     v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
+                    psi_error_ema_episode = beta_ao * psi_error_ema_episode + (1 - beta_ao) * abs(env.psi_error)
+                    theta_error_ema_episode = beta_ao * theta_error_ema_episode + (1 - beta_ao) * abs(env.theta_error)
                     
                     transition_dict['states'].append(obs)
                     transition_dict['actions'].append(u)
@@ -128,6 +132,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     't': env.t,
                     'ao_ema': ao_ema_episode,
                     'v_error_ema': v_error_ema_episode,
+                    'psi_error_ema': psi_error_ema_episode,
+                    'theta_error_ema': theta_error_ema_episode,
                     'height_overshoot': env.height_overshoot,
                     'heading_overshoot': env.heading_overshoot
                 }
@@ -355,6 +361,14 @@ if __name__=='__main__':
             # 记录平均速度误差 (回合 EMA 的算术平均)
             mean_v_error_batch = np.mean([res['metrics']['v_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
             logger.add("train_plus/0 avg v_e", mean_v_error_batch, rl_steps)
+
+            # 记录平均航向偏差 (回合 EMA 的算术平均)
+            mean_psi_error_batch = np.mean([res['metrics']['psi_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            logger.add("train_plus/0 avg psi_e", mean_psi_error_batch, rl_steps)
+
+            # 记录平均俯仰偏差 (回合 EMA 的算术平均)
+            mean_theta_error_batch = np.mean([res['metrics']['theta_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            logger.add("train_plus/0 avg theta_e", mean_theta_error_batch, rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)

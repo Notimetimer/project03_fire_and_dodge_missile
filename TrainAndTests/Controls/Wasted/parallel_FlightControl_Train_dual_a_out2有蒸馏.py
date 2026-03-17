@@ -105,7 +105,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     steps_run += 1
                     
                     next_obs, reward, done = env.step(action)
-                    ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
+                    ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
                     v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
                     
                     transition_dict['states'].append(obs)

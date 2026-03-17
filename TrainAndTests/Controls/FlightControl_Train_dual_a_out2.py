@@ -71,6 +71,8 @@ class track_env():
             self.tacview.handshake()
         self.AO = 0
         self.v_error = 0
+        self.psi_error = 0
+        self.theta_error = 0
     
     def reset(self, o00=None, birth_state=None, height_req=8e3, psi_req=0, v_req=340, dt_report=0.2, t0=0):
         self.t = t0
@@ -423,8 +425,8 @@ class track_env():
         self.theta_v_req = height2req/5000*pi/2
         
         L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
-        self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1))
-        self.v_error = abs(speed2req)
+        self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1)) * 180/pi
+        
 
         # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
         r_alt = 0
@@ -508,6 +510,10 @@ class track_env():
             1 * reward_alpha,
             1 * reward_beta,
         ])
+
+        self.v_error = abs(speed2req)
+        self.psi_error = -psi2req*180/pi
+        self.theta_error = (theta - desired_theta)*180/pi
 
         # 其他奖励待续
         return reward
@@ -693,7 +699,7 @@ if __name__=='__main__':
 
                 
                 next_obs, reward, done = env.step(action)
-                ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
+                ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
                 v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
 
                 # debug 用

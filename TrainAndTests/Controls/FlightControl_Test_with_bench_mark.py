@@ -5,6 +5,7 @@ from numpy.linalg import norm
 import torch as th
 from math import *
 import time
+import torch
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -36,7 +37,7 @@ if mission_name != "PID":
     # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
     # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
-    actor_path = load_actor_from_log(log_dir, number=None)
+    actor_path = load_actor_from_log(log_dir, number=15800)
     if not actor_path:
         print(f"No actor checkpoint found in {log_dir}")
         sys.exit()
@@ -48,7 +49,8 @@ if mission_name != "PID":
 # Benchmark 参数
 height_list = [3000, 5000, 7000, 9000, 11000]
 speed_list = [340, 250]
-dt_decide = 0.2
+dt_decide = 0.05
+dt_move = 0.05
 time_limit = 5 * 60  # 每组测试限时 5 分钟
 
 # 是否跟踪动目标（会导致超调量记录失效）
@@ -64,9 +66,10 @@ beta_ao = 0.01 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不�
 max_ny = -float('inf')
 min_ny = float('inf')
 max_alpha = 0
+min_alpha = float('inf')
 max_beta = 0
 
-env = track_env(dt_move=0.05, tacview_show=1, time_limit=time_limit)
+env = track_env(dt_move=dt_move, tacview_show=1, time_limit=time_limit)
 
 # PID 策略初始化
 pidcontroller = UnifiedPolicyWrapper(env, dt_decide=dt_decide) # 
@@ -89,9 +92,10 @@ global_success_seconds = 0
 t_bias = 0 # 用于 Tacview 时间偏移，防止轨道重叠
 
 print(f"\nBenchmark 开始，当前测试配置 [{mission_name}]，共 {total_cases} 组测试案例...")
-
+i=0
 for init_h in height_list:
     for target_v in speed_list:
+        i+=1
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
         
         # 固定初始化
@@ -124,8 +128,8 @@ for init_h in height_list:
                 env.height_req += h_dot_t * dt_decide
                 env.height_req = np.clip(env.height_req, 1500, 14000)
             else:
-                env.height_req = np.clip(init_h - 3000, 3000, 13000)
-                env.psi_req = sub_of_radian(birth_state['psi'], pi)
+                env.height_req = np.clip(init_h + 5000, 3000, 13000)
+                env.psi_req = sub_of_radian(birth_state['psi'], pi+2*pi/180*(i%2-0.5)*2)
                 env.v_req = target_v
             
             # 决策
@@ -141,7 +145,7 @@ for init_h in height_list:
             next_obs, reward, done = env.step(action)
             
             # 累加采样误差
-            ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO * 180 / pi)
+            ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
             v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * (env.v_error)
 
             case_steps += 1
@@ -158,6 +162,7 @@ for init_h in height_list:
             max_ny = max(max_ny, env.RUAV.Ny)
             min_ny = min(min_ny, env.RUAV.Ny)
             max_alpha = max(max_alpha, abs(env.RUAV.alpha_air) * 180 / pi)
+            min_alpha = min(min_alpha, env.RUAV.alpha_air * 180 / pi)
             max_beta = max(max_beta, abs(env.RUAV.beta_air) * 180 / pi)
 
             # 可视化输出 (使用 t_bias)
@@ -210,7 +215,7 @@ else:
     print("\n无成功回合，无法计算平均误差指标。")
 print("="*40)
 
-print("survive_rate", survive_rate)
+print("survive_rate", round(survive_rate,2))
 print("avg_height_overshoot", avg_height_overshoot)
 print("avg_heading_overshoot", avg_heading_overshoot)
 print("avg_v_error", avg_v_error)
@@ -220,4 +225,5 @@ print("\n飞行包线极限统计:")
 print(f" - 最大正过载 (Max Ny): {max_ny:.3f}")
 print(f" - 最大负过载 (Min Ny): {min_ny:.3f}")
 print(f" - 最大迎角 (Max Alpha): {max_alpha:.3f} deg")
+print(f" - 最小迎角 (Min Alpha): {min_alpha:.3f} deg")
 print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
