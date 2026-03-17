@@ -355,9 +355,9 @@ if __name__=='__main__':
             # 平滑调整熵系数 (假设初始 cont 熵为 0.5)
             agent.k_entropy['cont'] = 1e-5 + (0.5 - 1e-5) * alpha_decay
             
-            # [新增] 动态调整学习率：从初始 lr 下降到 1/20
-            current_actor_lr = actor_lr * (1/20 + (19/20) * alpha_decay)
-            current_critic_lr = critic_lr * (1/20 + (19/20) * alpha_decay)
+            # [新增] 动态调整学习率：从初始 lr 下降到 1/4
+            current_actor_lr = actor_lr * (1/4 + (3/4) * alpha_decay)
+            current_critic_lr = critic_lr * (1/4 + (3/4) * alpha_decay)
             agent.set_learning_rate(actor_lr=current_actor_lr, critic_lr=current_critic_lr)
 
             # logger 记录一下当前的干预值
