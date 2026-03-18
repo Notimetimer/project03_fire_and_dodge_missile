@@ -441,13 +441,6 @@ class track_env():
         # 误差计算
         psi2req = delta_psi_v
 
-        # 和奖励无关，方便画图
-        self.theta_v_req = height2req/5000*pi/2
-        
-        L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
-        self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1)) * 180/pi
-        
-
         # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
         r_alt = 0
         # r_alt += 0.16 * np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
@@ -467,10 +460,16 @@ class track_env():
         
 
         # 俯仰角惩罚
-        desired_theta = (height2req>=0)*height2req/5000*pi/3 + \
-                        (height2req<0)*height2req/5000*pi/2
-        r_angle += -3 * abs(theta - desired_theta)
+        desired_theta = height2req/5000*pi/2  # 去除 pi/3 约束
+                        # (height2req>=0)*height2req/5000*pi/3 + \
+                        # (height2req<0)*height2req/5000*pi/2
+        r_angle += -3 * abs(theta - desired_theta) # 应和desired_theta保持一致
 
+        # 和奖励无关，方便画图
+        self.theta_v_req = height2req/5000*pi/2
+        L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
+        self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1)) * 180/pi
+        
         # 滚转角惩罚
         r_angle += -0.001 * abs(phi)/pi
         # 0.01 有些强了

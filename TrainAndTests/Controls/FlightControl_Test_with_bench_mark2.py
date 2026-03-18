@@ -50,12 +50,17 @@ if mission_name != "PID":
 height_list = [3000, 5000, 7000, 9000, 11000]
 speed_list = [340, 250]
 dt_decide = 0.02
-dt_move = 0.02
-time_limit = 8 * 60  # 每组测试限时 5 分钟
+dt_move = 0.01
+
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 1
-realistic = 1
+chasing_wave = 0
+realistic = 0
+
+if chasing_wave:
+    time_limit = 8 * 60  # 每组测试限时 8 分钟
+else:
+    time_limit = 3 * 60  # 每组测试限时 3 分钟
 
 avg_height_overshoot = 0
 avg_heading_overshoot = 0
