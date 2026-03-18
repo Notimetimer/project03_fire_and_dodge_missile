@@ -47,9 +47,8 @@ import traceback
 import time
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, \
-    device_worker, seed, dt_decide, dt_move=0.02, k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}):
+    device_worker, seed, dt_decide, dt_move, beta_ao, k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}):
     try:
-        beta_ao = 0.01 ** (dt_decide / 10.0)
         worker_seed = seed + rank * 1000
         random.seed(worker_seed)
         np.random.seed(worker_seed)
@@ -168,7 +167,11 @@ if __name__=='__main__':
     dt_move = 0.025
     k_entropy={'cont':0.5, 'cat':0.0, 'bern':0.0} # 0.01
 
-    beta_ao = 0.01 ** (dt_decide / 10.0)
+    # --- EMA 统计参数设定 ---
+    # 学术设定：将 10s 设为 95% 权重的历史长度 (Cumulative Weight = 0.95)
+    # 计算公式: beta^k = 0.05, 其中 k = 10s / dt_decide
+    beta_ao_95_time = 10.0
+    beta_ao = 0.05 ** (dt_decide / beta_ao_95_time) # 分配给旧数值的权重
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
     parser.add_argument("--max-episode-len", type=float, default=5*60, help="maximum episode time length") # 7分钟有些长
@@ -223,7 +226,7 @@ if __name__=='__main__':
         p = mp.Process(target=worker_process, args=(
             i, child_conn, args, state_dim, hidden_dim, 
             action_dims_dict, action_bound, worker_device, 
-            seed, dt_decide, dt_move, k_entropy
+            seed, dt_decide, dt_move, beta_ao, k_entropy
         ))
         p.start()
         workers.append(p)
