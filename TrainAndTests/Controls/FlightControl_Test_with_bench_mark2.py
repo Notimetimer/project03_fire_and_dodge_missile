@@ -131,7 +131,7 @@ for init_h in height_list:
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
                 env.height_req = np.clip(init_h + 5000, 3000, 13000)
-                env.psi_req = sub_of_radian(birth_state['psi'], pi+2*pi/180*(i%2-0.5)*2)
+                env.psi_req = sub_of_radian(birth_state['psi'], pi + 2*pi/180*(i%2-0.5)*2)
                 env.v_req = target_v
             
             # 决策

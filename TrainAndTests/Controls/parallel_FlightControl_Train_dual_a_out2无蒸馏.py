@@ -85,7 +85,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 # 使用传入的 warm_up 调整难度
                 height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 3000, 13000)
                 psi_req = np.random.uniform(-pi, pi) # * warm_up
-                v_req = np.random.uniform(0.8, 2.5) * 340
+                v_req = np.random.uniform(0.5, 1.1) * 340
 
                 env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
                 
