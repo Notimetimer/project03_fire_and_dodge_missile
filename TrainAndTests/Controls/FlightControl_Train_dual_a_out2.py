@@ -377,7 +377,7 @@ class track_env():
             max_alpha_air = 26  # 29
             max_beta_air = 15
             min_ny = -3
-            max_ny = 10
+            max_ny = 9.5
         else: # 无迎角过载限制
             min_alpha_air = -91
             max_alpha_air = 91
