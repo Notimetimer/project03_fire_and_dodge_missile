@@ -487,7 +487,7 @@ class track_env():
             or abs(theta)*180/pi > 45:  # 大俯仰机动应该降低滚转角速度
             r_angle += -0.1 * abs(p)/pi  # 0.4 偏强？
         else:
-            r_angle += -0.01 * abs(p)/pi # 范围内0.01太弱了
+            r_angle += -0.005 * abs(p)/pi # 0.01 可能有些偏强？
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
