@@ -70,7 +70,7 @@ avg_psi_error = 0
 avg_theta_error = 0
 survive_rate = 0
 
-beta_ao = 0.01 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不计
+beta_ao = 0.05 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不计
 max_ny = -float('inf')
 min_ny = float('inf')
 max_alpha = 0
