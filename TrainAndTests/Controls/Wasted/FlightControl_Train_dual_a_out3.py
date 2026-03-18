@@ -43,7 +43,7 @@ from TrainAndTests.Controls.UPolicyWrapper import *
 class track_env():
     def __init__(self, dt_move=0.02, tacview_show=0, time_limit=3*60):
         super(track_env, self).__init__()
-        self.more_real = 1
+        self.realistic = 1
         self.RUAV_ids = None
         self.dt_report = None
         self.dt_move = dt_move
@@ -385,7 +385,7 @@ class track_env():
             self.crash = 1
             self.fail = 1
         
-        if self.more_real: # 更真实的失败条件
+        if self.realistic: # 更真实的失败条件
             min_alpha_air = -5
             max_alpha_air = 29
             max_beta_air = 15

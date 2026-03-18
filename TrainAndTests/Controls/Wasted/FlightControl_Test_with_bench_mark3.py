@@ -10,7 +10,7 @@ import torch
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
+from TrainAndTests.Controls.Wasted.FlightControl_Train_dual_a_out3 import *
 # from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
 from Utilities.LocateDirAndAgents import *
 from TrainAndTests.Controls.UPolicyWrapper import *
@@ -49,7 +49,7 @@ if mission_name != "PID":
 # Benchmark 参数
 height_list = [3000, 5000, 7000, 9000, 11000]
 speed_list = [340, 250]
-dt_decide = 0.025
+dt_decide = 0.2
 dt_move = 0.025
 time_limit = 5 * 60  # 每组测试限时 5 分钟
 

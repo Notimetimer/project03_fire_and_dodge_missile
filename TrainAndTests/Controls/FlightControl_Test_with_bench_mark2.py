@@ -10,7 +10,7 @@ import torch
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from TrainAndTests.Controls.FlightControl_Train_dual_a_out3 import *
+from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
 # from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
 from Utilities.LocateDirAndAgents import *
 from TrainAndTests.Controls.UPolicyWrapper import *
@@ -26,7 +26,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "PID" # "FlightControl_parallel无课程无蒸馏_有过载限制"
+mission_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制"
@@ -49,13 +49,13 @@ if mission_name != "PID":
 # Benchmark 参数
 height_list = [3000, 5000, 7000, 9000, 11000]
 speed_list = [340, 250]
-dt_decide = 0.2
-dt_move = 0.025
-time_limit = 5 * 60  # 每组测试限时 5 分钟
+dt_decide = 0.02
+dt_move = 0.02
+time_limit = 8 * 60  # 每组测试限时 5 分钟
 
 # 是否跟踪动目标（会导致超调量记录失效）
 chasing_wave = 1
-more_real = 1
+realistic = 1
 
 avg_height_overshoot = 0
 avg_heading_overshoot = 0
@@ -73,16 +73,16 @@ min_alpha = float('inf')
 max_beta = 0
 
 env = track_env(dt_move=dt_move, tacview_show=1, time_limit=time_limit)
-env.more_real = more_real
+env.realistic = realistic
 
 # PID 策略初始化
 pidcontroller = UnifiedPolicyWrapper(env, dt_decide=dt_decide) # 
 
 # 目标变化的波动参数（正弦波轨迹，在不同测试中保持一致）
 A_psi_dot = 6 * (pi / 180)  # deg/s 振幅
-w_psi = 2 * pi / 120         # s 一个周期
+w_psi = 2 * pi / 150         # s 一个周期
 A_h_dot = 100                # m/s 振幅
-w_h = 2 * pi / 150           # s 一个周期
+w_h = 2 * pi / 200           # s 一个周期
 
 total_cases = len(height_list) * len(speed_list)
 success_count = 0
@@ -121,9 +121,9 @@ for init_h in height_list:
                 env.psi_req = sub_of_radian(env.psi_req, 0)
                 
                 # 高度变化率波动
-                h_dot_t = A_h_dot * sin(w_h * current_t)
+                h_dot_t = A_h_dot * - sin(w_h * current_t)
                 env.height_req += h_dot_t * dt_decide
-                env.height_req = np.clip(env.height_req, 1500, 14000)
+                env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
                 env.height_req = np.clip(init_h + 5000, 3000, 13000)
                 env.psi_req = sub_of_radian(birth_state['psi'], pi+2*pi/180*(i%2-0.5)*2)

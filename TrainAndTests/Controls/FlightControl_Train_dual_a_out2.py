@@ -43,7 +43,7 @@ from TrainAndTests.Controls.UPolicyWrapper import *
 class track_env():
     def __init__(self, dt_move=0.02, tacview_show=0, time_limit=3*60):
         super(track_env, self).__init__()
-        self.more_real = 1
+        self.realistic = 1
         self.RUAV_ids = None
         self.dt_report = None
         self.dt_move = dt_move
@@ -372,18 +372,18 @@ class track_env():
             self.crash = 1
             self.fail = 1
         
-        if self.more_real: # 更真实的失败条件
+        if self.realistic: # 考虑迎角过载限制
             min_alpha_air = -5
             max_alpha_air = 29
             max_beta_air = 15
             min_ny = -3
             max_ny = 10
-        else: # 简化的失败条件
-            min_alpha_air = -15
-            max_alpha_air = 29
-            max_beta_air = 15
-            min_ny = -3
-            max_ny = 10
+        else: # 无迎角过载限制
+            min_alpha_air = -91
+            max_alpha_air = 91
+            max_beta_air = 181
+            min_ny = -10
+            max_ny = 30
 
         # 失速
         if alpha_air < min_alpha_air or alpha_air > max_alpha_air or abs(beta_air) > max_beta_air: # 负过载机动的限制可能比我想的还要严格
