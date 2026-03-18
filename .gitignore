@@ -50,3 +50,4 @@ __pycache__/
 /结果展示/data
 /结果展示/logs
 /.specstory/history
+/TrainAndTests/Controls/test_result
