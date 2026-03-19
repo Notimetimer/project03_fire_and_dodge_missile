@@ -27,7 +27,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
+mission_name = "PID" # "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制"
@@ -53,12 +53,14 @@ speed_list = [340, 250]
 dt_decide = 0.02
 dt_move = 0.01
 
+# 是否可视化
+visualize = 0
 
 # 是否跟踪动目标（会导致超调量记录失效）
 chasing_wave = 1
 realistic = 1
 
-delta_height = -5000
+delta_height = -3000 # -5000
 
 test_name1 = "wave" if chasing_wave else "static"
 test_name2 = "delta_h" + str(delta_height) if not chasing_wave else ""
@@ -71,7 +73,9 @@ else:
     time_limit = 3 * 60  # 每组测试限时 3 分钟
 
 avg_height_overshoot = 0
+max_h_overshoot = 0
 avg_heading_overshoot = 0
+max_heading_overshoot = 0
 avg_v_error = 0
 avg_ao = 0
 avg_psi_error = 0
@@ -84,7 +88,7 @@ max_alpha = 0
 min_alpha = float('inf')
 max_beta = 0
 
-env = track_env(dt_move=dt_move, tacview_show=1, time_limit=time_limit)
+env = track_env(dt_move=dt_move, tacview_show=visualize, time_limit=time_limit)
 env.realistic = realistic
 
 # PID 策略初始化
@@ -123,6 +127,16 @@ aileron_list = []
 elevetor_list = []
 rudder_list =[]
 throttle_list = []
+
+# NUE 坐标系下的轨迹
+traj_t_list = []
+uav_n_list = []
+uav_u_list = []
+uav_e_list = []
+target_n_list = []
+target_u_list = []
+target_e_list = []
+round_list = []
 
 
 print(f"\nBenchmark 开始，当前测试配置 [{mission_name}]，共 {total_cases} 组测试案例...")
@@ -213,13 +227,25 @@ for init_h in height_list:
             elevetor_list.append(elevetor)
             rudder_list.append(rudder)
             throttle_list.append(throttle)
+
+            # 记录 NUE 轨迹 (使用偏置后的时间以衔接 Tacview)
+            traj_t_list.append(env.t + t_bias)
+            uav_n_list.append(env.uav_pos_[0])
+            uav_u_list.append(env.uav_pos_[1])
+            uav_e_list.append(env.uav_pos_[2])
+            target_n_list.append(env.target_pos_[0])
+            target_u_list.append(env.target_pos_[1])
+            target_e_list.append(env.target_pos_[2])
+            round_list.append(i)
         
         env.clear_render(t_bias)
         t_bias += env.t # 累加偏置，使下一条轨迹衔接在后面
         
         if steps_in_episode > 0:
             avg_height_overshoot += abs(env.height_overshoot)/total_cases
+            max_h_overshoot = max(abs(env.height_overshoot), max_h_overshoot)
             avg_heading_overshoot += abs(env.heading_overshoot)*180/pi/total_cases
+            max_heading_overshoot = max(abs(env.heading_overshoot)*180/pi, max_heading_overshoot)
             avg_ao += (ao_sum_episode / steps_in_episode) / total_cases
             avg_v_error += (v_error_sum_episode / steps_in_episode) / total_cases
             avg_psi_error += (psi_error_sum_episode / steps_in_episode) / total_cases
@@ -249,10 +275,11 @@ print(f" - 航向误差 (Heading Err): {avg_psi_error:.3f} deg")
 print(f" - 高度误差 (Altitude Err): {avg_height_overshoot:.3f} m")
 print(f" - 俯仰角误差 (Pitch Err): {avg_theta_error:.3f} deg")
 print(f" - 指向误差 (AO):         {avg_ao:.3f} deg")
+print(" - 平均高度超调", avg_height_overshoot, "m")
+print(" - 最大高度超调", max_h_overshoot, "m")
+print(" - 平均航向超调", avg_heading_overshoot, "°")
+print(" - 最大航向超调", max_heading_overshoot, "°")
 print("="*40)
-
-print("avg_height_overshoot", avg_height_overshoot)
-print("avg_heading_overshoot", avg_heading_overshoot)
 
 
 print("\n飞行包线极限统计:")
@@ -266,7 +293,7 @@ print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
 try:
     save_dir = os.path.join(os.path.dirname(__file__), "test_result")
     os.makedirs(save_dir, exist_ok=True)
-    file_name = f"test_{test_name1}_{test_name2}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    file_name = f"{mission_name}_{test_name1}_{test_name2}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
     csv_path = os.path.join(save_dir, file_name)
     
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
@@ -274,15 +301,27 @@ try:
         # 写入表头
         writer.writerow([
             'time', 'theta', 'psi', 'phi', 'v', 'h', 'alpha', 'beta', 'Ny',
-            'theta_req', 'psi_req', 'v_req', 'h_req', 'aileron', 'elevator', 'rudder', 'throttle'
+            'theta_req', 'psi_req', 'v_req', 'h_req', 'aileron', 'elevator', 'rudder', 'throttle', 'round'
         ])
         # 写入数据 (使用 zip 聚合序列)
         writer.writerows(zip(
             t_list, theta_list, psi_list, phi_list, v_list, h_list, 
             alpha_air_list, beta_air_list, Ny_list,
             theta_req_list, psi_req_list, v_req_list, height_req_list,
-            aileron_list, elevetor_list, rudder_list, throttle_list
+            aileron_list, elevetor_list, rudder_list, throttle_list, round_list
         ))
     print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
+
+    # --- 保存 NUE 轨迹到另一个 CSV ---
+    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    traj_csv_path = os.path.join(save_dir, traj_file_name)
+    with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['time', 'uav_N', 'uav_U', 'uav_E', 'target_N', 'target_U', 'target_E', 'round'])
+        writer.writerows(zip(
+            traj_t_list, uav_n_list, uav_u_list, uav_e_list,
+            target_n_list, target_u_list, target_e_list, round_list
+        ))
+    print(f"[数据导出] NUE 轨迹已存至: {traj_csv_path}")
 except Exception as e:
     print(f"\n[错误] 保存 CSV 失败: {e}")

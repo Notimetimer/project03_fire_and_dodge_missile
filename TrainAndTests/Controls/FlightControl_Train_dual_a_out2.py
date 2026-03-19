@@ -78,6 +78,9 @@ class track_env():
         self.v_error = 0
         self.psi_error = 0
         self.theta_error = 0
+        self.uav_pos_ = np.zeros(3)
+        self.target_pos_ = np.zeros(3)
+        self.theta_v_req = 0
     
     def reset(self, o00=None, birth_state=None, height_req=8e3, psi_req=0, v_req=340, dt_report=0.2, t0=0):
         self.t = t0
@@ -539,10 +542,19 @@ class track_env():
         
 
     def render(self, t_bias=0):
+        # 记录 NUE 坐标
+        loc_LLH = self.RUAV.lon, self.RUAV.lat, self.RUAV.alt
+        N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=self.o00[0], lat_o=self.o00[1])
+        self.uav_pos_ = np.array([N, U, E])
+        
+        delta_N = 5e3 * cos(self.theta_v_req) * cos(self.psi_req)
+        delta_U = 5e3 * sin(self.theta_v_req)
+        delta_E = 5e3 * cos(self.theta_v_req) * sin(self.psi_req)
+        self.target_pos_ = np.array([N + delta_N, U + delta_U, E + delta_E])
+
         if self.tacview_show:
             send_t = self.t + t_bias
             data_to_send = ''
-            loc_LLH = self.RUAV.lon, self.RUAV.lat, self.RUAV.alt
             if not self.RUAV.dead:
                 pilot = 'Donkey'
                 color = 'Red'
@@ -553,12 +565,8 @@ class track_env():
                             f"Name=F16,Pilot={pilot},Color={color}\n"
                         )
                 # 绘制目标
-                delta_N = 5e3*cos(self.theta_v_req)*cos(self.psi_req)
-                delta_U = 5e3*sin(self.theta_v_req)
-                delta_E = 5e3*cos(self.theta_v_req)*sin(self.psi_req)
-                N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=self.o00[0], lat_o=self.o00[1])
                 delta_H = self.height_req
-                lon_T, lat_T, _ = NUE2LLH(N+delta_N,U+delta_U,E+delta_E,lon_o=self.o00[0], lat_o=self.o00[1])
+                lon_T, lat_T, _ = NUE2LLH(N+delta_N, U+delta_U, E+delta_E, lon_o=self.o00[0], lat_o=self.o00[1])
                 
                 data_to_send += (
                             f"#{send_t:.2f}\n"

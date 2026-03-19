@@ -117,9 +117,9 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=4 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
         self.r_pid = None
-        self.t_pid = PositionPID(max=1, min=-1, p=0.5, i=0.3, d=0.2)
+        self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -155,7 +155,7 @@ class F16PIDController:
         if -8 < alpha < 13:
             k_alpha_air = 0.01
         else:
-            k_alpha_air = 0.05
+            k_alpha_air = 0.2
 
         if theta * 180 / pi < -70:
             k_alpha_air = 0
@@ -241,7 +241,7 @@ class F16PIDController:
 
         # 通用
         roll_error = delta_x_angle
-        aileron = roll_error / pi * 2 - p / pi * 2 # 1
+        aileron = roll_error / pi * 3 - p / pi * 3 # 1
         # aileron = roll_error/pi*3 - p/pi * 2
 
         # # debug
@@ -254,7 +254,7 @@ class F16PIDController:
 
         # steady filght
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
-        steady_switch_angle = 20  # 20 15 30
+        steady_switch_angle = 15  # 20 15 30
 
         self.check_switch1 = acos(np.dot(L_, v_) / (norm(L_) * norm(v_) + 1e-8)) * 180 / pi
         self.check_switch2 = abs(theta_req)*180/pi
