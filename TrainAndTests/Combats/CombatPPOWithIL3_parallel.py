@@ -27,7 +27,7 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from prepare_il_datas import run_rules
+# from prepare_il_datas import run_rules
 from VsBaseline_while_training2 import test_worker
 
 dt_move = 0.05

@@ -1,5 +1,6 @@
 from CombatPPOWithIL3_parallel import *
 from datetime import datetime
+from prepare_il_datas import run_rules
 
 mission_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行'
 
