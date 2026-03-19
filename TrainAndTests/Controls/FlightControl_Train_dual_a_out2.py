@@ -28,7 +28,7 @@ plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 from _context import *
-from Envs.UAVmodel6d import UAVModel
+from Envs.UAVmodel6d0309 import UAVModel  # UAVmodel6d
 from Visualize.tacview_visualize2 import *
 from Visualize.tensorboard_visualize import *
 from Algorithms.PPOHybrid23_0_distil2_one_step_KL import *

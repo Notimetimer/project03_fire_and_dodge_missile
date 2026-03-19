@@ -253,7 +253,7 @@ if __name__=='__main__':
 
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(env.obs2obs_check(r_obs))  # r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, 5) # i_episode
+                    r_action_label, r_fire = basic_rules(r_state_check, 4) # i_episode
                     last_r_action_label = r_action_label
                     if r_fire:
                         launch_missile_immediately(env, 'r')

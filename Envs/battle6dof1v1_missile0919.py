@@ -311,8 +311,9 @@ class Battle(object):
         # initial_alive_ids = {m.id for m in (self.Rmissiles + self.Bmissiles) if not m.dead}
 
         # 在整个 maneuver step 开始时只重置一次 escape_once（不要在内层子步或导弹循环中再次重置）
-        for UAV in self.UAVs:
+        for UAV, action in zip(self.UAVs, actions):
             UAV.escape_once = 0
+            UAV.target_heading = sub_of_radian(UAV.psi + action[1], 0)
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中

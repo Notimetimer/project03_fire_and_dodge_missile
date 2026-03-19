@@ -28,13 +28,13 @@ from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
-from Envs.UAVmodel6d0309 import UAVModel
 from Visualize.tacview_visualize2 import *
 from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
 from Utilities.LocateDirAndAgents import *
 
 from TrainAndTests.Controls.UPolicyWrapper import *
-from TrainAndTests.Controls.FlightControl_Train_dual_a_out import *
+from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
+from Envs.UAVmodel6d0309 import UAVModel
 
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
@@ -68,7 +68,7 @@ class Battle(object):
         # 加载训练好的模型
         self.control_env = track_env(tacview_show=0)
         action_dims_dict = {'cont': 4, 'cat': [], 'bern': 0}
-        state_dim = 7+7+4
+        state_dim = 7+8+4
         hidden_dim = [128, 128]
         action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
         policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
@@ -275,8 +275,6 @@ class Battle(object):
         self.RUAV = self.RUAVs[0]
         self.BUAV = self.BUAVs[0]
 
-        # print(red_birth_state)
-        # print(blue_birth_state)
 
     def launch_missile(self, side='r'):
         """
@@ -304,14 +302,14 @@ class Battle(object):
             else:
                 self.Bmissiles.append(new_missile)
             self.missiles = self.Rmissiles + self.Bmissiles
-            # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+            
 
 
     def step(self, r_actions, b_actions):
         report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
-        self.t = round(self.t, 2)  # 保留两位小数
+        self.t = round(self.t, 3)  # 保留3位小数
 
         actions = [r_actions] + [b_actions]
         self.r_actions = r_actions.copy()
@@ -321,8 +319,14 @@ class Battle(object):
         # initial_alive_ids = {m.id for m in (self.Rmissiles + self.Bmissiles) if not m.dead}
 
         # 在整个 maneuver step 开始时只重置一次 escape_once（不要在内层子步或导弹循环中再次重置）
-        for UAV in self.UAVs:
+        for UAV, action in zip(self.UAVs, actions):
             UAV.escape_once = 0
+            UAV.target_heading = sub_of_radian(UAV.psi + action[1], 0)
+            # # 调试信息：计算相对方位角
+            # other_uav = self.UAVs[1] if UAV == self.UAVs[0] else self.UAVs[0]
+            # angle_to_other_rad = atan2(other_uav.pos_[2] - UAV.pos_[2], other_uav.pos_[0] - UAV.pos_[0])
+            # print(f"UAV {UAV.id}({UAV.side}) target_heading: {np.degrees(UAV.target_heading):.2f} deg, angle_to_other: {np.degrees(angle_to_other_rad):.2f} deg")
+            # print("--")
 
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
@@ -333,17 +337,19 @@ class Battle(object):
                 if UAV.dead:
                     continue
                 # 输入动作与动力运动学状态
-                # print(action)
+                delta_heading = action[1]
                 target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
-                delta_heading = action[1]  # 相对方位(弧度)
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
 
-                UAV.target_heading = sub_of_radian(UAV.psi + delta_heading, 0)
+                # 计算当前子步下，实际机头指向与固定目标点之间的动态差角
+                dynamic_delta_psi = sub_of_radian(UAV.target_heading, UAV.psi)
+
+                # UAV.target_heading = sub_of_radian(UAV.psi + action[1], 0)
                 # if len(action)==4:
                 #     rudder = action[3]
                 # else:
                 rudder = None
-                # print('target_height',target_height)
+                
 
                 if UAV.blue:
                     # 如果 BLUE_BIRTH_STATE 包含 p2p 则使用其值，否则为 False
@@ -402,6 +408,7 @@ class Battle(object):
                     float(cos(UAV.phi)),       # 5
                     0,                         # 6 弹药量（控制器训练时始终置0）
                 ])
+                # 对齐训练环境: ego_control[4] 是目标航向与 速度矢量(psi_v) 的差角
                 _delta_psi_v = sub_of_radian(UAV.target_heading, UAV.psi_v)
                 _ego_control_realtime = np.array([
                     float(UAV.p),             # 0 p rad/s
@@ -411,13 +418,14 @@ class Battle(object):
                     float(_delta_psi_v),      # 4 目标航向与速度方向差角
                     float(UAV.alpha_air),     # 5 rad
                     float(UAV.beta_air),      # 6 rad
+                    float(UAV.Ny),            # 7
                 ])
                 control_input_state = {
                     "ego_main": _ego_main_realtime,
                     "ego_control": _ego_control_realtime,
                     "flight_cmd": np.array([
-                        cos(delta_heading),
-                        sin(delta_heading),
+                        cos(dynamic_delta_psi),
+                        sin(dynamic_delta_psi),
                         np.clip(target_height, -5000, 5000),   # 与训练环境 clip 对齐
                         target_speed - UAV.speed,
                     ])
@@ -452,7 +460,7 @@ class Battle(object):
                 else:
                     missile.target = target
                 # if not missile.dead:
-                # print('目标位置', target.pos_)
+                
                 # 计算前导弹和目标位速
                 last_pmt_ = missile.pos_
                 last_vmt_ = missile.vel_
@@ -781,7 +789,8 @@ class Battle(object):
                 float(theta_v),  # 3
                 float(delta_psi_v),  # 4
                 float(alpha_air),  # 5 rad
-                float(beta_air)  # 6 rad
+                float(beta_air),  # 6 rad
+                float(own.Ny)     # 7
             ]),
 
             "weapon": float(missile_time_since_shoot),
@@ -821,6 +830,7 @@ class Battle(object):
         s["ego_control"][0] /= (2 * pi)  # (2 * pi) 5000
         s["ego_control"][1] /= (2 * pi)  # (2 * pi) pi
         s["ego_control"][2] /= (2 * pi)  # (2 * pi) 340
+        s["ego_control"][7] /= 5 # 取一个不上不下的过载量
         s["weapon"] /= 120
         s["threat"][3] /= 10e3
         s["border"][0] = min(1, s["border"][0] / 50e3)
@@ -843,6 +853,7 @@ class Battle(object):
             s["ego_control"][0] = s["ego_control"][0] * (2 * pi)
             s["ego_control"][1] = s["ego_control"][1] * (2 * pi)
             s["ego_control"][2] = s["ego_control"][2] * (2 * pi)
+            s["ego_control"][7] = s["ego_control"][7] * 5
 
         if "weapon" in s and s["weapon"] is not None:
             s["weapon"] = s["weapon"] * 120
@@ -956,7 +967,7 @@ class Battle(object):
         self.state_init["target_information"] = np.array([1, 0, 0, 100e3, 0, 0, 0, 0])
         self.state_init["ego_main"] = np.array([300, 5000, 0, 1, 0, 1, 0])
         self.state_init["ego_control"] = np.array(
-            [0, 0, 0, 0, 0, 0, 0])  # pqr[0, 0, 0, 0, 0, 0, 0] 历史动作[0, 0, 340, 0, 0, 0, 0]
+            [0, 0, 0, 0, 0, 0, 0, 0])
         self.state_init["weapon"] = 120
         # self.state_init["threat"] = np.array([pi, 0, 30e3])  # [pi,0,30e3]  [0,0,30e3]
         self.state_init["threat"] = np.array([1, 0, 0, 30e3])
@@ -1159,9 +1170,32 @@ class Battle(object):
                     #     f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
                     #     f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
                     # )
+
+
+                    # # 绘制目标期望点 (Carrot)
+                    # target_heading = getattr(UAV, 'target_heading', UAV.psi)
+                    # # set_height 在无人机 move 时会存在，若无则使用当前高度
+                    # set_height_target = getattr(UAV, 'set_height', loc_LLH[2])
+                    # # print("target_heading of UAV", UAV.id, "is", target_heading*180/pi)
+                    # # print("----")
+                    # # 将期望高度控制偏差映射为类似训练代码中的预期俯仰角
+                    # delta_h_clipped = np.clip(set_height_target - UAV.alt, -5000, 5000)
+                    # theta_req = delta_h_clipped / 5000 * (pi / 2)
+                    # N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
+                    # delta_N = 5e3 * cos(theta_req) * cos(target_heading)
+                    # delta_U = 5e3 * sin(theta_req)
+                    # delta_E = 5e3 * cos(theta_req) * sin(target_heading)
+                    # lon_T, lat_T, _ = NUE2LLH(N + delta_N, U + delta_U, E + delta_E, lon_o=o00[0], lat_o=o00[1], h_o=0)
+                    # data_to_send += (
+                    #     f"#{send_t:.2f}\n"
+                    #     f"{UAV.id + 1000},T={lon_T:.6f}|{lat_T:.6f}|{set_height_target:.6f},"
+                    #     f"Name=Carrot,Color={color}\n"
+                    # )
+
                 else:
                     data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
-                    # data_to_send += f"#-{UAV.id+1000}\n"
+                    # # data_to_send += f"#-{UAV.id+1000}\n"
+                    # data_to_send += f"#{send_t:.2f}\n-{UAV.id + 1000}\n"
 
             # 传输导弹信息
             for missile in self.missiles:
@@ -1192,6 +1226,7 @@ class Battle(object):
             for UAV in self.UAVs:
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
                 # data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
+                data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
             for missile in self.missiles:
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
             self.tacview.send_data_to_client(data_to_send)
@@ -1371,7 +1406,7 @@ def launch_missile_if_possible(env, side='r'):
             else:
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
-            # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+            
         return 1
     else:
         return 0
@@ -1415,7 +1450,7 @@ def launch_missile_immediately(env, side='r', tabu=0):
             else:
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
-            # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+            
     
     return new_missile_id
 
@@ -1476,7 +1511,7 @@ def launch_missile_with_basic_rules(env, side='r'):
         else:
             env.Bmissiles.append(new_missile)
         env.missiles = env.Rmissiles + env.Bmissiles
-        # print(f"{'红方' if side == 'r' else '蓝方'}发射导弹")
+        
 
         return 1
     else:

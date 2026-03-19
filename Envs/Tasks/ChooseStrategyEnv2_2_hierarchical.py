@@ -27,7 +27,7 @@ sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
 from Envs.battle6dof1v1_missile0309_hierarchical import *
 from .ChooseStrategyEnv2_0_hierarchical import ChooseStrategyEnv as BaseChooseStrategyEnv
-from .ChooseStrategyEnv2_0_hierarchical import action_options, action_optionsLR
+from .ChooseStrategyEnv2_0_hierarchical import action_optionsLR
 
 # 通过继承构建观测空间、奖励函数和终止条件
 # 通过类的组合获取各子策略的观测量裁剪
