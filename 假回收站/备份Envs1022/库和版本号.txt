@@ -1,2 +1,0 @@
-jsbsim==1.2.2
-gymnasium==1.0.0

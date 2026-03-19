@@ -1,3 +1,0 @@
-FileType=text/acmi/tacview
-FileVersion=2.2
-0,ReferenceTime=2025-01-02T05:00:00Z
