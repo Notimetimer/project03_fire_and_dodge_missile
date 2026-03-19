@@ -48,8 +48,8 @@ if mission_name != "PID":
         print(f"Loaded actor for test from: {actor_path}")
 
 # Benchmark 参数
-height_list = [3000, 5000, 7000, 9000, 11000]
-speed_list = [340, 250]
+height_list = [8000]
+speed_list = [300]
 dt_decide = 0.02
 dt_move = 0.01
 
@@ -57,10 +57,10 @@ dt_move = 0.01
 visualize = 0
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 1
+chasing_wave = 0
 realistic = 1
 
-delta_height = -3000 # -5000
+delta_height = -4000 # -5000
 
 test_name1 = "wave" if chasing_wave else "static"
 test_name2 = "delta_h" + str(delta_height) if not chasing_wave else ""
@@ -70,7 +70,7 @@ if chasing_wave:
     height_list = [8000]
     speed_list = [340]
 else:
-    time_limit = 3 * 60  # 每组测试限时 3 分钟
+    time_limit = 4 * 60  # 每组测试限时 3 分钟
 
 avg_height_overshoot = 0
 max_h_overshoot = 0
@@ -147,7 +147,7 @@ for init_h in height_list:
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
         
         # 固定初始化
-        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 0}
+        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 3*pi/180}
         env.reset(birth_state=birth_state, height_req=init_h, psi_req=0, v_req=target_v, dt_report=dt_decide)
         
         obs, obs_check = env.get_obs()
@@ -175,7 +175,7 @@ for init_h in height_list:
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
                 env.height_req = np.clip(init_h + delta_height, 3000, 13000)
-                env.psi_req = sub_of_radian(birth_state['psi'], pi + 2*pi/180*(i%2-0.5)*2)
+                env.psi_req = sub_of_radian(birth_state['psi'] + pi*5/6 ) #, pi + 2*pi/180*(i%2-0.5)*2)
                 env.v_req = target_v
             
             # 决策

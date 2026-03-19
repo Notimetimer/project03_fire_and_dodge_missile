@@ -26,7 +26,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "PID" # "FlightControl_parallel无课程无蒸馏_有过载限制"
+mission_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制"
@@ -47,14 +47,14 @@ if mission_name != "PID":
         print(f"Loaded actor for test from: {actor_path}")
 
 # Benchmark 参数
-height_list = [3000, 5000, 7000, 9000, 11000]
-speed_list = [340, 250]
-dt_decide = 0.025
+height_list = [11000]
+speed_list = [340]
+dt_decide = 0.05
 dt_move = 0.025
-time_limit = 5 * 60  # 每组测试限时 5 分钟
+time_limit = 10 * 60  # 每组测试限时 5 分钟
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 1
+chasing_wave = 0
 realistic = 1
 
 avg_height_overshoot = 0
@@ -125,8 +125,8 @@ for init_h in height_list:
                 env.height_req += h_dot_t * dt_decide
                 env.height_req = np.clip(env.height_req, 1500, 14000)
             else:
-                env.height_req = np.clip(init_h + 5000, 3000, 13000)
-                env.psi_req = sub_of_radian(birth_state['psi'], pi+2*pi/180*(i%2-0.5)*2)
+                env.height_req = np.clip(init_h + 0, 3000, 13000)
+                env.psi_req = sub_of_radian(birth_state['psi']) #, pi+2*pi/180*(i%2-0.5)*2)
                 env.v_req = target_v
             
             # 决策
