@@ -541,15 +541,15 @@ class track_env():
         return reward
         
 
-    def render(self, t_bias=0):
+    def render(self, t_bias=0, target_range=5e3):
         # 记录 NUE 坐标
         loc_LLH = self.RUAV.lon, self.RUAV.lat, self.RUAV.alt
         N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=self.o00[0], lat_o=self.o00[1])
         self.uav_pos_ = np.array([N, U, E])
         
-        delta_N = 5e3 * cos(self.theta_v_req) * cos(self.psi_req)
-        delta_U = 5e3 * sin(self.theta_v_req)
-        delta_E = 5e3 * cos(self.theta_v_req) * sin(self.psi_req)
+        delta_N = target_range * cos(self.theta_v_req) * cos(self.psi_req)
+        delta_U = target_range * sin(self.theta_v_req)
+        delta_E = target_range * cos(self.theta_v_req) * sin(self.psi_req)
         self.target_pos_ = np.array([N + delta_N, U + delta_U, E + delta_E])
 
         if self.tacview_show:

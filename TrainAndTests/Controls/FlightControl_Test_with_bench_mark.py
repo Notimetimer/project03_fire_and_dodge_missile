@@ -47,11 +47,13 @@ if mission_name != "PID":
         print(f"Loaded actor for test from: {actor_path}")
 
 # Benchmark 参数
-height_list = [11000]
+height_list = [4000]
 speed_list = [340]
 dt_decide = 0.05
 dt_move = 0.01
 time_limit = 5 * 60  # 每组测试限时 5 分钟
+
+target_range = 3e3
 
 # 是否跟踪动目标（会导致超调量记录失效）
 chasing_wave = 1
@@ -168,8 +170,7 @@ for init_h in height_list:
             max_beta = max(max_beta, abs(env.RUAV.beta_air) * 180 / pi)
 
             # 可视化输出 (使用 t_bias)
-            env.render(t_bias)
-            
+            env.render(t_bias, target_range=target_range)
             # --- 快照“残影”逻辑 ---
             if not hasattr(env, 'render_ids'):
                 env.render_ids = []
@@ -199,9 +200,9 @@ for init_h in height_list:
                     
                     # 添加目标残影
                     N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=env.o00[0], lat_o=env.o00[1])
-                    delta_N = 5e3 * cos(env.theta_v_req) * cos(env.psi_req)
-                    delta_U = 5e3 * sin(env.theta_v_req)
-                    delta_E = 5e3 * cos(env.theta_v_req) * sin(env.psi_req)
+                    delta_N = target_range * cos(env.theta_v_req) * cos(env.psi_req)
+                    delta_U = target_range * sin(env.theta_v_req)
+                    delta_E = target_range * cos(env.theta_v_req) * sin(env.psi_req)
                     
                     delta_H = env.height_req
                     lon_T, lat_T, _ = NUE2LLH(N+delta_N, U+delta_U, E+delta_E, lon_o=env.o00[0], lat_o=env.o00[1])
@@ -225,6 +226,7 @@ for init_h in height_list:
             if data_to_send:
                 env.tacview.send_data_to_client(data_to_send)
             env.render_ids.clear()
+            env.last_snapshot_time = 0
             
         t_bias += env.t # 累加偏置，使下一条轨迹衔接在后面
         
