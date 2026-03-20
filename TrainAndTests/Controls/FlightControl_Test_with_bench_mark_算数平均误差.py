@@ -27,11 +27,10 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "PID" # "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
+mission_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
-"FlightControl_parallel无课程无蒸馏_有过载限制"
-"FlightControl_parallel无课程无蒸馏半高度误差惩罚"
+"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
@@ -57,12 +56,11 @@ time_limit = 5 * 60  # 每组测试限时 5 分钟
 # 是否可视化
 visualize = 0
 target_range = 3e3
+z_limits = (0, 15000)
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 0
+chasing_wave = 1
 realistic = 1
-draw_interval = 10
-model_scale = 150
 
 delta_height = -4000 # -5000
 
@@ -75,6 +73,9 @@ if chasing_wave:
     speed_list = [340]
 else:
     time_limit = 1 * 60  # 每组测试限时 3 分钟
+
+draw_interval = int(time_limit/15)
+model_scale = 300/(time_limit/300)
 
 avg_height_overshoot = 0
 max_h_overshoot = 0
@@ -358,7 +359,7 @@ print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
 try:
     save_dir = os.path.join(os.path.dirname(__file__), "test_result")
     os.makedirs(save_dir, exist_ok=True)
-    file_name = f"{mission_name}_{test_name1}_{test_name2}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    file_name = f"{mission_name}_{test_name1}_{test_name2}.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
     csv_path = os.path.join(save_dir, file_name)
     
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
@@ -378,7 +379,7 @@ try:
     print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
 
     # --- 保存 NUE 轨迹到另一个 CSV ---
-    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
     traj_csv_path = os.path.join(save_dir, traj_file_name)
     with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -397,4 +398,4 @@ except Exception as e:
     print(f"\n[错误] 保存 CSV 失败: {e}")
 
 import Draw3DTrajectory
-Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale)
+Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)

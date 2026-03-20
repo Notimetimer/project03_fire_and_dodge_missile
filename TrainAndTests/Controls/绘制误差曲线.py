@@ -2,79 +2,85 @@ import numpy as np
 import matplotlib.pyplot as plt
 import csv
 import pandas as pd
+import os
 from _context import *
 from Visualize.plot_tools import set_axes_equal
 from Math_calculates.sub_of_angles import *
 
-# 读取 CSV 文件
+# 设置字体以支持中文
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+# 读取 CSV 文件路径
 current_dir = os.path.join(project_root, "TrainAndTests/Controls")
+test_res_dir = os.path.join(current_dir, 'test_result')
 
-file_name = "PID_static_delta_h-4000_20260319_161717.csv"
+file_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_wave_.csv"
+file_name2 = "PID_wave_.csv"
 
-csv_path = os.path.join(current_dir, 'test_result', file_name)
-df = pd.read_csv(csv_path)
+def load_processed_data(file_path):
+    if not os.path.exists(file_path):
+        print(f"警告：文件不存在 {file_path}")
+        return None
+    df = pd.read_csv(file_path)
+    if 'round' in df.columns:
+        df = df[df['round'] == 1]
+    return df
 
-# 如果 CSV 中包含 round 列，则自动过滤出第一轮的数据，防止轨迹重叠
-if 'round' in df.columns:
-    df = df[df['round'] == 1]
+# 加载两个文件的数据
+df1 = load_processed_data(os.path.join(test_res_dir, file_name))
+df2 = load_processed_data(os.path.join(test_res_dir, file_name2))
 
-# 提取数据
-time = df['time'].values
+# 创建画布
+plt.figure(figsize=(15, 10))
 
-# 有期望值的项
-theta = df['theta'].values
-theta_req = df['theta_req'].values
-psi = df['psi'].values
-psi_req = df['psi_req'].values
-v = df['v'].values
-v_req = df['v_req'].values
-h = df['h'].values
-h_req = df['h_req'].values
+# --- 辅助绘图函数 ---
+def plot_comparison(ax, df_list, col_name, labels, is_error=False, req_col=None):
+    colors = ['r', 'b'] # 红的是 RL，蓝的是 PID
+    linestyles = ['-', '--']
+    
+    for i, df in enumerate(df_list):
+        if df is None: continue
+        t = df['time'].values
+        val = df[col_name].values
+        
+        if is_error and req_col:
+            req = df[req_col].values
+            err = sub_of_degree(val, req)
+            ax.plot(t, err, color=colors[i], linestyle=linestyles[i], label=f'{labels[i]} Error')
+        else:
+            ax.plot(t, val, color=colors[i], linestyle=linestyles[i], label=f'{labels[i]} {col_name}')
+            if req_col and i == 1: # 绘制最后一次加载的指令值作为参考
+                ax.plot(t, df[req_col].values, 'k:', alpha=0.5, label='Command Line')
 
-# 没有期望值的项
-phi = df['phi'].values
-alpha = df['alpha'].values
-beta = df['beta'].values
-Ny = df['Ny'].values
-
-# 控制量
-aileron = df['aileron'].values
-elevator = df['elevator'].values
-rudder = df['rudder'].values
-throttle = df['throttle'].values
-
-# 角度误差量
-psi_error = sub_of_degree(psi, psi_req)
-theta_error = sub_of_degree(theta, theta_req)
-
-# 转换展示范围(只管psi绝对值，误差值不转)
-psi = rel2custom_degree(psi)
-psi_req = rel2custom_degree(psi_req)
-
-# 绘制
-# figure(1) = plt.figure(figsize=(10, 6))
+# 1. 航向角误差对比
 ax1 = plt.subplot(2, 2, 1)
-ax1.plot(time, psi, label='psi')
-ax1.plot(time, psi_req, label='psi_req')
-ax1.legend()
-plt.grid(True)
+plot_comparison(ax1, [df1, df2], 'psi', ['RL', 'PID'], is_error=True, req_col='psi_req')
+ax1.set_title("航向角误差 (Heading Error) 对比")
+ax1.set_ylabel("Error (deg)")
+ax1.legend(); ax1.grid(True)
 
+# 2. 俯仰角对比
 ax2 = plt.subplot(2, 2, 2)
-ax2.plot(time, theta, label='theta')
-ax2.plot(time, theta_req, label='theta_req')
-ax2.legend()
-plt.grid(True)
+plot_comparison(ax2, [df1, df2], 'theta', ['RL', 'PID'], req_col='theta_req')
+ax2.set_title("俯仰角 (Pitch) 跟踪对比")
+ax2.set_ylabel("Theta (deg)")
+ax2.legend(); ax2.grid(True)
 
+# 3. 速度对比
 ax3 = plt.subplot(2, 2, 3)
-ax3.plot(time, v, label='v')
-ax3.plot(time, v_req, label='v_req')
-ax3.legend()
-plt.grid(True)
+plot_comparison(ax3, [df1, df2], 'v', ['RL', 'PID'], req_col='v_req')
+ax3.set_title("速度 (Velocity) 跟踪对比")
+ax3.set_ylabel("Speed (m/s)")
+ax3.legend(); ax3.grid(True)
 
+# 4. 高度对比
 ax4 = plt.subplot(2, 2, 4)
-ax4.plot(time, h, label='h')
-ax4.plot(time, h_req, label='h_req')
-ax4.legend()
+plot_comparison(ax4, [df1, df2], 'h', ['RL', 'PID'], req_col='h_req')
+ax4.set_title("高度 (Altitude) 跟踪对比")
+ax4.set_ylabel("Height (m)")
+ax4.legend(); ax4.grid(True)
 
-plt.grid(True)
+plt.suptitle(f"控制器性能对比\nRL: {file_name}\nPID: {file_name2}", fontsize=12)
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 plt.show()

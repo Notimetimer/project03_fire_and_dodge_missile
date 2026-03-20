@@ -10,8 +10,11 @@ import trimesh.transformations as tf
 
 # 导入自定义的模型变换函数
 from Visualize.draw_in_matplotlib import get_transformed_mesh
+# 设置字体以支持中文
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
-def start_drawing(file_name, interval=30, model_scale=400):
+def start_drawing(file_name, interval=30, model_scale=400, x_limits=None, y_limits=None, z_limits=None):
     csv_path = os.path.join(project_root, 'TrainAndTests', 'Controls', 'test_result', file_name)
     if not os.path.exists(csv_path):
         print(f"找不到轨迹文件: {csv_path}，请检查文件名。")
@@ -92,8 +95,8 @@ def start_drawing(file_name, interval=30, model_scale=400):
             # ax3d.text(u_p[0], u_p[1], u_p[2], f"{int(time[i])}s", fontsize=9)
 
     import matplotlib.ticker as ticker
-    ax3d.set_zlim3d(0, 20000)
-    set_axes_equal_manual(ax3d, z_limits=(0, 20000))
+    # ax3d.set_zlim3d(0, 20000)
+    set_axes_equal_manual(ax3d, x_limits=x_limits, y_limits=y_limits, z_limits=z_limits)
 
     # 设置坐标轴显示单位为 km (将原始米数值除以 1000)
     ax3d.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f'{x/1000:.0f}'))
@@ -104,12 +107,34 @@ def start_drawing(file_name, interval=30, model_scale=400):
     ax3d.set_ylabel('North (km)')
     ax3d.set_zlabel('Up (km)')
 
-    # 限制图例
+    # 限制图例：使用 unique labels 逻辑，并开启鼠标拖拽功能
     handles, labels = ax3d.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
-    ax3d.legend(by_label.values(), by_label.keys())
+    leg = ax3d.legend(by_label.values(), by_label.keys(), loc='upper left', fontsize='small')
+    
+    # 开启像 MATLAB 那样的图例可拖动功能，并防止拖动时背景跟着转
+    if leg:
+        leg.set_draggable(True)
+        
+        # 内部处理函数：当点击图例时，屏蔽掉 3D 背景的自动旋转
+        def on_legend_pick(event):
+            # 如果点中的是图例框或其子组件
+            if event.artist == leg or event.artist == leg.get_frame():
+                ax3d.mouse_init(rotate_btn=None, pan_btn=None, zoom_btn=None)
+
+        def on_mouse_release(event):
+            # 鼠标释放后，恢复正常的 3D 交互功能
+            ax3d.mouse_init()
+
+        # 将事件绑定到画布
+        fig.canvas.mpl_connect('pick_event', on_legend_pick)
+        fig.canvas.mpl_connect('button_release_event', on_mouse_release)
+        
+        # 必须显式给图例框设置 picker，否则 pick_event 不会对矩形框生效
+        leg.get_frame().set_picker(True)
 
     plt.title(f"3D Trajectory & Attitude Visualization (per 30s)\nFile: {file_name}")
+    plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
@@ -117,5 +142,5 @@ if __name__ == "__main__":
     current_dir = os.path.join(project_root, "TrainAndTests/Controls")
 
     # 使用最新生成的轨迹数据
-    file_name = "PID_wave__trajectory_20260320_111039.csv"
+    file_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_static_delta_h-4000_trajectory.csv"
     start_drawing(file_name)

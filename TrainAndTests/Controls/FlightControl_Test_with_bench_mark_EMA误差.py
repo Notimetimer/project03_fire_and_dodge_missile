@@ -30,8 +30,7 @@ pre_log_dir = os.path.join(project_root, "logs/control")
 mission_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
-"FlightControl_parallel无课程无蒸馏_有过载限制"
-"FlightControl_parallel无课程无蒸馏半高度误差惩罚"
+"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
@@ -48,29 +47,35 @@ if mission_name != "PID":
         print(f"Loaded actor for test from: {actor_path}")
 
 # Benchmark 参数
-height_list = [3000, 5000, 7000, 9000, 11000]
-speed_list = [340, 250]
+height_list = [10000] # [3000, 5000, 7000, 9000, 11000]
+speed_list = [300] # [340, 250]
 dt_decide = 0.02
 dt_move = 0.01
+time_limit = 5 * 60  # 每组测试限时 5 分钟
 
 # 是否可视化
 visualize = 0
+target_range = 3e3
+z_limits = (0, 15000)
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 1
+chasing_wave = 0
 realistic = 1
 
-delta_height = -5000
+delta_height = -5000 # -5000
 
 test_name1 = "wave" if chasing_wave else "static"
 test_name2 = "delta_h" + str(delta_height) if not chasing_wave else ""
 
 if chasing_wave:
-    time_limit = 8 * 60  # 每组测试限时 8 分钟
+    time_limit = 5 * 60  # 每组测试限时 8 分钟
     height_list = [8000]
     speed_list = [340]
 else:
-    time_limit = 3 * 60  # 每组测试限时 3 分钟
+    time_limit = 1 * 60  # 每组测试限时 3 分钟
+
+draw_interval = int(time_limit/15)
+model_scale = 400/(time_limit/300)
 
 avg_height_overshoot = 0
 max_h_overshoot = 0
@@ -96,10 +101,10 @@ env.realistic = realistic
 pidcontroller = UnifiedPolicyWrapper(env, dt_decide=dt_decide) # 
 
 # 目标变化的波动参数（正弦波轨迹，在不同测试中保持一致）
-A_psi_dot = 10 * (pi / 180)  # deg/s 振幅
+A_psi_dot = 6 * (pi / 180)  # deg/s 振幅
 w_psi = 2 * pi / 120         # s 一个周期
 A_h_dot = 100                # m/s 振幅
-w_h = 2 * pi / 200           # s 一个周期
+w_h = 2 * pi / 150           # s 一个周期
 
 total_cases = len(height_list) * len(speed_list)
 success_count = 0
@@ -148,7 +153,7 @@ for init_h in height_list:
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
         
         # 固定初始化
-        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 0}
+        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 3*pi/180}
         env.reset(birth_state=birth_state, height_req=init_h, psi_req=0, v_req=target_v, dt_report=dt_decide)
         
         obs, obs_check = env.get_obs()
@@ -166,13 +171,19 @@ for init_h in height_list:
             
             if chasing_wave:
                 # 航向角速波动
-                psi_dot_t = A_psi_dot * sin(w_psi * current_t)
-                env.psi_req += psi_dot_t * dt_decide
+                # psi_dot_t = A_psi_dot * sin(w_psi * current_t)
+                # env.psi_req += psi_dot_t * dt_decide
+                env.psi_req = pi/2 * sin(w_psi * current_t)
+
                 env.psi_req = sub_of_radian(env.psi_req, 0)
                 
                 # 高度变化率波动
-                h_dot_t = A_h_dot * - sin(w_h * current_t)
-                env.height_req += h_dot_t * dt_decide
+                # h_dot_t = A_h_dot * sin(w_h * current_t)
+                # env.height_req += h_dot_t * dt_decide
+
+                theta_req = 45 * (pi/180) * sin(w_h * current_t)
+                env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
+
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
                 env.height_req = np.clip(init_h + delta_height, 3000, 13000)
@@ -206,8 +217,51 @@ for init_h in height_list:
             max_beta = max(max_beta, abs(env.RUAV.beta_air) * 180 / pi)
 
             # 可视化输出 (使用 t_bias)
-            env.render(t_bias)
+            env.render(t_bias, target_range=target_range)
+            # --- 快照“残影”逻辑 ---
+            if not hasattr(env, 'render_ids'):
+                env.render_ids = []
+                env.last_snapshot_time = 0
 
+            # 注意避免在 0s 时刻马上生成重叠残影
+            if env.t > 0 and env.t - env.last_snapshot_time >= 30.0:
+                env.last_snapshot_time = env.t
+                if hasattr(env, 'tacview_show') and env.tacview_show:
+                    # 分配不冲突的虚假 ID
+                    ghost_uav_id = env.RUAV.id + int(env.t)*10 + 20000
+                    ghost_target_id = ghost_uav_id + 1
+                    env.render_ids.extend([ghost_uav_id, ghost_target_id])
+                    
+                    send_t = env.t + t_bias
+                    data_to_send = ''
+                    loc_LLH = env.RUAV.lon, env.RUAV.lat, env.RUAV.alt
+                    pilot = f'Ghost_{int(env.t)}s'
+                    color = 'Red'
+                    # 添加飞机残影
+                    data_to_send += (
+                        f"#{send_t:.2f}\n"
+                        f"{ghost_uav_id},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
+                        f"{env.RUAV.phi * 180 / pi:.6f}|{env.RUAV.theta * 180 / pi:.6f}|{env.RUAV.psi * 180 / pi:.6f},"
+                        f"Name=F16,Pilot={pilot},Color={color}\n"
+                    )
+                    
+                    # 添加目标残影
+                    N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=env.o00[0], lat_o=env.o00[1])
+                    delta_N = target_range * cos(env.theta_v_req) * cos(env.psi_req)
+                    delta_U = target_range * sin(env.theta_v_req)
+                    delta_E = target_range * cos(env.theta_v_req) * sin(env.psi_req)
+                    
+                    delta_H = env.height_req
+                    lon_T, lat_T, _ = NUE2LLH(N+delta_N, U+delta_U, E+delta_E, lon_o=env.o00[0], lat_o=env.o00[1])
+                    
+                    data_to_send += (
+                        f"#{send_t:.2f}\n"
+                        f"{ghost_target_id},T={(lon_T):.6f}|{(lat_T):.6f}|{delta_H:.6f},"
+                        f"Name=Carrot,Color=Blue\n"
+                    )
+                    
+                    env.tacview.send_data_to_client(data_to_send)
+        
             # 记录飞行数据
             t_list.append(env.t)
             theta_list.append(env.RUAV.theta * 180/pi)
@@ -240,6 +294,18 @@ for init_h in height_list:
             round_list.append(i)
         
         env.clear_render(t_bias)
+        
+        # --- 清空快照残影 ---
+        if hasattr(env, 'tacview_show') and env.tacview_show and hasattr(env, 'render_ids'):
+            send_t = env.t + t_bias
+            data_to_send = ''
+            for ghost_id in env.render_ids:
+                data_to_send += f"#{send_t:.2f}\n-{ghost_id}\n"
+            if data_to_send:
+                env.tacview.send_data_to_client(data_to_send)
+            env.render_ids.clear()
+            env.last_snapshot_time = 0
+            
         t_bias += env.t # 累加偏置，使下一条轨迹衔接在后面
         
         max_h_overshoot = max(abs(env.height_overshoot), max_h_overshoot)
@@ -296,7 +362,7 @@ print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
 try:
     save_dir = os.path.join(os.path.dirname(__file__), "test_result")
     os.makedirs(save_dir, exist_ok=True)
-    file_name = f"{mission_name}_{test_name1}_{test_name2}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    file_name = f"{mission_name}_{test_name1}_{test_name2}.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
     csv_path = os.path.join(save_dir, file_name)
     
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
@@ -316,15 +382,23 @@ try:
     print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
 
     # --- 保存 NUE 轨迹到另一个 CSV ---
-    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
     traj_csv_path = os.path.join(save_dir, traj_file_name)
     with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['time', 'uav_N', 'uav_U', 'uav_E', 'target_N', 'target_U', 'target_E', 'round'])
+        writer.writerow([
+            'time', 'uav_N', 'uav_U', 'uav_E', 
+            'uav_psi', 'uav_theta', 'uav_phi', 
+            'target_N', 'target_U', 'target_E', 
+            'round'])
         writer.writerows(zip(
             traj_t_list, uav_n_list, uav_u_list, uav_e_list,
+            psi_list, theta_list, phi_list,
             target_n_list, target_u_list, target_e_list, round_list
         ))
     print(f"[数据导出] NUE 轨迹已存至: {traj_csv_path}")
 except Exception as e:
     print(f"\n[错误] 保存 CSV 失败: {e}")
+
+import Draw3DTrajectory
+Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)
