@@ -100,7 +100,15 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 psi_error_ema_episode = 0.0
                 theta_error_ema_episode = 0.0
                 
+
+
                 while not done:
+                    # 目标会跑
+                    height_req += np.random.randn() * 50 * dt_decide # 每秒动30m
+                    env.height_req = np.clip(height_req, 3000, 13000)
+                    psi_req += np.random.randn() * 10*pi/180 * dt_decide # 每秒动5°
+                    env.psi_req = sub_of_radian(psi_req)
+
                     obs, obs_check = env.get_obs()
                     action, u, _, _ = local_agent.take_action(obs, explore=True)
                     steps_run += 1
@@ -150,7 +158,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel无课程无蒸馏_有过载限制_动态lr'
+mission_name = 'FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr'
 
 if __name__=='__main__':
     # dof = 3

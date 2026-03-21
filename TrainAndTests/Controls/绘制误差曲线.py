@@ -15,7 +15,7 @@ plt.rcParams['axes.unicode_minus'] = False
 current_dir = os.path.join(project_root, "TrainAndTests/Controls")
 test_res_dir = os.path.join(current_dir, 'test_result')
 
-file_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_wave_.csv"
+file_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_.csv"
 file_name2 = "PID_wave_.csv"
 
 def load_processed_data(file_path):

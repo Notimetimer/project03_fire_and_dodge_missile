@@ -376,7 +376,7 @@ class track_env():
             self.fail = 1
         
         if self.realistic: # 考虑迎角过载限制
-            min_alpha_air = -5  # -5
+            min_alpha_air = -7  # -5
             max_alpha_air = 26  # 29
             max_beta_air = 15
             min_ny = -3
@@ -447,7 +447,8 @@ class track_env():
         # 高度误差惩罚，从用法上看不如用俯仰角约束的效果好
         r_alt = 0
         # r_alt += 0.16 * np.sign(height2req) * np.clip(self.RUAV.vu / 100, -1, 1)
-        r_alt += -0.15 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
+        r_alt += -0.01 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
+        # 0.15 可能有些大
 
         # 高度限制奖励/惩罚
         r_alt += 2*((alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 1) + \
@@ -486,32 +487,20 @@ class track_env():
 
 
         # 滚转角速度惩罚
-        if abs(psi2req) < 20 * pi/180 \
-            or abs(theta)*180/pi > 45:  # 大俯仰机动应该降低滚转角速度
+        if abs(psi2req) < 15 * pi/180 \
+            or abs(theta)*180/pi > 75:  # 大俯仰机动应该降低滚转角速度
             r_angle += -0.1 * abs(p)/pi  # 0.4 偏强？
         else:
-            r_angle += -0.005 * abs(p)/pi # 0.01 可能有些偏强？
+            r_angle += -0.001 * abs(p)/pi # 0.01 可能有些偏强？
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
         r_speed = self.RUAV.Nx * np.sign(speed2req) * 0.5
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
-        "笔记本上跑的，可能有错，但以结果为准"
-        # reward_alpha = 0.5
-        # if alpha_air >= 15:
-        #     reward_alpha -= (alpha_air-15)/15 * 10/(29-15)
-        # if alpha_air < 0:
-        #     reward_alpha += alpha_air/2 *10/(0 - -5)
-        # ny = self.RUAV.Ny
-        # if ny<=-1:
-        #     reward_alpha -= 3 + (-1-ny)*6 *2
-        # if ny >= 6:
-        #     reward_alpha -= 3 + (ny-6)*3 *2
-        "台式机要跑的"
         reward_alpha = 0.5
         if alpha_air >= 15:
-            reward_alpha -= (alpha_air-15) * 10/(29-15)
+            reward_alpha -= (alpha_air-15) * 5/(26-15) # 10 可能有些大，没有把大迎角的全部优势拿出来
         if alpha_air < -2:
             reward_alpha -= ((-2) - alpha_air) * 15/((-2) - (-5))
         ny = self.RUAV.Ny
