@@ -27,10 +27,10 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "PID"
 # 可选其它控制器
 "PID"
-"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
+"FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
@@ -70,7 +70,7 @@ test_name2 = "delta_h" + str(delta_height) if not chasing_wave else ""
 if chasing_wave:
     time_limit = 5 * 60  # 每组测试限时 8 分钟
     height_list = [8000]
-    speed_list = [340]
+    speed_list = [300]
 else:
     time_limit = 1 * 60  # 每组测试限时 3 分钟
 
@@ -180,7 +180,7 @@ for init_h in height_list:
                 # h_dot_t = A_h_dot * sin(w_h * current_t)
                 # env.height_req += h_dot_t * dt_decide
 
-                theta_req = 5 * (pi/180) * sin(w_h * current_t)
+                theta_req = 2 * (pi/180) * sin(w_h * current_t)
                 env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)

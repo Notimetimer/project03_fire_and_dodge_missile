@@ -15,12 +15,12 @@ plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 def start_drawing(file_name, interval=30, model_scale=400, x_limits=None, y_limits=None, z_limits=None):
-    csv_path = os.path.join(project_root, 'TrainAndTests', 'Controls', 'test_result', file_name)
+    csv_path = os.path.join(project_root, "logs", "control_test_results", file_name)
     if not os.path.exists(csv_path):
         print(f"找不到轨迹文件: {csv_path}，请检查文件名。")
         # 尝试列出目录下的文件以便调试
         print("可用文件列表:")
-        print(os.listdir(os.path.join(project_root, 'TrainAndTests', 'Controls', 'test_result')))
+        print(os.listdir(os.path.join(project_root, "logs", "control_test_results")))
         exit()
 
     df = pd.read_csv(csv_path)
