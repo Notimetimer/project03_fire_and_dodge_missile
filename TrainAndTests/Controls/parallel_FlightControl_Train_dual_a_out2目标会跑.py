@@ -83,7 +83,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                                 'psi': np.random.uniform(-pi/6, pi/6)}
                 
                 # 使用传入的 warm_up 调整难度
-                height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 3000, 13000)
+                height_req = np.clip(env.RUAV.alt + np.random.uniform(-1, 1) * 5000, 3000, 13000)
                 psi_req = np.random.uniform(-pi, pi) # * warm_up
                 v_req = np.random.uniform(0.5, 2.5) * 340  # 根本不可能跑到2.5Ma, 1.1 就封顶了，但是在训练的时候就要处理好这个数据.
 

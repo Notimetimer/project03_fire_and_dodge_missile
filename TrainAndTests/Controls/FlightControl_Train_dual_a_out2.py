@@ -467,7 +467,7 @@ class track_env():
         desired_theta = height2req/5000*pi/2  # 去除 pi/3 约束
                         # (height2req>=0)*height2req/5000*pi/3 + \
                         # (height2req<0)*height2req/5000*pi/2
-        r_angle += -3 * abs(theta - desired_theta) # 应和desired_theta保持一致
+        r_angle += - 5 * abs(theta - desired_theta) # 应和desired_theta保持一致  3小了
 
         # 和奖励无关，方便画图
         self.theta_v_req = height2req/5000*pi/2
@@ -475,7 +475,12 @@ class track_env():
         self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1)) * 180/pi
         
         # 滚转角惩罚
-        r_angle += -0.001 * abs(phi)/pi
+        if desired_theta >= 0:
+            r_angle += 0.001 * cos(phi)
+        else:
+            r_angle  += 0
+
+
         # 0.01 有些强了
 
         if abs(theta)*180/pi <= 70:
