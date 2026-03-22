@@ -27,7 +27,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "PID" # "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr" # PID
+mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
@@ -101,7 +101,7 @@ pidcontroller = UnifiedPolicyWrapper(env, dt_decide=dt_decide) #
 
 # 目标变化的波动参数（正弦波轨迹，在不同测试中保持一致）
 A_psi_dot = 6 * (pi / 180)  # deg/s 振幅
-w_psi = 2 * pi / 120         # s 一个周期
+w_psi = 2 * pi / 240         # s 一个周期
 A_h_dot = 100                # m/s 振幅
 w_h = 2 * pi / 150           # s 一个周期
 
@@ -180,7 +180,7 @@ for init_h in height_list:
                 # h_dot_t = A_h_dot * sin(w_h * current_t)
                 # env.height_req += h_dot_t * dt_decide
 
-                theta_req = 30 * (pi/180) * sin(w_h * current_t)
+                theta_req = 5 * (pi/180) * sin(w_h * current_t)
                 env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
@@ -358,9 +358,9 @@ print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
 
 # --- 保存数据到 CSV ---
 try:
-    save_dir = os.path.join(os.path.dirname(__file__), "test_result")
+    save_dir = os.path.join(project_root, "logs", "control_test_results")
     os.makedirs(save_dir, exist_ok=True)
-    file_name = f"{mission_name}_{test_name1}_{test_name2}.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
+    file_name = f"{mission_name}_{test_name1}_{test_name2}_steady.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
     csv_path = os.path.join(save_dir, file_name)
     
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
@@ -380,7 +380,7 @@ try:
     print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
 
     # --- 保存 NUE 轨迹到另一个 CSV ---
-    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory_steady.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
     traj_csv_path = os.path.join(save_dir, traj_file_name)
     with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)

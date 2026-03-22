@@ -6,6 +6,7 @@ import torch as th
 from math import *
 import time
 import torch
+import csv
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -26,11 +27,10 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "PID" # "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "PID" # "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr" # PID
 # 可选其它控制器
 "PID"
-"FlightControl_parallel无课程无蒸馏_有过载限制"
-"FlightControl_parallel无课程无蒸馏半高度误差惩罚"
+"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
@@ -48,33 +48,52 @@ if mission_name != "PID":
 
 # Benchmark 参数
 height_list = [8000]
-speed_list = [340]
-dt_decide = 0.05
+speed_list = [300]
+dt_decide = 0.02
 dt_move = 0.01
 time_limit = 5 * 60  # 每组测试限时 5 分钟
 
+# 是否可视化
+visualize = 0
 target_range = 3e3
+z_limits = (0, 15000)
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 0
+chasing_wave = 1
 realistic = 1
 
+delta_height = -4000 # -5000
+
+test_name1 = "wave" if chasing_wave else "static"
+test_name2 = "delta_h" + str(delta_height) if not chasing_wave else ""
+
+if chasing_wave:
+    time_limit = 5 * 60  # 每组测试限时 8 分钟
+    height_list = [8000]
+    speed_list = [340]
+else:
+    time_limit = 1 * 60  # 每组测试限时 3 分钟
+
+draw_interval = int(time_limit/15)
+model_scale = 300/(time_limit/300)
+
 avg_height_overshoot = 0
+max_h_overshoot = 0
 avg_heading_overshoot = 0
+max_heading_overshoot = 0
 avg_v_error = 0
 avg_ao = 0
 avg_psi_error = 0
 avg_theta_error = 0
 survive_rate = 0
 
-beta_ao = 0.01 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不计
 max_ny = -float('inf')
 min_ny = float('inf')
 max_alpha = 0
 min_alpha = float('inf')
 max_beta = 0
 
-env = track_env(dt_move=dt_move, tacview_show=1, time_limit=time_limit)
+env = track_env(dt_move=dt_move, tacview_show=visualize, time_limit=time_limit)
 env.realistic = realistic
 
 # PID 策略初始化
@@ -91,27 +110,59 @@ success_count = 0
 
 t_bias = 0 # 用于 Tacview 时间偏移，防止轨道重叠
 
+t_list = []
+# 姿态、速高
+theta_list = []
+psi_list = []
+phi_list = []
+v_list = []
+h_list = []
+# 空气动力学
+alpha_air_list = []
+beta_air_list = []
+# 过载
+Ny_list = []
+# 目标
+theta_req_list = []
+psi_req_list = []
+v_req_list = []
+height_req_list = []
+# 控制量
+aileron_list = []
+elevetor_list = []
+rudder_list =[]
+throttle_list = []
+
+# NUE 坐标系下的轨迹
+traj_t_list = []
+uav_n_list = []
+uav_u_list = []
+uav_e_list = []
+target_n_list = []
+target_u_list = []
+target_e_list = []
+round_list = []
+
+
 print(f"\nBenchmark 开始，当前测试配置 [{mission_name}]，共 {total_cases} 组测试案例...")
 i=0
 for init_h in height_list:
-    height_req = np.clip(init_h + 5000, 3000, 13000)
     for target_v in speed_list:
         i+=1
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
         
         # 固定初始化
-        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 0}
+        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 3*pi/180}
         env.reset(birth_state=birth_state, height_req=init_h, psi_req=0, v_req=target_v, dt_report=dt_decide)
         
         obs, obs_check = env.get_obs()
         done = False
         
-        ao_ema_episode = 0
-        v_error_ema_episode = 0
-        psi_error_ema_episode = 0.0
-        theta_error_ema_episode = 0.0
-        psi_error_ema_episode = 0.0
-        theta_error_ema_episode = 0.0
+        ao_sum_episode = 0
+        v_error_sum_episode = 0
+        psi_error_sum_episode = 0.0
+        theta_error_sum_episode = 0.0
+        steps_in_episode = 0
 
         while not done:
             # 更新动态目标 (按照预设的正弦曲线变化)
@@ -129,13 +180,14 @@ for init_h in height_list:
                 # h_dot_t = A_h_dot * sin(w_h * current_t)
                 # env.height_req += h_dot_t * dt_decide
 
-                theta_req = 45 * (pi/180) * sin(w_h * current_t)
+                theta_req = 30 * (pi/180) * sin(w_h * current_t)
                 env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
+                theta_req = env.height_req /5000 *pi/2
             else:
-                env.height_req = height_req # np.clip(height_req, env.RUAV.alt-5000, env.RUAV.alt+3000)
-                env.psi_req = sub_of_radian(birth_state['psi'], pi+2*pi/180*(i%2-0.5)*2)
+                env.height_req = np.clip(init_h + delta_height, 3000, 13000)
+                env.psi_req = sub_of_radian(birth_state['psi']+pi) #, pi+2*pi/180*(i%2-0.5)*2)
                 env.v_req = target_v
             
             # 决策
@@ -150,18 +202,12 @@ for init_h in height_list:
             # 推进环境
             next_obs, reward, done = env.step(action)
             
-            # 累加采样误差
-            ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-            v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
-            psi_error_ema_episode = beta_ao * psi_error_ema_episode + (1 - beta_ao) * abs(env.psi_error)
-            theta_error_ema_episode = beta_ao * theta_error_ema_episode + (1 - beta_ao) * abs(env.theta_error)
-
-            # 累加采样误差
-            ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-            v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
-            psi_error_ema_episode = beta_ao * psi_error_ema_episode + (1 - beta_ao) * abs(env.psi_error)
-            theta_error_ema_episode = beta_ao * theta_error_ema_episode + (1 - beta_ao) * abs(env.theta_error)
-
+            # 累积采样误差 (算术平均用)
+            ao_sum_episode += env.AO
+            v_error_sum_episode += abs(env.v_error)
+            psi_error_sum_episode += abs(env.psi_error)
+            theta_error_sum_episode += abs(env.theta_error)
+            steps_in_episode += 1
             
             # 记录飞行包线极限值
             max_ny = max(max_ny, env.RUAV.Ny)
@@ -178,7 +224,7 @@ for init_h in height_list:
                 env.last_snapshot_time = 0
 
             # 注意避免在 0s 时刻马上生成重叠残影
-            if env.t - env.last_snapshot_time >= 30.0 or env.t == dt_decide:
+            if env.t > 0 and env.t - env.last_snapshot_time >= 30.0:
                 env.last_snapshot_time = env.t
                 if hasattr(env, 'tacview_show') and env.tacview_show:
                     # 分配不冲突的虚假 ID
@@ -216,6 +262,37 @@ for init_h in height_list:
                     
                     env.tacview.send_data_to_client(data_to_send)
         
+            # 记录飞行数据
+            t_list.append(env.t)
+            theta_list.append(env.RUAV.theta * 180/pi)
+            psi_list.append(env.RUAV.psi * 180/pi)
+            phi_list.append(env.RUAV.phi * 180/pi)
+            v_list.append(env.RUAV.speed)
+            h_list.append(env.RUAV.alt)
+            alpha_air_list.append(env.RUAV.alpha_air * 180/pi)
+            beta_air_list.append(env.RUAV.beta_air * 180/pi)
+            Ny_list.append(env.RUAV.Ny)
+            theta_req_list.append(env.theta_v_req * 180/pi)
+            psi_req_list.append(env.psi_req * 180/pi)
+            v_req_list.append(env.v_req)
+            height_req_list.append(env.height_req)
+
+            aileron, elevetor, rudder, throttle = action['cont']
+            aileron_list.append(aileron)
+            elevetor_list.append(elevetor)
+            rudder_list.append(rudder)
+            throttle_list.append(throttle)
+
+            # 记录 NUE 轨迹 (使用偏置后的时间以衔接 Tacview)
+            traj_t_list.append(env.t + t_bias)
+            uav_n_list.append(env.uav_pos_[0])
+            uav_u_list.append(env.uav_pos_[1])
+            uav_e_list.append(env.uav_pos_[2])
+            target_n_list.append(env.target_pos_[0])
+            target_u_list.append(env.target_pos_[1])
+            target_e_list.append(env.target_pos_[2])
+            round_list.append(i)
+        
         env.clear_render(t_bias)
         
         # --- 清空快照残影 ---
@@ -231,13 +308,15 @@ for init_h in height_list:
             
         t_bias += env.t # 累加偏置，使下一条轨迹衔接在后面
         
-        steps_run = int(env.t/dt_decide)
-        avg_height_overshoot += abs(env.height_overshoot)/total_cases
-        avg_heading_overshoot += abs(env.heading_overshoot)*180/pi/total_cases
-        avg_ao += ao_ema_episode/(1 - beta_ao**max(1, steps_run))/total_cases
-        avg_v_error += v_error_ema_episode/(1 - beta_ao**max(1, steps_run))/total_cases
-        avg_psi_error += psi_error_ema_episode/(1 - beta_ao**max(1, steps_run))/total_cases
-        avg_theta_error += theta_error_ema_episode/(1 - beta_ao**max(1, steps_run))/total_cases
+        if steps_in_episode > 0:
+            avg_height_overshoot += abs(env.height_overshoot)/total_cases
+            max_h_overshoot = max(abs(env.height_overshoot), max_h_overshoot)
+            avg_heading_overshoot += abs(env.heading_overshoot)*180/pi/total_cases
+            max_heading_overshoot = max(abs(env.heading_overshoot)*180/pi, max_heading_overshoot)
+            avg_ao += (ao_sum_episode / steps_in_episode) / total_cases
+            avg_v_error += (v_error_sum_episode / steps_in_episode) / total_cases
+            avg_psi_error += (psi_error_sum_episode / steps_in_episode) / total_cases
+            avg_theta_error += (theta_error_sum_episode / steps_in_episode) / total_cases
         
         # 判断本轮是否成功
         if not env.fail and env.t >= time_limit:
@@ -256,18 +335,18 @@ print(f"测试总例数: {total_cases}")
 print(f"成功例数:   {success_count}")
 print(f"总成功率:   {success_count/total_cases*100:.1f}%")
 
-# 全部回合平均误差指标 (EMA 偏差修正后的全口径汇报)
-print(f"\n全部回合平均 EMA 误差指标:")
+# 全部回合平均误差指标 (算术平均)
+print(f"\n全部回合平均算术误差指标 (Arithmetic Mean Error):")
 print(f" - 速度误差 (Speed Err):   {avg_v_error:.3f} m/s")
 print(f" - 航向误差 (Heading Err): {avg_psi_error:.3f} deg")
 print(f" - 高度误差 (Altitude Err): {avg_height_overshoot:.3f} m")
 print(f" - 俯仰角误差 (Pitch Err): {avg_theta_error:.3f} deg")
 print(f" - 指向误差 (AO):         {avg_ao:.3f} deg")
+print(" - 平均高度超调", avg_height_overshoot, "m")
+print(" - 最大高度超调", max_h_overshoot, "m")
+print(" - 平均航向超调", avg_heading_overshoot, "°")
+print(" - 最大航向超调", max_heading_overshoot, "°")
 print("="*40)
-
-# print("survive_rate", round(survive_rate,2)) # 重复了
-print("avg_height_overshoot", avg_height_overshoot)
-print("avg_heading_overshoot", avg_heading_overshoot)
 
 
 print("\n飞行包线极限统计:")
@@ -276,3 +355,48 @@ print(f" - 最大负过载 (Min Ny): {min_ny:.3f}")
 print(f" - 最大迎角 (Max Alpha): {max_alpha:.3f} deg")
 print(f" - 最小迎角 (Min Alpha): {min_alpha:.3f} deg")
 print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
+
+# --- 保存数据到 CSV ---
+try:
+    save_dir = os.path.join(project_root, "logs", "control_test_results")
+    os.makedirs(save_dir, exist_ok=True)
+    file_name = f"{mission_name}_{test_name1}_{test_name2}.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
+    csv_path = os.path.join(save_dir, file_name)
+    
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        # 写入表头
+        writer.writerow([
+            'time', 'theta', 'psi', 'phi', 'v', 'h', 'alpha', 'beta', 'Ny',
+            'theta_req', 'psi_req', 'v_req', 'h_req', 'aileron', 'elevator', 'rudder', 'throttle', 'round'
+        ])
+        # 写入数据 (使用 zip 聚合序列)
+        writer.writerows(zip(
+            t_list, theta_list, psi_list, phi_list, v_list, h_list, 
+            alpha_air_list, beta_air_list, Ny_list,
+            theta_req_list, psi_req_list, v_req_list, height_req_list,
+            aileron_list, elevetor_list, rudder_list, throttle_list, round_list
+        ))
+    print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
+
+    # --- 保存 NUE 轨迹到另一个 CSV ---
+    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    traj_csv_path = os.path.join(save_dir, traj_file_name)
+    with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'time', 'uav_N', 'uav_U', 'uav_E', 
+            'uav_psi', 'uav_theta', 'uav_phi', 
+            'target_N', 'target_U', 'target_E', 
+            'round'])
+        writer.writerows(zip(
+            traj_t_list, uav_n_list, uav_u_list, uav_e_list,
+            psi_list, theta_list, phi_list,
+            target_n_list, target_u_list, target_e_list, round_list
+        ))
+    print(f"[数据导出] NUE 轨迹已存至: {traj_csv_path}")
+except Exception as e:
+    print(f"\n[错误] 保存 CSV 失败: {e}")
+
+import Draw3DTrajectory
+Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)

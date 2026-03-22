@@ -13,7 +13,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # 读取 CSV 文件路径
 current_dir = os.path.join(project_root, "TrainAndTests/Controls")
-test_res_dir = os.path.join(current_dir, 'test_result')
+test_res_dir = os.path.join(project_root, "logs", "control_test_results")
 
 file_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_.csv"
 file_name2 = "PID_wave_.csv"

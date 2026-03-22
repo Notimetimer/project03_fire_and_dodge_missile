@@ -360,7 +360,7 @@ print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
 
 # --- 保存数据到 CSV ---
 try:
-    save_dir = os.path.join(os.path.dirname(__file__), "test_result")
+    save_dir = os.path.join(project_root, "logs", "control_test_results")
     os.makedirs(save_dir, exist_ok=True)
     file_name = f"{mission_name}_{test_name1}_{test_name2}.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
     csv_path = os.path.join(save_dir, file_name)
