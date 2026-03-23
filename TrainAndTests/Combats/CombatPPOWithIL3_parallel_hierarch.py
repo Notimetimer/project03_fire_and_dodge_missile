@@ -339,7 +339,7 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         probs = np.ones(len(target_keys)) / len(target_keys)
         return probs, target_keys
 
-    # 4. 处理 SP (最强/最新历史版本)
+    # 4. 处理 SP (最新历史版本)
     elif SP_type == 'SP':
         # rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
         # 严格匹配 actor_rein + 数字
