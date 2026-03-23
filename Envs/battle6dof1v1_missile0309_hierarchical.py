@@ -70,7 +70,7 @@ class Battle(object):
         action_dims_dict = {'cont': 4, 'cat': [], 'bern': 0}
         state_dim = 7+8+4
         hidden_dim = [128, 128]
-        action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
+        action_bound = np.array([[-1.1,1.1],[-1.1,1.1],[-1.1,1.1],[-0.2,1.2]])  # aileron, elevator, rudder, throttle
         policy_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
         self.control_actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bound, device=device)
         actor_path = os.path.join(project_root, "Controller/NNController", "01.pt")

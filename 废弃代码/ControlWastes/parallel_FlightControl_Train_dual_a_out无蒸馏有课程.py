@@ -141,7 +141,7 @@ hidden_dim = [128, 128] # [128, 128] 极限了，64,64 训练出来的会有稳�
 action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
+action_bound = np.array([[-1.1,1.1],[-1.1,1.1],[-1.1,1.1],[-0.2,1.2]])  # aileron, elevator, rudder, throttle
 mission_name = 'FlightControl_parallel无蒸馏删高度误差惩罚'
 
 if __name__=='__main__':

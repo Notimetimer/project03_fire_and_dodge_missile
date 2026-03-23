@@ -83,7 +83,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                                 'psi': np.random.uniform(-pi/6, pi/6)}
                 
                 # 使用传入的 warm_up 调整难度
-                height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 3000, 13000)
+                height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 3000, 15000)
                 psi_req = np.random.uniform(-pi, pi) # * warm_up
                 v_req = np.random.uniform(0.5, 2.5) * 340  # 根本不可能跑到2.5Ma, 1.1 就封顶了，但是在训练的时候就要处理好这个数据.
 
@@ -149,7 +149,7 @@ hidden_dim = [128, 128] # [128, 128]
 action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
-action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])  # aileron, elevator, rudder, throttle
+action_bound = np.array([[-1.1,1.1],[-1.1,1.1],[-1.1,1.1],[-0.2,1.2]])  # aileron, elevator, rudder, throttle
 mission_name = 'FlightControl_parallel无课程无蒸馏_有过载限制_动态lr'
 
 if __name__=='__main__':

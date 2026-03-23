@@ -54,7 +54,7 @@ if mission_name != "PID":
 
 # Benchmark 参数
 height_list = [8000]
-speed_list = [340]
+speed_list = [300]
 dt_decide = 0.05
 dt_move = 0.01
 time_limit = 5 * 60  # 每组测试限时 5 分钟
@@ -144,9 +144,11 @@ for init_h in height_list:
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
-                env.height_req = height_req # np.clip(height_req, env.RUAV.alt-5000, env.RUAV.alt+3000)
-                env.psi_req = sub_of_radian(birth_state['psi'], pi+2*pi/180*(i%2-0.5)*2)
-                env.v_req = target_v
+                if env.t >= 10:
+                    env.height_req = np.clip(env.RUAV.alt + 7 /90*5000, 3000, 13000)
+                    theta_req = (env.height_req-env.RUAV.alt) /5000*pi/2
+                    env.psi_req = sub_of_radian(birth_state['psi'], 15*pi/180+ 0*(pi+2*pi/180*(i%2-0.5)*2) )
+                    env.v_req = target_v
             
             # 决策
             obs, obs_check = env.get_obs()
@@ -156,7 +158,6 @@ for init_h in height_list:
             else:
                 # PID
                 action = pidcontroller.get_action(obs, explore=0)
-            
             # 推进环境
             next_obs, reward, done = env.step(action)
             
