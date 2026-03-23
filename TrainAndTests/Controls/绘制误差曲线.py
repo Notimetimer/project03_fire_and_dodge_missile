@@ -54,8 +54,9 @@ def plot_comparison(ax, df_list, col_name, labels, is_error=False, req_col=None)
             ax.plot(t, err, color=colors[i], linestyle=linestyles[i], label=f'{labels[i]} Error')
         else:
             ax.plot(t, val, color=colors[i], linestyle=linestyles[i], label=f'{labels[i]} {col_name}')
-            if req_col and i == 1: # 绘制最后一次加载的指令值作为参考
-                ax.plot(t, df[req_col].values, 'k:', alpha=0.5, label='Command Line')
+            if req_col:
+                # 绘制各自的指令值作为参考，使用相同颜色但不同线型
+                ax.plot(t, df[req_col].values, color=colors[i], linestyle=':', alpha=0.5, label=f'{labels[i]} Target')
 
 # --- Figure 1: 核心跟踪性能对比 ---
 plt.figure(figsize=(15, 10))

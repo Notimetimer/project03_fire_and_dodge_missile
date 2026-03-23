@@ -354,7 +354,7 @@ class track_env():
             if done:
                 break
         next_obs, _ = self.get_obs()
-        reward = self.get_reward()
+        reward = self.get_reward(action)
         
         return next_obs, reward, done
 
@@ -405,7 +405,8 @@ class track_env():
         return done
 
 
-    def get_reward(self, ):
+    def get_reward(self, action):
+        aileron, elevator, rudder, throttle = action['cont']
         ruav_state = self.get_state()
         speed = ruav_state["ego_main"][0]
         alt = ruav_state["ego_main"][1]
@@ -515,7 +516,8 @@ class track_env():
             reward_alpha -= 3 + (ny-6)*3 *2
         
         # 侧滑角惩罚（尽量少侧滑）
-        reward_beta = - abs(beta_air/5)
+        reward_beta = - 2 * abs(beta_air/5) # 1可能有些小
+        reward_beta -= abs(rudder) * 0.1  # 方向舵在稳定的的时候尽量少打
 
         reward = np.sum([
             1 * reward_alive,

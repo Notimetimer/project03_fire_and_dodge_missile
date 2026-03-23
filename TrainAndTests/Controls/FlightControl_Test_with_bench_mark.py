@@ -6,10 +6,16 @@ import torch as th
 from math import *
 import time
 import torch
+import matplotlib.pyplot as plt
+
+
+# 设置字体以支持中文
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-
+from Math_calculates.sub_of_angles import *
 from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
 # from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
 from Utilities.LocateDirAndAgents import *
@@ -93,7 +99,7 @@ t_bias = 0 # 用于 Tacview 时间偏移，防止轨道重叠
 print(f"\nBenchmark 开始，当前测试配置 [{mission_name}]，共 {total_cases} 组测试案例...")
 i=0
 for init_h in height_list:
-    height_req = np.clip(init_h + 5000, 3000, 13000)
+    height_req = np.clip(init_h - 5000, 3000, 13000)
     for target_v in speed_list:
         i+=1
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
@@ -104,11 +110,15 @@ for init_h in height_list:
         
         obs, obs_check = env.get_obs()
         done = False
+        # 初始化数据记录
+        history = {
+            'time': [], 'alpha': [], 'Ny': [], 'phi': [], 'h': [],
+            'aileron': [], 'elevator': [], 'rudder': [], 'throttle': [],
+            'psi': [], 'psi_req': [], 'theta': [], 'theta_req': [], 'v': [], 'v_req': []
+        }
         
         ao_ema_episode = 0
         v_error_ema_episode = 0
-        psi_error_ema_episode = 0.0
-        theta_error_ema_episode = 0.0
         psi_error_ema_episode = 0.0
         theta_error_ema_episode = 0.0
 
@@ -149,12 +159,29 @@ for init_h in height_list:
             # 推进环境
             next_obs, reward, done = env.step(action)
             
-            # 累加采样误差
-            ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
-            v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
-            psi_error_ema_episode = beta_ao * psi_error_ema_episode + (1 - beta_ao) * abs(env.psi_error)
-            theta_error_ema_episode = beta_ao * theta_error_ema_episode + (1 - beta_ao) * abs(env.theta_error)
-
+            # 数据记录
+            aileron_val, elevator_val, rudder_val, throttle_val = action['cont']
+            history['time'].append(env.t)
+            history['alpha'].append(env.RUAV.alpha_air * 180 / pi)
+            history['Ny'].append(env.RUAV.Ny)
+            history['phi'].append(env.RUAV.phi * 180 / pi)
+            history['h'].append(env.RUAV.alt)
+            history['aileron'].append(aileron_val)
+            history['elevator'].append(elevator_val)
+            history['rudder'].append(rudder_val)
+            history['throttle'].append(throttle_val)
+            
+            history['psi'].append(env.RUAV.psi * 180 / pi)
+            history['psi_req'].append(env.psi_req * 180 / pi)
+            history['theta'].append(env.RUAV.theta * 180 / pi)
+            # 获取 theta_req，如果环境里没有则尝试从局部提取
+            t_req = getattr(env, 'theta_req', 0)
+            if 'theta_req' in locals(): t_req = locals()['theta_req']
+            history['theta_req'].append(t_req * 180 / pi)
+            
+            history['v'].append(norm(env.RUAV.speed))
+            history['v_req'].append(env.v_req)
+            
             # 累加采样误差
             ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
             v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
@@ -275,3 +302,67 @@ print(f" - 最大负过载 (Min Ny): {min_ny:.3f}")
 print(f" - 最大迎角 (Max Alpha): {max_alpha:.3f} deg")
 print(f" - 最小迎角 (Min Alpha): {min_alpha:.3f} deg")
 print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
+
+# --- 自动化绘图 (展示最后一组测试案例) ---
+if len(history['time']) > 0:
+    t = history['time']
+    # 动态选择颜色：RL 为红色，PID 为蓝色
+    color = 'r' if mission_name != "PID" else 'b'
+    
+    # Figure 1: 核心跟踪性能
+    plt.figure(figsize=(15, 10))
+    # 1. 航向角误差
+    plt.subplot(3, 1, 1)
+    psi_err = [sub_of_degree(p, pr) for p, pr in zip(history['psi'], history['psi_req'])]
+    plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
+    plt.title("航向角误差 (Heading Error)")
+    plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)
+    
+    # 2. 俯仰角跟踪
+    plt.subplot(3, 1, 2)
+    plt.plot(t, history['theta'], color=color, linestyle='-', label=f'{mission_name} Pitch')
+    plt.plot(t, history['theta_req'], color=color, linestyle=':', alpha=0.6, label='Target Pitch')
+    plt.title("俯仰角 (Pitch) 跟踪对比")
+    plt.ylabel(r"$\theta$ (°)"); plt.legend(); plt.grid(True)
+    
+    # 3. 速度跟踪
+    plt.subplot(3, 1, 3)
+    plt.plot(t, history['v'], color=color, linestyle='-', label=f'{mission_name} Velocity')
+    plt.plot(t, history['v_req'], color=color, linestyle=':', alpha=0.6, label='Target Velocity')
+    plt.title("速度 (Velocity) 跟踪对比")
+    plt.ylabel("v (m/s)"); plt.legend(); plt.grid(True)
+    plt.tight_layout()
+
+    # Figure 2: 飞行包线与控制量
+    plt.figure(figsize=(15, 12))
+    # 1. Alpha 与 Ny 对比
+    ax1 = plt.subplot(2, 2, 1)
+    ax1_r = ax1.twinx()
+    ax1.plot(t, history['alpha'], color=color, linestyle='-', label='Alpha')
+    ax1_r.plot(t, history['Ny'], color='g', linestyle=':', alpha=0.6, label='Ny')
+    ax1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
+    ax1.set_ylabel("Alpha (°)"); ax1_r.set_ylabel("Ny (g)")
+    ax1.legend(loc='upper left'); ax1_r.legend(loc='upper right'); ax1.grid(True)
+    
+    # 2. Phi 与 高度 对比
+    ax2 = plt.subplot(2, 2, 2)
+    ax2_r = ax2.twinx()
+    ax2.plot(t, history['phi'], color=color, linestyle='-', label='Phi')
+    ax2_r.plot(t, history['h'], color='g', linestyle=':', alpha=0.6, label='Height')
+    ax2_r.set_title("滚转角 (Phi) 与 高度 (Height)")
+    ax2.set_ylabel("Phi (°)"); ax2_r.set_ylabel("Height (m)")
+    ax2.legend(loc='upper left'); ax2_r.legend(loc='upper right'); ax2.grid(True)
+    
+    # 3. 控制量
+    plt.subplot(2, 1, 2)
+    ctrl_labels = ['aileron', 'elevator', 'rudder', 'throttle']
+    ctrl_data = [history['aileron'], history['elevator'], history['rudder'], history['throttle']]
+    for label, data in zip(ctrl_labels, ctrl_data):
+        plt.plot(t, data, label=label)
+    plt.title(f"{mission_name} 控制器指令")
+    plt.ylabel("Normalized Command")
+    plt.legend(); plt.grid(True)
+    
+    plt.suptitle(f"测试任务性能分析: {mission_name}", fontsize=15)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()

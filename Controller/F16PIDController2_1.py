@@ -117,7 +117,7 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=4 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=4 / pi, i=0.2 / pi, d=2.5 / pi)  # 16, 0.3, 8
         self.r_pid = None
         self.t_pid = PositionPID(max=1, min=-1, p=0.5, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
