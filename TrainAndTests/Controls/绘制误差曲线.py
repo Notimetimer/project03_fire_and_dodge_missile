@@ -15,15 +15,17 @@ plt.rcParams['axes.unicode_minus'] = False
 current_dir = os.path.join(project_root, "TrainAndTests/Controls")
 test_res_dir = os.path.join(project_root, "logs", "control_test_results")
 
-file_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_.csv"
+file_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave__steady.csv"
 
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave__steady"
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_"
 
-file_name2 = "PID_wave_.csv"
+file_name2 = "PID_wave__steady.csv"
 
 "PID_wave__steady"
 "PID_wave_"
+
+"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_wave_"
 
 def load_processed_data(file_path):
     if not os.path.exists(file_path):
@@ -91,9 +93,9 @@ plt.figure(figsize=(15, 12))
 # 1. Alpha 与 Ny 对比 (左轴 Alpha, 右轴 Ny)
 ax2_1 = plt.subplot(2, 2, 1)
 ax2_1_r = ax2_1.twinx()
-ax2_1.plot(df1['time'], df1['alpha'], 'r-', label='RL Alpha')
+ax2_1.plot(df1['time'], df1['alpha'], 'r-', label='PPO Alpha')
 ax2_1.plot(df2['time'], df2['alpha'], 'b--', label='PID Alpha')
-ax2_1_r.plot(df1['time'], df1['Ny'], 'r:', alpha=0.6, label='RL Ny')
+ax2_1_r.plot(df1['time'], df1['Ny'], 'r:', alpha=0.6, label='PPO Ny')
 ax2_1_r.plot(df2['time'], df2['Ny'], 'b:', alpha=0.6, label='PID Ny')
 ax2_1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
 ax2_1.set_ylabel("Alpha (°)"); ax2_1_r.set_ylabel("Ny (g)")
@@ -102,9 +104,9 @@ ax2_1.legend(loc='upper left'); ax2_1_r.legend(loc='upper right'); ax2_1.grid(Tr
 # 2. Phi 与 高度 对比 (左轴 Phi, 右轴 h)
 ax2_2 = plt.subplot(2, 2, 2)
 ax2_2_r = ax2_2.twinx()
-ax2_2.plot(df1['time'], df1['phi'], 'r-', label='RL Phi')
+ax2_2.plot(df1['time'], df1['phi'], 'r-', label='PPO Phi')
 ax2_2.plot(df2['time'], df2['phi'], 'b--', label='PID Phi')
-ax2_2_r.plot(df1['time'], df1['h'], 'r:', alpha=0.6, label='RL Height')
+ax2_2_r.plot(df1['time'], df1['h'], 'r:', alpha=0.6, label='PPO Height')
 ax2_2_r.plot(df2['time'], df2['h'], 'b:', alpha=0.6, label='PID Height')
 ax2_2.set_title("滚转角 (Phi) 与 高度 (Height)")
 ax2_2.set_ylabel("Phi (°)"); ax2_2_r.set_ylabel("Height (m)")

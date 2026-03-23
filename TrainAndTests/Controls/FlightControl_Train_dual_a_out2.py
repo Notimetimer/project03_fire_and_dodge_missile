@@ -516,8 +516,8 @@ class track_env():
             reward_alpha -= 3 + (ny-6)*3 *2
         
         # 侧滑角惩罚（尽量少侧滑）
-        reward_beta = - 2 * abs(beta_air/5) # 1可能有些小
-        reward_beta -= abs(rudder) * 0.1  # 方向舵在稳定的的时候尽量少打
+        reward_beta = - 1.2 * abs(beta_air/5) # 1可能有些小，2可能大了
+        reward_beta -= abs(rudder) * 0.3  # 方向舵在稳定的的时候尽量少打 0.1 可能小了
 
         reward = np.sum([
             1 * reward_alive,
