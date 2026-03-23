@@ -610,7 +610,10 @@ class PPOHybrid:
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
+    def update(self, transition_dict, adv_normed=False, 
+                clip_vf=False, clip_range=0.2, shuffled=1, 
+                mini_batch_size=None, alpha_logit_reg=0.05,
+                v_trace=None):
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -812,6 +815,11 @@ class PPOHybrid:
                     clip_fracs = (((ratio - 1.0).abs() > self.eps).float() * mb_active_masks).sum() / (active_sum + mask_eps)
                     clip_frac_list.append(clip_fracs.item())
                 
+                # 借用一点IMPALA的经验，防止ratio过大导致梯度被炸飞
+                # 建议设置数值：2.0~5.0
+                if v_trace is not None:
+                    ratio = torch.clamp(ratio, max=v_trace)
+
                 surr1 = ratio * mb_advantage
                 surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * mb_advantage
                 

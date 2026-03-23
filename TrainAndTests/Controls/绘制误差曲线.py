@@ -63,21 +63,21 @@ plt.figure(figsize=(15, 10))
 
 # 1. 航向角误差对比
 ax1 = plt.subplot(3, 1, 1)
-plot_comparison(ax1, [df1, df2], 'psi', ['RL', 'PID'], is_error=True, req_col='psi_req')
+plot_comparison(ax1, [df1, df2], 'psi', ['PPO', 'PID'], is_error=True, req_col='psi_req')
 ax1.set_title("航向角误差 (Heading Error) 对比")
 ax1.set_ylabel(r"$\varepsilon_{\psi}$ (°)")
 ax1.legend(); ax1.grid(True)
 
 # 2. 俯仰角对比
 ax2 = plt.subplot(3, 1, 2)
-plot_comparison(ax2, [df1, df2], 'theta', ['RL', 'PID'], req_col='theta_req')
+plot_comparison(ax2, [df1, df2], 'theta', ['PPO', 'PID'], req_col='theta_req')
 ax2.set_title("俯仰角 (Pitch) 跟踪对比")
 ax2.set_ylabel(r"$\theta$ (°)")
 ax2.legend(); ax2.grid(True)
 
 # 3. 速度对比
 ax3 = plt.subplot(3, 1, 3)
-plot_comparison(ax3, [df1, df2], 'v', ['RL', 'PID'], req_col='v_req')
+plot_comparison(ax3, [df1, df2], 'v', ['PPO', 'PID'], req_col='v_req')
 ax3.set_title("速度 (Velocity) 跟踪对比")
 ax3.set_ylabel("v (m/s)")
 ax3.legend(); ax3.grid(True)

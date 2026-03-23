@@ -2,7 +2,7 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-mission_name = 'IL_and_PFSP_挑战_并行_分层'
+mission_name = 'IL_and_PFSP_DPC_混规则对手_挑战_并行_分层'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -20,7 +20,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 0.0  # 设置为0就是纯强化学习
+alpha_il = 2e-1  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 2e4 # il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
@@ -105,22 +105,32 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
+        use_init_data=1,  # 是否留够他模仿的次数
         init_elo_ratings = {
-        }, # 不允许规则对手进入，这样就是纯自博弈了, 
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            # 'Rule_5': 1200,
+            },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
-        use_sil = 0,
+        use_sil = 1,
+        sil_only_maneuver = 0, # 自模仿除了机动也模仿开火
         sigma_elo = 500,  # 200,
-        WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
-        ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
+        WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
-        rule_actor_rate = 0.0, # “复习”概率
+        rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
+        max_il_exponent = -2.0,
+        k_shape_il = 0.0, # 常数
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
