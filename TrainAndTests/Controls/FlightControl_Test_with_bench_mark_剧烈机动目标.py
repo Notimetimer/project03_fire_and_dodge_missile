@@ -27,7 +27,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "PID"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
@@ -153,7 +153,7 @@ for init_h in height_list:
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
         
         # 固定初始化
-        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 3*pi/180}
+        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 0.1 * pi/180}
         env.reset(birth_state=birth_state, height_req=init_h, psi_req=0, v_req=target_v, dt_report=dt_decide)
         
         obs, obs_check = env.get_obs()
@@ -181,7 +181,7 @@ for init_h in height_list:
                 # h_dot_t = A_h_dot * sin(w_h * current_t)
                 # env.height_req += h_dot_t * dt_decide
 
-                theta_req = 30 * (pi/180) * sin(w_h * current_t)
+                theta_req = 45 * (pi/180) * sin(w_h * current_t)
                 env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
