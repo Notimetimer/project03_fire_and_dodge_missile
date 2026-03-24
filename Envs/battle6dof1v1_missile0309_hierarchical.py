@@ -66,6 +66,8 @@ class Battle(object):
         # self.p2p_control = False
         
         # 加载训练好的模型
+        import torch
+        device = torch.device("cpu")
         self.control_env = track_env(tacview_show=0)
         action_dims_dict = {'cont': 4, 'cat': [], 'bern': 0}
         state_dim = 7+8+4
