@@ -502,9 +502,10 @@ class track_env():
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
         r_speed = self.RUAV.Nx * np.sign(speed2req) * 2  # 0.5 小了
+        r_speed += -0.01 * abs(speed2req) # 速度误差绝对值惩罚
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
-        reward_alpha = 0.5
+        reward_alpha = 0.0 # 0.5
         if alpha_air >= 15:
             reward_alpha -= (alpha_air-15) * 5/(26-15) # 10 可能有些大，没有把大迎角的全部优势拿出来
         if alpha_air < -2:
@@ -512,8 +513,8 @@ class track_env():
         ny = self.RUAV.Ny
         if ny<=-1:
             reward_alpha -= 3 + ((-1)-ny)*6 *2
-        if ny >= 6:
-            reward_alpha -= 3 + (ny-6)*3 *2
+        if ny >= 7:
+            reward_alpha -= 3 + (ny-7)*3 *2
         
         # 侧滑角惩罚（尽量少侧滑）
         reward_beta = - 1.2 * abs(beta_air/5) # 1可能有些小，2可能大了

@@ -32,7 +32,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "PID"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
@@ -53,11 +53,11 @@ if mission_name != "PID":
         print(f"Loaded actor for test from: {actor_path}")
 
 # Benchmark 参数
-height_list = [8000]
+height_list = [9000]
 speed_list = [300]
 dt_decide = 0.05
 dt_move = 0.01
-time_limit = 5 * 60  # 每组测试限时 5 分钟
+time_limit = 2 * 60  # 每组测试限时 5 分钟
 
 target_range = 3e3
 
@@ -80,7 +80,7 @@ max_alpha = 0
 min_alpha = float('inf')
 max_beta = 0
 
-env = track_env(dt_move=dt_move, tacview_show=1, time_limit=time_limit)
+env = track_env(dt_move=dt_move, tacview_show=0, time_limit=time_limit)
 env.realistic = realistic
 
 # PID 策略初始化
@@ -106,7 +106,7 @@ for init_h in height_list:
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
         
         # 固定初始化
-        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 0}
+        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 1*pi/180}
         env.reset(birth_state=birth_state, height_req=init_h, psi_req=0, v_req=target_v, dt_report=dt_decide)
         
         obs, obs_check = env.get_obs()
@@ -144,10 +144,10 @@ for init_h in height_list:
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
-                if env.t >= 10:
-                    env.height_req = np.clip(env.RUAV.alt + 7 /90*5000, 3000, 13000)
+                if env.t >= 30:
+                    env.height_req = 5000
                     theta_req = (env.height_req-env.RUAV.alt) /5000*pi/2
-                    env.psi_req = sub_of_radian(birth_state['psi'], 15*pi/180+ 0*(pi+2*pi/180*(i%2-0.5)*2) )
+                    env.psi_req = sub_of_radian(birth_state['psi'], 179*pi/180)
                     env.v_req = target_v
             
             # 决策
@@ -315,7 +315,7 @@ if len(history['time']) > 0:
     plt.figure(figsize=(15, 10))
     # 1. 航向角误差
     plt.subplot(3, 1, 1)
-    psi_err = [sub_of_degree(p, pr) for p, pr in zip(history['psi'], history['psi_req'])]
+    psi_err = [abs(sub_of_degree(p, pr)) for p, pr in zip(history['psi'], history['psi_req'])]
     plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
     plt.title("航向角误差 (Heading Error)")
     plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)

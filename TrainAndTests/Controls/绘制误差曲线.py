@@ -16,22 +16,19 @@ plt.rcParams['ytick.labelsize'] = 14       # y轴刻度
 plt.rcParams['legend.fontsize'] = 14       # 图例
 plt.rcParams['axes.titlesize'] = 14        # 子图标题 (ax.set_title)
 plt.rcParams['figure.titlesize'] = 15      # 总标题 (plt.suptitle)
+plt.rcParams['legend.framealpha'] = 0.5    # 图例背景透明度 (0为完全透明)
 
 # 读取 CSV 文件路径
 current_dir = os.path.join(project_root, "TrainAndTests/Controls")
 test_res_dir = os.path.join(project_root, "logs", "control_test_results")
 
-file_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_.csv"
-
-"FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave__steady"
-"FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_"
-
-file_name2 = "PID_wave_.csv"
-
-"PID_wave__steady"
-"PID_wave_"
-
-"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_wave_"
+# 文件名定义
+file_ppo_norm = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_.csv"
+file_ppo_steady = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave__steady.csv"
+file_ppo_splits = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_SplitS_.csv"
+file_pid_norm = "PID_wave_.csv"
+file_pid_steady = "PID_wave__steady.csv"
+file_pid_splits = "PID_SplitS_.csv"
 
 def load_processed_data(file_path):
     if not os.path.exists(file_path):
@@ -42,9 +39,13 @@ def load_processed_data(file_path):
         df = df[df['round'] == 1]
     return df
 
-# 加载两个文件的数据
-df1 = load_processed_data(os.path.join(test_res_dir, file_name))
-df2 = load_processed_data(os.path.join(test_res_dir, file_name2))
+# 加载工况数据
+df_ppo_norm = load_processed_data(os.path.join(test_res_dir, file_ppo_norm))
+df_ppo_steady = load_processed_data(os.path.join(test_res_dir, file_ppo_steady))
+df_ppo_splits = load_processed_data(os.path.join(test_res_dir, file_ppo_splits))
+df_pid_norm = load_processed_data(os.path.join(test_res_dir, file_pid_norm))
+df_pid_steady = load_processed_data(os.path.join(test_res_dir, file_pid_steady))
+df_pid_splits = load_processed_data(os.path.join(test_res_dir, file_pid_splits))
 
 # --- 辅助绘图函数 ---
 def plot_comparison(ax, df_list, col_name, labels, is_error=False, req_col=None):
@@ -66,86 +67,102 @@ def plot_comparison(ax, df_list, col_name, labels, is_error=False, req_col=None)
                 # 绘制各自的指令值作为参考，使用相同颜色但不同线型
                 ax.plot(t, df[req_col].values, color=colors[i], linestyle=':', alpha=0.8, label=f'{labels[i]} Target')
 
-# --- Figure 1: 核心跟踪性能对比 ---
-plt.figure(figsize=(15, 12))
+# --- Figure 1: 核心跟踪性能对比 (Mild vs Violent vs Split-S) ---
+fig1 = plt.figure(figsize=(18, 12))
 
 # 1. 航向角误差对比
-ax1 = plt.subplot(2, 2, 1)
-plot_comparison(ax1, [df1, df2], 'psi', ['PPO', 'PID'], is_error=True, req_col='psi_req')
-# ax1.set_title("航向角误差 (Heading Error) 对比")
-ax1.set_ylabel("heading error/ degree")
-# ax1.set_ylabel(r"$\varepsilon_{\psi}$ (°)")
-ax1.legend(); ax1.grid(True)
+ax1_l = plt.subplot(3, 3, 1)
+plot_comparison(ax1_l, [df_ppo_steady, df_pid_steady], 'psi', ['PPO', 'PID'], is_error=True, req_col='psi_req')
+ax1_l.set_ylabel("heading error / degree"); ax1_l.set_title("Mild Maneuver"); ax1_l.legend(loc='lower left'); ax1_l.grid(True)
+
+ax1_m = plt.subplot(3, 3, 2)
+plot_comparison(ax1_m, [df_ppo_norm, df_pid_norm], 'psi', ['PPO', 'PID'], is_error=True, req_col='psi_req')
+ax1_m.set_ylabel("heading error / degree"); ax1_m.set_title("Violent Maneuver"); ax1_m.legend(loc='lower left'); ax1_m.grid(True)
+
+ax1_r = plt.subplot(3, 3, 3)
+plot_comparison(ax1_r, [df_ppo_splits, df_pid_splits], 'psi', ['PPO', 'PID'], is_error=True, req_col='psi_req')
+ax1_r.set_ylabel("heading error / degree"); ax1_r.set_title("Split-S Maneuver"); ax1_r.legend(loc='lower left'); ax1_r.grid(True)
 
 # 2. 俯仰角对比
-ax2 = plt.subplot(2, 2, 2)
-plot_comparison(ax2, [df1, df2], 'theta', ['PPO', 'PID'], req_col='theta_req')
-# ax2.set_title("俯仰角 (Pitch) 跟踪对比")
-ax2.set_ylabel("pitch angle/ degree")
-# ax2.set_ylabel(r"$\theta$ (°)")
-ax2.legend(); ax2.grid(True)
+ax2_l = plt.subplot(3, 3, 4)
+plot_comparison(ax2_l, [df_ppo_steady, df_pid_steady], 'theta', ['PPO', 'PID'], req_col='theta_req')
+ax2_l.set_ylabel("pitch angle / degree"); ax2_l.legend(loc='lower right'); ax2_l.grid(True)
+
+ax2_m = plt.subplot(3, 3, 5)
+plot_comparison(ax2_m, [df_ppo_norm, df_pid_norm], 'theta', ['PPO', 'PID'], req_col='theta_req')
+ax2_m.set_ylabel("pitch angle / degree"); ax2_m.legend(loc='lower right'); ax2_m.grid(True)
+
+ax2_r = plt.subplot(3, 3, 6)
+plot_comparison(ax2_r, [df_ppo_splits, df_pid_splits], 'theta', ['PPO', 'PID'], req_col='theta_req')
+ax2_r.set_ylabel("pitch angle / degree"); ax2_r.legend(loc='lower right'); ax2_r.grid(True)
 
 # 3. 速度对比
-ax3 = plt.subplot(2, 2, 3)
-plot_comparison(ax3, [df1, df2], 'v', ['PPO', 'PID'], req_col='v_req')
-# ax3.set_title("速度 (Velocity) 跟踪对比")
-ax3.set_ylabel("speed/ m/s")
-ax3.legend(); ax3.grid(True)
+ax3_l = plt.subplot(3, 3, 7)
+plot_comparison(ax3_l, [df_ppo_steady, df_pid_steady], 'v', ['PPO', 'PID'], req_col='v_req')
+ax3_l.set_ylabel("speed / m/s"); ax3_l.set_xlabel("Time / second"); ax3_l.legend(loc='lower right'); ax3_l.grid(True)
 
-plt.suptitle(f"控制器核心性能对比\nRL: {file_name}\nPID: {file_name2}")
+ax3_m = plt.subplot(3, 3, 8)
+plot_comparison(ax3_m, [df_ppo_norm, df_pid_norm], 'v', ['PPO', 'PID'], req_col='v_req')
+ax3_m.set_ylabel("speed / m/s"); ax3_m.set_xlabel("Time / second"); ax3_m.legend(loc='lower right'); ax3_m.grid(True)
+
+ax3_r = plt.subplot(3, 3, 9)
+plot_comparison(ax3_r, [df_ppo_splits, df_pid_splits], 'v', ['PPO', 'PID'], req_col='v_req')
+ax3_r.set_ylabel("speed / m/s"); ax3_r.set_xlabel("Time / second"); ax3_r.legend(loc='lower right'); ax3_r.grid(True)
+
+plt.suptitle(f"控制器核心性能对比 (Mild vs Violent vs Split-S)")
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
-# --- Figure 2: 飞行包线与控制量分析 ---
+# --- Figure 2: 飞行包线与控制量分析 (使用 Normal 工况) ---
 plt.figure(figsize=(15, 12))
 
-# 1. Alpha 与 Ny 对比 (左轴 Alpha, 右轴 Ny)
+# 1. Alpha 与 Ny 对比
 ax2_1 = plt.subplot(2, 2, 1)
 ax2_1_r = ax2_1.twinx()
-ax2_1.plot(df1['time'], df1['alpha'], 'r-', label='PPO')
-ax2_1.plot(df2['time'], df2['alpha'], 'b--', label='PID')
-ax2_1_r.plot(df1['time'], df1['Ny'], 'r:', alpha=0.6, label='PPO')
-ax2_1_r.plot(df2['time'], df2['Ny'], 'b:', alpha=0.6, label='PID')
-# ax2_1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
-ax2_1.set_ylabel("Attack Angle/ degree"); ax2_1_r.set_ylabel("Overload/ g")
+ax2_1.plot(df_ppo_norm['time'], df_ppo_norm['alpha'], 'r-', label='PPO')
+ax2_1.plot(df_pid_norm['time'], df_pid_norm['alpha'], 'b--', label='PID')
+ax2_1_r.plot(df_ppo_norm['time'], df_ppo_norm['Ny'], 'r:', alpha=0.8, label='PPO')
+ax2_1_r.plot(df_pid_norm['time'], df_pid_norm['Ny'], 'b:', alpha=0.8, label='PID')
+ax2_1.set_ylabel("Attack Angle / degree"); ax2_1_r.set_ylabel("Overload / g")
+ax2_1.set_xlabel("Time / second")
 ax2_1.legend(loc='upper left'); ax2_1_r.legend(loc='upper right'); ax2_1.grid(True)
 
-# 2. Phi 与 高度 对比 (左轴 Phi, 右轴 h)
+# 2. Phi 与 高度 对比
 ax2_2 = plt.subplot(2, 2, 2)
 ax2_2_r = ax2_2.twinx()
-ax2_2.plot(df1['time'], df1['phi'], 'r-', label='PPO')
-ax2_2.plot(df2['time'], df2['phi'], 'b--', label='PID')
-ax2_2_r.plot(df1['time'], df1['h'], 'r:', alpha=0.6, label='PPO')
-ax2_2_r.plot(df2['time'], df2['h'], 'b:', alpha=0.6, label='PID')
-# ax2_2.set_title("滚转角 (Phi) 与 高度 (Height)")
-ax2_2.set_ylabel("Phi (°)"); ax2_2_r.set_ylabel("Height (m)")
+ax2_2.plot(df_ppo_norm['time'], df_ppo_norm['phi'], 'r-', label='PPO')
+ax2_2.plot(df_pid_norm['time'], df_pid_norm['phi'], 'b--', label='PID')
+ax2_2_r.plot(df_ppo_norm['time'], df_ppo_norm['h'], 'r:', alpha=0.8, label='PPO')
+ax2_2_r.plot(df_pid_norm['time'], df_pid_norm['h'], 'b:', alpha=0.8, label='PID')
+ax2_2.set_ylabel("Phi / degree"); ax2_2_r.set_ylabel("Height / m")
+ax2_2.set_xlabel("Time / second")
 ax2_2.legend(loc='upper left'); ax2_2_r.legend(loc='upper right'); ax2_2.grid(True)
 
-# 3. RL 控制量
+# 3. PPO 控制量
 ax2_3 = plt.subplot(2, 2, 3)
 ctrl_cols = ['aileron', 'elevator', 'rudder', 'throttle']
 for col in ctrl_cols:
-    smoothed_val = df1[col].ewm(span=10).mean()
-    ax2_3.plot(df1['time'], smoothed_val, label=col)
-# ax2_3.set_title("RL 控制器指令")
-ax2_3.set_ylabel("Normalized Command")
+    smoothed_val = df_ppo_norm[col].ewm(span=10).mean()
+    ax2_3.plot(df_ppo_norm['time'], smoothed_val, label=col)
+ax2_3.set_title("PPO Command")
+ax2_3.set_ylabel("Normalized Command"); ax2_3.set_xlabel("Time / second")
 ax2_3.legend(); ax2_3.grid(True)
 
 # 4. PID 控制量
 ax2_4 = plt.subplot(2, 2, 4)
 for col in ctrl_cols:
-    smoothed_val = df2[col].ewm(span=10).mean()
-    ax2_4.plot(df2['time'], smoothed_val, label=col)
-# ax2_4.set_title("PID 控制器指令")
-ax2_4.set_ylabel("Normalized Command")
+    smoothed_val = df_pid_norm[col].ewm(span=10).mean()
+    ax2_4.plot(df_pid_norm['time'], smoothed_val, label=col)
+ax2_4.set_title("PID Command")
+ax2_4.set_ylabel("Normalized Command"); ax2_4.set_xlabel("Time / second")
 ax2_4.legend(); ax2_4.grid(True)
 
-plt.suptitle(f"飞行包线与控制特性分析\nRL: {file_name}\nPID: {file_name2}")
+plt.suptitle(f"飞行包线与控制特性分析 (Normal Case)")
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
 # --- 统计性能指标打印 ---
 def print_stats(df, label):
     if df is None:
-        print(f"\n警告：未能加载 {label} 的数据，跳过统计。")
+        print(f"  [警告] 未能加载 {label} 的数据。")
         return
     
     # 计算各项误差的绝对值
@@ -163,20 +180,30 @@ def print_stats(df, label):
     max_alpha = df['alpha'].max()
     min_alpha = df['alpha'].min()
     
-    print(f"\n[{label}] 性能统计指标:")
-    print(f"  算术平均航向误差 : {avg_psi_err:.4f} °")
-    print(f"  算术平均俯仰误差 : {avg_theta_err:.4f} °")
-    print(f"  算术平均速度误差 : {avg_v_err:.4f} m/s")
-    print(f"  最大过载 (Max Ny): {max_ny:.4f} g")
-    print(f"  最小过载 (Min Ny): {min_ny:.4f} g")
-    print(f"  最大迎角 (Max Alpha): {max_alpha:.4f} °")
-    print(f"  最小迎角 (Min Alpha): {min_alpha:.4f} °")
+    print(f"  [{label}] 性能统计指标:")
+    print(f"    算术平均航向误差 : {avg_psi_err:.4f} °")
+    print(f"    算术平均俯仰误差 : {avg_theta_err:.4f} °")
+    print(f"    算术平均速度误差 : {avg_v_err:.4f} m/s")
+    print(f"    最大过载 (Max Ny): {max_ny:.4f} g")
+    print(f"    最小过载 (Min Ny): {min_ny:.4f} g")
+    print(f"    最大迎角 (Max Alpha): {max_alpha:.4f} °")
+    print(f"    最小迎角 (Min Alpha): {min_alpha:.4f} °")
 
-print("\n" + "="*50)
-print("             控制器性能统计汇总")
-print("="*50)
-print_stats(df1, "PPO")
-print_stats(df2, "PID")
-print("="*50 + "\n")
+print("\n" + "="*60)
+print("             控制器多任务性能统计汇总")
+print("="*60)
+
+scenarios = [
+    ("Mild Maneuver", df_ppo_steady, df_pid_steady),
+    ("Violent Maneuver", df_ppo_norm, df_pid_norm),
+    ("Split-S Maneuver", df_ppo_splits, df_pid_splits)
+]
+
+for name, d_ppo, d_pid in scenarios:
+    print(f"\n>>> 工况: {name}")
+    print_stats(d_ppo, "PPO")
+    print_stats(d_pid, "PID")
+
+print("\n" + "="*60 + "\n")
 
 plt.show()

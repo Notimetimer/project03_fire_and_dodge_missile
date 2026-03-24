@@ -117,9 +117,9 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=4 / pi, i=0.2 / pi, d=2.5 / pi)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0.5 / pi)  # 16, 0.3, 8
         self.r_pid = None
-        self.t_pid = PositionPID(max=1, min=-1, p=0.5, i=0.3, d=0.2)
+        self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -153,14 +153,14 @@ class F16PIDController:
         q = state_input[9]
 
         k_alpha_air = 0
-        # # # 迎角限制器
-        # if -8 < alpha < 13:
-        #     k_alpha_air = 0.01
-        # else:
-        #     k_alpha_air = 0.05
+        # # 迎角限制器
+        if -8 < alpha < 13:
+            k_alpha_air = 0.01
+        else:
+            k_alpha_air = 0.2
 
-        # if theta * 180 / pi < -70:
-        #     k_alpha_air = 0
+        if theta * 180 / pi < -70:
+            k_alpha_air = 0
 
         norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
         norm_act[1] = np.clip(norm_act[1], -1, 1)

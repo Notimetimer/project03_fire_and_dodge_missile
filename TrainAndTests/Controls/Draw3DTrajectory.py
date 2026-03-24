@@ -142,5 +142,5 @@ if __name__ == "__main__":
     current_dir = os.path.join(project_root, "TrainAndTests/Controls")
 
     # 使用最新生成的轨迹数据
-    file_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_static_delta_h-4000_trajectory.csv"
-    start_drawing(file_name)
+    file_name = "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr_wave__trajectory.csv"
+    start_drawing(file_name, z_limits = (0, 15000))
