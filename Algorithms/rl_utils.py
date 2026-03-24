@@ -50,6 +50,16 @@ def moving_average(a, window_size):
     end = (np.cumsum(a[:-window_size:-1])[::2] / r)[::-1]
     return np.concatenate((begin, middle, end))
 
+def ema(a, epsilon):
+    # epsilon越大，越趋向于最新的数据
+    ema_list = []
+    v = 0
+    for t, x in enumerate(a, 1):
+        v = (1 - epsilon) * v + epsilon * x
+        # 偏差修正：根据样本数进行缩放，防止初始值趋向于0
+        v_corrected = v / (1 - (1 - epsilon)**t)
+        ema_list.append(v_corrected)
+    return np.array(ema_list)
 
 def train_on_policy_agent(env, agent, num_episodes):
     return_list = []

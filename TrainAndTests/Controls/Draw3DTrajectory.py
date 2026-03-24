@@ -9,7 +9,7 @@ import trimesh
 import trimesh.transformations as tf
 
 # 导入自定义的模型变换函数
-from Visualize.draw_in_matplotlib import get_transformed_mesh
+from Visualize.plot_F16_in_matplotlib import get_transformed_mesh
 # 设置字体以支持中文
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
