@@ -192,7 +192,7 @@ for init_h in height_list:
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
                 if env.t >= 30:
-                    env.height_req = 12000  # 5000
+                    env.height_req = 5000 # 12000  # 5000
                     theta_req = (env.height_req-env.RUAV.alt) /5000*pi/2
                     env.psi_req = sub_of_radian(birth_state['psi'], 179*pi/180)
                     env.v_req = target_v

@@ -104,10 +104,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
 
                 while not done:
                     # 目标会跑
-                    height_req += np.random.randn() * 80 * dt_decide # 每秒动 50m
+                    height_req += np.random.randn() * 80 * dt_decide # 每秒动 80m
                     env.height_req = np.clip(height_req, 3000, 13000)
-                    psi_req += np.random.randn() * 10*pi/180 * dt_decide # 每秒动5°
+                    psi_req += np.random.randn() * 10 *pi/180 * dt_decide # 每秒动10°
                     env.psi_req = sub_of_radian(psi_req)
+                    v_req += np.random.randn() * 10 * dt_decide # 每秒动 10m/s
+                    env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)  # 速度目标也在动
 
                     obs, obs_check = env.get_obs()
                     action, u, _, _ = local_agent.take_action(obs, explore=True)

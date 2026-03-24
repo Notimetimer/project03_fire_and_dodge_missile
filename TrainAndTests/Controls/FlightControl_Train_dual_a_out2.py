@@ -434,7 +434,7 @@ class track_env():
         self.get_done()
 
         # 存活奖励
-        reward_alive = 0.01 # 10
+        reward_alive = 0.01 + 0.5 # 10
 
         # 失败惩罚
         reward_end = 0
@@ -502,7 +502,7 @@ class track_env():
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
         r_speed = self.RUAV.Nx * np.sign(speed2req) * 2  # 0.5 小了
-        r_speed += -0.01 * abs(speed2req) # 速度误差绝对值惩罚
+        r_speed += -0.002 * abs(speed2req) # 速度误差绝对值惩罚
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.0 # 0.5
