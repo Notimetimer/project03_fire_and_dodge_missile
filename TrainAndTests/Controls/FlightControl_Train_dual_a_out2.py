@@ -499,12 +499,12 @@ class track_env():
         else:
             r_angle += -0.001 * abs(p)/pi # 0.01 可能有些偏强？
         
-        r_angle -= (0.001 * abs(q)/pi + 0.001 * abs(r)/pi) # 加q和r的惩罚
+        r_angle -= (0.05 * abs(q)/pi + 0.01 * abs(r)/pi) # 加q和r的惩罚
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
         r_speed = self.RUAV.Nx * np.sign(speed2req) * 2  # 0.5 小了
-        r_speed += -0.002 * abs(speed2req) # 速度误差绝对值惩罚
+        # r_speed += -0.002 * min(abs(speed2req), 30) # 速度误差绝对值惩罚还是别给了，免得淹没其他微小的奖励信号
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.0 # 0.5
