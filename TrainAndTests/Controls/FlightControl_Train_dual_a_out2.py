@@ -80,7 +80,7 @@ class track_env():
         self.theta_error = 0
         self.uav_pos_ = np.zeros(3)
         self.target_pos_ = np.zeros(3)
-        self.theta_v_req = 0
+        self.theta_req = 0
     
     def reset(self, o00=None, birth_state=None, height_req=8e3, psi_req=0, v_req=340, dt_report=0.2, t0=0):
         self.t = t0
@@ -471,8 +471,8 @@ class track_env():
         r_angle += - 5 * abs(theta - desired_theta) # 应和desired_theta保持一致  3小了
 
         # 和奖励无关，方便画图
-        self.theta_v_req = height2req/5000*pi/2
-        L_ = np.array([cos(self.theta_v_req)*cos(self.psi_req), sin(self.theta_v_req), cos(self.theta_v_req)*sin(self.psi_req)])
+        self.theta_req = height2req/5000*pi/2
+        L_ = np.array([cos(self.theta_req)*cos(self.psi_req), sin(self.theta_req), cos(self.theta_req)*sin(self.psi_req)])
         self.AO = np.arccos(np.clip(np.dot(L_, self.RUAV.point_) / (1*1), -1, 1)) * 180/pi
         
         # 滚转角惩罚
@@ -498,6 +498,8 @@ class track_env():
             r_angle += -0.1 * abs(p)/pi  # 0.4 偏强？
         else:
             r_angle += -0.001 * abs(p)/pi # 0.01 可能有些偏强？
+        
+        r_angle -= (0.001 * abs(q)/pi + 0.001 * abs(r)/pi) # 加q和r的惩罚
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
@@ -544,9 +546,9 @@ class track_env():
         N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=self.o00[0], lat_o=self.o00[1])
         self.uav_pos_ = np.array([N, U, E])
         
-        delta_N = target_range * cos(self.theta_v_req) * cos(self.psi_req)
-        delta_U = target_range * sin(self.theta_v_req)
-        delta_E = target_range * cos(self.theta_v_req) * sin(self.psi_req)
+        delta_N = target_range * cos(self.theta_req) * cos(self.psi_req)
+        delta_U = target_range * sin(self.theta_req)
+        delta_E = target_range * cos(self.theta_req) * sin(self.psi_req)
         self.target_pos_ = np.array([N + delta_N, U + delta_U, E + delta_E])
 
         if self.tacview_show:

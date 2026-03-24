@@ -247,9 +247,9 @@ for init_h in height_list:
                     
                     # 添加目标残影
                     N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=env.o00[0], lat_o=env.o00[1])
-                    delta_N = target_range * cos(env.theta_v_req) * cos(env.psi_req)
-                    delta_U = target_range * sin(env.theta_v_req)
-                    delta_E = target_range * cos(env.theta_v_req) * sin(env.psi_req)
+                    delta_N = target_range * cos(env.theta_req) * cos(env.psi_req)
+                    delta_U = target_range * sin(env.theta_req)
+                    delta_E = target_range * cos(env.theta_req) * sin(env.psi_req)
                     
                     delta_H = env.height_req
                     lon_T, lat_T, _ = NUE2LLH(N+delta_N, U+delta_U, E+delta_E, lon_o=env.o00[0], lat_o=env.o00[1])
@@ -272,7 +272,7 @@ for init_h in height_list:
             alpha_air_list.append(env.RUAV.alpha_air * 180/pi)
             beta_air_list.append(env.RUAV.beta_air * 180/pi)
             Ny_list.append(env.RUAV.Ny)
-            theta_req_list.append(env.theta_v_req * 180/pi)
+            theta_req_list.append(env.theta_req * 180/pi)
             psi_req_list.append(env.psi_req * 180/pi)
             v_req_list.append(env.v_req)
             height_req_list.append(env.height_req)

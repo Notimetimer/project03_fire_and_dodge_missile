@@ -7,10 +7,16 @@ from math import *
 import time
 import torch
 import csv
+import matplotlib.pyplot as plt
+
+
+# 设置字体以支持中文
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-
+from Math_calculates.sub_of_angles import *
 from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
 # from TrainAndTests.Controls.parallel_FlightControl_Train_dual_a_out import *
 from Utilities.LocateDirAndAgents import *
@@ -88,6 +94,7 @@ avg_psi_error = 0
 avg_theta_error = 0
 survive_rate = 0
 
+beta_ao = 0.01 ** (dt_decide / 10.0) # 超出最后10s以前的误差忽略不计
 max_ny = -float('inf')
 min_ny = float('inf')
 max_alpha = 0
@@ -158,7 +165,18 @@ for init_h in height_list:
         
         obs, obs_check = env.get_obs()
         done = False
-        
+        # 初始化数据记录
+        history = {
+            'time': [], 'alpha': [], 'Ny': [], 'phi': [], 'h': [],
+            'aileron': [], 'elevator': [], 'rudder': [], 'throttle': [],
+            'psi': [], 'psi_req': [], 'theta': [], 'theta_req': [], 'v': [], 'v_req': []
+        }
+        # ema
+        ao_ema_episode = 0
+        v_error_ema_episode = 0
+        psi_error_ema_episode = 0.0
+        theta_error_ema_episode = 0.0
+        # ma
         ao_sum_episode = 0
         v_error_sum_episode = 0
         psi_error_sum_episode = 0.0
@@ -185,12 +203,14 @@ for init_h in height_list:
                 env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
-                theta_req = env.height_req /5000 *pi/2
+                theta_req = (env.height_req-env.RUAV.alt) /5000 *pi/2
             else:
                 env.height_req = np.clip(init_h + delta_height, 3000, 13000)
+                theta_req = (env.height_req-env.RUAV.alt) /5000 *pi/2
                 env.psi_req = sub_of_radian(birth_state['psi']+pi) #, pi+2*pi/180*(i%2-0.5)*2)
                 env.v_req = target_v
             
+            env.theta_req = theta_req
             # 决策
             obs, obs_check = env.get_obs()
             if mission_name != "PID":
@@ -209,6 +229,34 @@ for init_h in height_list:
             psi_error_sum_episode += abs(env.psi_error)
             theta_error_sum_episode += abs(env.theta_error)
             steps_in_episode += 1
+            aileron_val, elevator_val, rudder_val, throttle_val = action['cont']
+            history['time'].append(env.t)
+            history['alpha'].append(env.RUAV.alpha_air * 180 / pi)
+            history['Ny'].append(env.RUAV.Ny)
+            history['phi'].append(env.RUAV.phi * 180 / pi)
+            history['h'].append(env.RUAV.alt)
+            history['aileron'].append(aileron_val)
+            history['elevator'].append(elevator_val)
+            history['rudder'].append(rudder_val)
+            history['throttle'].append(throttle_val)
+            
+            history['psi'].append(env.RUAV.psi * 180 / pi)
+            history['psi_req'].append(env.psi_req * 180 / pi)
+            history['theta'].append(env.RUAV.theta * 180 / pi)
+            # 获取 theta_req，如果环境里没有则尝试从局部提取
+            t_req = getattr(env, 'theta_req', 0)
+            if 'theta_req' in locals(): t_req = locals()['theta_req']
+            history['theta_req'].append(t_req * 180 / pi)
+            
+            history['v'].append(norm(env.RUAV.speed))
+            history['v_req'].append(env.v_req)
+            
+            # 累加采样误差
+            ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
+            v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
+            psi_error_ema_episode = beta_ao * psi_error_ema_episode + (1 - beta_ao) * abs(env.psi_error)
+            theta_error_ema_episode = beta_ao * theta_error_ema_episode + (1 - beta_ao) * abs(env.theta_error)
+
             
             # 记录飞行包线极限值
             max_ny = max(max_ny, env.RUAV.Ny)
@@ -225,7 +273,7 @@ for init_h in height_list:
                 env.last_snapshot_time = 0
 
             # 注意避免在 0s 时刻马上生成重叠残影
-            if env.t > 0 and env.t - env.last_snapshot_time >= 30.0:
+            if env.t - env.last_snapshot_time >= 30.0 or env.t == dt_decide:
                 env.last_snapshot_time = env.t
                 if hasattr(env, 'tacview_show') and env.tacview_show:
                     # 分配不冲突的虚假 ID
@@ -248,9 +296,9 @@ for init_h in height_list:
                     
                     # 添加目标残影
                     N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=env.o00[0], lat_o=env.o00[1])
-                    delta_N = target_range * cos(env.theta_v_req) * cos(env.psi_req)
-                    delta_U = target_range * sin(env.theta_v_req)
-                    delta_E = target_range * cos(env.theta_v_req) * sin(env.psi_req)
+                    delta_N = target_range * cos(env.theta_req) * cos(env.psi_req)
+                    delta_U = target_range * sin(env.theta_req)
+                    delta_E = target_range * cos(env.theta_req) * sin(env.psi_req)
                     
                     delta_H = env.height_req
                     lon_T, lat_T, _ = NUE2LLH(N+delta_N, U+delta_U, E+delta_E, lon_o=env.o00[0], lat_o=env.o00[1])
@@ -273,7 +321,7 @@ for init_h in height_list:
             alpha_air_list.append(env.RUAV.alpha_air * 180/pi)
             beta_air_list.append(env.RUAV.beta_air * 180/pi)
             Ny_list.append(env.RUAV.Ny)
-            theta_req_list.append(env.theta_v_req * 180/pi)
+            theta_req_list.append(env.theta_req * 180/pi)
             psi_req_list.append(env.psi_req * 180/pi)
             v_req_list.append(env.v_req)
             height_req_list.append(env.height_req)
@@ -309,15 +357,15 @@ for init_h in height_list:
             
         t_bias += env.t # 累加偏置，使下一条轨迹衔接在后面
         
-        if steps_in_episode > 0:
-            avg_height_overshoot += abs(env.height_overshoot)/total_cases
-            max_h_overshoot = max(abs(env.height_overshoot), max_h_overshoot)
-            avg_heading_overshoot += abs(env.heading_overshoot)*180/pi/total_cases
-            max_heading_overshoot = max(abs(env.heading_overshoot)*180/pi, max_heading_overshoot)
-            avg_ao += (ao_sum_episode / steps_in_episode) / total_cases
-            avg_v_error += (v_error_sum_episode / steps_in_episode) / total_cases
-            avg_psi_error += (psi_error_sum_episode / steps_in_episode) / total_cases
-            avg_theta_error += (theta_error_sum_episode / steps_in_episode) / total_cases
+        steps_run = int(env.t/dt_decide)
+        avg_height_overshoot += abs(env.height_overshoot)/total_cases
+        max_h_overshoot = max(abs(env.height_overshoot), max_h_overshoot)
+        avg_heading_overshoot += abs(env.heading_overshoot)*180/pi/total_cases
+        max_heading_overshoot = max(abs(env.heading_overshoot)*180/pi, max_heading_overshoot)
+        avg_ao += (ao_sum_episode / steps_in_episode) / total_cases
+        avg_v_error += (v_error_sum_episode / steps_in_episode) / total_cases
+        avg_psi_error += (psi_error_sum_episode / steps_in_episode) / total_cases
+        avg_theta_error += (theta_error_sum_episode / steps_in_episode) / total_cases
         
         # 判断本轮是否成功
         if not env.fail and env.t >= time_limit:
@@ -401,3 +449,67 @@ except Exception as e:
 
 import Draw3DTrajectory
 Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)
+
+# --- 自动化绘图 (展示最后一组测试案例) ---
+if len(history['time']) > 0:
+    t = history['time']
+    # 动态选择颜色：RL 为红色，PID 为蓝色
+    color = 'r' if mission_name != "PID" else 'b'
+    
+    # Figure 1: 核心跟踪性能
+    plt.figure(figsize=(15, 10))
+    # 1. 航向角误差
+    plt.subplot(3, 1, 1)
+    psi_err = [abs(sub_of_degree(p, pr)) for p, pr in zip(history['psi'], history['psi_req'])]
+    plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
+    plt.title("航向角误差 (Heading Error)")
+    plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)
+    
+    # 2. 俯仰角跟踪
+    plt.subplot(3, 1, 2)
+    plt.plot(t, history['theta'], color=color, linestyle='-', label=f'{mission_name} Pitch')
+    plt.plot(t, history['theta_req'], color=color, linestyle=':', alpha=0.6, label='Target Pitch')
+    plt.title("俯仰角 (Pitch) 跟踪对比")
+    plt.ylabel(r"$\theta$ (°)"); plt.legend(); plt.grid(True)
+    
+    # 3. 速度跟踪
+    plt.subplot(3, 1, 3)
+    plt.plot(t, history['v'], color=color, linestyle='-', label=f'{mission_name} Velocity')
+    plt.plot(t, history['v_req'], color=color, linestyle=':', alpha=0.6, label='Target Velocity')
+    plt.title("速度 (Velocity) 跟踪对比")
+    plt.ylabel("v (m/s)"); plt.legend(); plt.grid(True)
+    plt.tight_layout()
+
+    # Figure 2: 飞行包线与控制量
+    plt.figure(figsize=(15, 12))
+    # 1. Alpha 与 Ny 对比
+    ax1 = plt.subplot(2, 2, 1)
+    ax1_r = ax1.twinx()
+    ax1.plot(t, history['alpha'], color=color, linestyle='-', label='Alpha')
+    ax1_r.plot(t, history['Ny'], color='g', linestyle=':', alpha=0.6, label='Ny')
+    ax1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
+    ax1.set_ylabel("Alpha (°)"); ax1_r.set_ylabel("Ny (g)")
+    ax1.legend(loc='upper left'); ax1_r.legend(loc='upper right'); ax1.grid(True)
+    
+    # 2. Phi 与 高度 对比
+    ax2 = plt.subplot(2, 2, 2)
+    ax2_r = ax2.twinx()
+    ax2.plot(t, history['phi'], color=color, linestyle='-', label='Phi')
+    ax2_r.plot(t, history['h'], color='g', linestyle=':', alpha=0.6, label='Height')
+    ax2_r.set_title("滚转角 (Phi) 与 高度 (Height)")
+    ax2.set_ylabel("Phi (°)"); ax2_r.set_ylabel("Height (m)")
+    ax2.legend(loc='upper left'); ax2_r.legend(loc='upper right'); ax2.grid(True)
+    
+    # 3. 控制量
+    plt.subplot(2, 1, 2)
+    ctrl_labels = ['aileron', 'elevator', 'rudder', 'throttle']
+    ctrl_data = [history['aileron'], history['elevator'], history['rudder'], history['throttle']]
+    for label, data in zip(ctrl_labels, ctrl_data):
+        plt.plot(t, data, label=label)
+    plt.title(f"{mission_name} 控制器指令")
+    plt.ylabel("Normalized Command")
+    plt.legend(); plt.grid(True)
+    
+    plt.suptitle(f"测试任务性能分析: {mission_name}", fontsize=15)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()

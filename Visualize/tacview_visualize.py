@@ -42,7 +42,7 @@ class Tacview(object):
         # 向客户端发送头部格式数据
 
         data_to_send = ("FileType=text/acmi/tacview\nFileVersion=2.1\n"
-                        "0,ReferenceTime=2020-04-01T00:00:00Z\n#0.00\n"
+                        "0,ReferenceTime=2026-03-01T00:00:00Z\n#0.00\n"
                         )
         client_socket.send(data_to_send.encode())
 

@@ -369,7 +369,7 @@ class track_env():
         height2req = np.clip(self.height_req-alt, -5000, 5000)
         theta_v_req = height2req/5000*pi/2
         
-        self.theta_v_req = theta_v_req
+        self.theta_req = theta_v_req
         
         # 航向奖励（误差惩罚）
         # psi2req = sub_of_radian(self.psi_req, psi_v)
@@ -437,9 +437,9 @@ class track_env():
                             f"Name=F16,Pilot={pilot},Color={color}\n"
                         )
                 # 绘制目标
-                delta_N = 5e3*cos(self.theta_v_req)*cos(self.psi_req)
-                delta_U = 5e3*sin(self.theta_v_req)
-                delta_E = 5e3*cos(self.theta_v_req)*sin(self.psi_req)
+                delta_N = 5e3*cos(self.theta_req)*cos(self.psi_req)
+                delta_U = 5e3*sin(self.theta_req)
+                delta_E = 5e3*cos(self.theta_req)*sin(self.psi_req)
                 N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=self.o00[0], lat_o=self.o00[1])
                 delta_H = self.height_req
                 lon_T, lat_T, _ = NUE2LLH(N+delta_N,U+delta_U,E+delta_E,lon_o=self.o00[0], lat_o=self.o00[1])

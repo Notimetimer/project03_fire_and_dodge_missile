@@ -108,8 +108,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     env.height_req = np.clip(height_req, 3000, 13000)
                     psi_req += np.random.randn() * 10 *pi/180 * dt_decide # 每秒动10°
                     env.psi_req = sub_of_radian(psi_req)
-                    v_req += np.random.randn() * 10 * dt_decide # 每秒动 10m/s
-                    env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)  # 速度目标也在动
+                    v_req += np.random.randn() * 3 * dt_decide # 速度目标也在动
+                    env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)
 
                     obs, obs_check = env.get_obs()
                     action, u, _, _ = local_agent.take_action(obs, explore=True)

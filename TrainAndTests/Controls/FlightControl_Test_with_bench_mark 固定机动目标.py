@@ -163,7 +163,7 @@ for init_h in height_list:
             'aileron': [], 'elevator': [], 'rudder': [], 'throttle': [],
             'psi': [], 'psi_req': [], 'theta': [], 'theta_req': [], 'v': [], 'v_req': []
         }
-        
+        # ema
         ao_ema_episode = 0
         v_error_ema_episode = 0
         psi_error_ema_episode = 0.0
@@ -191,12 +191,15 @@ for init_h in height_list:
 
                 env.height_req = np.clip(env.height_req, 3000, 13000)
             else:
+                theta_req = 0
+                
                 if env.t >= 30:
                     env.height_req = 5000 # 12000  # 5000
                     theta_req = (env.height_req-env.RUAV.alt) /5000*pi/2
                     env.psi_req = sub_of_radian(birth_state['psi'], 179*pi/180)
                     env.v_req = target_v
             
+            env.theta_req = theta_req
             # 决策
             obs, obs_check = env.get_obs()
             if mission_name != "PID":
@@ -278,9 +281,9 @@ for init_h in height_list:
                     
                     # 添加目标残影
                     N, U, E = LLH2NUE(loc_LLH[0], loc_LLH[1], loc_LLH[2], lon_o=env.o00[0], lat_o=env.o00[1])
-                    delta_N = target_range * cos(env.theta_v_req) * cos(env.psi_req)
-                    delta_U = target_range * sin(env.theta_v_req)
-                    delta_E = target_range * cos(env.theta_v_req) * sin(env.psi_req)
+                    delta_N = target_range * cos(env.theta_req) * cos(env.psi_req)
+                    delta_U = target_range * sin(env.theta_req)
+                    delta_E = target_range * cos(env.theta_req) * sin(env.psi_req)
                     
                     delta_H = env.height_req
                     lon_T, lat_T, _ = NUE2LLH(N+delta_N, U+delta_U, E+delta_E, lon_o=env.o00[0], lat_o=env.o00[1])
@@ -303,7 +306,7 @@ for init_h in height_list:
             alpha_air_list.append(env.RUAV.alpha_air * 180/pi)
             beta_air_list.append(env.RUAV.beta_air * 180/pi)
             Ny_list.append(env.RUAV.Ny)
-            theta_req_list.append(env.theta_v_req * 180/pi)
+            theta_req_list.append(env.theta_req * 180/pi)
             psi_req_list.append(env.psi_req * 180/pi)
             v_req_list.append(env.v_req)
             height_req_list.append(env.height_req)
