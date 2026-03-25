@@ -16,12 +16,10 @@ import datetime
 
 from _context import *
 
-from BasicRules_new import basic_rules
-# from Envs.Tasks.ChooseStrategyEnv20 import ChooseStrategyEnv
-from Envs.Tasks.ChooseStrategyEnv2_2 import * # 1218-104003
-from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
+from BasicRules_new_hierarchical import basic_rules
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
+from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
-# from Algorithms.PPOHybrid23_2 import PPOHybrid, ValueNet, PolicyNetHybrid, HybridActorWrapper # 带通道注意力
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 30
@@ -43,20 +41,13 @@ def create_initial_state():
 
 # --- 3. 主程序 ---
 if __name__ == "__main__":
+
+    experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
+
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default='IL_and_PFSP_2元奖励', help="Mission name to find the log directory.")
-    args = parser.parse_args()
-
-    'RL_combat_PFSP_简单熵_区分左右'
-    'IL_RL_combat_PFSP_简单熵_区分左右'
-    '打莽夫_左右_noCA_4epochs'
-    '打莽夫_左右_CA_4epochs'
-    'RL_combat_PFSP_简单熵_区分左右_无淘汰机制'
-    'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_开火负熵'
-    'RL_combat_PFSP_简单熵_区分左右_无淘汰机制_有模仿学习'
-    'IL_and_PFSP_2元奖励'
-    
+    parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
+    args = parser.parse_args()    
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
@@ -64,7 +55,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- 初始化环境 ---
-    env = ChooseStrategyEnv(env_args, tacview_show=0)
+    env = ChooseStrategyEnv(env_args)
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -97,7 +88,14 @@ if __name__ == "__main__":
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
-    env = ChooseStrategyEnv(env_args, tacview_show=1)
+    # --- [修正] 移除重复的 env 初始化，直接配置已有的 env ---
+    # env = ChooseStrategyEnv(env_args, tacview_show=1) 
+    env.tacview_show = 1
+    if env.tacview_show:
+        env.tacview = Tacview()
+        env.tacview.handshake()
+        env.visualize_cage()
+
     env.shielded = 1
     env.no_out = 0
     
@@ -108,16 +106,17 @@ if __name__ == "__main__":
     try:
         for rule_num in rule_opponents:
             print("\n" + "="*50)
-            print(f"--- Starting Test: Loaded Agent vs Rule_{rule_num} ---")
+            print(f"--- Starting Test: Loaded Actor(Red) vs Rule_{rule_num}(Blue) ---")
             print("="*50)
 
             # 重置环境
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
-            env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE)
+            env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r')
 
             done = False
             last_r_action_label = 0
             last_b_action_label = 0
+            r_action_label = 0
             b_action_label = 0
 
             # 回合仿真循环
@@ -130,48 +129,39 @@ if __name__ == "__main__":
 
                 # 决策
                 if count % action_cycle_multiplier == 0:
-                    # 红方 (规则智能体)
-                    r_state_check = env.unscale_state(r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, rule_num, last_action=last_r_action_label)
-                    last_r_action_label = r_action_label
-                    if r_fire:
-                        launch_missile_immediately(env, 'r')
-
-                    # 蓝方 (RL 智能体)
-                    # -- 规则
-                    # b_state_check = env.unscale_state(b_check_obs)
-                    # b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
-                    # last_b_action_label = b_action_label
-                    # -- 训练
+                    # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
-                        # **修正点：使用正确的、已加载权重的 actor_wrapper**
-                        b_action_exec, _, _, b_action_check = actor_wrapper.get_action(b_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.38) # , bern_threshold= 1e-4
+                        r_action_exec, _, _, r_action_check = actor_wrapper.get_action(r_obs, \
+                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.38)
                         
-                    b_action_label = b_action_exec['cat'][0]
-                    b_fire = b_action_exec['bern'][0]
-                    print("开火概率", b_action_check['bern'][0])
-                    
-                    # b_action_label = np.random.choice([4,6,13])
+                    r_action_label = r_action_exec['cat'][0]
+                    r_fire = r_action_exec['bern'][0]
+                    last_r_action_label = r_action_label
+                    print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
+                    if r_fire:
+                        launch_missile_immediately(env, 'r', tabu=0)
+
+                    # --- 蓝方 (规则智能体) ---
+                    b_state_check = env.unscale_state(b_check_obs)
+                    b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
+                    last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b', tabu=0)
-                    
-                    # print(f"Time: {env.t:.1f}s, Blue Action Probs: Maneuver={b_action_check['cat']}, Fire={b_action_check['bern'][0]:.2f}")
+                        launch_missile_immediately(env, 'b')
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                 env.step(r_maneuver, b_maneuver)
-                done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)
-                done = done
+                # 统计红方的奖励与状态
+                done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
                 env.render(t_bias=t_bias)
 
             # 报告结果
             result = "Draw"
             if env.win: result = "Win"
             elif env.lose: result = "Lose"
-            print(f"\n--- Test Finished. Result for Blue (Loaded Agent): {result} ---")
+            print(f"\n--- Test Finished. Result for Red (Loaded Agent): {result} ---")
             
             env.clear_render(t_bias=t_bias)
             t_bias += env.t

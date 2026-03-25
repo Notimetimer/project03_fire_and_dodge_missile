@@ -31,7 +31,6 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
-from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
