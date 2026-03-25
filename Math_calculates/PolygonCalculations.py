@@ -69,8 +69,8 @@ def calc_dist2polygon_border(vertices, test_pt, velocity):
 if __name__=="__main__":
     # 1. 示例数据
     poly_verts = np.array([[0, 0], [10, 0], [10, 10], [5, 4], [0, 10]])
-    test_point = np.array([9,9])
-    velocity_vec = np.array([1, 1])
+    test_point = np.array([2,-1])
+    velocity_vec = np.array([-0.4, -1])
 
     # 2. 调用核心计算接口
     d_vec, side = calc_dist2polygon_border(poly_verts, test_point, velocity_vec)
