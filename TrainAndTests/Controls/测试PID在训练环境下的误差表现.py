@@ -17,9 +17,9 @@ from Math_calculates.sub_of_angles import sub_of_radian
 # =============================================================================
 # 超参数与环境配置 (严格对齐训练时的并行参数)
 # =============================================================================
-num_episodes = 20
+num_episodes = 40
 max_episode_len = 5 * 60
-dt_decide = 0.05 # 0.16
+dt_decide = 0.1 # 0.16
 dt_move = 0.01 # 0.02
 beta_ao_95_time = 10.0
 beta_ao = 0.05 ** (dt_decide / beta_ao_95_time)
@@ -135,7 +135,7 @@ if __name__ == '__main__':
         # 异步收取回报以提供实时打印
         for idx, res in enumerate(res_iter):
             results.append(res)
-            print(f"[{idx+1:02d}/{num_episodes}] 回合{'成功' if not res['fail'] else '坠机/失速'} | "
+            print(f"[{idx+1:02d}/{num_episodes}] 回合{'成功' if not res['fail'] else '坠机/失速/解体'} | "
                   f"存活步数: {res['steps']:04d} | 奖励: {res['return']:7.1f} | "
                   f"EMA -> V: {res['v_ema']:6.2f}m/s, Psi: {res['psi_ema']:5.2f}°, Theta: {res['theta_ema']:5.2f}°")
                   
