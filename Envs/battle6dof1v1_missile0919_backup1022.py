@@ -36,7 +36,7 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
-from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
+from Math_calculates.Calc_dist2border import calc_intern_dist2circle
 from Envs.UAVmodel6d import UAVModel
 from Visualize.tacview_visualize2 import *
 from Utilities.FlattenDictObs import flatten_obs2 as flatten_obs
@@ -537,7 +537,7 @@ class Battle(object):
         AA_hor = sub_of_radian(psi_vT, q_beta)  # 向右飞为正
         AA_vert = sub_of_radian(theta_vT, q_epsilon)  # 向上飞为正
 
-        d, d_hor, left_or_right = calc_intern_dist2cylinder(self.R_cage, own.pos_, own.psi_v, own.theta_v)
+        d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, own.pos_, own.psi)
 
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [
