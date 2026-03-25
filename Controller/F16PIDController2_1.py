@@ -152,17 +152,28 @@ class F16PIDController:
         alpha = state_input[6] * 180 / pi
         q = state_input[9]
 
+        if len(state_input)>13:
+            Ny = state_input[13]
+        else:
+            Ny = 0
+
         k_alpha_air = 0
         # # 迎角限制器
         if -1.5 < alpha < 17: # -8~13
             k_alpha_air = 0.01
         else:
             k_alpha_air = 0.3 # 0.2
+        k_Ny = 0
+        # 过载限制器
+        if -1.5< Ny < 7:
+            k_Ny += 0.01
+        else:
+            k_Ny += 0.2
 
         if theta * 180 / pi < -70:
             k_alpha_air = 0
 
-        norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
+        norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20) + k_Ny * (Ny/6)
         norm_act[1] = np.clip(norm_act[1], -1, 1)
 
         return norm_act

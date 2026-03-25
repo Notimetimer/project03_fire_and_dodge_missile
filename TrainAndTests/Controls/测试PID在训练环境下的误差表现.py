@@ -19,7 +19,7 @@ from Math_calculates.sub_of_angles import sub_of_radian
 # =============================================================================
 num_episodes = 40
 max_episode_len = 5 * 60
-dt_decide = 0.1 # 0.16
+dt_decide = 0.16 # 0.16
 dt_move = 0.01 # 0.02
 beta_ao_95_time = 10.0
 beta_ao = 0.05 ** (dt_decide / beta_ao_95_time)
