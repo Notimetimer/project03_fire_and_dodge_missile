@@ -36,7 +36,6 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
-from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
 
 from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import track_env
@@ -173,8 +172,8 @@ if __name__=='__main__':
     lmbda = 0.95
     epochs = 5  # 10
     eps = 0.2
-    dt_decide = 0.15 # 0.2 可以， 0.1很难 必须是dt_move的整数倍  0.16 也挺快
-    dt_move = 0.01
+    dt_decide = 0.16 # 0.15 对 0.01, 0.16 对 0.02
+    dt_move = 0.02
     k_entropy={'cont':0.5, 'cat':0.0, 'bern':0.0} # 0.01
 
     # --- EMA 统计参数设定 ---

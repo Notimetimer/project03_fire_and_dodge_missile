@@ -37,7 +37,6 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
-from Math_calculates.Calc_dist2border import calc_intern_dist2cylinder
 from TrainAndTests.Controls.UPolicyWrapper import *
 
 class track_env():
@@ -495,11 +494,11 @@ class track_env():
         # 滚转角速度惩罚
         if abs(psi2req) < 15 * pi/180 \
             or abs(theta)*180/pi > 75:  # 大俯仰机动应该降低滚转角速度
-            r_angle += -0.1 * abs(p)/pi  # 0.4 偏强？
+            r_angle += -0.2 * abs(p)/pi  # 0.4 偏强？ 0.1偏弱？
         else:
-            r_angle += -0.001 * abs(p)/pi # 0.01 可能有些偏强？
+            r_angle += -0.05 * abs(p)/pi # 0.01 可能有些弱？
         
-        r_angle -= (0.05 * abs(q)/pi + 0.01 * abs(r)/pi) # 加q和r的惩罚
+        # r_angle -= (0.05 * abs(q)/pi + 0.01 * abs(r)/pi) # 加q和r的惩罚
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励

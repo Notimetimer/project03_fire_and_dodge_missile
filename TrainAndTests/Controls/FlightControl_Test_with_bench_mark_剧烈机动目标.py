@@ -33,7 +33,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "PID"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
@@ -44,7 +44,7 @@ if mission_name != "PID":
     # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
     # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
-    actor_path = load_actor_from_log(log_dir, number=15800)
+    actor_path = load_actor_from_log(log_dir, number=16800)
     if not actor_path:
         print(f"No actor checkpoint found in {log_dir}")
         sys.exit()
@@ -109,9 +109,9 @@ pidcontroller = UnifiedPolicyWrapper(env, dt_decide=dt_decide) #
 
 # 目标变化的波动参数（正弦波轨迹，在不同测试中保持一致）
 A_psi_dot = 6 * (pi / 180)  # deg/s 振幅
-w_psi = 2 * pi / 120         # s 一个周期
+w_psi = 2 * pi / 75         # s 一个周期
 A_h_dot = 100                # m/s 振幅
-w_h = 2 * pi / 150           # s 一个周期
+w_h = 2 * pi / 120           # s 一个周期
 
 total_cases = len(height_list) * len(speed_list)
 success_count = 0

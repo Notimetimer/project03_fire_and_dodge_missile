@@ -154,10 +154,10 @@ class F16PIDController:
 
         k_alpha_air = 0
         # # 迎角限制器
-        if -8 < alpha < 13:
+        if -1.5 < alpha < 17: # -8~13
             k_alpha_air = 0.01
         else:
-            k_alpha_air = 0.2
+            k_alpha_air = 0.3 # 0.2
 
         if theta * 180 / pi < -70:
             k_alpha_air = 0
