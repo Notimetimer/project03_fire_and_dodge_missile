@@ -5,7 +5,7 @@ import seaborn as sns
 import os
 # 自定义库
 from _context import *
-from Visualize.plot_training_curve_from_csv import plot_training_results
+from Visualize.plot_training_curve_from_csv_old import plot_training_results
 
 # 配置 Seaborn 主题，让颜色和网格更漂亮
 sns.set_theme(style="whitegrid", palette="muted")
@@ -18,24 +18,24 @@ psi_error_path = os.path.join(project_root, "logs", "EMAPsiErrorOfControllerTrai
 theta_error_path = os.path.join(project_root, "logs", "EMAThetaErrorOfControllerTraining.csv")
 
 # 开启画布 (2x1 竖向排布)
-fig = plt.figure(figsize=(12, 18), dpi=100)
+fig = plt.figure(figsize=(10, 18), dpi=100)
 
 # =============================================================================
 # 第一行：奖励函数 & 生存率
 # =============================================================================
 ax1_l = fig.add_subplot(2, 1, 1)
 plot_training_results(returns_path, ax=ax1_l, smooth_type='ma', smooth_param=35, 
-                      ylabel="Cumulative Return (Log)", xlabel='Epoch', 
+                      ylabel="Episode Reward", xlabel='Steps', 
                       color=sns.color_palette("muted")[3], # 漂亮的深红色
-                      legend='Return', title=None, 
+                      legend='Episode Reward', title=None, 
                       y_scale_type="linear", y_log_subs=[1, 2, 5], numticks=3,
                       show=False)
 
 ax1_r = ax1_l.twinx()
 plot_training_results(survive_rates_path, ax=ax1_r, smooth_type='ma', smooth_param=20, 
-                      ylabel="Success Rate", 
+                      ylabel="Survive Rate", 
                       color=sns.color_palette("muted")[0], # 漂亮的蓝色
-                      legend='Success Rate', title=None,
+                      legend='Survive Rate', title=None,
                       show=False)
 
 # 合并图例并加深网格
@@ -51,7 +51,7 @@ ax1_r.grid(False)
 ax2 = fig.add_subplot(2, 1, 2)
 # 绘制航向误差
 plot_training_results(psi_error_path, ax=ax2, smooth_type='ma', smooth_param=35, 
-                      ylabel="Error Degree (Log)", xlabel='Epoch', 
+                      ylabel="Error Degree ", xlabel='Steps', 
                       color=sns.color_palette("muted")[1], # 漂亮的橙色
                       legend='Psi Error', title=None,
                       y_scale_type="log", y_log_subs=[1, 2, 5], numticks=5,

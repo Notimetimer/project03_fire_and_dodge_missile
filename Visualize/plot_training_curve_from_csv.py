@@ -62,11 +62,11 @@ def plot_training_results(csv_path, ax=None, smooth_type='ma', smooth_param=35,
         sns.set_theme(style="whitegrid")
         fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
     
-    # 绘制原始数据 (背景噪声，颜色较淡)
-    ax.plot(steps, values, color=color, alpha=0.3, linewidth=0.8, label='Raw Data' if show else None)
+    # 绘制原始数据 (背景噪声，作为半透明细线)
+    ax.plot(steps, values, color=color, alpha=0.2, linewidth=0.5, label='Raw' if show else None)
     
     # 绘制平滑曲线 (主趋势)
-    ax.plot(steps, smoothed_values, color=color, linewidth=2.0, label=legend if legend else 'Smoothed Trend')
+    ax.plot(steps, smoothed_values, color=color, linewidth=2.5, label=legend if legend else 'Smoothed Trend')
     
     # 设置标签与字体
     if xlabel:

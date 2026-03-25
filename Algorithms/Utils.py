@@ -16,8 +16,8 @@ def model_grad_norm(model):
             found = True
     return float(total_sq ** 0.5) if found else float('nan')
 
-
-from rl_utils import moving_average, old_moving_average
+from _context import *
+from Algorithms.rl_utils import moving_average, old_moving_average
 
 
 def check_weights_bias_nan(model, model_name="model", place=None):
