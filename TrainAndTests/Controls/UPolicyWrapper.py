@@ -57,10 +57,11 @@ class UnifiedPolicyWrapper:
         r = state_check["ego_control"][2]
         theta_v = state_check["ego_control"][3]
         delta_psi_v = state_check["ego_control"][4]
+        Ny = state_check["ego_control"][7]
 
         set_height = ego_height + delta_height_cmd
 
-        obs_jsbsim = np.zeros(14)
+        obs_jsbsim = np.zeros(15)
         obs_jsbsim[0] = set_height / 5000  # 期望高度 # 测试飞行控制器
         obs_jsbsim[1] = delta_heading  # 期望相对航向角
         obs_jsbsim[2] = set_speed / 340  # 期望速度
@@ -75,6 +76,7 @@ class UnifiedPolicyWrapper:
         obs_jsbsim[11] = theta_v  # 爬升角
         obs_jsbsim[12] = delta_psi_v  # 相对航迹角
         obs_jsbsim[13] = ego_height / 5000  # 高度/5000
+        obs_jsbsim[14] = Ny
 
 
         norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)

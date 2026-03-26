@@ -31,6 +31,14 @@ psi_error_path = os.path.join(project_root, "logs", "EMAPsiErrorOfControllerTrai
 theta_error_path = os.path.join(project_root, "logs", "EMAThetaErrorOfControllerTraining.csv")
 v_error_path = os.path.join(project_root, "logs", "EMAVErrorOfControllerTraining.csv")
 
+# =============================================================================
+# PID 基准性能常量 (来自于最近的测试报告)
+# =============================================================================
+PID_AVG_REWARD = -51.72
+PID_AVG_V_ERR = 175.492
+PID_AVG_PSI_ERR = 5.517
+PID_AVG_THETA_ERR = 3.765
+
 # 开启画布 (2x1 竖向排布)
 fig = plt.figure(figsize=(8, 12), dpi=100)
 
@@ -89,9 +97,9 @@ def prepare_metric_df(path, label, scale=1.0):
     df['Metric'] = label # 类别标签
     return df
 
-df_psi = prepare_metric_df(psi_error_path, "Psi Error")
-df_theta = prepare_metric_df(theta_error_path, "Theta Error")
-df_v = prepare_metric_df(v_error_path, "V Error", scale=1.0) # 速度不缩放，放到右轴
+df_psi = prepare_metric_df(psi_error_path, "PPO Psi Error")
+df_theta = prepare_metric_df(theta_error_path, "PPO Theta Error")
+df_v = prepare_metric_df(v_error_path, "PPO V Error", scale=1.0) # 速度不缩放，放到右轴
 
 df_merged = pd.concat([df_psi, df_theta]) # 拼成长表，仅包含角度误差
 
@@ -104,7 +112,12 @@ sns.lineplot(data=df_merged, x='Step', y='Smooth', hue='Metric', ax=ax2, linewid
 ax2_r = ax2.twinx()
 color_v = sns.color_palette("muted")[2] # 绿色
 sns.lineplot(data=df_v, x='Step', y='Raw', ax=ax2_r, color=color_v, linewidth=LW_RAW, alpha=ALPHA_RAW, legend=False)
-sns.lineplot(data=df_v, x='Step', y='Smooth', ax=ax2_r, color=color_v, linewidth=LW_SMOOTH, label='V Error')
+sns.lineplot(data=df_v, x='Step', y='Smooth', ax=ax2_r, color=color_v, linewidth=LW_SMOOTH, label='PPO V Error')
+
+# 绘制 PID 基准误差 (加深颜色，使用点线)
+ax2.axhline(PID_AVG_PSI_ERR, color=colors[0], linestyle='--', linewidth=1.5, alpha=1.0, label='PID Psi Error')
+ax2.axhline(PID_AVG_THETA_ERR, color=colors[1], linestyle='--', linewidth=1.5, alpha=1.0, label='PID Theta Error')
+ax2_r.axhline(PID_AVG_V_ERR, color=color_v, linestyle='--', linewidth=1.5, alpha=1.0, label='PID V Error')
 
 # 处理并合并两轴图例
 ax2_r.legend_.remove() if ax2_r.get_legend() else None 
@@ -121,7 +134,9 @@ ax2.legend(handles=filtered_handles, labels=filtered_labels, loc='upper right', 
 # 装饰底轴风格
 import matplotlib.ticker as ticker
 ax2.set_yscale('log')
-# 恢复 1, 2, 5 的对数刻度标记逻辑
+# 调整 Y 轴范围：通过调低 Y 轴下限（而不是拉高上限）来从物理高度上推开重合的线
+# ax2.set_ylim(0.1, 50)     # 左轴：角度误差范围
+ax2_r.set_ylim(0, 350) # 右轴：速度误差范围，下限扩充以提供视觉余量
 ax2.yaxis.set_major_locator(ticker.LogLocator(base=10.0, subs=[1, 2, 5], numticks=5))
 formatter = ticker.LogFormatter(labelOnlyBase=False, minor_thresholds=(np.inf, np.inf))
 ax2.yaxis.set_major_formatter(formatter)

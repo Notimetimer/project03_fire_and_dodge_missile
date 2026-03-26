@@ -117,7 +117,7 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=0.5 / pi)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0.5 / pi)  # 16, 0.3, 8
         self.r_pid = None
         self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
@@ -158,44 +158,22 @@ class F16PIDController:
             Ny = 0
 
         k_alpha_air = 0
-        # # 迎角限制器 -8~13
-        if alpha<=-1.2:
-            k_alpha_air = 0.5
-        elif alpha>17:
+        # # 迎角限制器
+        if -1.5 < alpha < 17: # -8~13
+            k_alpha_air = 0.01
+        else:
             k_alpha_air = 0.3 # 0.2
+        k_Ny = 0
+        # 过载限制器
+        if -1.5< Ny < 7:
+            k_Ny += 0.01
         else:
-            if alpha>=0:
-                k_alpha_air = 0.01
-            else:
-                k_alpha_air = 0.01
-        if theta * 180 / pi < -70: # 大俯仰机动时降低迎角干预
-            k_alpha_air = 0
-        
-        # 过载限制器 (EMA 融合比例)
-        if Ny >= 7.0: # 正过载死区 7
-            k_Ny = 0.2
-            ny_term = Ny / 7.0
-        elif Ny <= -1.2: # 负过载危险区，加大抑制力度
-            k_Ny = 0.85
-            ny_term = Ny / 1.2 
-        else: # 安全区
-            if Ny>0:
-                k_Ny = 0.01
-            else:
-                k_Ny = 0.6
-        # 非对称过载系数限制
-        if Ny>0:    
-            ny_term = Ny / 9.5
-        else:
-            ny_term = Ny / 3
+            k_Ny += 0.2
 
-        # 改成级联的指数滑动平均 (EMA) 形式，确保始终保持限制且系数归一化
-        # 1. 先融合迎角限制
-        norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
-        # 2. 再融合过载限制
-        if Ny * norm_act[1] < 0: # 杆位加剧过载的时候加限制，否则不限制
-            norm_act[1] = (1 - k_Ny) * norm_act[1] + k_Ny * ny_term
-        
+        if theta * 180 / pi < -70:
+            k_alpha_air = 0
+
+        norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20) + k_Ny * (Ny/6)
         norm_act[1] = np.clip(norm_act[1], -1, 1)
 
         return norm_act
@@ -267,12 +245,12 @@ class F16PIDController:
         y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
         delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
 
-        # # 特例：压机头能够得着的，就不翻转机身
-        # if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
-        #     delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
-        #     # print('push')
-        # # else:
-        # # print('pull')
+        # 特例：压机头能够得着的，就不翻转机身
+        if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
+            delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
+            # print('push')
+        # else:
+        # print('pull')
 
         # 通用
         roll_error = delta_x_angle
@@ -458,7 +436,7 @@ if __name__ == '__main__':
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
 
         # 构建观测向量
-        obs_jsbsim = np.zeros(15)
+        obs_jsbsim = np.zeros(14)
         # obs_jsbsim[0] = target_theta * pi / 180  # 期望俯仰角 # 测试姿态控制器
         obs_jsbsim[0] = target_height / 5000  # 期望高度 # 测试飞行控制器
         obs_jsbsim[1] = delta_heading * pi / 180  # 期望相对航向角
@@ -474,7 +452,7 @@ if __name__ == '__main__':
         obs_jsbsim[11] = gamma_angle * pi / 180  # 爬升角
         obs_jsbsim[12] = sub_of_degree(target_heading, course_angle) * pi / 180  # 相对航迹角
         obs_jsbsim[13] = sim["position/h-sl-ft"] * 0.3048 / 5000  # 高度/5000（英尺转米）
-        obs_jsbsim[14] = ny_g
+        # obs_jsbsim[14] = target_heading * pi / 180  # test
         # obs_jsbsim[15] = psi * pi / 180  # test
 
         # 输出姿态控制指令

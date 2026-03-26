@@ -24,11 +24,11 @@ current_dir = os.path.join(project_root, "TrainAndTests/Controls")
 test_res_dir = os.path.join(project_root, "logs", "control_test_results")
 
 # 文件名定义
-file_ppo_norm = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave_.csv"
-file_ppo_steady = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_wave__steady.csv"
+file_ppo_norm = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_violent_wave_.csv"
+file_ppo_steady = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_mild_wave_.csv"
 file_ppo_splits = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr_SplitS_.csv"
-file_pid_norm = "PID_wave_.csv"
-file_pid_steady = "PID_wave__steady.csv"
+file_pid_norm = "PID_violent_wave_.csv"
+file_pid_steady = "PID_mild_wave_.csv"
 file_pid_splits = "PID_SplitS_.csv"
 
 def load_processed_data(file_path):

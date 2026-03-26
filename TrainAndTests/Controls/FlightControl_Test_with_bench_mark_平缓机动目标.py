@@ -39,6 +39,12 @@ mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限�
 "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 
+save_csv = 1 # 是否保存csv
+# 是否可视化
+visualize = 0
+target_range = 3e3
+z_limits = (0, 15000)
+
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)
     # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
@@ -60,26 +66,19 @@ dt_decide = 0.02
 dt_move = 0.01
 time_limit = 5 * 60  # 每组测试限时 5 分钟
 
-# 是否可视化
-visualize = 1
-target_range = 3e3
-z_limits = (0, 15000)
-
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 1
+
 realistic = 1
 
-delta_height = -4000 # -5000
 
-test_name1 = "wave" if chasing_wave else "static"
-test_name2 = "delta_h" + str(delta_height) if not chasing_wave else ""
 
-if chasing_wave:
-    time_limit = 5 * 60  # 每组测试限时 8 分钟
-    height_list = [8000]
-    speed_list = [300]
-else:
-    time_limit = 1 * 60  # 每组测试限时 3 分钟
+test_name1 = "mild_wave"
+test_name2 = ""
+
+time_limit = 5 * 60  # 每组测试限时 8 分钟
+height_list = [8000]
+speed_list = [300]
+
 
 draw_interval = int(time_limit/15)
 model_scale = 300/(time_limit/300)
@@ -187,28 +186,23 @@ for init_h in height_list:
             # 更新动态目标 (按照预设的正弦曲线变化)
             current_t = env.t
             
-            if chasing_wave:
-                # 航向角速波动
-                # psi_dot_t = A_psi_dot * sin(w_psi * current_t)
-                # env.psi_req += psi_dot_t * dt_decide
-                env.psi_req = pi/2 * sin(w_psi * current_t)
 
-                env.psi_req = sub_of_radian(env.psi_req, 0)
-                
-                # 高度变化率波动
-                # h_dot_t = A_h_dot * sin(w_h * current_t)
-                # env.height_req += h_dot_t * dt_decide
+            # 航向角速波动
+            # psi_dot_t = A_psi_dot * sin(w_psi * current_t)
+            # env.psi_req += psi_dot_t * dt_decide
+            env.psi_req = pi/2 * sin(w_psi * current_t)
 
-                theta_req = 2 * (pi/180) * sin(w_h * current_t)
-                env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
+            env.psi_req = sub_of_radian(env.psi_req, 0)
+            
+            # 高度变化率波动
+            # h_dot_t = A_h_dot * sin(w_h * current_t)
+            # env.height_req += h_dot_t * dt_decide
 
-                env.height_req = np.clip(env.height_req, 3000, 13000)
-                theta_req = (env.height_req-env.RUAV.alt) /5000 *pi/2
-            else:
-                env.height_req = np.clip(init_h + delta_height, 3000, 13000)
-                theta_req = (env.height_req-env.RUAV.alt) /5000 *pi/2
-                env.psi_req = sub_of_radian(birth_state['psi']+pi) #, pi+2*pi/180*(i%2-0.5)*2)
-                env.v_req = target_v
+            theta_req = 2 * (pi/180) * sin(w_h * current_t)
+            env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
+
+            env.height_req = np.clip(env.height_req, 3000, 13000)
+            theta_req = (env.height_req-env.RUAV.alt) /5000 *pi/2
             
             env.theta_req = theta_req
             # 决策
@@ -405,111 +399,112 @@ print(f" - 最大迎角 (Max Alpha): {max_alpha:.3f} deg")
 print(f" - 最小迎角 (Min Alpha): {min_alpha:.3f} deg")
 print(f" - 最大侧滑角 (Max Beta): {max_beta:.3f} deg")
 
-# --- 保存数据到 CSV ---
-try:
-    save_dir = os.path.join(project_root, "logs", "control_test_results")
-    os.makedirs(save_dir, exist_ok=True)
-    file_name = f"{mission_name}_{test_name1}_{test_name2}_steady.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
-    csv_path = os.path.join(save_dir, file_name)
-    
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        # 写入表头
-        writer.writerow([
-            'time', 'theta', 'psi', 'phi', 'v', 'h', 'alpha', 'beta', 'Ny',
-            'theta_req', 'psi_req', 'v_req', 'h_req', 'aileron', 'elevator', 'rudder', 'throttle', 'round'
-        ])
-        # 写入数据 (使用 zip 聚合序列)
-        writer.writerows(zip(
-            t_list, theta_list, psi_list, phi_list, v_list, h_list, 
-            alpha_air_list, beta_air_list, Ny_list,
-            theta_req_list, psi_req_list, v_req_list, height_req_list,
-            aileron_list, elevetor_list, rudder_list, throttle_list, round_list
-        ))
-    print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
+if save_csv:
+    # --- 保存数据到 CSV ---
+    try:
+        save_dir = os.path.join(project_root, "logs", "control_test_results")
+        os.makedirs(save_dir, exist_ok=True)
+        file_name = f"{mission_name}_{test_name1}_{test_name2}.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv
+        csv_path = os.path.join(save_dir, file_name)
+        
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # 写入表头
+            writer.writerow([
+                'time', 'theta', 'psi', 'phi', 'v', 'h', 'alpha', 'beta', 'Ny',
+                'theta_req', 'psi_req', 'v_req', 'h_req', 'aileron', 'elevator', 'rudder', 'throttle', 'round'
+            ])
+            # 写入数据 (使用 zip 聚合序列)
+            writer.writerows(zip(
+                t_list, theta_list, psi_list, phi_list, v_list, h_list, 
+                alpha_air_list, beta_air_list, Ny_list,
+                theta_req_list, psi_req_list, v_req_list, height_req_list,
+                aileron_list, elevetor_list, rudder_list, throttle_list, round_list
+            ))
+        print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
 
-    # --- 保存 NUE 轨迹到另一个 CSV ---
-    traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory_steady.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
-    traj_csv_path = os.path.join(save_dir, traj_file_name)
-    with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            'time', 'uav_N', 'uav_U', 'uav_E', 
-            'uav_psi', 'uav_theta', 'uav_phi', 
-            'target_N', 'target_U', 'target_E', 
-            'round'])
-        writer.writerows(zip(
-            traj_t_list, uav_n_list, uav_u_list, uav_e_list,
-            psi_list, theta_list, phi_list,
-            target_n_list, target_u_list, target_e_list, round_list
-        ))
-    print(f"[数据导出] NUE 轨迹已存至: {traj_csv_path}")
-except Exception as e:
-    print(f"\n[错误] 保存 CSV 失败: {e}")
+        # --- 保存 NUE 轨迹到另一个 CSV ---
+        traj_file_name = f"{mission_name}_{test_name1}_{test_name2}_trajectory.csv" #_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        traj_csv_path = os.path.join(save_dir, traj_file_name)
+        with open(traj_csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'time', 'uav_N', 'uav_U', 'uav_E', 
+                'uav_psi', 'uav_theta', 'uav_phi', 
+                'target_N', 'target_U', 'target_E', 
+                'round'])
+            writer.writerows(zip(
+                traj_t_list, uav_n_list, uav_u_list, uav_e_list,
+                psi_list, theta_list, phi_list,
+                target_n_list, target_u_list, target_e_list, round_list
+            ))
+        print(f"[数据导出] NUE 轨迹已存至: {traj_csv_path}")
+    except Exception as e:
+        print(f"\n[错误] 保存 CSV 失败: {e}")
 
-import Draw3DTrajectory
-Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)
+    import Draw3DTrajectory
+    Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)
 
-# --- 自动化绘图 (展示最后一组测试案例) ---
-if len(history['time']) > 0:
-    t = history['time']
-    # 动态选择颜色：RL 为红色，PID 为蓝色
-    color = 'r' if mission_name != "PID" else 'b'
-    
-    # Figure 1: 核心跟踪性能
-    plt.figure(figsize=(15, 10))
-    # 1. 航向角误差
-    plt.subplot(3, 1, 1)
-    psi_err = [abs(sub_of_degree(p, pr)) for p, pr in zip(history['psi'], history['psi_req'])]
-    plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
-    plt.title("航向角误差 (Heading Error)")
-    plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)
-    
-    # 2. 俯仰角跟踪
-    plt.subplot(3, 1, 2)
-    plt.plot(t, history['theta'], color=color, linestyle='-', label=f'{mission_name} Pitch')
-    plt.plot(t, history['theta_req'], color=color, linestyle=':', alpha=0.6, label='Target Pitch')
-    plt.title("俯仰角 (Pitch) 跟踪对比")
-    plt.ylabel(r"$\theta$ (°)"); plt.legend(); plt.grid(True)
-    
-    # 3. 速度跟踪
-    plt.subplot(3, 1, 3)
-    plt.plot(t, history['v'], color=color, linestyle='-', label=f'{mission_name} Velocity')
-    plt.plot(t, history['v_req'], color=color, linestyle=':', alpha=0.6, label='Target Velocity')
-    plt.title("速度 (Velocity) 跟踪对比")
-    plt.ylabel("v (m/s)"); plt.legend(); plt.grid(True)
-    plt.tight_layout()
+    # --- 自动化绘图 (展示最后一组测试案例) ---
+    if len(history['time']) > 0:
+        t = history['time']
+        # 动态选择颜色：RL 为红色，PID 为蓝色
+        color = 'r' if mission_name != "PID" else 'b'
+        
+        # Figure 1: 核心跟踪性能
+        plt.figure(figsize=(15, 10))
+        # 1. 航向角误差
+        plt.subplot(3, 1, 1)
+        psi_err = [abs(sub_of_degree(p, pr)) for p, pr in zip(history['psi'], history['psi_req'])]
+        plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
+        plt.title("航向角误差 (Heading Error)")
+        plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)
+        
+        # 2. 俯仰角跟踪
+        plt.subplot(3, 1, 2)
+        plt.plot(t, history['theta'], color=color, linestyle='-', label=f'{mission_name} Pitch')
+        plt.plot(t, history['theta_req'], color=color, linestyle=':', alpha=0.6, label='Target Pitch')
+        plt.title("俯仰角 (Pitch) 跟踪对比")
+        plt.ylabel(r"$\theta$ (°)"); plt.legend(); plt.grid(True)
+        
+        # 3. 速度跟踪
+        plt.subplot(3, 1, 3)
+        plt.plot(t, history['v'], color=color, linestyle='-', label=f'{mission_name} Velocity')
+        plt.plot(t, history['v_req'], color=color, linestyle=':', alpha=0.6, label='Target Velocity')
+        plt.title("速度 (Velocity) 跟踪对比")
+        plt.ylabel("v (m/s)"); plt.legend(); plt.grid(True)
+        plt.tight_layout()
 
-    # Figure 2: 飞行包线与控制量
-    plt.figure(figsize=(15, 12))
-    # 1. Alpha 与 Ny 对比
-    ax1 = plt.subplot(2, 2, 1)
-    ax1_r = ax1.twinx()
-    ax1.plot(t, history['alpha'], color=color, linestyle='-', label='Alpha')
-    ax1_r.plot(t, history['Ny'], color='g', linestyle=':', alpha=0.6, label='Ny')
-    ax1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
-    ax1.set_ylabel("Alpha (°)"); ax1_r.set_ylabel("Ny (g)")
-    ax1.legend(loc='upper left'); ax1_r.legend(loc='upper right'); ax1.grid(True)
-    
-    # 2. Phi 与 高度 对比
-    ax2 = plt.subplot(2, 2, 2)
-    ax2_r = ax2.twinx()
-    ax2.plot(t, history['phi'], color=color, linestyle='-', label='Phi')
-    ax2_r.plot(t, history['h'], color='g', linestyle=':', alpha=0.6, label='Height')
-    ax2_r.set_title("滚转角 (Phi) 与 高度 (Height)")
-    ax2.set_ylabel("Phi (°)"); ax2_r.set_ylabel("Height (m)")
-    ax2.legend(loc='upper left'); ax2_r.legend(loc='upper right'); ax2.grid(True)
-    
-    # 3. 控制量
-    plt.subplot(2, 1, 2)
-    ctrl_labels = ['aileron', 'elevator', 'rudder', 'throttle']
-    ctrl_data = [history['aileron'], history['elevator'], history['rudder'], history['throttle']]
-    for label, data in zip(ctrl_labels, ctrl_data):
-        plt.plot(t, data, label=label)
-    plt.title(f"{mission_name} 控制器指令")
-    plt.ylabel("Normalized Command")
-    plt.legend(); plt.grid(True)
-    
-    plt.suptitle(f"测试任务性能分析: {mission_name}", fontsize=15)
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
+        # Figure 2: 飞行包线与控制量
+        plt.figure(figsize=(15, 12))
+        # 1. Alpha 与 Ny 对比
+        ax1 = plt.subplot(2, 2, 1)
+        ax1_r = ax1.twinx()
+        ax1.plot(t, history['alpha'], color=color, linestyle='-', label='Alpha')
+        ax1_r.plot(t, history['Ny'], color='g', linestyle=':', alpha=0.6, label='Ny')
+        ax1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
+        ax1.set_ylabel("Alpha (°)"); ax1_r.set_ylabel("Ny (g)")
+        ax1.legend(loc='upper left'); ax1_r.legend(loc='upper right'); ax1.grid(True)
+        
+        # 2. Phi 与 高度 对比
+        ax2 = plt.subplot(2, 2, 2)
+        ax2_r = ax2.twinx()
+        ax2.plot(t, history['phi'], color=color, linestyle='-', label='Phi')
+        ax2_r.plot(t, history['h'], color='g', linestyle=':', alpha=0.6, label='Height')
+        ax2_r.set_title("滚转角 (Phi) 与 高度 (Height)")
+        ax2.set_ylabel("Phi (°)"); ax2_r.set_ylabel("Height (m)")
+        ax2.legend(loc='upper left'); ax2_r.legend(loc='upper right'); ax2.grid(True)
+        
+        # 3. 控制量
+        plt.subplot(2, 1, 2)
+        ctrl_labels = ['aileron', 'elevator', 'rudder', 'throttle']
+        ctrl_data = [history['aileron'], history['elevator'], history['rudder'], history['throttle']]
+        for label, data in zip(ctrl_labels, ctrl_data):
+            plt.plot(t, data, label=label)
+        plt.title(f"{mission_name} 控制器指令")
+        plt.ylabel("Normalized Command")
+        plt.legend(); plt.grid(True)
+        
+        plt.suptitle(f"测试任务性能分析: {mission_name}", fontsize=15)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.show()
