@@ -32,9 +32,10 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 def create_initial_state():
     """创建固定的初始状态"""
     blue_height, red_height = 9000, 9000
-    red_psi, blue_psi = -pi / 2, pi / 2
-    red_N, red_E = 0, 45e3
-    blue_N, blue_E = 0, -45e3
+    red_psi, blue_psi = -pi / 2 + random.uniform(-pi/4, pi/4), \
+        pi / 2 + random.uniform(-pi/4, pi/4)
+    red_N, red_E = random.uniform(-20,20)*1e3, 45e3
+    blue_N, blue_E = random.uniform(-20,20)*1e3, -45e3
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     args.agent_id = 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
+    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=40e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -97,6 +98,8 @@ if __name__ == "__main__":
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
+    enm_actor_wrapper = copy.deepcopy(actor_wrapper)
+
     # --- [修正] 移除重复的 env 初始化，直接配置已有的 env ---
     # env = ChooseStrategyEnv(env_args, tacview_show=1) 
     env.tacview_show = 1
@@ -109,13 +112,12 @@ if __name__ == "__main__":
     env.no_out = 0
     
     # --- 循环测试 ---
-    rule_opponents = [0, 1, 2, 3, 4]
     t_bias = 0
 
     try:
-        for rule_num in rule_opponents:
+        for i in range(5):
             print("\n" + "="*50)
-            print(f"--- Starting Test: Loaded Actor(Red) vs Rule_{rule_num}(Blue) ---")
+            print(f"--- Starting Test: Self Play Test {i+1} ---")
             print("="*50)
 
             # 重置环境
@@ -152,8 +154,12 @@ if __name__ == "__main__":
                         launch_missile_immediately(env, 'r', tabu=0)
 
                     # --- 蓝方 (规则智能体) ---
-                    b_state_check = env.unscale_state(b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
+                    with torch.no_grad():
+                        b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(b_obs, \
+                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.38)
+                        
+                    b_action_label = b_action_exec['cat'][0]
+                    b_fire = b_action_exec['bern'][0]
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')

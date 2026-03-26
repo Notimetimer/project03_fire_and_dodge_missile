@@ -367,8 +367,9 @@ def create_initial_state_worker(randomized=0):
     # (复制原本的 create_initial_state 逻辑)
     blue_height = 9000
     red_height = 9000
-    red_psi = -np.pi/2
-    blue_psi = np.pi/2
+    # 初始航向随机化
+    red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
+    blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi/3, pi/3))
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
     red_N = init_North
     red_E = 45e3
@@ -826,6 +827,8 @@ def run_MLP_simulation(
     pipes = []
     worker_device = torch.device('cpu') # Worker 使用 CPU 推理
     
+    args.max_episode_len = max_episode_duration
+    args.R_cage = np.random.uniform(30e3, 45e3) # 环境大小随机化
     print(f"Initializing {num_workers} training workers...")
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()

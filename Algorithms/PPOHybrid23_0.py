@@ -106,6 +106,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
             # temps = 1.0  # [修改] 使用传入的 temp
+            # >2 强随机，<0.1 强确定性
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
             # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
