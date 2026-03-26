@@ -672,6 +672,8 @@ def run_MLP_simulation(
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+    sigma_elo0 = sigma_elo
     
     # 2. 参数与环境配置 (Master 用于获取维度)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
@@ -1326,6 +1328,10 @@ def run_MLP_simulation(
                         curr_rank = 0.5 if denom == 0 else (main_agent_elo - r_min) / denom
                         logger.add("Elo_Centered/Current_Rank %", curr_rank * 100, total_steps)
                     
+                    # 缩放sigma_elo 只能更大，不能小
+                    sigma_elo = max(sigma_elo0, (0.5-curr_rank) * 1000)
+                    logger.add("Elo/sigma_elo", sigma_elo, total_steps)
+
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
                     logger.add("Elo/History_Pool_Size", hist_count, total_steps)
 
