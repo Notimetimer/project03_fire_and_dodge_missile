@@ -10,9 +10,9 @@ import pandas as pd
 from multiprocessing import Pool, cpu_count 
 
 from _context import * # 包含 project_root
-from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import ChooseStrategyEnv
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
-from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
+from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 from read_n_draw_inter_experiment_tests import draw_combat_matrix
 
@@ -23,8 +23,8 @@ TOTAL_ROUNDS = 100 # 每两队之间打100场
 TEAM_SIZE = 25     # 每队成员数
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
-def get_agent_teams(log_dir):
-    """根据文件编号划分三个进度的队伍"""
+def get_agent_teams(log_dir, num_teams=4):
+    """根据文件编号划分多个进度的队伍"""
     files = [f for f in os.listdir(log_dir) if f.startswith('actor_rein') and f.endswith('.pt')]
     # 提取编号并排序
     agents = []
@@ -36,8 +36,8 @@ def get_agent_teams(log_dir):
     agents.sort(key=lambda x: x['id'])
     total_count = len(agents)
     
-    # 定义进度索引 (1/3, 2/3, 1.0)
-    indices = [total_count // 3, (2 * total_count) // 3, total_count - 1]
+    # 动态定义进度索引 (由 num_teams 决定)
+    indices = [max(0, (i + 1) * total_count // num_teams - 1) for i in range(num_teams)]
     teams = []
     
     for idx in indices:
@@ -58,7 +58,7 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
     done = False
     r_label, b_label = 0, 0
     
-    for count in range(3000):
+    for count in range(int(20*60/env.dt_maneuver)):
         if done: break
         if count % action_cycle_multiplier == 0:
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
@@ -92,7 +92,7 @@ def worker_process_battle(args_pack):
     
     # 1. 初始化环境
     # 注意：这里假设 Namespace 参数是固定的，如果需要动态传参需修改 args_pack
-    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=600, R_cage=55e3), tacview_show=0)
+    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=10 * 60, R_cage=45e3), tacview_show=0)
     state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
     
     # 2. 初始化模型
@@ -115,7 +115,7 @@ def worker_process_battle(args_pack):
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    name = 'IL_and_PFSP_带自模仿_混规则对手_平衡_并行-run-20260129-214607'
+    name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341'
 
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -123,9 +123,9 @@ if __name__ == "__main__":
     log_dir = os.path.join(project_root, "logs","combat", name)
     
     # 1. 准备队伍
-    teams = get_agent_teams(log_dir)
-    team_labels = ['Progress 33%', 'Progress 67%', 'Final 100%']
-    results_matrix = np.zeros((3, 3))
+    team_labels = ['25%', '50%', '75%', '100%']
+    teams = get_agent_teams(log_dir, num_teams=len(team_labels))
+    results_matrix = np.zeros((len(team_labels), len(team_labels)))
     np.fill_diagonal(results_matrix, 0.5)
 
     # 并行配置
@@ -135,8 +135,8 @@ if __name__ == "__main__":
 
     # 2. 并行计算
     with Pool(processes=num_processes) as pool:
-        for i in range(3):      # Blue (Row)
-            for j in range(3):  # Red (Col)
+        for i in range(len(team_labels)):      # Blue (Row)
+            for j in range(len(team_labels)):  # Red (Col)
                 if i == j: continue
                 
                 # 只计算下三角 (i > j)，即进度靠后的打进度靠前的

@@ -75,7 +75,7 @@ realistic = 1
 test_name1 = "violent_wave"
 test_name2 = ""
 
-time_limit = 5 * 60  # 每组测试限时 8 分钟
+
 height_list = [8000]
 speed_list = [340]
 
