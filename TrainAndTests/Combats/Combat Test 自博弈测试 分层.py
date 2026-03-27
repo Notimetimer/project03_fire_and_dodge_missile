@@ -109,7 +109,7 @@ if __name__ == "__main__":
         env.visualize_cage()
 
     env.shielded = 1
-    env.no_out = 0
+    env.no_out = 1 # 是否强制阻止出界
     
     # --- 循环测试 ---
     t_bias = 0

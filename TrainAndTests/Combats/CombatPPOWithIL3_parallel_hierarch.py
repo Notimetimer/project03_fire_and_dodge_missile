@@ -400,8 +400,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         np.random.seed(worker_seed)
         torch.manual_seed(worker_seed)
 
-        args.R_cage = np.random.uniform(30e3, 45e3) # 环境大小随机化
-        
+        # args.R_cage = np.random.uniform(30e3, 45e3) # 已移除：放在这里会导致同一个Worker的所有episode的环境大小不变
+
         # 初始化环境 (关闭可视化以加速)
         env = ChooseStrategyEnv(args, tacview_show=False)
         env.shielded = no_crash # 假设默认开启防撞
@@ -473,6 +473,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 使用从master传来的出生状态
                 red_birth = settings['red_birth']
                 blue_birth = settings['blue_birth']
+                
+                # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
+                r_min, r_max = settings.get('R_cage_range', (30e3, 45e3))
+                env.R_cage = np.random.uniform(r_min, r_max)
+                
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
                 
                 # 状态变量初始化
@@ -665,6 +670,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
+    R_cage_range = (30e3, 45e3), # 新增：环境随机化范围
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -1005,7 +1011,8 @@ def run_MLP_simulation(
                     'action_cycle_multiplier': action_cycle_multiplier,
                     'weight_reward': weight_reward_0,
                     'red_birth': rb,
-                    'blue_birth': bb
+                    'blue_birth': bb,
+                    'R_cage_range': R_cage_range # 将范围传给Worker
                 }
                 
                 # 发送指令 pipe.send

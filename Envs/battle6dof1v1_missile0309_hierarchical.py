@@ -209,8 +209,8 @@ class Battle(object):
             init_R = norm([UAV.pos_[0], UAV.pos_[2]])
             safe_R_cage = self.R_cage-5e3
             if init_R > self.R_cage-5e3:
-                UAV.pos_[0] *= safe_R_cage/init_R
-                UAV.pos_[2] *= safe_R_cage/init_R
+                UAV.pos_[0] *= max(5e3, safe_R_cage-5e3)/init_R
+                UAV.pos_[2] *= max(5e3, safe_R_cage-5e3)/init_R
             # 判断是否有自定义初始速度、theta、phi
             UAV.speed = red_birth_state.get('speed', 300)  # (UAV.speed_max - UAV.speed_min) / 2
             # speed = UAV.speed
@@ -385,7 +385,7 @@ class Battle(object):
                 d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, UAV.pos_, UAV.psi_v)
                 # 不准出界
                 if self.no_out:
-                    if d_hor < 8e3:
+                    if d_hor < 9e3: # 8e3
                         if left_or_right == 1:
                             delta_heading = min(-pi/2, delta_heading)
                         if left_or_right == -1:
