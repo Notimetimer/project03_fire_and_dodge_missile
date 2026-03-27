@@ -1174,11 +1174,6 @@ class Battle(object):
                         f"{UAV.phi * 180 / pi:.6f}|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
                         f"Name=F16,Pilot={pilot},Color={color}\n"
                     )
-                    # data_to_send+=(
-                    #     f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
-                    #     f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                    #     f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=20\n"
-                    # )
                     # 雷达和锁定 Beam 显示
                     if getattr(UAV, 'lock_on', 0) == 0:
                         # 正常探测雷达
@@ -1198,7 +1193,7 @@ class Battle(object):
                         data_to_send += (
                             f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                             f"0|{q_epsilon * 180 / pi:.6f}|{q_beta * 180 / pi:.6f},"
-                            f"Type=Beam, Color={color},Visible=0.4,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
+                            f"Type=Beam, Color={color},Visible=0.7,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
                         )
                     
 
@@ -1262,7 +1257,7 @@ class Battle(object):
                             data_to_send += (
                                 f"{missile.id+1000},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}|"
                                 f"0|{q_epsilon * 180 / pi:.6f}|{q_beta * 180 / pi:.6f},"
-                                f"Type=Beam, Color={color},Visible=0.4,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
+                                f"Type=Beam, Color={color},Visible=0.7,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
                             )
                         else:
                             data_to_send += (
@@ -1270,6 +1265,9 @@ class Battle(object):
                                 f"0|{missile.theta * 180 / pi:.6f}|{missile.psi * 180 / pi:.6f},"
                                 f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange={missile.detect_range:.1f}, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=120\n"
                             )
+                    else:
+                        # 导弹存活但雷达关闭，移除可能残留的雷达波束可视
+                        data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
 
             self.tacview.send_data_to_client(data_to_send)
 
