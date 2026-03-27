@@ -82,6 +82,13 @@ class PolicyNetHybrid(torch.nn.Module):
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temp 参数
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0):
+        if isinstance(temp, dict):
+            temp_cat = temp.get('cat', 1.0)
+            temp_bern = temp.get('bern', 1.0)
+        else:
+            temp_cat = temp
+            temp_bern = temp
+
         shared_features = self.net(x)
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -114,9 +121,8 @@ class PolicyNetHybrid(torch.nn.Module):
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
                 # 对应的温度: temps[i]
-                # scaled_logits = logits / (temps[i] + 1e-8)
-                # 使用传入的 temp 进行缩放, 防止除0
-                scaled_logits = logits / (temp + 1e-8)
+                # 使用 temp_cat 进行缩放, 防止除0
+                scaled_logits = logits / (temp_cat + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
             
             outputs['cat'] = final_probs_list
@@ -132,9 +138,9 @@ class PolicyNetHybrid(torch.nn.Module):
                 # mask == 0 代表禁止开火，设为极小值
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
-            # [修改] 使用传入的 temp
+            # [修改] 使用我们提取的 temp_bern
             # temps = 1.0 
-            scaled_bern_logits = bern_logits / (temp + 1e-8)
+            scaled_bern_logits = bern_logits / (temp_bern + 1e-8)
             outputs['bern'] = scaled_bern_logits
             
         return outputs

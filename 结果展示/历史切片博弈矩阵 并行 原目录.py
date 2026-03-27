@@ -7,8 +7,12 @@ import numpy as np
 import argparse
 import random
 import pandas as pd
+import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count 
-
+import matplotlib
+matplotlib.use('Agg') # 禁止弹出窗口，直接保存
+matplotlib.rcParams['font.sans-serif'] = ['SimHei'] # 支持中文
+matplotlib.rcParams['axes.unicode_minus'] = False
 from _context import * # 包含 project_root
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import ChooseStrategyEnv
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
@@ -23,32 +27,50 @@ TOTAL_ROUNDS = 100 # 每两队之间打100场
 TEAM_SIZE = 25     # 每队成员数
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
-def get_agent_teams(log_dir, num_teams=4):
-    """根据文件编号划分多个进度的队伍"""
-    files = [f for f in os.listdir(log_dir) if f.startswith('actor_rein') and f.endswith('.pt')]
-    # 提取编号并排序
+def get_agent_teams(log_dir, num_teams=3):
+    """根据 elo_ratings.json 的 Elo 划分区间，提取各区间最强的组合"""
+    json_path = os.path.join(log_dir, "elo_ratings.json")
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"找不到 {json_path} 文件，请确保目录下有该文件。")
+    
+    with open(json_path, 'r', encoding='utf-8') as f:
+        elo_data = json.load(f)
+        
     agents = []
-    for f in files:
-        match = re.search(r'actor_rein(\d+)', f)
+    max_id = 0
+    # 提取所有有效的 actor_rein* 并关联其 Elo
+    for k, v in elo_data.items():
+        match = re.search(r'^actor_rein(\d+)$', k)
         if match:
-            agents.append({'id': int(match.group(1)), 'path': os.path.join(log_dir, f)})
-    
-    agents.sort(key=lambda x: x['id'])
-    total_count = len(agents)
-    
-    # 动态定义进度索引 (由 num_teams 决定)
-    indices = [max(0, (i + 1) * total_count // num_teams - 1) for i in range(num_teams)]
+            agent_id = int(match.group(1))
+            agent_path = os.path.join(log_dir, f"{k}.pt")
+            if os.path.exists(agent_path):
+                agents.append({'id': agent_id, 'name': k, 'elo': v, 'path': agent_path})
+                max_id = max(max_id, agent_id)
+            
+    if not agents:
+        raise ValueError("在 elo_ratings.json 中未找到任何可用的 actor_rein 键。")
+        
+    # 划分区间
     teams = []
+    interval_size = (max_id + 1) / num_teams
     
-    for idx in indices:
-        # 在该进度点附近进行间隔采样
-        start = max(0, idx - 10)
-        end = min(total_count, idx + 10)
-        sample_pool = agents[start:end]
-        # 确保每队只要 TEAM_SIZE 个
-        team = sample_pool[::max(1, len(sample_pool)//TEAM_SIZE)][:TEAM_SIZE]
+    for i in range(num_teams):
+        start_id = i * interval_size
+        end_id = (i + 1) * interval_size if i < num_teams - 1 else float('inf')
+        
+        # 获取在这个区间内的所有 agents
+        pool = [a for a in agents if start_id <= a['id'] < end_id]
+        
+        # 按照 Elo 降序排列，取前 TEAM_SIZE 个
+        pool.sort(key=lambda x: x['elo'], reverse=True)
+        team = pool[:TEAM_SIZE]
+        
+        # 如果取到了就加入球队，否则给个提醒
+        if not team:
+            print(f"警告: 区间 [{start_id}, {end_id}) 内未找到任何智能体，将从相邻区间凑数")
         teams.append(team)
-    
+        
     return teams
 
 # --- 保持原样 ---
@@ -64,8 +86,11 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
             b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':using_explore_maneuver,'bern':1})
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':using_explore_maneuver,'bern':1})
+                explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
+                # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
+                temp_dict = {'cat': 0.1, 'bern': 1.0}
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temp=temp_dict)
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temp=temp_dict)
             if r_act['bern'][0]: launch_missile_immediately(env, 'r')
             if b_act['bern'][0]: launch_missile_immediately(env, 'b')
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]
@@ -123,8 +148,44 @@ if __name__ == "__main__":
     log_dir = os.path.join(project_root, "logs","combat", name)
     
     # 1. 准备队伍
-    team_labels = ['25%', '50%', '75%', '100%']
+    team_labels = ['0%~33%', '33%~66%', '66%~100%']
     teams = get_agent_teams(log_dir, num_teams=len(team_labels))
+
+    # --- [新增] 可视化 Elo 曲线及成员分布 ---
+    with open(os.path.join(log_dir, "elo_ratings.json"), 'r', encoding='utf-8') as f:
+        elo_data = json.load(f)
+    
+    # 提取所有 actor_rein 的 Elo 数据用于画图
+    all_plot_data = []
+    for k, v in elo_data.items():
+        match = re.search(r'^actor_rein(\d+)$', k)
+        if match:
+            all_plot_data.append([int(match.group(1)), v])
+    all_plot_data.sort(key=lambda x: x[0])
+    all_plot_data = np.array(all_plot_data) # [ID, Elo]
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(all_plot_data[:, 0], all_plot_data[:, 1], color='gray', alpha=0.5, label='Elo Evolution')
+    
+    colors = ['red', 'blue', 'green']
+    for idx, team in enumerate(teams):
+        team_ids = np.array([a['id'] for a in team])
+        team_elos = np.array([a['elo'] for a in team])
+        print(f"Team {team_labels[idx]} IDs: {team_ids.tolist()}")
+        plt.scatter(team_ids, team_elos, color=colors[idx], label=f'Team {team_labels[idx]} Member', s=20)
+    
+    plt.title(f"Elo Evolution & Team Sampling - {name}")
+    plt.xlabel("Actor ID (Checkpoint)")
+    plt.ylabel("Elo Rating")
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.6)
+    
+    plot_save_path = os.path.join(project_root, "结果展示", "outputs", f"elo_sampling_{name}.png")
+    os.makedirs(os.path.dirname(plot_save_path), exist_ok=True)
+    plt.savefig(plot_save_path)
+    print(f"Elo 采样分布图已保存至: {plot_save_path}")
+    # ------------------------------------------
+
     results_matrix = np.zeros((len(team_labels), len(team_labels)))
     np.fill_diagonal(results_matrix, 0.5)
 
