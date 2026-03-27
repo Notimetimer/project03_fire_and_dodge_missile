@@ -106,7 +106,7 @@ if __name__ == "__main__":
         env.visualize_cage()
 
     env.shielded = 1
-    env.no_out = 0
+    env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2, 3, 4]

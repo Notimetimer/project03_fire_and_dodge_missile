@@ -322,9 +322,55 @@ class Battle(object):
         # # 记录 step 开始时的“已存在”导弹 id（用于判断导弹是否为在本 step 开始时就已存在）
         # initial_alive_ids = {m.id for m in (self.Rmissiles + self.Bmissiles) if not m.dead}
 
-        # 在整个 maneuver step 开始时只重置一次 escape_once（不要在内层子步或导弹循环中再次重置）
+        # 在这里执行保护系统计算，并覆写原本的飞行动作指令
         for UAV, action in zip(self.UAVs, actions):
             UAV.escape_once = 0
+            
+            delta_heading = action[1]
+            target_height = action[0]
+            target_speed = action[2]
+
+            p2p = False
+            if UAV.blue:
+                p2p = self.BLUE_BIRTH_STATE.get('p2p', False)
+            if UAV.red:
+                p2p = self.RED_BIRTH_STATE.get('p2p', False)
+
+            # 防撞地系统
+            if self.shielded:
+                # 临近撞地强制拉起
+                if UAV.alt < self.min_alt_safe + 1e3:
+                    target_height = max(self.min_alt_safe + 1e3 - UAV.alt, target_height)
+                    p2p = False
+                    delta_heading = np.clip(delta_heading, -pi/3, pi/3)
+
+                # 不许超过限高
+                if UAV.alt > self.max_alt_safe:
+                    target_height = min(self.max_alt_safe - UAV.alt, target_height)
+                    p2p = False
+
+                # 速度过低强制加油门
+                if UAV.speed/340 < 0.5:
+                    if p2p:
+                        UAV.target_speed = 1
+                    else:
+                        target_speed = max(340, target_speed)
+                        UAV.target_speed = target_speed
+                
+            # 不准出界
+            if self.no_out:
+                d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, UAV.pos_, UAV.psi_v)
+                if d_hor < 8e3: # 8e3
+                    if left_or_right == 1:
+                        delta_heading = min(-pi/2, delta_heading)
+                    else:
+                        delta_heading = max(pi/2, delta_heading)
+
+            # 将调整后的动作写回，Python引用就地修改
+            action[0] = target_height
+            action[1] = delta_heading
+            action[2] = target_speed
+
             UAV.target_heading = sub_of_radian(UAV.psi + action[1], 0)
             # # 调试信息：计算相对方位角
             # other_uav = self.UAVs[1] if UAV == self.UAVs[0] else self.UAVs[0]
@@ -353,43 +399,6 @@ class Battle(object):
                 #     rudder = action[3]
                 # else:
                 rudder = None
-                
-
-                if UAV.blue:
-                    # 如果 BLUE_BIRTH_STATE 包含 p2p 则使用其值，否则为 False
-                    p2p = self.BLUE_BIRTH_STATE.get('p2p', False)
-                if UAV.red:
-                    # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
-                    p2p = self.RED_BIRTH_STATE.get('p2p', False)
-
-                # 防撞地系统
-                if self.shielded:
-                    # 临近撞地强制拉起
-                    if UAV.alt < self.min_alt_safe + 1e3:
-                        target_height = max(self.min_alt_safe + 1e3 - UAV.alt, target_height)
-                        p2p = False
-                        delta_heading = np.clip(delta_heading, -pi/3, pi/3)
-
-                    # 不许超过限高
-                    if UAV.alt > self.max_alt_safe:
-                        target_height = min(self.max_alt_safe - UAV.alt, target_height)
-                        p2p = False
-
-                    # 速度过低强制加油门
-                    if UAV.speed/340 < 0.5:
-                        if p2p:
-                            UAV.target_speed = 1
-                        else:
-                            UAV.target_speed = max(340, target_speed)
-                    
-                d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, UAV.pos_, UAV.psi_v)
-                # 不准出界
-                if self.no_out:
-                    if d_hor < 9e3: # 8e3
-                        if left_or_right == 1:
-                            delta_heading = min(-pi/2, delta_heading)
-                        if left_or_right == -1:
-                            delta_heading = max(pi/2, delta_heading)
 
                 # 出界就炸
                 if self.out_range(UAV):
