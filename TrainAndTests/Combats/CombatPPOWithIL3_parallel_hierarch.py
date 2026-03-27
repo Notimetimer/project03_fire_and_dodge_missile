@@ -399,6 +399,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         random.seed(worker_seed)
         np.random.seed(worker_seed)
         torch.manual_seed(worker_seed)
+
+        args.R_cage = np.random.uniform(30e3, 45e3) # 环境大小随机化
         
         # 初始化环境 (关闭可视化以加速)
         env = ChooseStrategyEnv(args, tacview_show=False)
@@ -828,7 +830,7 @@ def run_MLP_simulation(
     worker_device = torch.device('cpu') # Worker 使用 CPU 推理
     
     args.max_episode_len = max_episode_duration
-    args.R_cage = np.random.uniform(30e3, 45e3) # 环境大小随机化
+    args.R_cage = 45e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
     print(f"Initializing {num_workers} training workers...")
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()

@@ -35,6 +35,8 @@ def test_worker(model_state_dict, rule_num,
     在独立进程中运行一场对战。
     """
     device = torch.device(device_name)
+
+    env_args.R_cage = 45e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
     
     # 1. 局部初始化环境 (必须在子进程内创建)
     # 关闭渲染以节省资源

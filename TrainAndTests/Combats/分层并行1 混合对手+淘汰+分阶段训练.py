@@ -2,7 +2,7 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
+mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层_随机大小'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
