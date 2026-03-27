@@ -229,6 +229,7 @@ class Battle(object):
             UAV.escape_once = 0
             self.RUAVs.append(UAV)
             self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
+            UAV.lock_on = 0
         # 蓝方初始化
         for i in range(self.Bnum):
             UAV = UAVModel(dt=self.dt_move)
@@ -267,6 +268,7 @@ class Battle(object):
             UAV.escape_once = 0
             self.BUAVs.append(UAV)
             self.BUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
+            UAV.lock_on = 0
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
         self.UAVsTable = {**self.RUAVsTable, **self.BUAVsTable}
@@ -631,8 +633,10 @@ class Battle(object):
         # 雷达可跟踪标志
         if ATA <= own.max_radar_angle and dist <= own.max_radar_range and target_alive:
             target_locked = 1
+            own.lock_on = 1
         else:
             target_locked = 0
+            own.lock_on = 0
 
         # 导弹中制导状态 bool 与 导弹发射间隔时间
         missile_in_mid_term = 0
@@ -683,13 +687,16 @@ class Battle(object):
             for i, missile in enumerate(alive_enm_missiles):
                 distances[i] = missile.distance
                 if missile.distance < missile.detect_range and missile.in_angle:
+                    missile.lock_on = 1
                     warnings[i] = 1
                     threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
-                elif locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
-                    # 进入告警距离前用敌机方位作为导弹告警方位
-                    threat_delta_psis[i] = delta_psi
-                    threat_delta_thetas[i] = delta_theta + own.theta
+                else:
+                    missile.lock_on = 0
+                    if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
+                        # 进入告警距离前用敌机方位作为导弹告警方位
+                        threat_delta_psis[i] = delta_psi
+                        threat_delta_thetas[i] = delta_theta + own.theta
 
             # 告警标志 bool
             warning = bool(max(warnings))
@@ -1170,8 +1177,31 @@ class Battle(object):
                     # data_to_send+=(
                     #     f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                     #     f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
-                    #     f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=90\n"
+                    #     f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=20\n"
                     # )
+                    # 雷达和锁定 Beam 显示
+                    if getattr(UAV, 'lock_on', 0) == 0:
+                        # 正常探测雷达
+                        data_to_send += (
+                            f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
+                            f"0|{UAV.theta * 180 / pi:.6f}|{UAV.psi * 180 / pi:.6f},"
+                            f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange=100000, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=20\n"
+                        )
+                    else:
+                        # 锁定时的细光束波束
+                        target = self.BUAV if UAV.side == 'r' else self.RUAV
+                        delta_pos = target.pos_ - UAV.pos_
+                        dist = norm(delta_pos)
+                        q_beta = atan2(delta_pos[2], delta_pos[0])
+                        q_epsilon = atan2(delta_pos[1], sqrt(delta_pos[0]**2 + delta_pos[2]**2))
+                        
+                        data_to_send += (
+                            f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
+                            f"0|{q_epsilon * 180 / pi:.6f}|{q_beta * 180 / pi:.6f},"
+                            f"Type=Beam, Color={color},Visible=0.4,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
+                        )
+                    
+
 
 
                     # # 绘制目标期望点 (Carrot)
@@ -1203,6 +1233,8 @@ class Battle(object):
             for missile in self.missiles:
                 if hasattr(missile, 'dead') and missile.dead:
                     data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
+                    # 同步移除已经死掉导弹的雷达波束
+                    data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
                 else:
                     # 记录导弹的位置
                     loc_m = NUE2LLH(missile.pos_[0], missile.pos_[1], missile.pos_[2], lon_o=o00[0], lat_o=o00[1],
@@ -1218,6 +1250,26 @@ class Battle(object):
                                     f"{0.0:.6f}|{missile.theta * 180 / pi:.6f}|{missile.psi * 180 / pi:.6f},"
                                     f"Name=AIM-120C,Color={color}\n"
                                     )
+                    # 导弹雷达波束显示
+                    if getattr(missile, 'radar_on', 0):
+                        if getattr(missile, 'lock_on', 0):
+                            target = self.BUAV if missile.side == 'r' else self.RUAV
+                            delta_pos = target.pos_ - missile.pos_
+                            dist = norm(delta_pos)
+                            q_beta = atan2(delta_pos[2], delta_pos[0])
+                            q_epsilon = atan2(delta_pos[1], sqrt(delta_pos[0]**2 + delta_pos[2]**2))
+                            
+                            data_to_send += (
+                                f"{missile.id+1000},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}|"
+                                f"0|{q_epsilon * 180 / pi:.6f}|{q_beta * 180 / pi:.6f},"
+                                f"Type=Beam, Color={color},Visible=0.4,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
+                            )
+                        else:
+                            data_to_send += (
+                                f"{missile.id+1000},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}|"
+                                f"0|{missile.theta * 180 / pi:.6f}|{missile.psi * 180 / pi:.6f},"
+                                f"Type=Beam, Color={color},Visible=0.3,Radius=0.0,RadarMode=1,RadarRange={missile.detect_range:.1f}, RadarHorizontalBeamwidth=120, RadarVerticalBeamwidth=120\n"
+                            )
 
             self.tacview.send_data_to_client(data_to_send)
 
@@ -1227,10 +1279,10 @@ class Battle(object):
             data_to_send = ''
             for UAV in self.UAVs:
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
-                # data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
             for missile in self.missiles:
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
+                data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
             self.tacview.send_data_to_client(data_to_send)
         else:
             pass
@@ -1401,6 +1453,7 @@ def launch_missile_if_possible(env, side='r'):
         if uav.can_launch_missile(target, env.t):
             # 发射导弹
             new_missile = uav.launch_missile(target, env.t, missile_class)
+            new_missile.lock_on = 0
             uav.ammo -= 1
             new_missile.side = 'r' if side == 'r' else 'b'
             if side == 'r':
@@ -1439,6 +1492,7 @@ def launch_missile_immediately(env, side='r', tabu=0):
         if not tabu or\
                 target_locked and ego_state["weapon"]>=0.1 and ATA<=60 *pi/180:
             new_missile = uav.launch_missile(target, env.t, missile_class)
+            new_missile.lock_on = 0
             uav.ammo -= 1
 
             # 记录导弹发射瞬间的 ATA、distance 和 AA_hor
@@ -1506,6 +1560,7 @@ def launch_missile_with_basic_rules(env, side='r'):
 
     if np.random.rand() < should_shoot: # np.random.rand() 生成的是在区间 [0, 1) 上的独立均匀分布
         new_missile = uav.launch_missile(target, env.t, missile_class)
+        new_missile.lock_on = 0
         uav.ammo -= 1
         new_missile.side = 'r' if side == 'r' else 'b'
         if side == 'r':
