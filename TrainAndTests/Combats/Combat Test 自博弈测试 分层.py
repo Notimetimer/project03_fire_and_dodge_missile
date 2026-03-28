@@ -44,7 +44,7 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
+    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
 
     # 次要
     experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
@@ -54,7 +54,8 @@ if __name__ == "__main__":
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
     args = parser.parse_args()    
 
-    args.agent_id = 838
+    red_agent_id = 700
+    blue_agent_id = 200
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=12*60, R_cage=40e3) # 55e3
@@ -82,23 +83,26 @@ if __name__ == "__main__":
     if not latest_log_dir:
         raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
     
-    agent_path = find_latest_agent_path(latest_log_dir, args.agent_id)
-    if not agent_path:
-        raise FileNotFoundError(f"No agent file found in '{latest_log_dir}' (ID: {args.agent_id or 'latest'})")
+    red_agent_path = find_latest_agent_path(latest_log_dir, red_agent_id)
+    blue_agent_path = find_latest_agent_path(latest_log_dir, blue_agent_id)
+    if not red_agent_path or not blue_agent_path:
+        raise FileNotFoundError(f"Found missing agent. Red:{red_agent_path}, Blue:{blue_agent_path}")
 
     print()
     print(f"Found log directory: {latest_log_dir}")
-    print(f"Loading agent weights from: {agent_path}")
+    print(f"Loading Red Agent (ID: {red_agent_id}) from: {red_agent_path}")
+    print(f"Loading Blue Agent (ID: {blue_agent_id}) from: {blue_agent_path}")
     print()
 
-    # 实例化模型结构并加载权重
-    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-    # 注意：测试时只需要 Actor Wrapper，不需要完整的 PPO agent
-    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
-    actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
-    actor_wrapper.eval() # **非常重要**：设置为评估模式
+    # 实例化红方
+    actor_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict), action_dims_dict, None, device).to(device)
+    actor_wrapper.load_state_dict(torch.load(red_agent_path, map_location=device, weights_only=1), strict=False)
+    actor_wrapper.eval() 
 
-    enm_actor_wrapper = copy.deepcopy(actor_wrapper)
+    # 实例化蓝方
+    enm_actor_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict), action_dims_dict, None, device).to(device)
+    enm_actor_wrapper.load_state_dict(torch.load(blue_agent_path, map_location=device, weights_only=1), strict=False)
+    enm_actor_wrapper.eval()
 
     # --- [修正] 移除重复的 env 初始化，直接配置已有的 env ---
     # env = ChooseStrategyEnv(env_args, tacview_show=1) 
@@ -140,10 +144,14 @@ if __name__ == "__main__":
 
                 # 决策
                 if count % action_cycle_multiplier == 0:
-                    # --- 红方 (RL 智能体) ---
+                    explore_dict = {'cat': 1, 'bern': 1}
+                    temp_dict = {'cat': 0.1, 'bern': 1.0}
+                    # --- 红方 (RL 智能体 700) ---
                     with torch.no_grad():
-                        r_action_exec, _, _, r_action_check = actor_wrapper.get_action(r_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.38)
+                        # 由于训练时没有 state_check，去除 check_obs
+                        r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
+                            r_obs, explore=explore_dict, temp=temp_dict, bern_threshold=0.1
+                        )
                         
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0]
@@ -151,18 +159,19 @@ if __name__ == "__main__":
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
-                        launch_missile_immediately(env, 'r', tabu=0)
+                        launch_missile_immediately(env, 'r', tabu=1)
 
-                    # --- 蓝方 (规则智能体) ---
+                    # --- 蓝方 (RL 智能体 200) ---
                     with torch.no_grad():
-                        b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(b_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.38)
+                        b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(
+                            b_obs, explore=explore_dict, temp=temp_dict, bern_threshold=0.1
+                        )
                         
                     b_action_label = b_action_exec['cat'][0]
                     b_fire = b_action_exec['bern'][0]
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b')
+                        launch_missile_immediately(env, 'b', tabu=1)
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)

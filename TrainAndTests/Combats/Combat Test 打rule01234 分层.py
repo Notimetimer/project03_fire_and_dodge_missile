@@ -43,7 +43,12 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
+    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+
+    "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
+    "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+
+    
 
     # 次要
     experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
@@ -53,7 +58,7 @@ if __name__ == "__main__":
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
     args = parser.parse_args()    
 
-    args.agent_id = 838
+    args.agent_id = None # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)

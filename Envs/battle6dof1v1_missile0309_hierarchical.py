@@ -280,6 +280,19 @@ class Battle(object):
         self.BUAV = self.BUAVs[0]
 
 
+    def close(self):
+        """
+        关闭环境并清理资源
+        """
+        if self.tacview_show:
+            try:
+                self.tacview.socket.close()
+            except:
+                pass
+        # 清理 UAV 和导弹引用
+        self.UAVs = []
+        self.missiles = []
+
     def launch_missile(self, side='r'):
         """
         立即发射导弹
