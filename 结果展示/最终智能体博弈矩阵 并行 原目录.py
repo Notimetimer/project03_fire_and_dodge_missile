@@ -10,19 +10,17 @@ import pandas as pd
 from multiprocessing import Pool, cpu_count # 引入多进程库
 
 from _context import * # 包含 project_root
-from Envs.Tasks.ChooseStrategyEnv2_2 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import ChooseStrategyEnv
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
-from Envs.battle6dof1v1_missile0919 import launch_missile_immediately
-# --- 2. 辅助函数 ---
+from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir
-# [新增] 引入绘图函数
 from read_n_draw_inter_experiment_tests import draw_combat_matrix
 
 # --- 1. 配置参数 ---
-TOTAL_ROUNDS = 100    # 每对任务之间对抗 100 场
-TEAM_SIZE = 50        # 每队从 Elo 排行中取前 50 名
 action_cycle_multiplier = 30
 dt_maneuver = 0.2
+TOTAL_ROUNDS = 80    # 每对任务之间对抗 100 场
+TEAM_SIZE = 40        # 每队从 Elo 排行中取前 50 名
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
 # --- 2. 核心辅助函数 ---
@@ -119,19 +117,27 @@ def get_top_elo_agents(log_dir, top_n=50):
 def run_battle(env, blue_wrapper, red_wrapper, device):
     """仿真逻辑 (保持与文件 1 一致)"""
     env.reset(red_init_ammo=6, blue_init_ammo=6)
+    env.shielded = 1 # 测试时开启防撞地
+    env.no_out = 0 # 测试时防止出界
+
     done = False
     r_label, b_label = 0, 0
     
-    for count in range(3000):
+    for count in range(int(20*60/env.dt_maneuver)):
         if done: break
         if count % action_cycle_multiplier == 0:
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
             b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore={'cat':using_explore_maneuver,'bern':1})
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore={'cat':using_explore_maneuver,'bern':1})
-            if r_act['bern'][0]: launch_missile_immediately(env, 'r')
-            if b_act['bern'][0]: launch_missile_immediately(env, 'b')
+                explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
+                # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
+                temp_dict = {'cat': 0.1, 'bern': 1.0}
+                # 不再向网络传入 check_obs 执行强力动作屏蔽
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temp=temp_dict)
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temp=temp_dict)
+            # 交给环境物理函数使用 tabu=1 (相对宽松的条件) 拦截无效开火
+            if r_act['bern'][0]: launch_missile_immediately(env, 'r', tabu=1)
+            if b_act['bern'][0]: launch_missile_immediately(env, 'b', tabu=1)
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]
 
         r_maneuver = env.maneuver14LR(env.RUAV, r_label)
@@ -143,25 +149,23 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
     if env.lose: return 0.0  # 红胜
     return 0.5               # 平局
 
-# --- 新增：并行工作函数 (包装器) ---
+# --- 并行工作函数 ---
 def worker_process_battle(args_pack):
     """
-    为了并行化，需要在子进程内实例化环境和模型，
-    然后调用未修改的 run_battle。
+    子进程执行函数
     """
     blue_path, red_path = args_pack
     
-    # 强制在 Worker 中使用 CPU，避免多进程 CUDA 冲突
+    # 强制在 Worker 中使用 CPU
     device = torch.device("cpu")
-    # 限制单进程线程数，防止 CPU 争抢
     torch.set_num_threads(1) 
     
     # 1. 初始化环境
-    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=600, R_cage=55e3), tacview_show=0)
+    # 注意：这里假设 Namespace 参数是固定的，如果需要动态传参需修改 args_pack
+    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=10 * 60, R_cage=45e3), tacview_show=0)
     state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
     
-    # 2. 初始化模型结构 (使用 CPU)
-    # 变量名保持 blue_wrapper / red_wrapper 以匹配 run_battle 签名要求
+    # 2. 初始化模型
     blue_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
     red_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
     
@@ -183,18 +187,20 @@ def worker_process_battle(args_pack):
 if __name__ == "__main__":
     # --- [在此处修改输入列表] ---
     mission_names = [
-        'IL_and_PFSP_分阶段_纯自博弈_平衡_并行-run-20260129-203500', # 任务1
-        'IL_and_PFSP_带自模仿_混规则对手_平衡_并行-run-20260129-214607', # 任务2
-        '无IL_PFSP_分阶段_混规则对手_平衡_并行-run-20260129-215015', # 任务3
-        'IL_and_PFSP_分阶段_混规则对手_平衡_并行-run-20260201-130236',
+        'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341', # 任务1
+        'IL_and_PFSP_挑战_并行_分层-run-20260323-165715', # 任务2
+        'MixedPFSP_挑战_并行_分层-run-20260323-165740', # 任务3
+        'IL_and_deltaFSP_挑战_并行_分层-run-20260323-152514',
+        'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C-run-20260324-153858',
     ]
     
-    team_labels = [
-        '1',
-        '2',
-        '3',
-        '4',
-    ]
+    team_labels = range(len(mission_names))
+    # [
+    #     '1',
+    #     '2',
+    #     '3',
+    #     '4',
+    # ]
     
     # 强制校验长度
     if len(mission_names) != len(team_labels):
