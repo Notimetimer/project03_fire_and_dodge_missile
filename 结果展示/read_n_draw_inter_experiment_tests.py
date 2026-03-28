@@ -98,20 +98,18 @@ def draw_combat_matrix(csv_path, team_labels=None,
     plt.show()
 
 if __name__ == "__main__":
-    # # 绘制实验之间对比
-    # current_dir = os.path.dirname(os.path.abspath(__file__))
-    # test_path = os.path.join(current_dir, "outputs", "combat_matrix.csv")
-    # print(f"Testing draw on: {test_path}")
-    # draw_combat_matrix(test_path)
+    # 绘制实验内自博弈进度对比（历史切片博弈矩阵）
+    csv_path = os.path.join(project_root, "结果展示", "outputs", "history_combat_matrix.csv")
     
-    # 绘制实验内自博弈对比
-    name = 'IL_and_PFSP_分阶段_混规则对手_挑战-run-20260123-203921'
-    log_dir = os.path.join(project_root, "结果展示", "logs", name)
-    draw_combat_matrix(
-        csv_path = os.path.join(project_root, "结果展示", "outputs", "history_combat_matrix.csv"), 
-        team_labels = ['Progress 33%', 'Progress 67%', 'Final 100%'],
-        title="Cross-Play Score Matrix: Training Progress Evaluation",
-        xlabel="Opponent / Column",
-        ylabel="Evaluated / Row",
-        cbar_label="Score Rate",
-    )
+    if os.path.exists(csv_path):
+        print(f"正在读取并绘制: {csv_path}")
+        draw_combat_matrix(
+            csv_path = csv_path, 
+            team_labels = ['0%~33%', '33%~66%', '66%~100%'],
+            title="Cross-Play Score Matrix: Training Progress Evaluation",
+            xlabel="Opponent / Column",
+            ylabel="Evaluated / Row",
+            cbar_label="Score Rate",
+        )
+    else:
+        print(f"找不到文件: {csv_path}，请先运行生成矩阵的脚本。")

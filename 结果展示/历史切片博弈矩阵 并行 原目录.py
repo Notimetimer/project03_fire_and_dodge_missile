@@ -77,6 +77,9 @@ def get_agent_teams(log_dir, num_teams=3):
 def run_battle(env, blue_wrapper, red_wrapper, device):
     """仿真逻辑 (保持与文件 1 一致)"""
     env.reset(red_init_ammo=6, blue_init_ammo=6)
+    env.shielded = 1 # 测试时开启防撞地面
+    env.no_out = 1 # 测试时防止出界
+
     done = False
     r_label, b_label = 0, 0
     
@@ -89,10 +92,12 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
                 explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
                 # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
                 temp_dict = {'cat': 0.1, 'bern': 1.0}
+                # 不再向网络传入 check_obs 执行强力动作屏蔽
                 r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temp=temp_dict)
                 b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temp=temp_dict)
-            if r_act['bern'][0]: launch_missile_immediately(env, 'r')
-            if b_act['bern'][0]: launch_missile_immediately(env, 'b')
+            # 交给环境物理函数使用 tabu=1 (相对宽松的条件) 拦截无效开火
+            if r_act['bern'][0]: launch_missile_immediately(env, 'r', tabu=1)
+            if b_act['bern'][0]: launch_missile_immediately(env, 'b', tabu=1)
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]
 
         r_maneuver = env.maneuver14LR(env.RUAV, r_label)
@@ -147,45 +152,63 @@ if __name__ == "__main__":
     
     log_dir = os.path.join(project_root, "logs","combat", name)
     
+def plot_elo_sampling(log_dir, teams, team_labels, name):
+    """封装 Elo 采样绘图逻辑，采用 Agg 后端防止干扰主进程 GUI"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg', force=True) # 强制局部使用 Agg
+        import matplotlib.pyplot as plt
+        
+        with open(os.path.join(log_dir, "elo_ratings.json"), 'r', encoding='utf-8') as f:
+            elo_data = json.load(f)
+        
+        all_plot_data = []
+        for k, v in elo_data.items():
+            match = re.search(r'^actor_rein(\d+)$', k)
+            if match:
+                all_plot_data.append([int(match.group(1)), v])
+        all_plot_data.sort(key=lambda x: x[0])
+        all_plot_data = np.array(all_plot_data)
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(all_plot_data[:, 0], all_plot_data[:, 1], color='gray', alpha=0.5, label='Elo Evolution')
+        
+        colors = ['red', 'blue', 'green']
+        for idx, team in enumerate(teams):
+            team_ids = np.array([a['id'] for a in team])
+            team_elos = np.array([a['elo'] for a in team])
+            plt.scatter(team_ids, team_elos, color=colors[idx], label=f'Team {team_labels[idx]} Member', s=20)
+        
+        plt.title(f"Elo Evolution & Team Sampling - {name}")
+        plt.xlabel("Actor ID (Checkpoint)")
+        plt.ylabel("Elo Rating")
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.6)
+        
+        plot_save_path = os.path.join(project_root, "结果展示", "outputs", f"elo_sampling_{name}.png")
+        os.makedirs(os.path.dirname(plot_save_path), exist_ok=True)
+        plt.savefig(plot_save_path)
+        plt.close() # 释放内存
+        print(f"Elo 采样分布图已保存至: {plot_save_path}")
+    except Exception as e:
+        print(f"绘图预览失败（不影响主程序）: {e}")
+
+# --- 主程序 ---
+if __name__ == "__main__":
+    name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341'
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log_dir = os.path.join(project_root, "logs","combat", name)
+    
     # 1. 准备队伍
     team_labels = ['0%~33%', '33%~66%', '66%~100%']
     teams = get_agent_teams(log_dir, num_teams=len(team_labels))
 
-    # --- [新增] 可视化 Elo 曲线及成员分布 ---
-    with open(os.path.join(log_dir, "elo_ratings.json"), 'r', encoding='utf-8') as f:
-        elo_data = json.load(f)
-    
-    # 提取所有 actor_rein 的 Elo 数据用于画图
-    all_plot_data = []
-    for k, v in elo_data.items():
-        match = re.search(r'^actor_rein(\d+)$', k)
-        if match:
-            all_plot_data.append([int(match.group(1)), v])
-    all_plot_data.sort(key=lambda x: x[0])
-    all_plot_data = np.array(all_plot_data) # [ID, Elo]
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(all_plot_data[:, 0], all_plot_data[:, 1], color='gray', alpha=0.5, label='Elo Evolution')
-    
-    colors = ['red', 'blue', 'green']
+    # --- [修改] 调用预览绘图 ---
     for idx, team in enumerate(teams):
-        team_ids = np.array([a['id'] for a in team])
-        team_elos = np.array([a['elo'] for a in team])
-        print(f"Team {team_labels[idx]} IDs: {team_ids.tolist()}")
-        plt.scatter(team_ids, team_elos, color=colors[idx], label=f'Team {team_labels[idx]} Member', s=20)
+        print(f"Team {team_labels[idx]} IDs: {[a['id'] for a in team]}")
+    plot_elo_sampling(log_dir, teams, team_labels, name)
     
-    plt.title(f"Elo Evolution & Team Sampling - {name}")
-    plt.xlabel("Actor ID (Checkpoint)")
-    plt.ylabel("Elo Rating")
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.6)
-    
-    plot_save_path = os.path.join(project_root, "结果展示", "outputs", f"elo_sampling_{name}.png")
-    os.makedirs(os.path.dirname(plot_save_path), exist_ok=True)
-    plt.savefig(plot_save_path)
-    print(f"Elo 采样分布图已保存至: {plot_save_path}")
-    # ------------------------------------------
-
     results_matrix = np.zeros((len(team_labels), len(team_labels)))
     np.fill_diagonal(results_matrix, 0.5)
 
@@ -234,8 +257,23 @@ if __name__ == "__main__":
     df.to_csv(csv_path, float_format="%.4f", encoding="utf-8-sig")
     print(f"博弈矩阵已保存到: {csv_path}")
 
-    # 4. [修改] 调用公共绘图函数
-    print("正在绘图...")
+    # 4. [修改] 尝试修复并显示博弈矩阵
+    import matplotlib
+    # 试图从原本不可交互的 Agg 切换回交互后端 (这在某些环境下可能需要 reload)
+    try:
+        import importlib
+        importlib.reload(matplotlib)
+        importlib.reload(plt)
+        # 常见 GUI 后端顺序尝试
+        for gui_backend in ['Qt5Agg', 'TkAgg', 'WXAgg']:
+            try:
+                matplotlib.use(gui_backend, force=True)
+                import matplotlib.pyplot as plt
+                break
+            except: continue
+    except: pass
+
+    print("正在绘图 (尝试弹窗显示)...")
     draw_combat_matrix(
         csv_path, 
         team_labels, 
