@@ -143,15 +143,6 @@ def worker_process_battle(args_pack):
     # 4. 调用原始函数
     return run_battle(env, blue_wrapper, red_wrapper, device)
 
-# --- 主程序 ---
-if __name__ == "__main__":
-    name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341'
-
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    log_dir = os.path.join(project_root, "logs","combat", name)
-    
 def plot_elo_sampling(log_dir, teams, team_labels, name):
     """封装 Elo 采样绘图逻辑，采用 Agg 后端防止干扰主进程 GUI"""
     try:
@@ -167,17 +158,24 @@ def plot_elo_sampling(log_dir, teams, team_labels, name):
             match = re.search(r'^actor_rein(\d+)$', k)
             if match:
                 all_plot_data.append([int(match.group(1)), v])
+        
+        if not all_plot_data:
+            print("警告: 未找到任何 Elo 绘图数据。")
+            return
+
         all_plot_data.sort(key=lambda x: x[0])
         all_plot_data = np.array(all_plot_data)
 
         plt.figure(figsize=(10, 6))
         plt.plot(all_plot_data[:, 0], all_plot_data[:, 1], color='gray', alpha=0.5, label='Elo Evolution')
         
-        colors = ['red', 'blue', 'green']
+        # 使用 colormap 生成动态颜色，防止 team 数量超过颜色列表长度
+        cmap = plt.get_cmap('tab10')
         for idx, team in enumerate(teams):
+            if not team: continue
             team_ids = np.array([a['id'] for a in team])
             team_elos = np.array([a['elo'] for a in team])
-            plt.scatter(team_ids, team_elos, color=colors[idx], label=f'Team {team_labels[idx]} Member', s=20)
+            plt.scatter(team_ids, team_elos, color=cmap(idx % 10), label=f'Team {team_labels[idx]} Member', s=20)
         
         plt.title(f"Elo Evolution & Team Sampling - {name}")
         plt.xlabel("Actor ID (Checkpoint)")
@@ -201,10 +199,10 @@ if __name__ == "__main__":
     log_dir = os.path.join(project_root, "logs","combat", name)
     
     # 1. 准备队伍
-    team_labels = ['0%~33%', '33%~66%', '66%~100%']
+    team_labels = ['1/4', '2/4', '3/4', '4/4']
     teams = get_agent_teams(log_dir, num_teams=len(team_labels))
 
-    # --- [修改] 调用预览绘图 ---
+    # --- 调用预览绘图 ---
     for idx, team in enumerate(teams):
         print(f"Team {team_labels[idx]} IDs: {[a['id'] for a in team]}")
     plot_elo_sampling(log_dir, teams, team_labels, name)
