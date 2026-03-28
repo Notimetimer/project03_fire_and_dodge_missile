@@ -2,7 +2,7 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层_随机大小'
+mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -127,6 +127,7 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
+        R_cage_range = (R_cage, R_cage), # 固定场地大小
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
