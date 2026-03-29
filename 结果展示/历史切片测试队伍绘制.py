@@ -95,7 +95,7 @@ def plot_elo_sampling(log_dir, teams, team_labels, name):
     plt.ylabel("Elo Rating", fontsize=18)
     plt.xticks(fontsize=16)
     plt.yticks(fontsize=16)
-    plt.legend(fontsize=16, loc='upper left')
+    plt.legend(fontsize=14, loc='upper left')
     plt.grid(True, linestyle='--', alpha=0.5)
     
     # [修改] 移除标题，手动设置留白 (left, right, top, bottom)
