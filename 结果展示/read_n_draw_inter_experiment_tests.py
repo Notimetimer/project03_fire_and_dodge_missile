@@ -10,7 +10,7 @@ plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 def draw_combat_matrix(csv_path, team_labels=None, 
-                       title="Cross-Algorithm Final Agents Combat Matrix",
+                       title=None,
                        xlabel="Opponent Team (Column)",
                        ylabel="Evaluated Team (Row)",
                        cbar_label="Win Rate",
@@ -66,13 +66,27 @@ def draw_combat_matrix(csv_path, team_labels=None,
     
     cmap = LinearSegmentedColormap.from_list("custom_cmap", colors, N=256)
     
-    # 增加鲁棒性：如果数值完全一样（例如刚初始化的0.0），TwoSlopeNorm会报错
-    vmin, vmax = results_matrix.min(), results_matrix.max()
-    if vmin == vmax:
+    # 增加鲁棒性：根据当前数据的最小值和最大值自动调整色彩深度
+    v_min_actual, v_max_actual = results_matrix.min(), results_matrix.max()
+    v_range = v_max_actual - v_min_actual if v_max_actual > v_min_actual else 1.0
+    
+    # [微调] 增加 15% 的余量，防止颜色分布太满导致最黑/最白处看不清数值
+    padding = 0.15 * v_range
+    vmin = max(0.0, v_min_actual - padding)
+    vmax = min(1.0, v_max_actual + padding)
+    
+    # 保持以 0.5 (中立评分) 为色彩过渡的中点，或者使用数据的真实中点
+    vcenter = (vmin + vmax) / 2
+    
+    if vmin >= vmax:
         norm = None
     else:
-        norm = TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
+        # 动态归一化并保留余地
+        norm = TwoSlopeNorm(vmin=vmin, vcenter=vcenter, vmax=vmax)
 
+    # 绘制热力图并自定义 Colorbar 字体
+    cbar_kws = {"label": cbar_label, "shrink": 0.8}
+    
     ax = sns.heatmap(
         results_matrix,
         annot=True,
@@ -83,18 +97,30 @@ def draw_combat_matrix(csv_path, team_labels=None,
         yticklabels=labels,
         square=True,
         linewidths=0.5,
-        cbar_kws={"label": cbar_label, "shrink": 0.8}
+        annot_kws={"size": 14},
+        cbar_kws=cbar_kws
     )
+
+    # [优化] 获取并放大 Colorbar 标签及刻度字号
+    cbar = ax.collections[0].colorbar
+    cbar.set_label(cbar_label, size=14)
+    cbar.ax.tick_params(labelsize=12)
 
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
+    
+    # [新增] 调整刻度标签字号
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
 
     # 使用传入的自定义文本
-    plt.title(title, fontsize=14, pad=40)
-    plt.xlabel(xlabel, fontsize=12, labelpad=15)
-    plt.ylabel(ylabel, fontsize=12)
+    if title:
+        plt.title(title, fontsize=18, pad=30)
+    plt.xlabel(xlabel, fontsize=16, labelpad=20)
+    plt.ylabel(ylabel, fontsize=16)
 
-    plt.tight_layout()
+    # [新增] 通过 subplots_adjust 强制留白，防止缩放遮挡
+    plt.subplots_adjust(top=0.82, bottom=0.12, left=0.15, right=0.95)
     plt.show()
 
 if __name__ == "__main__":
@@ -105,8 +131,8 @@ if __name__ == "__main__":
         print(f"正在读取并绘制: {csv_path}")
         draw_combat_matrix(
             csv_path = csv_path, 
-            team_labels = ['0%~33%', '33%~66%', '66%~100%'],
-            title="Cross-Play Score Matrix: Training Progress Evaluation",
+            team_labels = ['1/4', '2/4', '3/4', '4/4'], # [修正] 对齐 4x4 维度
+            title=None,
             xlabel="Opponent / Column",
             ylabel="Evaluated / Row",
             cbar_label="Score Rate",

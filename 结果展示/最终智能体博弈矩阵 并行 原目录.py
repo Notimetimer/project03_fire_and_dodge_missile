@@ -191,10 +191,12 @@ if __name__ == "__main__":
         'IL_and_PFSP_挑战_并行_分层-run-20260323-165715', # 任务2
         'MixedPFSP_挑战_并行_分层-run-20260323-165740', # 任务3
         'IL_and_deltaFSP_挑战_并行_分层-run-20260323-152514',
-        'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C-run-20260324-153858',
+        'IL_and_MixedPFSP_分阶段_挑战_并行_分层_A3C-run-20260324-153858',
     ]
     
-    team_labels = range(len(mission_names))
+    # team_labels = range(len(mission_names))
+    # 提取任务名称的前半部分作为标签，更具可读性
+    team_labels = [name.split('-run-')[0][:25] for name in mission_names]
     # [
     #     '1',
     #     '2',
@@ -270,4 +272,11 @@ if __name__ == "__main__":
 
     # 4. [修改] 调用外部函数进行绘图
     print("正在调用 read_n_draw_inter_experiment_tests 进行绘图...")
-    draw_combat_matrix(csv_path, team_labels)
+    draw_combat_matrix(
+        csv_path, 
+        team_labels, 
+        title=None,
+        xlabel="Opponent / Column",
+        ylabel="Evaluated / Row",
+        cbar_label="Win Rate"
+    )
