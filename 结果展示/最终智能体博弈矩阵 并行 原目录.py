@@ -20,7 +20,7 @@ from read_n_draw_inter_experiment_tests import draw_combat_matrix
 action_cycle_multiplier = 30
 dt_maneuver = 0.2
 TOTAL_ROUNDS = 80    # 每对任务之间对抗 100 场
-TEAM_SIZE = 40        # 每队从 Elo 排行中取前 50 名
+TEAM_SIZE = 30        # 每队从 Elo 排行中取前 50 名
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
 # --- 2. 核心辅助函数 ---
