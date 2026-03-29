@@ -187,11 +187,12 @@ def worker_process_battle(args_pack):
 if __name__ == "__main__":
     # --- [在此处修改输入列表] ---
     mission_names = [
-        'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341', # 任务1
-        'IL_and_PFSP_挑战_并行_分层-run-20260323-165715', # 任务2
-        'MixedPFSP_挑战_并行_分层-run-20260323-165740', # 任务3
+        'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341',
+        'IL_and_PFSP_挑战_并行_分层-run-20260323-165715',
+        'MixedPFSP_挑战_并行_分层-run-20260323-165740',
         'IL_and_deltaFSP_挑战_并行_分层-run-20260323-152514',
         'IL_and_MixedPFSP_分阶段_挑战_并行_分层_A3C-run-20260324-153858',
+        '纯Rule4训练_分层_挑战-run-20260328-114343',
     ]
     
     # team_labels = range(len(mission_names))
