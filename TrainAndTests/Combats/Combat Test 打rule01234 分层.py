@@ -61,7 +61,7 @@ if __name__ == "__main__":
     args.agent_id = None # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
+    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=40e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -145,8 +145,9 @@ if __name__ == "__main__":
                 if count % action_cycle_multiplier == 0:
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
-                        r_action_exec, _, _, r_action_check = actor_wrapper.get_action(r_obs, \
-                                    explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.38)
+                        r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.38
+                            )
                         
                     r_action_label = r_action_exec['cat'][0]
                     r_fire = r_action_exec['bern'][0]
@@ -154,14 +155,14 @@ if __name__ == "__main__":
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
-                        launch_missile_immediately(env, 'r', tabu=0)
+                        launch_missile_immediately(env, 'r', tabu=1)
 
                     # --- 蓝方 (规则智能体) ---
                     b_state_check = env.unscale_state(b_check_obs)
                     b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b')
+                        launch_missile_immediately(env, 'b', tabu=1)
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
