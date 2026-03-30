@@ -79,20 +79,41 @@ def plot_elo_sampling(log_dir, teams, team_labels, name):
     all_plot_data.sort(key=lambda x: x[0])
     all_plot_data = np.array(all_plot_data)
 
+    # --- [新增] 步数等比例转换逻辑 ---
+    TOTAL_STEPS = 13.6e6  # 指定总步数为 13.6M
+    max_id = all_plot_data[:, 0].max()
+    scale_factor = TOTAL_STEPS / max_id
+    all_plot_data[:, 0] *= scale_factor # 转换整个序列的横轴
+    # -----------------------------
+
     plt.figure(figsize=(13, 8))
     plt.plot(all_plot_data[:, 0], all_plot_data[:, 1], color='gray', alpha=0.4, label='Elo Evolution', linewidth=2.0)
     
     # 使用 colormap 生成动态颜色
     cmap = plt.get_cmap('tab10')
+    num_teams = len(teams)
     for idx, team in enumerate(teams):
         if not team: continue
-        team_ids = np.array([a['id'] for a in team])
+        # [修改] 采样点的横轴也需要进行同样的等比例缩放
+        team_ids = np.array([a['id'] for a in team]) * scale_factor
         team_elos = np.array([a['elo'] for a in team])
         plt.scatter(team_ids, team_elos, color=cmap(idx % 10), label=f'Team {team_labels[idx]} Member', s=45, edgecolors='white', linewidth=0.5)
     
-    # 字体与布局设置 (进一步调大字号)
-    plt.xlabel("Actor ID (Checkpoint)", fontsize=18)
+    # --- [新增] 绘制区间分界虚线 (无图例) ---
+    interval_size = (max_id + 1) / num_teams
+    for i in range(1, num_teams):
+        boundary_step = i * interval_size * scale_factor
+        plt.axvline(x=boundary_step, linestyle='--', color='k', alpha=0.7, linewidth=1, label=None)
+    # -----------------------------
+
+    # 字体与布局设置
+    plt.xlabel("Training Steps", fontsize=18) # 修改横轴标签
     plt.ylabel("Elo Rating", fontsize=18)
+    
+    # 优化刻度显示：使用科学计数法 (×10^n)
+    plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0), useMathText=True)
+    plt.gca().xaxis.get_offset_text().set_fontsize(14) # 设置偏移量文字大小
+    
     plt.xticks(fontsize=16)
     plt.yticks(fontsize=16)
     plt.legend(fontsize=14, loc='upper left')
