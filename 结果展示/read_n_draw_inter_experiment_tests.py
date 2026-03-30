@@ -50,31 +50,35 @@ def draw_combat_matrix(csv_path, team_labels=None,
         labels = df.columns.tolist()
 
     num_teams = len(labels)
+    
+    # [修改] 判断标签总长是否过长，如果所有标签总长度超过一定限制(比如40)，将展示改为数字代号
+    total_len = sum(len(str(lbl)) for lbl in labels)
+    use_numbered_legend = total_len > 40
+    
+    if use_numbered_legend:
+        display_labels = [str(i+1) for i in range(num_teams)]
+    else:
+        display_labels = labels
 
     # 4. 绘图部分
     # 动态调整图片大小
     fig_size = max(8, num_teams + 2)
     plt.figure(figsize=(fig_size + 2, fig_size))
     
-    # 手动指定色彩空间向量（RGB 0-1）
-    if color_theme == 'red':
-        end_color = (0.6, 0.05, 0.05) # 深红色
-    else:
-        end_color = (0.1, 0.1, 0.44)  # 默认蓝紫色
-    
-    colors = [(1.0, 1.0, 1.0), end_color]
-    
-    cmap = LinearSegmentedColormap.from_list("custom_cmap", colors, N=256)
+    # [修改] 使用从白到深蓝的颜色映射
+    end_color = (0.06, 0.1, 0.38)  # 深蓝色 （0.6， 0.05， 0.05)深红色
+    colors = [(1.0, 1.0, 1.0), end_color] # 白色到深蓝色
+    cmap = LinearSegmentedColormap.from_list("custom_blue", colors, N=256)
     
     # 增加鲁棒性：根据当前数据的最小值和最大值自动调整色彩深度
     v_min_actual, v_max_actual = results_matrix.min(), results_matrix.max()
     v_range = v_max_actual - v_min_actual if v_max_actual > v_min_actual else 1.0
     
-    # [微调] 增加 15% 的余量，防止颜色分布太满导致最黑/最白处看不清数值
+    # 增加 15% 的余量
     padding = 0.15 * v_range
     vmin = max(0.0, v_min_actual - padding)
     vmax = min(1.0, v_max_actual + padding)
-    
+
     # 保持以 0.5 (中立评分) 为色彩过渡的中点，或者使用数据的真实中点
     vcenter = (vmin + vmax) / 2
     
@@ -83,7 +87,6 @@ def draw_combat_matrix(csv_path, team_labels=None,
     else:
         # 动态归一化并保留余地
         norm = TwoSlopeNorm(vmin=vmin, vcenter=vcenter, vmax=vmax)
-
     # 绘制热力图并自定义 Colorbar 字体
     cbar_kws = {"label": cbar_label, "shrink": 0.8}
     
@@ -95,21 +98,37 @@ def draw_combat_matrix(csv_path, team_labels=None,
         norm=norm,
         xticklabels=labels,
         yticklabels=labels,
+        # vmin=vmin,
+        # vmax=vmax,
+        # xticklabels=display_labels,
+        # yticklabels=display_labels,
         square=True,
         linewidths=0.5,
         annot_kws={"size": 14},
         cbar_kws=cbar_kws
     )
 
-    # [优化] 获取并放大 Colorbar 标签及刻度字号
+    # 给矩阵外围加边框
+    for _, spine in ax.spines.items():
+        spine.set_visible(True)
+        spine.set_linewidth(1.5)
+        spine.set_color('black')
+
+    # 获取并放大 Colorbar 标签及刻度字号
     cbar = ax.collections[0].colorbar
     cbar.set_label(cbar_label, size=14)
     cbar.ax.tick_params(labelsize=12)
+    
+    # 给颜色表(Colorbar)外围加边框
+    if cbar.outline is not None:
+        cbar.outline.set_visible(True)
+        cbar.outline.set_linewidth(1.5)
+        cbar.outline.set_edgecolor('black')
 
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
     
-    # [新增] 调整刻度标签字号
+    # 调整刻度标签字号
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
 
@@ -119,7 +138,7 @@ def draw_combat_matrix(csv_path, team_labels=None,
     plt.xlabel(xlabel, fontsize=16, labelpad=20)
     plt.ylabel(ylabel, fontsize=16)
 
-    # [新增] 通过 subplots_adjust 强制留白，防止缩放遮挡
+    # 只需要原始边距，去掉下方文字说明
     plt.subplots_adjust(top=0.82, bottom=0.12, left=0.15, right=0.95)
     plt.show()
 
