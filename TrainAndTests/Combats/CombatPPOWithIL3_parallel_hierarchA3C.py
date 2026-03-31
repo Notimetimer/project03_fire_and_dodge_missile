@@ -367,8 +367,9 @@ def create_initial_state_worker(randomized=0):
     # (复制原本的 create_initial_state 逻辑)
     blue_height = 9000
     red_height = 9000
-    red_psi = -np.pi/2
-    blue_psi = np.pi/2
+    # 初始航向随机化
+    red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
+    blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi/3, pi/3))
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
     red_N = init_North
     red_E = 45e3
@@ -398,7 +399,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         random.seed(worker_seed)
         np.random.seed(worker_seed)
         torch.manual_seed(worker_seed)
-        
+
+        # args.R_cage = np.random.uniform(30e3, 45e3) # 已移除：放在这里会导致同一个Worker的所有episode的环境大小不变
+
         # 初始化环境 (关闭可视化以加速)
         env = ChooseStrategyEnv(args, tacview_show=False)
         env.shielded = no_crash # 假设默认开启防撞
@@ -470,6 +473,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 使用从master传来的出生状态
                 red_birth = settings['red_birth']
                 blue_birth = settings['blue_birth']
+                
+                # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
+                r_min, r_max = settings.get('R_cage_range', (45e3, 45e3))
+                env.R_cage = np.random.uniform(r_min, r_max)
+                
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
                 
                 # 状态变量初始化
@@ -650,7 +658,7 @@ def run_MLP_simulation(
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
-    ADMISSION_THRESHOLD = 0.5,
+    admission_threshold_bias = 0,
     MAX_HISTORY_SIZE = 300,  # 100
     deltaFSP_epsilon = 0.8,
     rule_actor_rate = 0.2,
@@ -662,6 +670,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
+    R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -672,6 +681,8 @@ def run_MLP_simulation(
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+    sigma_elo0 = sigma_elo
     
     # 2. 参数与环境配置 (Master 用于获取维度)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
@@ -824,6 +835,8 @@ def run_MLP_simulation(
     pipes = []
     worker_device = torch.device('cpu') # Worker 使用 CPU 推理
     
+    args.max_episode_len = max_episode_duration
+    args.R_cage = 45e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
     print(f"Initializing {num_workers} training workers...")
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()
@@ -924,21 +937,6 @@ def run_MLP_simulation(
 
             # --- 2. 准备训练 Batch (Synchronous) ---
             
-            # 1. 计算当前排位 rank_pos
-            valid_elo_values = [v for k, v in elite_elo_ratings.items() if not k.startswith("__")]
-            if not valid_elo_values:
-                rank_pos = 0.5
-                min_elo, max_elo = main_agent_elo, main_agent_elo
-            else:
-                min_elo = np.min(valid_elo_values)
-                max_elo = np.max(valid_elo_values)
-                denom = float(max_elo - min_elo)
-                # 如果分母为0，视为0.5中位
-                if denom == 0.0:
-                    rank_pos = 0.5
-                else:
-                    rank_pos = float((main_agent_elo - min_elo) / denom)
-
 
             # A. 获取当前策略权重 (CPU)
             current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
@@ -998,7 +996,8 @@ def run_MLP_simulation(
                     'action_cycle_multiplier': action_cycle_multiplier,
                     'weight_reward': weight_reward_0,
                     'red_birth': rb,
-                    'blue_birth': bb
+                    'blue_birth': bb,
+                    'R_cage_range': R_cage_range # 将范围传给Worker
                 }
                 
                 # 发送指令 pipe.send
@@ -1241,14 +1240,12 @@ def run_MLP_simulation(
 
                 # B. 维护精英池 (Admission)
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    # 计算 Rank
-                    valid_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
-                    if not valid_elos: valid_elos = [1200]
-                    r_min, r_max = min(valid_elos), max(valid_elos)
-                    denom = r_max - r_min if r_max != r_min else 1.0
-                    rank = (main_agent_elo - r_min) / denom
+                    # 计算 rule_avg_elo
+                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    if not rule_elos: rule_elos = [0]
+                    rule_avg_elo = sum(rule_elos) / len(rule_elos)
                     
-                    if rank >= ADMISSION_THRESHOLD:
+                    if main_agent_elo >= rule_avg_elo + admission_threshold_bias:
                         # 满员清理
                         history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         while len(history_keys) >= MAX_HISTORY_SIZE:
@@ -1304,26 +1301,21 @@ def run_MLP_simulation(
                     # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
                     min_elo = np.min(list(valid_elos.values()))
                     max_elo = np.max(list(valid_elos.values()))
-                    denom = float(max_elo - min_elo)
-                    if denom == 0.0:
-                        rank_pos = 0.5
-                    else:
-                        rank_pos = float((main_agent_elo - min_elo) / denom)
-                    # 现有日志
-                    logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                    # 记录与 Rule 平均 Elo 的分差
+                    rule_avg_elo = np.mean([v for k, v in valid_elos.items() if k.startswith("Rule")] or [0])
+                    elo_diff_to_mean = main_agent_elo - rule_avg_elo
+                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_mean, total_steps)
                     
                     # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
                     elo_spread = float(max_elo - min_elo)
                     print('elo分极差：', elo_spread)
                     logger.add("Elo/Spread", elo_spread, total_steps)
                     
-                    rule_vals = [v for k, v in valid_elos.items() if k.startswith("Rule")]
-                    if rule_vals:
-                        r_min, r_max = np.min(rule_vals), np.max(rule_vals)
-                        denom = float(r_max - r_min)
-                        curr_rank = 0.5 if denom == 0 else (main_agent_elo - r_min) / denom
-                        logger.add("Elo_Centered/Current_Rank %", curr_rank * 100, total_steps)
-                    
+                    # 线性缩放 sigma_elo: 落后 400 分或以上时放大到 1000，0 分以后保持 sigma_elo0
+                    scale = np.clip(-elo_diff_to_mean / 400.0, 0.0, 1.0)
+                    sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
+                    logger.add("Elo/sigma_elo", sigma_elo, total_steps)
+
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
                     logger.add("Elo/History_Pool_Size", hist_count, total_steps)
 

@@ -12,15 +12,17 @@ from Algorithms.rl_utils import moving_average # 使用我们新版本的MA
 # =============================================================================
 # 全局样式配置 (Seaborn 主旋律)
 # =============================================================================
-# 配置 Seaborn 主题，使用 darkgrid 风格，并设置中文字体
-sns.set_theme(style="darkgrid", font="SimHei", rc={"axes.unicode_minus": False})
+# 配置 Seaborn 主题，让颜色和网格更漂亮
+sns.set_theme(style="whitegrid", palette="muted")
+plt.rcParams['font.sans-serif'] = ['SimHei'] # 再次确认中文支持
+plt.rcParams['axes.unicode_minus'] = False
 
 # =============================================================================
 # 全局视觉参数 (在此调节线粗细和深浅)
 # =============================================================================
 LW_SMOOTH = 1.5   # 平滑主趋势线粗
 LW_RAW = 0.5      # 原始噪声背景线细
-ALPHA_RAW = 0.1   # 原始噪声背景透明度 (0.1 风格)
+ALPHA_RAW = 0.25   # 原始噪声背景透明度 (0~1)
 
 # 数据路径
 returns_path = os.path.join(project_root, "logs", "ReturnOfControllerTraining.csv")
@@ -37,7 +39,10 @@ PID_AVG_V_ERR = 175.492
 PID_AVG_PSI_ERR = 5.517
 PID_AVG_THETA_ERR = 3.765
 
-# 数据预处理通用函数
+# 开启画布 (2x1 竖向排布)
+fig = plt.figure(figsize=(8, 12), dpi=100)
+
+# 读取并预处理数据的通用函数
 def prepare_metric_df(path, label, scale=1.0, smooth_p=35):
     df = pd.read_csv(path)
     df['Raw'] = df['Value'].values * scale
@@ -46,10 +51,9 @@ def prepare_metric_df(path, label, scale=1.0, smooth_p=35):
     return df
 
 # =============================================================================
-# Figure 1：奖励函数 & 生存率
+# 第一行：奖励函数 & 生存率
 # =============================================================================
-fig1 = plt.figure(figsize=(8, 6), dpi=100)
-ax1_l = fig1.add_subplot(1, 1, 1)
+ax1_l = fig.add_subplot(2, 1, 1)
 
 # 准备数据
 df_reward = prepare_metric_df(returns_path, "Episode Reward", smooth_p=35)
@@ -70,59 +74,32 @@ sns.lineplot(data=df_survive, x='Step', y='Smooth', ax=ax1_r, color=color_surviv
 ax1_r.legend_.remove() if ax1_r.get_legend() else None 
 h1, l1 = ax1_l.get_legend_handles_labels()
 h2, l2 = ax1_r.get_legend_handles_labels()
-ax1_l.legend(handles=h1+h2, labels=l2+l1, loc='lower right', frameon=True, fontsize=9)
+ax1_l.legend(handles=h1+h2, labels=l1+l2, loc='lower right', frameon=True)
 
-# 装饰 (参考 Figure 1 风格)
-# 调深 Y 轴颜色 (加深版彩色)
-color_reward_dark = "tab:red"
-color_survive_dark = "tab:blue"
-
-ax1_l.set_ylabel("Episode Reward", color=color_reward_dark, fontweight='bold', fontsize=12)
-ax1_r.set_ylabel("Survive Rate", color=color_survive_dark, fontweight='bold', fontsize=12)
-ax1_l.set_xlabel("Steps", fontweight='bold')
-ax1_l.tick_params(axis='y', labelcolor=color_reward_dark, labelsize=10, width=1.5)
-ax1_r.tick_params(axis='y', labelcolor=color_survive_dark, labelsize=10, width=1.5)
-
-# 强制所有坐标轴刻度数字加粗，并保持轴对应的颜色 (加深版)
-for label in ax1_l.get_yticklabels(): 
-    label.set_fontweight('bold')
-    label.set_color(color_reward_dark)
-for label in ax1_r.get_yticklabels(): 
-    label.set_fontweight('bold')
-    label.set_color(color_survive_dark)
-for label in ax1_l.get_xticklabels(): 
-    label.set_fontweight('bold')
-
-# 保持网格在最底层
-ax1_l.set_axisbelow(True)
-ax1_r.set_axisbelow(True)
-
-# 隐藏左侧 y 轴网格，显示 x 轴和右侧 y 轴网格，淡化网格线
-ax1_l.grid(False, axis='y')
-ax1_l.grid(True, axis='x', alpha=0.3, color='lightgray')
-ax1_r.grid(True, alpha=0.3, color='lightgray')
+# 装饰
+ax1_l.set_ylabel("Episode Reward")
+ax1_r.set_ylabel("Survive Rate")
+ax1_l.set_xlabel("Steps")
+ax1_l.grid(True, which='both', linestyle='--', alpha=0.9, color='lightgray')
+ax1_r.grid(False) 
 sns.despine(ax=ax1_l, right=False)
 
-# 布局收尾 (Figure 1)
-fig1.tight_layout(pad=3.0, rect=[0, 0, 1, 0.95])
-
 # =============================================================================
-# Figure 2：误差追踪 (Psi & Theta & V)
+# 第二行：航向误差 & 俯仰误差 (极致数据驱动绘图)
 # =============================================================================
-fig2 = plt.figure(figsize=(8, 6), dpi=100)
-ax2 = fig2.add_subplot(1, 1, 1)
+ax2 = fig.add_subplot(2, 1, 2)
 
 # 读取并预处理误差数据到一个 DataFrame
-def prepare_metric_df_simple(path, label, scale=1.0):
+def prepare_metric_df(path, label, scale=1.0):
     df = pd.read_csv(path)
     df['Raw'] = df['Value'].values * scale
     df['Smooth'] = moving_average(df['Value'].values, 35) * scale
     df['Metric'] = label # 类别标签
     return df
 
-df_psi = prepare_metric_df_simple(psi_error_path, "PPO Psi Error")
-df_theta = prepare_metric_df_simple(theta_error_path, "PPO Theta Error")
-df_v = prepare_metric_df_simple(v_error_path, "PPO V Error", scale=1.0) # 速度不缩放，放到右轴
+df_psi = prepare_metric_df(psi_error_path, "PPO Psi Error")
+df_theta = prepare_metric_df(theta_error_path, "PPO Theta Error")
+df_v = prepare_metric_df(v_error_path, "PPO V Error", scale=1.0) # 速度不缩放，放到右轴
 
 df_merged = pd.concat([df_psi, df_theta]) # 拼成长表，仅包含角度误差
 
@@ -152,48 +129,31 @@ for h, l in zip(handles1 + handles2, labels1 + labels2):
     if l not in ['Metric', 'Raw']: 
         filtered_handles.append(h)
         filtered_labels.append(l)
-ax2.legend(handles=filtered_handles, labels=filtered_labels, loc='upper right', frameon=True, fontsize=9)
+ax2.legend(handles=filtered_handles, labels=filtered_labels, loc='upper right', frameon=True)
 
 # 装饰底轴风格
 import matplotlib.ticker as ticker
 ax2.set_yscale('log')
-ax2_r.set_ylim(0, 350) 
+# 调整 Y 轴范围：通过调低 Y 轴下限（而不是拉高上限）来从物理高度上推开重合的线
+# ax2.set_ylim(0.1, 50)     # 左轴：角度误差范围
+ax2_r.set_ylim(0, 350) # 右轴：速度误差范围，下限扩充以提供视觉余量
 ax2.yaxis.set_major_locator(ticker.LogLocator(base=10.0, subs=[1, 2, 5], numticks=5))
 formatter = ticker.LogFormatter(labelOnlyBase=False, minor_thresholds=(np.inf, np.inf))
 ax2.yaxis.set_major_formatter(formatter)
 ax2.yaxis.set_minor_locator(ticker.LogLocator(base=10.0, subs=np.arange(1, 10), numticks=20))
 ax2.yaxis.set_minor_formatter(ticker.NullFormatter())
 
-# 装饰底轴风格
-# 调深颜色
-color_v_dark = "tab:green"
-
-ax2.set_ylabel("Error Degree (Log Scale)", fontweight='bold', fontsize=12, color='black') # Log轴保持黑色
-ax2_r.set_ylabel("V Error (m/s)", color=color_v_dark, fontweight='bold', fontsize=12)
-ax2_r.tick_params(axis='y', labelcolor=color_v_dark, labelsize=10, width=1.5)
-ax2.tick_params(axis='y', labelcolor='black', labelsize=10, width=1.5)
-ax2.set_xlabel("Steps", fontweight='bold')
-
-# 确保所有坐标轴数字也加粗，并保持深色
-for label in ax2.get_yticklabels(): 
-    label.set_fontweight('bold')
-for label in ax2_r.get_yticklabels(): 
-    label.set_fontweight('bold')
-    label.set_color(color_v_dark)
-for label in ax2.get_xticklabels(): 
-    label.set_fontweight('bold')
-
-# 保持网格在最底层
-ax2.set_axisbelow(True)
-ax2_r.set_axisbelow(True)
-
-# 针对对数坐标轴启用淡化的网格线
-ax2.grid(True, which='both', axis='y', alpha=0.4, color='lightgray')
-ax2.grid(True, axis='x', alpha=0.3, color='lightgray')
-ax2_r.grid(False) 
+ax2.set_ylabel("Error Degree (Log Scale)")
+ax2_r.set_ylabel("V Error (m/s)")
+ax2.set_xlabel("Steps")
+ax2.grid(True, which='both', linestyle='--', alpha=0.9, color='lightgray')
+ax2_r.grid(False) # 关键：关闭右边辅助轴的网格，避免和左边的对数网格冲突
 sns.despine(ax=ax2, right=False)
 
-# 使用 tight_layout 并像决策曲线图一样留出顶部空白，防止标题被遮挡
-fig2.tight_layout(pad=3.0, rect=[0, 0, 1, 0.95])
+# =============================================================================
+# 布局细节优化：强行指定子图间距
+# =============================================================================
+# hspace=0.25 提供了巨大的垂直留白，完美避开 xlabel 与下面图表的冲突
+fig.subplots_adjust(hspace=0.25, top=0.9, bottom=0.1, left=0.2, right=0.8)
 
 plt.show()

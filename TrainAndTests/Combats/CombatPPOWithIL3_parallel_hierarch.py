@@ -658,7 +658,7 @@ def run_MLP_simulation(
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
-    ADMISSION_THRESHOLD = 0.5,
+    admission_threshold_bias = 0,
     MAX_HISTORY_SIZE = 300,  # 100
     deltaFSP_epsilon = 0.8,
     rule_actor_rate = 0.2,
@@ -937,21 +937,6 @@ def run_MLP_simulation(
 
             # --- 2. 准备训练 Batch (Synchronous) ---
             
-            # 1. 计算当前排位 rank_pos
-            valid_elo_values = [v for k, v in elite_elo_ratings.items() if not k.startswith("__")]
-            if not valid_elo_values:
-                rank_pos = 0.5
-                min_elo, max_elo = main_agent_elo, main_agent_elo
-            else:
-                min_elo = np.min(valid_elo_values)
-                max_elo = np.max(valid_elo_values)
-                denom = float(max_elo - min_elo)
-                # 如果分母为0，视为0.5中位
-                if denom == 0.0:
-                    rank_pos = 0.5
-                else:
-                    rank_pos = float((main_agent_elo - min_elo) / denom)
-
 
             # A. 获取当前策略权重 (CPU)
             current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
@@ -1257,14 +1242,12 @@ def run_MLP_simulation(
 
                 # B. 维护精英池 (Admission)
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    # 计算 Rank
-                    valid_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
-                    if not valid_elos: valid_elos = [1200]
-                    r_min, r_max = min(valid_elos), max(valid_elos)
-                    denom = r_max - r_min if r_max != r_min else 1.0
-                    rank = (main_agent_elo - r_min) / denom
+                    # 计算 rule_avg_elo
+                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    if not rule_elos: rule_elos = [0]
+                    rule_avg_elo = sum(rule_elos) / len(rule_elos)
                     
-                    if rank >= ADMISSION_THRESHOLD:
+                    if main_agent_elo >= rule_avg_elo + admission_threshold_bias:
                         # 满员清理
                         history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         while len(history_keys) >= MAX_HISTORY_SIZE:
@@ -1320,28 +1303,19 @@ def run_MLP_simulation(
                     # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
                     min_elo = np.min(list(valid_elos.values()))
                     max_elo = np.max(list(valid_elos.values()))
-                    denom = float(max_elo - min_elo)
-                    if denom == 0.0:
-                        rank_pos = 0.5
-                    else:
-                        rank_pos = float((main_agent_elo - min_elo) / denom)
-                    # 现有日志
-                    logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
+                    # 记录与 Rule 平均 Elo 的分差
+                    rule_avg_elo = np.mean([v for k, v in valid_elos.items() if k.startswith("Rule")] or [0])
+                    elo_diff_to_mean = main_agent_elo - rule_avg_elo
+                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_mean, total_steps)
                     
                     # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
                     elo_spread = float(max_elo - min_elo)
                     print('elo分极差：', elo_spread)
                     logger.add("Elo/Spread", elo_spread, total_steps)
                     
-                    rule_vals = [v for k, v in valid_elos.items() if k.startswith("Rule")]
-                    if rule_vals:
-                        r_min, r_max = np.min(rule_vals), np.max(rule_vals)
-                        denom = float(r_max - r_min)
-                        curr_rank = 0.5 if denom == 0 else (main_agent_elo - r_min) / denom
-                        logger.add("Elo_Centered/Current_Rank %", curr_rank * 100, total_steps)
-                    
-                    # 缩放sigma_elo 只能更大，不能小
-                    sigma_elo = max(sigma_elo0, (0.5-curr_rank) * 1000)
+                    # 线性缩放 sigma_elo: 落后 400 分或以上时放大到 1000，0 分以后保持 sigma_elo0
+                    scale = np.clip(-elo_diff_to_mean / 400.0, 0.0, 1.0)
+                    sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
                     logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])

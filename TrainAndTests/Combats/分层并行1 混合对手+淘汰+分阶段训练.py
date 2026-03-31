@@ -118,7 +118,7 @@ if __name__=='__main__':
         use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5, # 0.5 这里可能不宜太低
+        admission_threshold_bias = 0, # 0.5 这里可能不宜太低
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
