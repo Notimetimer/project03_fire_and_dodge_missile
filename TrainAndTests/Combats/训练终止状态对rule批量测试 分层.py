@@ -54,19 +54,24 @@ def create_initial_state_worker(randomized=1):
 # --- 3. 主程序 ---
 if __name__ == "__main__":
 
-    experiment_name = '只模仿学习'
+    # experiment_name = "只模仿学习" # "只模仿学习"
+    experiment_name = "无学习-run-20260401-104553"
+    
+    "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+    "只模仿学习-run-20260401-104200"
+    "无学习-run-20260401-104553"
 
     parser = argparse.ArgumentParser("RL/IL Combat Test - Evaluation")
     parser.add_argument("--agent-id", type=int, default=0, help="Specific agent ID to test (0 for actor_rein0).")
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
-    parser.add_argument("--num-matches", type=int, default=30, help="Number of matches per rule.")
+    parser.add_argument("--num-matches", type=int, default=50, help="Number of matches per rule.")
     args = parser.parse_args()    
 
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
     
     # # --- 环境和模型参数 (必须与训练时一致) ---
     # env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 训练时默认是 45e3
-    args.max_episode_len = 10*60
+    args.max_episode_len = 12*60
     args.R_cage=45e3
 
     hidden_dim = [128, 128, 128]
@@ -81,10 +86,12 @@ if __name__ == "__main__":
     # --- 查找并加载模型 ---
     logs_root_dir = os.path.join(project_root, "logs/combat")
     
-    latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
+    latest_log_dir = os.path.join(logs_root_dir, args.mission_name)
+
+    # latest_log_dir = get_latest_log_dir(logs_root_dir, args.mission_name)
     
-    if not latest_log_dir:
-        raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
+    # if not latest_log_dir:
+    #     raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
     
     import json
     # 如果目录里面没有elo_ratings.json，按当前的方式，取actor_rein后接最大数字的来测试，否则取actor_rein开头且elo值最大的来测试。
