@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test - Evaluation")
     parser.add_argument("--agent-id", type=int, default=0, help="Specific agent ID to test (0 for actor_rein0).")
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
-    parser.add_argument("--num-matches", type=int, default=40, help="Number of matches per rule.")
+    parser.add_argument("--num-matches", type=int, default=20, help="Number of matches per rule.")
     args = parser.parse_args()    
 
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     env.tacview_show = 0
     env.shielded = 1
-    env.no_out = 1 # 防止出界，测试专用
+    env.no_out = 0 # 防止出界，测试专用
     
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2, 3, 4]
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     print("\nAll tests completed. Generating CSV report...")
     
     # --- 写入 CSV ---
-    csv_filename = os.path.join(latest_log_dir, f"IL_Evaluation_Results_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    csv_filename = os.path.join(latest_log_dir, f"IL_Evaluation_Results.csv") # _{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
     
     with open(csv_filename, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
