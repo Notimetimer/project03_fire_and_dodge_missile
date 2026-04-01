@@ -3,6 +3,7 @@
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
 
+from typing import final
 import os
 import sys
 import numpy as np
@@ -658,7 +659,7 @@ def run_MLP_simulation(
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
-    admission_threshold_bias = 0,
+    ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
     deltaFSP_epsilon = 0.8,
     rule_actor_rate = 0.2,
@@ -904,8 +905,8 @@ def run_MLP_simulation(
                     obj = test_pool.apply_async(
                         test_worker, 
                         args=(current_weights, r_idx, args, 
-                              state_dim, hidden_dim, action_dims_dict, 
-                              dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
+                            state_dim, hidden_dim, action_dims_dict, 
+                            dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
                     )
                     test_tasks.append(obj)
                 # 等待所有测试进程结束
@@ -949,8 +950,8 @@ def run_MLP_simulation(
             if not init_elo_ratings:
                 # 按照 Elo 分数降序排列，排除内部特殊键
                 sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
-                                                   key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
-                                                   reverse=True) if not k.startswith("__")]
+                                                key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                                                reverse=True) if not k.startswith("__")]
                 effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
             else:
                 effective_pool = elite_elo_ratings
@@ -1240,12 +1241,19 @@ def run_MLP_simulation(
 
                 # B. 维护精英池 (Admission)
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    # 计算 rule_avg_elo
                     rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
-                    if not rule_elos: rule_elos = [0]
-                    rule_avg_elo = sum(rule_elos) / len(rule_elos)
+
+                    if not rule_elos:
+                        rank_pos = 0.5
+                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
+                    else:
+                        min_rule_elo = np.min(rule_elos)
+                        max_rule_elo = np.max(rule_elos)
                     
-                    if main_agent_elo >= rule_avg_elo + admission_threshold_bias:
+                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
+                        (1-ADMISSION_THRESHOLD) * min_rule_elo
+
+                    if main_agent_elo >= rule_elo_thres:
                         # 满员清理
                         history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         while len(history_keys) >= MAX_HISTORY_SIZE:
@@ -1301,18 +1309,30 @@ def run_MLP_simulation(
                     # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
                     min_elo = np.min(list(valid_elos.values()))
                     max_elo = np.max(list(valid_elos.values()))
-                    # 记录与 Rule 平均 Elo 的分差
-                    rule_avg_elo = np.mean([v for k, v in valid_elos.items() if k.startswith("Rule")] or [0])
-                    elo_diff_to_mean = main_agent_elo - rule_avg_elo
-                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_mean, total_steps)
+                    
+                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    if not rule_elos:
+                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
+                    else:
+                        min_rule_elo = np.min(rule_elos)
+                        max_rule_elo = np.max(rule_elos)
+                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
+                        (1-ADMISSION_THRESHOLD) * min_rule_elo
+
+                    # 记录与 Rule 阈值的差值 (维持旧指标名)
+                    elo_diff_to_thres = main_agent_elo - rule_elo_thres
+                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_thres, total_steps)
                     
                     # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
                     elo_spread = float(max_elo - min_elo)
                     print('elo分极差：', elo_spread)
                     logger.add("Elo/Spread", elo_spread, total_steps)
+
+                    curr_rank = 0.5 if elo_spread == 0 else (main_agent_elo - min_elo) / elo_spread
+                    logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
-                    # 线性缩放 sigma_elo: 落后 400 分或以上时放大到 1000，0 分以后保持 sigma_elo0
-                    scale = np.clip(-elo_diff_to_mean / 400.0, 0.0, 1.0)
+                    # 线性缩放 sigma_elo: 落后 200 分或以上时放大到 1000，0 分以后保持 sigma_elo0
+                    scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
                     sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
                     logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
@@ -1369,7 +1389,7 @@ def run_MLP_simulation(
         p.join(timeout=5) # 【修改】给子进程 5 秒优雅退出的时间
         if p.is_alive():
             p.terminate() # 如果没死，强制结束
-    
+
     # 【修改】调整顺序：先尝试关闭测试池
     try:
         test_pool.close()

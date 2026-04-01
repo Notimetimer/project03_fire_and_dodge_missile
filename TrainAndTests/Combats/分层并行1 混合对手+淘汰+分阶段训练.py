@@ -2,7 +2,9 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
+resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\断点续训_IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260401-155300"
+
+mission_name = '断点续训_IL_and_MixedPFSP_分阶段_挑战_并行_分层'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -71,6 +73,10 @@ if original_il_transition_dict is not None:
 
 if __name__=='__main__':
     print('Hello')
+    
+    # 指定断点续训的目录。如果为 None，则正常开启新训练。
+    resume_target_dir = resume_target_dir
+    
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
@@ -118,7 +124,7 @@ if __name__=='__main__':
         use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
-        admission_threshold_bias = -1000, # 几乎不设置门限
+        ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
@@ -128,6 +134,7 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
+        resume_dir=resume_target_dir, # 指定断点续训目录
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

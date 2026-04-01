@@ -3,6 +3,7 @@
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
 
+from typing import final
 import os
 import sys
 import numpy as np
@@ -658,7 +659,7 @@ def run_MLP_simulation(
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
-    admission_threshold_bias = 0,
+    ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
     deltaFSP_epsilon = 0.8,
     rule_actor_rate = 0.2,
@@ -671,6 +672,7 @@ def run_MLP_simulation(
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
     R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
+    resume_dir = None,
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -721,15 +723,46 @@ def run_MLP_simulation(
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    if resume_dir is not None and os.path.exists(resume_dir):
+        log_dir = resume_dir
+        print(f"Resuming from directory: {log_dir}")
+        IL_epoches = 0  # 断点续训跳过预训练
+    else:
+        log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(log_dir, exist_ok=True)
     
-    os.makedirs(log_dir, exist_ok=True)
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
     critic_meta_path = os.path.join(log_dir, "critic.meta.json")
     
     save_meta_once(actor_meta_path, student_agent.actor.state_dict())
     save_meta_once(critic_meta_path, student_agent.critic.state_dict())
+
+    # 断点续训
+    if resume_dir is not None and os.path.exists(resume_dir):
+        actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+        if len(actor_files) > 0:
+            def extract_num(f):
+                m = re.search(r'actor_rein(\d+)\.pt$', f)
+                return int(m.group(1)) if m else -1
+            latest_actor = max(actor_files, key=extract_num)
+            student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
+            print(f"Loaded actor from: {latest_actor}")
+            
+            critic_path = os.path.join(log_dir, "critic.pt")
+            if os.path.exists(critic_path):
+                student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
+                print(f"Loaded critic from: {critic_path}")
+            
+            opt_path = os.path.join(log_dir, "optimizers_state.pt")
+            if os.path.exists(opt_path):
+                try:
+                    opt_states = torch.load(opt_path, map_location=device)
+                    student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
+                    student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
+                    print("Loaded optimizer states.")
+                except Exception as e:
+                    print(f"Failed to load optimizers: {e}")
     
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
@@ -782,6 +815,10 @@ def run_MLP_simulation(
 
     student_agent.set_learning_rate(actor_lr=actor_lr_init_il, critic_lr=critic_lr_init_il)
     
+    # 存储无学习情况下的网络参数
+    init_opponent_name = "actor_rein0"
+    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
+
     # === 模仿训练循环 ===
     # 现在 original_il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
@@ -868,16 +905,17 @@ def run_MLP_simulation(
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
-    # 初始对手
+    # 初始对手(存储IL后的网络参数)
     if (not elo_ratings) or IL_epoches > 0:
         init_opponent_name = "actor_rein0"
         torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
         if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
 
     # 训练循环变量
-    total_steps = 0
-    batch_idx = 0
-    trigger = trigger0
+    total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
+    batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
+    trigger = trigger0 + (total_steps // trigger_delta) * trigger_delta
+    
     current_max_steps = int(max_steps)
     
     # 全局 Buffer (用于攒够 Batch 训练)
@@ -887,7 +925,7 @@ def run_MLP_simulation(
     # =========================================================
     # 主循环 (Master Process)
     # =========================================================
-    while True: 
+    while True:
         while total_steps < current_max_steps:
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
@@ -904,8 +942,8 @@ def run_MLP_simulation(
                     obj = test_pool.apply_async(
                         test_worker, 
                         args=(current_weights, r_idx, args, 
-                              state_dim, hidden_dim, action_dims_dict, 
-                              dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
+                            state_dim, hidden_dim, action_dims_dict, 
+                            dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
                     )
                     test_tasks.append(obj)
                 # 等待所有测试进程结束
@@ -949,8 +987,8 @@ def run_MLP_simulation(
             if not init_elo_ratings:
                 # 按照 Elo 分数降序排列，排除内部特殊键
                 sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
-                                                   key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
-                                                   reverse=True) if not k.startswith("__")]
+                                                key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                                                reverse=True) if not k.startswith("__")]
                 effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
             else:
                 effective_pool = elite_elo_ratings
@@ -1242,12 +1280,19 @@ def run_MLP_simulation(
 
                 # B. 维护精英池 (Admission)
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    # 计算 rule_avg_elo
                     rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
-                    if not rule_elos: rule_elos = [0]
-                    rule_avg_elo = sum(rule_elos) / len(rule_elos)
+
+                    if not rule_elos:
+                        rank_pos = 0.5
+                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
+                    else:
+                        min_rule_elo = np.min(rule_elos)
+                        max_rule_elo = np.max(rule_elos)
                     
-                    if main_agent_elo >= rule_avg_elo + admission_threshold_bias:
+                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
+                        (1-ADMISSION_THRESHOLD) * min_rule_elo
+
+                    if main_agent_elo >= rule_elo_thres:
                         # 满员清理
                         history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         while len(history_keys) >= MAX_HISTORY_SIZE:
@@ -1269,6 +1314,7 @@ def run_MLP_simulation(
                 # 无论是否进入精英池，全量表都要记录
                 elo_ratings[actor_key] = main_agent_elo
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
+                elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
                 
                 # 5. 保存全量日志
                 with open(full_json_path, "w", encoding="utf-8") as f:
@@ -1303,18 +1349,30 @@ def run_MLP_simulation(
                     # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
                     min_elo = np.min(list(valid_elos.values()))
                     max_elo = np.max(list(valid_elos.values()))
-                    # 记录与 Rule 平均 Elo 的分差
-                    rule_avg_elo = np.mean([v for k, v in valid_elos.items() if k.startswith("Rule")] or [0])
-                    elo_diff_to_mean = main_agent_elo - rule_avg_elo
-                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_mean, total_steps)
+                    
+                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    if not rule_elos:
+                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
+                    else:
+                        min_rule_elo = np.min(rule_elos)
+                        max_rule_elo = np.max(rule_elos)
+                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
+                        (1-ADMISSION_THRESHOLD) * min_rule_elo
+
+                    # 记录与 Rule 阈值的差值 (维持旧指标名)
+                    elo_diff_to_thres = main_agent_elo - rule_elo_thres
+                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_thres, total_steps)
                     
                     # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
                     elo_spread = float(max_elo - min_elo)
                     print('elo分极差：', elo_spread)
                     logger.add("Elo/Spread", elo_spread, total_steps)
+
+                    curr_rank = 0.5 if elo_spread == 0 else (main_agent_elo - min_elo) / elo_spread
+                    logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
-                    # 线性缩放 sigma_elo: 落后 400 分或以上时放大到 1000，0 分以后保持 sigma_elo0
-                    scale = np.clip(-elo_diff_to_mean / 400.0, 0.0, 1.0)
+                    # 线性缩放 sigma_elo: 落后 200 分或以上时放大到 1000，0 分以后保持 sigma_elo0
+                    scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
                     sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
                     logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
@@ -1336,6 +1394,17 @@ def run_MLP_simulation(
                         
                         # 直接计算并记录 最强个体 vs 规则对手 的差值
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", main_agent_elo - rule_elo, total_steps)
+
+                # --- 例行保存优化器状态和步数 ---
+                torch.save({
+                    'actor_optimizer': student_agent.actor_optimizer.state_dict(),
+                    'critic_optimizer': student_agent.critic_optimizer.state_dict(),
+                }, os.path.join(log_dir, "optimizers_state.pt"))
+                # print(f"Optimizers routinely saved to optimizers_state.pt")
+                elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
+                elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
+                with open(full_json_path, "w", encoding="utf-8") as f:
+                    json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
 
         # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")
@@ -1371,7 +1440,7 @@ def run_MLP_simulation(
         p.join(timeout=5) # 【修改】给子进程 5 秒优雅退出的时间
         if p.is_alive():
             p.terminate() # 如果没死，强制结束
-    
+
     # 【修改】调整顺序：先尝试关闭测试池
     try:
         test_pool.close()
