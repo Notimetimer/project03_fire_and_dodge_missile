@@ -125,12 +125,13 @@ if __name__ == "__main__":
         # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
         num_runs = args.num_matches
         test_tasks = []
+        # 发送 5 * num_runs 个任务到进程池，但是强制要求每个任务内部只跑 1 场
         for r_idx in [0, 1, 2, 3, 4]*num_runs:
             obj = test_pool.apply_async(
                 test_worker, 
                 args=(current_weights, r_idx, args, 
                         state_dim, hidden_dim, action_dims_dict, 
-                        dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
+                        dt_maneuver, 'cpu', 1, action_cycle_multiplier) # <--- 这里改成 1
             )
             test_tasks.append(obj)
         # 等待所有测试进程结束
