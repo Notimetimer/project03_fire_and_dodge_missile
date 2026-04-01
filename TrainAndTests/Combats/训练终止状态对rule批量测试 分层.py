@@ -59,7 +59,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test - Evaluation")
     parser.add_argument("--agent-id", type=int, default=0, help="Specific agent ID to test (0 for actor_rein0).")
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
-    parser.add_argument("--num-matches", type=int, default=20, help="Number of matches per rule.")
+    parser.add_argument("--num-matches", type=int, default=30, help="Number of matches per rule.")
     args = parser.parse_args()    
 
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
@@ -86,9 +86,40 @@ if __name__ == "__main__":
     if not latest_log_dir:
         raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
     
-    agent_path = find_latest_agent_path(latest_log_dir, args.agent_id)
-    if not agent_path:
-        raise FileNotFoundError(f"No agent file found in '{latest_log_dir}' (ID: {args.agent_id})")
+    import json
+    # 如果目录里面没有elo_ratings.json，按当前的方式，取actor_rein后接最大数字的来测试，否则取actor_rein开头且elo值最大的来测试。
+    elo_path = os.path.join(latest_log_dir, 'elo_ratings.json')
+    if os.path.exists(elo_path):
+        with open(elo_path, 'r', encoding='utf-8') as f:
+            elo_ratings = json.load(f)
+        # 寻找具有最高 elo 分数且以 'actor_rein' 开头的名称
+        best_agent = None
+        best_elo = -float('inf')
+        for k, v in elo_ratings.items():
+            if k.startswith('actor_rein') and v > best_elo:
+                best_elo = v
+                best_agent = k
+        if best_agent is None:
+            raise FileNotFoundError(f"elo_ratings.json found, but no 'actor_rein' keys inside.")
+        agent_path = os.path.join(latest_log_dir, f"{best_agent}.pt")
+        print(f"Loading agent '{best_agent}' based on highest Elo score: {best_elo}")
+    else:
+        # 取actor_rein后接最大数字的
+        agent_files = glob.glob(os.path.join(latest_log_dir, 'actor_rein*.pt'))
+        if not agent_files:
+            raise FileNotFoundError(f"No agent file found in '{latest_log_dir}'")
+        max_idx = -1
+        agent_path = None
+        for file in agent_files:
+            match = re.search(r'actor_rein(\d+)\.pt', file)
+            if match:
+                idx = int(match.group(1))
+                if idx > max_idx:
+                    max_idx = idx
+                    agent_path = file
+        if not agent_path:
+            agent_path = find_latest_agent_path(latest_log_dir, args.agent_id)
+        print(f"Loading latest parameter index from fallback logic.")
 
     print(f"\nFound log directory: {latest_log_dir}")
     print(f"Loading agent weights from: {agent_path}\n")
@@ -142,19 +173,32 @@ if __name__ == "__main__":
         test_pool.join()
 
         rule_score_sum = {rule_num: 0 for rule_num in rule_opponents}
+        rule_wins = {rule_num: 0 for rule_num in rule_opponents}
+        rule_loses = {rule_num: 0 for rule_num in rule_opponents}
+        rule_draws = {rule_num: 0 for rule_num in rule_opponents}
+
         for i in test_results:
-            rule_num, score, result2 = i
+            rule_num, score, result2, wins, loses, draws = i
             rule_score_sum[rule_num] += score
+            rule_wins[rule_num] += wins
+            rule_loses[rule_num] += loses
+            rule_draws[rule_num] += draws
         
         # 计算平均分并填充到 summary 中
         rule_score_mean = {rule_num: score/num_runs for rule_num, score in rule_score_sum.items()}
         results_summary = rule_score_mean
+        
+        # 同时记录胜平负比例
+        results_detail = {
+            r: (rule_wins[r]/num_runs, rule_loses[r]/num_runs, rule_draws[r]/num_runs)
+            for r in rule_opponents
+        }
 
-        print("test_results", test_results)
-        print("rule_score_mean", rule_score_mean)
+        print("test_results_mean_score", rule_score_mean)
 
         for r_num, score in rule_score_mean.items():
-            print(f"  [Test Result] Rule_{r_num}: {score}")
+            w, l, d = results_detail[r_num]
+            print(f"  [Test Result] Rule_{r_num}: Score={score:.3f} | Win={w:.3f}, Lose={l:.3f}, Draw={d:.3f}")
 
 
     except KeyboardInterrupt:
@@ -170,8 +214,9 @@ if __name__ == "__main__":
     
     with open(csv_filename, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(["Opponent", "Win_Rate"])
+        writer.writerow(["Opponent", "Score", "Win_Ratio", "Lose_Ratio", "Draw_Ratio"])
         for k, v in results_summary.items():
-            writer.writerow([k, f"{v:.4f}"])
-            
+            w, l, d = results_detail[k]
+            writer.writerow([k, f"{v:.4f}", f"{w:.4f}", f"{l:.4f}", f"{d:.4f}"])
+
     print(f"Report saved to: {csv_filename}")

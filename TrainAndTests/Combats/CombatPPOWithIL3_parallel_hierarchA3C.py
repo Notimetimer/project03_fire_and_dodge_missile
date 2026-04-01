@@ -672,6 +672,7 @@ def run_MLP_simulation(
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
     R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
+    resume_dir = None,
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -722,15 +723,46 @@ def run_MLP_simulation(
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
-    log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+    if resume_dir is not None and os.path.exists(resume_dir):
+        log_dir = resume_dir
+        print(f"Resuming from directory: {log_dir}")
+        IL_epoches = 0  # 断点续训跳过预训练
+    else:
+        log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(log_dir, exist_ok=True)
     
-    os.makedirs(log_dir, exist_ok=True)
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
     critic_meta_path = os.path.join(log_dir, "critic.meta.json")
     
     save_meta_once(actor_meta_path, student_agent.actor.state_dict())
     save_meta_once(critic_meta_path, student_agent.critic.state_dict())
+
+    # 断点续训
+    if resume_dir is not None and os.path.exists(resume_dir):
+        actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+        if len(actor_files) > 0:
+            def extract_num(f):
+                m = re.search(r'actor_rein(\d+)\.pt$', f)
+                return int(m.group(1)) if m else -1
+            latest_actor = max(actor_files, key=extract_num)
+            student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
+            print(f"Loaded actor from: {latest_actor}")
+            
+            critic_path = os.path.join(log_dir, "critic.pt")
+            if os.path.exists(critic_path):
+                student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
+                print(f"Loaded critic from: {critic_path}")
+            
+            opt_path = os.path.join(log_dir, "optimizers_state.pt")
+            if os.path.exists(opt_path):
+                try:
+                    opt_states = torch.load(opt_path, map_location=device)
+                    student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
+                    student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
+                    print("Loaded optimizer states.")
+                except Exception as e:
+                    print(f"Failed to load optimizers: {e}")
     
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
@@ -783,6 +815,10 @@ def run_MLP_simulation(
 
     student_agent.set_learning_rate(actor_lr=actor_lr_init_il, critic_lr=critic_lr_init_il)
     
+    # 存储无学习情况下的网络参数
+    init_opponent_name = "actor_rein0"
+    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
+
     # === 模仿训练循环 ===
     # 现在 original_il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
@@ -869,16 +905,17 @@ def run_MLP_simulation(
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
-    # 初始对手
+    # 初始对手(存储IL后的网络参数)
     if (not elo_ratings) or IL_epoches > 0:
         init_opponent_name = "actor_rein0"
         torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
         if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
 
     # 训练循环变量
-    total_steps = 0
-    batch_idx = 0
-    trigger = trigger0
+    total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
+    batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
+    trigger = trigger0 + (total_steps // trigger_delta) * trigger_delta
+    
     current_max_steps = int(max_steps)
     
     # 全局 Buffer (用于攒够 Batch 训练)
@@ -888,7 +925,7 @@ def run_MLP_simulation(
     # =========================================================
     # 主循环 (Master Process)
     # =========================================================
-    while True: 
+    while True:
         while total_steps < current_max_steps:
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
@@ -912,8 +949,8 @@ def run_MLP_simulation(
                 # 等待所有测试进程结束
                 test_results = [t.get() for t in test_tasks]
 
-                outcomes = {rule_num: score for rule_num, score, result2 in test_results}
-                outcomes_return = {rule_num: result2 for rule_num, score, result2 in test_results}
+                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
+                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
@@ -1275,6 +1312,7 @@ def run_MLP_simulation(
                 # 无论是否进入精英池，全量表都要记录
                 elo_ratings[actor_key] = main_agent_elo
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
+                elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
                 
                 # 5. 保存全量日志
                 with open(full_json_path, "w", encoding="utf-8") as f:
@@ -1354,6 +1392,17 @@ def run_MLP_simulation(
                         
                         # 直接计算并记录 最强个体 vs 规则对手 的差值
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", main_agent_elo - rule_elo, total_steps)
+
+                # --- 例行保存优化器状态和步数 ---
+                torch.save({
+                    'actor_optimizer': student_agent.actor_optimizer.state_dict(),
+                    'critic_optimizer': student_agent.critic_optimizer.state_dict(),
+                }, os.path.join(log_dir, "optimizers_state.pt"))
+                # print(f"Optimizers routinely saved to optimizers_state.pt")
+                elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
+                elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
+                with open(full_json_path, "w", encoding="utf-8") as f:
+                    json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
 
         # --- [新增] 达到 max_steps 后的交互逻辑 ---
         print(f"\n--- Target steps reached: {total_steps} / {current_max_steps} ---")

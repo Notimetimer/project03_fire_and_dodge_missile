@@ -55,6 +55,9 @@ def test_worker(model_state_dict, rule_num,
     # 3. 运行对战逻辑
     result = 0
     result2 = 0
+    wins = 0
+    loses = 0
+    draws = 0
     for _ in range(num_runs):
         test_env.reset(red_init_ammo=6, blue_init_ammo=6)
         
@@ -104,11 +107,14 @@ def test_worker(model_state_dict, rule_num,
         # 返回结果：1 赢, 0 输, 0.5 平
         if test_env.win:
             result += 1/num_runs
+            wins += 1/num_runs
         elif test_env.lose:
             result += 0/num_runs
+            loses += 1/num_runs
         else:
             result += 0.5/num_runs
+            draws += 1/num_runs
         result2 += episode_return /num_runs
         
-    return rule_num, result, result2
+    return rule_num, result, result2, wins, loses, draws
 

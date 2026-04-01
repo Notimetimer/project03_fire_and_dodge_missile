@@ -949,8 +949,8 @@ def run_MLP_simulation(
                 # 等待所有测试进程结束
                 test_results = [t.get() for t in test_tasks]
 
-                outcomes = {rule_num: score for rule_num, score, result2 in test_results}
-                outcomes_return = {rule_num: result2 for rule_num, score, result2 in test_results}
+                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
+                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
