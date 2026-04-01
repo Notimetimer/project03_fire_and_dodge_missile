@@ -59,7 +59,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test - Evaluation")
     parser.add_argument("--agent-id", type=int, default=0, help="Specific agent ID to test (0 for actor_rein0).")
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
-    parser.add_argument("--num-matches", type=int, default=30, help="Number of matches per rule.")
+    parser.add_argument("--num-matches", type=int, default=20, help="Number of matches per rule.")
     args = parser.parse_args()    
 
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
