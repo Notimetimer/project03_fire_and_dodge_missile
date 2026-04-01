@@ -9,6 +9,7 @@ from math import pi
 import time
 import datetime
 import csv
+import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 
 # # --- 1. 项目路径和模块导入 ---
 
@@ -21,6 +22,7 @@ from BasicRules_new_hierarchical import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
+from VsBaseline_while_training2_hierarch import test_worker
 
 # --- 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 30
@@ -57,18 +59,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("RL/IL Combat Test - Evaluation")
     parser.add_argument("--agent-id", type=int, default=0, help="Specific agent ID to test (0 for actor_rein0).")
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
-    parser.add_argument("--num-matches", type=int, default=20, help="Number of matches per rule.")
+    parser.add_argument("--num-matches", type=int, default=30, help="Number of matches per rule.")
     args = parser.parse_args()    
 
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
     
-    # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 训练时默认是 45e3
+    # # --- 环境和模型参数 (必须与训练时一致) ---
+    # env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 训练时默认是 45e3
+    args.max_episode_len = 10*60
+    args.R_cage=45e3
+
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- 初始化环境 ---
-    env = ChooseStrategyEnv(env_args, tacview_show=False) # 取消可视化
+    env = ChooseStrategyEnv(args, tacview_show=False) # 取消可视化
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -106,83 +111,56 @@ if __name__ == "__main__":
     print(f"=== Starting Evaluation ({args.num_matches} matches per rule) ===")
     
     try:
-        for rule_num in rule_opponents:
-            print(f"\n--- Testing vs Rule_{rule_num} ---")
-            
-            match_scores = []
-            
-            for match_idx in range(args.num_matches):
-                # 重置环境（加入随机化）
-                rb, bb = create_initial_state_worker(randomized=1)
-                # 可选配环境大小随机化，测试时也可以加上
-                env.R_cage = np.random.uniform(30e3, 45e3) 
-                env.reset(red_birth_state=rb, blue_birth_state=bb, ego_side='r')
+        # 进程通信设置
+        mp.set_start_method('spawn', force=True)
+        # --- A. 启动并行测试进程池 (Async Test Pool) ---
+        # 一次最多同时并行processes个工作进程，每个工作进程处理完maxtasksperchild个任务后，会重新开启新的工作进程以阻止内存泄漏
+        # processes 收费站窗口数，maxtasksperchild 窗口处理完多少个任务后换班
+        test_pool = mp.Pool(processes=10, maxtasksperchild=10) 
 
-                done = False
-                last_r_action_label = 0
-                last_b_action_label = 0
-                r_action_label = 0
-                b_action_label = 0
-                r_fire = False
+        # 1. 深度拷贝当前 Actor 权重到 CPU 内存 (注意：需要使用 wrapper 的 state_dict 以包含 net. 前缀)
+        current_weights = {k: v.cpu().clone() for k, v in actor_wrapper.state_dict().items()}
 
-                # 回合仿真循环
-                total_steps = round(env_args.max_episode_len / dt_maneuver)
-                for count in range(total_steps):
-                    if not env.running or done:
-                        break
+        # 2. 分发测试任务并【立即阻塞等待】
+        # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
+        num_runs = args.num_matches
+        test_tasks = []
+        for r_idx in [0, 1, 2, 3, 4]*num_runs:
+            obj = test_pool.apply_async(
+                test_worker, 
+                args=(current_weights, r_idx, args, 
+                        state_dim, hidden_dim, action_dims_dict, 
+                        dt_maneuver, 'cpu', num_runs, action_cycle_multiplier)
+            )
+            test_tasks.append(obj)
+        # 等待所有测试进程结束
+        test_results = [t.get() for t in test_tasks]
+        
+        # 显式关闭进程池，防止主进程结束时出现 AttributeError
+        test_pool.close()
+        test_pool.join()
 
-                    r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
-                    b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+        rule_score_sum = {rule_num: 0 for rule_num in rule_opponents}
+        for i in test_results:
+            rule_num, score, result2 = i
+            rule_score_sum[rule_num] += score
+        
+        # 计算平均分并填充到 summary 中
+        rule_score_mean = {rule_num: score/num_runs for rule_num, score in rule_score_sum.items()}
+        results_summary = rule_score_mean
 
-                    # 决策
-                    if count % action_cycle_multiplier == 0:
-                        # --- 红方 (RL 智能体) ---
-                        with torch.no_grad():
-                            r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                                r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.38
-                                )
-                            
-                        r_action_label = r_action_exec['cat'][0]
-                        r_fire = r_action_exec['bern'][0]
-                        last_r_action_label = r_action_label
+        print("test_results", test_results)
+        print("rule_score_mean", rule_score_mean)
 
-                        if r_fire:
-                            launch_missile_immediately(env, 'r', tabu=1)
+        for r_num, score in rule_score_mean.items():
+            print(f"  [Test Result] Rule_{r_num}: {score}")
 
-                        # --- 蓝方 (规则智能体) ---
-                        b_state_check = env.unscale_state(b_check_obs)
-                        b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
-                        last_b_action_label = b_action_label
-                        if b_fire:
-                            launch_missile_immediately(env, 'b', tabu=1)
-
-                    # 执行机动并步进
-                    r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
-                    b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
-                    env.step(r_maneuver, b_maneuver)
-                    
-                    # 统计结束条件
-                    done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
-
-                # 单盘统计
-                score = 0.5
-                res_str = "Draw"
-                if env.win:
-                    score = 1.0
-                    res_str = "Win"
-                elif env.lose:
-                    score = 0.0
-                    res_str = "Lose"
-                
-                match_scores.append(score)
-                print(f"Match {match_idx+1}/{args.num_matches} -> {res_str}")
-
-            avg_win_rate = np.mean(match_scores)
-            results_summary[f"Rule_{rule_num}"] = avg_win_rate
-            print(f"==> Rule_{rule_num} Total Win Rate: {avg_win_rate * 100:.2f}%")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")
+        if 'test_pool' in locals():
+            test_pool.terminate()
+            test_pool.join()
     
     print("\nAll tests completed. Generating CSV report...")
     
