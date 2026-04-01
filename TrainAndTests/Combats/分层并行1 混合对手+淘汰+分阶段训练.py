@@ -2,9 +2,10 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\断点续训_IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260401-155300"
+# 指定断点续训的目录。如果为 None，则正常开启新训练。
+resume_target_dir = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\断点续训_IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260401-155300"
 
-mission_name = '断点续训_IL_and_MixedPFSP_分阶段_挑战_并行_分层'
+mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -74,8 +75,6 @@ if original_il_transition_dict is not None:
 if __name__=='__main__':
     print('Hello')
     
-    # 指定断点续训的目录。如果为 None，则正常开启新训练。
-    resume_target_dir = resume_target_dir
     
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")

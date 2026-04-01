@@ -1372,8 +1372,17 @@ def run_MLP_simulation(
                     logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
                     # 线性缩放 sigma_elo: 落后 200 分或以上时放大到 1000，0 分以后保持 sigma_elo0
-                    scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
-                    sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
+                    # scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
+                    # sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
+
+                    # 根据全局排位调整sigma_elo
+                    sigma_elo = 300 + np.clip(1 - curr_rank, 0, 1) * (1000 - 300)
+
+                    # 动态学习率调节
+                    actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
+                    critic_lr = actor_lr * 5
+                    student_agent.set_learning_rate(actor_lr, critic_lr)
+
                     logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
