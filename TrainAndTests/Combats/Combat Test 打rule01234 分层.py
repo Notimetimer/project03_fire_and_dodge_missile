@@ -43,7 +43,7 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+    dir_name = "针对性不出界训练-run-20260402-214445"
 
     "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
     "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
@@ -111,7 +111,7 @@ if __name__ == "__main__":
         env.visualize_cage()
 
     env.shielded = 1
-    env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
+    env.no_out = 1 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2, 3, 4]

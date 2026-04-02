@@ -369,8 +369,8 @@ def create_initial_state_worker(randomized=0):
     blue_height = 9000
     red_height = 9000
     # 初始航向随机化
-    red_psi = sub_of_radian(-1*-np.pi/2 + np.random.uniform(-pi/3, pi/3)) # 背对背
-    blue_psi = sub_of_radian(-1*np.pi/2 + np.random.uniform(-pi/3, pi/3)) # 背对背
+    red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
+    blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi/3, pi/3))
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
     red_N = init_North
     red_E = 45e3
@@ -409,7 +409,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.dt_move = dt_move
         env.dt_maneuver = dt_maneuver
         
-        # env.no_out = 1 # 训练时防止出界
+        env.no_out = 1 # 训练时防止出界
 
         # 初始化本地网络 (CPU)
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
