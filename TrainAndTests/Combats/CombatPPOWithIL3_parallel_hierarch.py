@@ -369,8 +369,8 @@ def create_initial_state_worker(randomized=0):
     blue_height = 9000
     red_height = 9000
     # 初始航向随机化
-    red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
-    blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi/3, pi/3))
+    red_psi = sub_of_radian(-1*-np.pi/2 + np.random.uniform(-pi/3, pi/3)) # 背对背
+    blue_psi = sub_of_radian(-1*np.pi/2 + np.random.uniform(-pi/3, pi/3)) # 背对背
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
     red_N = init_North
     red_E = 45e3

@@ -49,8 +49,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'missile_warning': 0.06,
             'enemy_gets_warning': 0.05,
             'alt_limit_penalty': 1.0,
-            'border_penalty_scale': 0.2,
-            'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
+            'border_penalty_scale': 2, # 0.2 小了
+            'border_reward': 0.2, # 不靠近边界就有奖励
             'angle_advantage': 1.0,
             'height_advantage': 0.1,
             'defensive_angle_close': 0.5,
