@@ -84,7 +84,7 @@ def test_worker(model_state_dict, rule_num,
                 with torch.no_grad():
                     # [修复] 调用 actor.get_action 而不是 take_action
                     # get_action 返回 4 个值: actions_exec, actions_raw, h_state, actions_dist_check
-                    b_act_exec, _, _, _ = actor.get_action(b_obs, explore={'cont':1, 'cat':1, 'bern':1})
+                    b_act_exec, _, _, _ = actor.get_action(b_obs, explore={'cont':0, 'cat':0, 'bern':1})
                     b_action_label = b_act_exec['cat'][0]
                     if b_act_exec['bern'][0]: 
                         b_m_id = launch_missile_immediately(test_env, 'b', tabu=1)
