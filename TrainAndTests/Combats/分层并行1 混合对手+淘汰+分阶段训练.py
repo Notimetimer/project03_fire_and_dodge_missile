@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定断点续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260401-231411" 
+# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260402-104852" 
 
 mission_name = '快调IL_and_MixedPFSP_分阶段_挑战_并行_分层'
 
@@ -42,7 +42,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 12.5*60 # 回合最长时间，单位s
+max_episode_duration = 10*60 # 回合最长时间，单位s
 R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
@@ -80,7 +80,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,

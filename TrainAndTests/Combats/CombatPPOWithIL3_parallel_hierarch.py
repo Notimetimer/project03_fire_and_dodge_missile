@@ -408,6 +408,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.shielded = no_crash # 假设默认开启防撞
         env.dt_move = dt_move
         env.dt_maneuver = dt_maneuver
+        
+        # env.no_out = 1 # 测试时防止出界
 
         # 初始化本地网络 (CPU)
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
@@ -1396,7 +1398,7 @@ def run_MLP_simulation(
 
                     # 根据平均胜率打分动态调节对手方差(sigma_elo)
                     # 胜率=0.5时方差取500，>=0.7时方差为300，<=0.3时取1500
-                    sigma_elo = float(np.interp(filtered_score, [0.3, 0.5, 0.7], [1500, 500, 300]))
+                    sigma_elo = float(np.interp(filtered_score, [0.3, 0.5, 0.7], [1000, 500, 250]))
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
