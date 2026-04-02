@@ -409,7 +409,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.dt_move = dt_move
         env.dt_maneuver = dt_maneuver
         
-        # env.no_out = 1 # 测试时防止出界
+        # env.no_out = 1 # 训练时防止出界
 
         # 初始化本地网络 (CPU)
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
@@ -481,7 +481,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 r_min, r_max = settings.get('R_cage_range', (45e3, 45e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=1)
                 
                 # 状态变量初始化
                 done = False

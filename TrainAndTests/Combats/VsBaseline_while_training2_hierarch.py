@@ -60,7 +60,7 @@ def test_worker(model_state_dict, rule_num,
     loses = 0
     draws = 0
     for _ in range(num_runs):
-        test_env.reset(red_init_ammo=6, blue_init_ammo=6)
+        test_env.reset(red_init_ammo=6, blue_init_ammo=6, pomdp=1)
         
         steps = 0
         done = False

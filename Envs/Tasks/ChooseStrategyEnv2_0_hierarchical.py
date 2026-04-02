@@ -73,7 +73,7 @@ class ChooseStrategyEnv(Battle):
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
         self.last_obs = None
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=0, ego_side='b'):
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=1, ego_side='b'):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
         super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo, ego_side=ego_side)
         # # 初始化红蓝远离速度
@@ -88,6 +88,10 @@ class ChooseStrategyEnv(Battle):
         self.last_obs = None 
         
         self.pomdp = pomdp   
+
+        # 开场数据支持，至少背对背决斗时需要知道“对手在后面”
+        self.RUAV.state_memory = copy.deepcopy(self.get_state('r'))
+        self.BUAV.state_memory = copy.deepcopy(self.get_state('b'))
     
     def obs_1v1(self, side, pomdp=0, reward_fn=0):
         pre_full_obs = self.base_obs(side, pomdp, reward_fn)

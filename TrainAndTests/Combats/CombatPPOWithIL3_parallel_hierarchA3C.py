@@ -479,7 +479,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 r_min, r_max = settings.get('R_cage_range', (45e3, 45e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=1)
                 
                 # 状态变量初始化
                 done = False
