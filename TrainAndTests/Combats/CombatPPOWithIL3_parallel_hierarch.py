@@ -1378,10 +1378,10 @@ def run_MLP_simulation(
                     # 根据全局排位调整sigma_elo
                     sigma_elo = 300 + np.clip(1 - curr_rank, 0, 1) * (1000 - 300)
 
-                    # 动态学习率调节
-                    actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
-                    critic_lr = actor_lr * 5
-                    student_agent.set_learning_rate(actor_lr, critic_lr)
+                    # # 动态学习率调节
+                    # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
+                    # critic_lr = actor_lr * 5
+                    # student_agent.set_learning_rate(actor_lr, critic_lr)
 
                     logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
