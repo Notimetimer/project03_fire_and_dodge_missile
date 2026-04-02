@@ -6,7 +6,7 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260401-231411" 
 
-mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
+mission_name = '快调IL_and_MixedPFSP_分阶段_挑战_并行_分层'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
