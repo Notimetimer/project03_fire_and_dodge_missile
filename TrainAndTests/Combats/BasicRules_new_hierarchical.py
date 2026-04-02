@@ -116,6 +116,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     if  np.random.rand() <= p_random:
         action_number = np.random.randint(0, 13+1)
         action_number = np.clip(action_number, 0, 13)
+        # 不准因为随机行为而出界
+        if d_hor < 8e3:
+            action_number = base_offensive_action
     
     if rules_num in [3, 4]:
         # 不准出界
