@@ -922,10 +922,6 @@ def run_MLP_simulation(
     empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     transition_dict = copy.deepcopy(empty_transition_dict)
 
-    # 初始化基于胜率的在线 EMA 变量（用于在随后的训练中调整 sigma_elo）
-    ema_score = 0.5
-    ema_step = 0
-
     # =========================================================
     # 主循环 (Master Process)
     # =========================================================
@@ -979,6 +975,21 @@ def run_MLP_simulation(
 
             # --- 2. 准备训练 Batch (Synchronous) ---
             
+            # 1. 计算当前排位 rank_pos
+            valid_elo_values = [v for k, v in elite_elo_ratings.items() if not k.startswith("__")]
+            if not valid_elo_values:
+                rank_pos = 0.5
+                min_elo, max_elo = main_agent_elo, main_agent_elo
+            else:
+                min_elo = np.min(valid_elo_values)
+                max_elo = np.max(valid_elo_values)
+                denom = float(max_elo - min_elo)
+                # 如果分母为0，视为0.5中位
+                if denom == 0.0:
+                    rank_pos = 0.5
+                else:
+                    rank_pos = float((main_agent_elo - min_elo) / denom)
+
 
             # A. 获取当前策略权重 (CPU)
             current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
@@ -1148,21 +1159,6 @@ def run_MLP_simulation(
             batch_idx += 1
             
             # --- 3.5 记录批次聚合指标 ---
-            # 更新在线胜率 EMA 并且加入偏差修正（既稳又抗滞后）
-            batch_score = (batch_wins + batch_draw_cnt * 0.5) / num_workers
-            ema_step += 1
-            alpha_ema = 0.2  # 平滑系数，较大可防止滞后，和tensorboard的smoothing是补数的关系
-            # 若第一步则直接初始化，避免前期偏差
-            if ema_step == 1:
-                ema_score = batch_score
-            else:
-                ema_score = (1 - alpha_ema) * ema_score + alpha_ema * batch_score
-            
-            # 使用带有偏差修正的滤波值
-            filtered_score = ema_score / (1 - (1 - alpha_ema) ** ema_step)
-            logger.add("train_plus/batch_score", batch_score, total_steps)
-            logger.add("train_plus/filtered_score", filtered_score, total_steps)
-
             # 记录导弹发射平均数量或总数
             logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
             # 记录平均回报与胜率
@@ -1299,19 +1295,14 @@ def run_MLP_simulation(
 
                 # B. 维护精英池 (Admission)
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
-
-                    if not rule_elos:
-                        rank_pos = 0.5
-                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
-                    else:
-                        min_rule_elo = np.min(rule_elos)
-                        max_rule_elo = np.max(rule_elos)
+                    # 计算 Rank
+                    valid_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    if not valid_elos: valid_elos = [1200]
+                    r_min, r_max = min(valid_elos), max(valid_elos)
+                    denom = r_max - r_min if r_max != r_min else 1.0
+                    rank = (main_agent_elo - r_min) / denom
                     
-                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
-                        (1-ADMISSION_THRESHOLD) * min_rule_elo
-
-                    if main_agent_elo >= rule_elo_thres:
+                    if rank >= ADMISSION_THRESHOLD:
                         # 满员清理
                         history_keys = [k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")]
                         while len(history_keys) >= MAX_HISTORY_SIZE:
@@ -1368,41 +1359,28 @@ def run_MLP_simulation(
                     # (主elo - min_elo) / (max_elo - min_elo)，当分母为0时取0.5
                     min_elo = np.min(list(valid_elos.values()))
                     max_elo = np.max(list(valid_elos.values()))
-                    
-                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
-                    if not rule_elos:
-                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
+                    denom = float(max_elo - min_elo)
+                    if denom == 0.0:
+                        rank_pos = 0.5
                     else:
-                        min_rule_elo = np.min(rule_elos)
-                        max_rule_elo = np.max(rule_elos)
-                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
-                        (1-ADMISSION_THRESHOLD) * min_rule_elo
-
-                    # 记录与 Rule 阈值的差值 (维持旧指标名)
-                    elo_diff_to_thres = main_agent_elo - rule_elo_thres
-                    logger.add("Elo_Centered/EloDiffToMean", elo_diff_to_thres, total_steps)
+                        rank_pos = float((main_agent_elo - min_elo) / denom)
+                    # 现有日志
+                    logger.add("Elo_Centered/Current_Rank %", rank_pos*100, total_steps)
                     
                     # 新增：记录 ELO 极差（max - min），用于判断 PFSP sigma 是否合适...
                     elo_spread = float(max_elo - min_elo)
                     print('elo分极差：', elo_spread)
                     logger.add("Elo/Spread", elo_spread, total_steps)
-
-                    curr_rank = 0.5 if elo_spread == 0 else (main_agent_elo - min_elo) / elo_spread
-                    logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
-                    # 线性缩放 sigma_elo: 落后 200 分或以上时放大到 1000，0 分以后保持 sigma_elo0
-                    # scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
-                    # sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
-
-                    # 根据平均胜率打分动态调节对手方差(sigma_elo)
-                    # 胜率=0.5时方差取500，>=0.7时方差为300，<=0.3时取1500
-                    sigma_elo = float(np.interp(filtered_score, [0.3, 0.5, 0.7], [1500, 500, 300]))
-
-                    # # 动态学习率调节
-                    # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
-                    # critic_lr = actor_lr * 5
-                    # student_agent.set_learning_rate(actor_lr, critic_lr)
-
+                    rule_vals = [v for k, v in valid_elos.items() if k.startswith("Rule")]
+                    if rule_vals:
+                        r_min, r_max = np.min(rule_vals), np.max(rule_vals)
+                        denom = float(r_max - r_min)
+                        curr_rank = 0.5 if denom == 0 else (main_agent_elo - r_min) / denom
+                        logger.add("Elo_Centered/Current_Rank %", curr_rank * 100, total_steps)
+                    
+                    # 缩放sigma_elo 只能更大，不能小
+                    sigma_elo = max(sigma_elo0, (0.5-curr_rank) * 1000)
                     logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
