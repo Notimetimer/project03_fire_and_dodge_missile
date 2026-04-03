@@ -46,7 +46,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # --- 1. 参数初始化与状态获取 ---
         # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
         reward_weights = {
-            'base_survival': 0.0,
             'missile_guidance': 0.04,
             'target_locked': 0.06,
             'locked_by_target': 0.05,
@@ -57,10 +56,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
             'angle_advantage': 1.0,
             'height_advantage': 0.1,
-            'defensive_angle_close': 0.5,
-            'defensive_run_close': 0.5,
-            'defensive_angle_far': 0.2,
-            'defensive_crank_penalty': 0.3,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
         }
@@ -254,45 +249,18 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if enm_states["warning"] and enm_states["threat"][3] <= 20e3:
             r_shaping += reward_weights['enemy_gets_warning']
 
-        # 优势度引导
+        # 进攻引导
         if len(alive_ally_missiles) == 0 and ego.ammo > 0 and not warning:
-            # 角度优势度
-            r_shaping += (ATA_enm / pi - alpha / pi) * reward_weights['angle_advantage']
-            # 高度优势度
-            r_shaping += (alt - enm.alt)/5000 * reward_weights['height_advantage']
+            # 角度奖励
+            r_shaping += cos(delta_psi) * reward_weights['angle_advantage']
 
         # 防御引导
-        if warning and d_hor >= 10e3:
-            threat_directio_n = np.array([cos(delta_theta_threat)*cos(delta_psi_threat), 
-                                         sin(delta_theta_threat), 
-                                         cos(delta_theta_threat)*sin(delta_psi_threat)])
-            if threat_distance <= 30e3:
-                r_shaping += reward_weights['defensive_angle_close'] * abs(delta_psi_threat) / pi
-                r_shaping += np.dot(ego.vel_, threat_directio_n)/340 * reward_weights['defensive_run_close']
+        if warning:
+            # delta_psi_threat 给惩罚，越大越好
+            if abs(delta_psi_threat) < pi/2:
+                r_shaping -= (1-abs(delta_psi_threat)/(pi/2)) * reward_weights['angle_advantage']
             else:
-                r_shaping += reward_weights['defensive_angle_far'] * abs(delta_psi_threat) / pi
-                if missile_in_mid_term:
-                    r_shaping -= reward_weights['defensive_crank_penalty'] * abs(abs(delta_psi)-pi/3)/(pi/3) # alpha-pi/3
-
-        # [加回] 开火引导逻辑 (Should fire vs Shoot)
-        should_fire_missile = False
-        if distance < 60e3 and alpha < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
-            if missile_time_since_shoot >= 20 and not missile_in_mid_term and not (distance > 12e3 and abs(AA_hor) < 30*pi/180):
-                should_fire_missile = True
-        
-        # reward_shoot_coach = 0
-        # if shoot == 1:
-        #     if should_fire_missile:
-        #         reward_shoot_coach += 10
-        #     else:
-        #         reward_shoot_coach -= 10
-        # if shoot == 0:
-        #     if should_fire_missile:
-        #         reward_shoot_coach -= 10
-        #     else:
-        #         reward_shoot_coach += 0.01
-        
-        # r_shaping += reward_shoot_coach # 归入引导奖励
+                r_shaping += 0
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         # 逃脱导弹

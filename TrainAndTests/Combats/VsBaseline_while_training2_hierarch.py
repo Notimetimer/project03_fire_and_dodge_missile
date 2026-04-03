@@ -27,7 +27,8 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 def test_worker(model_state_dict, rule_num, 
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
-                device_name='cpu', num_runs=1, action_cycle_multiplier=30):
+                device_name='cpu', num_runs=1, action_cycle_multiplier=30,
+                no_out=0):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -43,7 +44,7 @@ def test_worker(model_state_dict, rule_num,
     # 关闭渲染以节省资源
     test_env = ChooseStrategyEnv(env_args, tacview_show=0)
     test_env.shielded = 1
-    test_env.no_out = 1
+    test_env.no_out = no_out
     test_env.dt_move = 0.05
     test_env.dt_maneuver = dt_maneuver_val # 使用传入的值，不依赖全局变量
     
@@ -61,7 +62,7 @@ def test_worker(model_state_dict, rule_num,
     loses = 0
     draws = 0
     for _ in range(num_runs):
-        test_env.reset(red_init_ammo=6, blue_init_ammo=6, pomdp=1)
+        test_env.reset(red_init_ammo=6, blue_init_ammo=6, pomdp=0)
         
         steps = 0
         done = False

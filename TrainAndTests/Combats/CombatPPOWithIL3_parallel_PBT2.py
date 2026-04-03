@@ -748,7 +748,7 @@ def run_MLP_simulation(
         # 初始化 sigma_elo: 固定为 400 (如果不调它的话)
         init_sigma = sigma_elo 
         # 初始化 shaping_weight: 不再随机，而是从 0.05 到 5 之间按指数级等比分布
-        init_shaping = 0.001 * 40**i
+        init_shaping = 0.005 * 20**3
         
         # 0.05 * ((20 / 0.05) ** (i / pop_size))
         
