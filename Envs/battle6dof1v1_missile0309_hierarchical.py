@@ -695,7 +695,7 @@ class Battle(object):
         else:
             locked_by_target = 0
 
-        # 告警信息 pi和-pi是突变点，置尾机动的时候不易训练，暂时不想用sin和cos，试试改为追一个东西
+        # 告警信息
         if not alive_enm_missiles:
             warning = 0
             threat_delta_psi = pi  # pi 0
@@ -1001,7 +1001,7 @@ class Battle(object):
             [0, 0, 0, 0, 0, 0, 0, 0])
         self.state_init["weapon"] = 120
         # self.state_init["threat"] = np.array([pi, 0, 30e3])  # [pi,0,30e3]  [0,0,30e3]
-        self.state_init["threat"] = np.array([1, 0, 0, 30e3])
+        self.state_init["threat"] = np.array([-1, 0, 0, 30e3])
         self.state_init["border"] = np.array([50e3, 0])
 
         if pomdp:  # 只有在部分观测情况下需要添加屏蔽

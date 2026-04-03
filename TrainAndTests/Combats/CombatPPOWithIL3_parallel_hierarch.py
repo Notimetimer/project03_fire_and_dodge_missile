@@ -481,7 +481,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 r_min, r_max = settings.get('R_cage_range', (45e3, 45e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=1)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
                 
                 # 状态变量初始化
                 done = False
@@ -1153,7 +1153,7 @@ def run_MLP_simulation(
             # 更新在线胜率 EMA 并且加入偏差修正（既稳又抗滞后）
             batch_score = (batch_wins + batch_draw_cnt * 0.5) / num_workers
             ema_step += 1
-            alpha_ema = 0.2  # 平滑系数，较大可防止滞后，和tensorboard的smoothing是补数的关系
+            alpha_ema = 0.1  # 平滑系数，较大可防止滞后，和tensorboard的smoothing是补数的关系
             # 若第一步则直接初始化，避免前期偏差
             if ema_step == 1:
                 ema_score = batch_score
@@ -1398,7 +1398,9 @@ def run_MLP_simulation(
 
                     # 根据平均胜率打分动态调节对手方差(sigma_elo)
                     # 胜率=0.5时方差取500，>=0.7时方差为300，<=0.3时取1500
-                    sigma_elo = 500 # float(np.interp(filtered_score, [0.3, 0.5, 0.7], [1000, 500, 250]))
+                    sigma_elo = float(np.interp(np.clip(filtered_score, 0.3, 0.7), 
+                                                [0.3, 0.5, 0.7], 
+                                                [700, 500, 300]))
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
