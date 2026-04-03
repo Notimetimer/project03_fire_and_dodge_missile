@@ -32,7 +32,7 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 def create_initial_state():
     """创建固定的初始状态"""
     blue_height, red_height = 9000, 9000
-    red_psi, blue_psi = -1* -pi / 2, -1 * pi / 2
+    red_psi, blue_psi = -pi / 2, pi / 2
     red_N, red_E = 0, 45e3
     blue_N, blue_E = 0, -45e3
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
@@ -43,7 +43,7 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "针对性不出界训练-run-20260402-214445"
+    dir_name = None # "针对性不出界训练-run-20260402-214445"
 
     "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
     "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
+    experiment_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     args.agent_id = None # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=40e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
