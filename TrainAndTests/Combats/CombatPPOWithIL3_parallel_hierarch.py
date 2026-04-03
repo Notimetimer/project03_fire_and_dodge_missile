@@ -1,4 +1,4 @@
-'''
+﻿'''
 同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
@@ -245,22 +245,7 @@ class IL_transition_buffer:
         
 
 
-# 加载数据
-original_il_transition_dict, _ = load_il_and_transitions(
-    os.path.join(cur_dir, "IL"),
-    "il_transitions_combat_LR.pkl",
-    "transition_dict_combat_LR.pkl"
-)
-original_il_transition_dict0 = copy.deepcopy(original_il_transition_dict)
-
-# --- 关键步骤：执行数据重构 ---
-if original_il_transition_dict is not None:
-    # 这里完成 (Batch, Key) -> (Key, Batch) 的转换
-    original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict0['actions'])
-    
-    # 顺便确保 states 和 returns 也是标准的 float32 numpy array
-    original_il_transition_dict['states'] = np.array(original_il_transition_dict0['states'], dtype=np.float32)
-    original_il_transition_dict['returns'] = np.array(original_il_transition_dict0['returns'], dtype=np.float32)
+# calculate_expected_score 概率计算
 
 def calculate_expected_score(player_elo, opponent_elo):
     """计算期望得分"""
@@ -675,6 +660,7 @@ def run_MLP_simulation(
     k_shape_il = 0.004,
     R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
     resume_dir = None,
+    init_il_data = None, # [新增] 从外部传入预拉取的数据集
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -687,6 +673,30 @@ def run_MLP_simulation(
         torch.cuda.manual_seed_all(seed)
 
     sigma_elo0 = sigma_elo
+    
+    # --- [修改] 灵活加载模仿学习数据集 ---
+    if init_il_data is not None:
+        print("Using externally provided IL dataset.")
+        original_il_transition_dict = copy.deepcopy(init_il_data)
+        original_il_transition_dict0 = copy.deepcopy(init_il_data)
+    else:
+        # 如果外面没传，则走老路子，从本地文件加载
+        original_il_transition_dict, _ = load_il_and_transitions(
+            os.path.join(cur_dir, "IL"),
+            "il_transitions_combat_LR.pkl",
+            "transition_dict_combat_LR.pkl"
+        )
+        original_il_transition_dict0 = copy.deepcopy(original_il_transition_dict)
+    
+    # 对加载/传入的数据进行必要的重构
+    if original_il_transition_dict is not None:
+        original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict['actions'])
+        # 顺便确保 states 和 returns 也是标准的 float32 numpy array
+        if 'states' in original_il_transition_dict:
+            original_il_transition_dict['states'] = np.array(original_il_transition_dict['states'], dtype=np.float32)
+        if 'returns' in original_il_transition_dict:
+            original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
+        print(f"IL dataset processed. Samples: {len(original_il_transition_dict['states'] if original_il_transition_dict['states'] is not None else [])}")
     
     # 2. 参数与环境配置 (Master 用于获取维度)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
