@@ -1287,7 +1287,8 @@ class PPOHybrid:
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
-                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0,
+                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_epochs=None,
+                     sil_only_maneuver=True,
                      # 公共参数
                      shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05, v_trace=2):
         
@@ -1297,10 +1298,7 @@ class PPOHybrid:
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = True
-        # if hasattr(self.actor.net, 'log_temp_cat'):
-        #     self.actor.net.log_temp_cat.requires_grad = False
-        # if hasattr(self.actor.net, 'log_temp_bern'):
-        #     self.actor.net.log_temp_bern.requires_grad = False
+
 
         def to_tensor(x, dtype):
             if isinstance(x, np.ndarray):
@@ -1472,7 +1470,7 @@ class PPOHybrid:
             # 情况1：如果是最后一个 epoch，不切分 mini-batch，使用打乱后的全量 RL 数据 + 全量 IL 数据进行单次更新
             # 情况2：如果是前面的 epoch，使用 Mini-Batch 仅更新 RL 部分
             
-            if is_last_epoch:
+            if 1: #  is_last_epoch:
                 # 构造单次循环，为了代码复用，将 start 设为 0，步长设为 rl_num_samples (一次取完)
                 # 注意：这里我们强制取完所有数据
                 step_indices = [(0, rl_num_samples)]
@@ -1505,6 +1503,7 @@ class PPOHybrid:
                 log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
                 
                 log_ratio = log_probs - mb_old_log_probs
+                log_ratio = torch.clamp(log_ratio, min=-20, max=20) # 防止Nan
                 ratio = torch.exp(log_ratio)
                 
                 with torch.no_grad():
@@ -1570,7 +1569,7 @@ class PPOHybrid:
                 actor_loss_init_il = torch.tensor(0.0, device=self.device) # [新增] 他模仿 Loss
                 critic_loss_il = torch.tensor(0.0, device=self.device)
                 
-                if is_last_epoch:
+                if 1: # is_last_epoch:
                     # 使用全量(或最大batch) IL 数据，不切分 Mini-Batch
                     # 这里也可以稍微 Shuffle 一下 IL 数据，或者直接随机采样 batch_size
                     curr_il_batch_size = il_batch_size if il_batch_size is not None else il_total_size
@@ -1633,8 +1632,7 @@ class PPOHybrid:
                         il_samples_total += curr_il_batch_size
                         il_valid_samples_total += F_word.sum().item()
 
-                    # compute_il_loss 接口不变
-                    raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=True)
+                    raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=sil_only_maneuver)
                     actor_loss_il = torch.mean(il_weights * raw_il_loss)
                     
                     # --- [new] 对初始轨迹行为克隆 ---
@@ -1692,8 +1690,8 @@ class PPOHybrid:
                     if init_il_transition_dict is not None:
                         actor_loss_init_il = eta * actor_loss_init_mse
                         
-                total_actor_loss = actor_loss_rl + (alpha * (actor_loss_il + actor_loss_init_il) if is_last_epoch else 0)
-                total_critic_loss = critic_loss_rl + (alpha * critic_loss_il if is_last_epoch else 0)
+                total_actor_loss = actor_loss_rl + (alpha * (actor_loss_il + actor_loss_init_il)) # if is_last_epoch else 0)
+                total_critic_loss = critic_loss_rl + (alpha * critic_loss_il) # if is_last_epoch else 0)
 
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
