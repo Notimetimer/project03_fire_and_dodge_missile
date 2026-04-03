@@ -2,6 +2,8 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
+# 指定断点续训的目录。如果为 None，则正常开启新训练。
+resume_target_dir = None
 mission_name = 'IL_and_PFSP_挑战_并行_分层'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
@@ -121,6 +123,8 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
+        R_cage_range = (R_cage, R_cage), # 固定场地大小
+        resume_dir=resume_target_dir, # 指定断点续训目录
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

@@ -45,8 +45,8 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None # "针对性不出界训练-run-20260402-214445"
 
-    "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
-    "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+    # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
+    # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
 
     
 
