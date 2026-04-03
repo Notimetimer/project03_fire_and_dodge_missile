@@ -1182,7 +1182,7 @@ def run_MLP_simulation(
                 ema_score = (1 - alpha_ema) * ema_score + alpha_ema * batch_score
             
             # 使用带有偏差修正的滤波值
-            filtered_score = ema_score / (1 - (1 - alpha_ema) ** ema_step)
+            filtered_score = ema_score
             logger.add("train_plus/batch_score", batch_score, total_steps)
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
 
