@@ -24,8 +24,9 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯ML
 # from Algorithms.PPOHybrid23_2 import PPOHybrid, ValueNet, PolicyNetHybrid, HybridActorWrapper # 带通道注意力
 
 # --- [修正] 在此处直接定义缺失的常量 ---
-action_cycle_multiplier = 30
 dt_maneuver = 0.2
+dt_decide = 2
+action_cycle_multiplier = int(dt_decide/dt_maneuver)
 # -----------------------------------------
 
 # --- 2. 辅助函数 ---
@@ -44,7 +45,7 @@ def create_initial_state():
 # --- 3. 主程序 ---
 if __name__ == "__main__":
 
-    experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
+    experiment_name = 'IL_and_MixedPFSP_分阶段长间隔_挑战_并行'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -142,14 +143,14 @@ if __name__ == "__main__":
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
-                        launch_missile_immediately(env, 'r', tabu=0)
+                        launch_missile_immediately(env, 'r', tabu=1)
 
                     # --- 蓝方 (规则智能体) ---
                     b_state_check = env.unscale_state(b_check_obs)
                     b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b')
+                        launch_missile_immediately(env, 'b', tabu=1)
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)

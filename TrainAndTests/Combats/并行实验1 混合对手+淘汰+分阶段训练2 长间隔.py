@@ -1,13 +1,8 @@
-# from CombatPPOWithIL3_parallel_hierarch import *
-from CombatPPOWithIL3_parallel_hierarchSIL import *
+from CombatPPOWithIL3_parallel import *
 from datetime import datetime
-from prepare_il_datas_hierarchical import run_rules
+from prepare_il_datas import run_rules
 
-# 指定断点续训的目录。如果为 None，则正常开启新训练。
-# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_PFSP_DPC_混规则对手_挑战_并行_分层-run-20260403-172852"
-resume_target_dir = None
-
-mission_name = 'IL_and_PFSP_DPC2_混规则对手_挑战_并行_分层'
+mission_name = 'IL_and_MixedPFSP_分阶段长间隔_挑战_并行'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -25,14 +20,14 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 2e-1  # 设置为0就是纯强化学习
+alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 2e4 # il_batch_size
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.2 # 0.3 
+label_smoothing=0.1 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 6
+dt_decide = 12 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -110,7 +105,6 @@ if __name__=='__main__':
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
-        use_init_data=1,  # 是否留够他模仿的次数
         init_elo_ratings = {
             'Rule_0': 1200, # debug
             "Rule_1": 1200,
@@ -121,8 +115,7 @@ if __name__=='__main__':
             },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
-        use_sil = 1,
-        sil_only_maneuver = 0, # 自模仿除了机动也模仿开火
+        use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
@@ -134,9 +127,6 @@ if __name__=='__main__':
         opp_greedy_rate = 0.5, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
-        max_il_exponent = -2.0,
-        k_shape_il = 0.0, # 常数
-        resume_dir=resume_target_dir, # 指定断点续训目录
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

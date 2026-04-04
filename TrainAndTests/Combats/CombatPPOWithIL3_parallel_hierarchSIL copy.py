@@ -515,9 +515,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             # 注意：这里调用你原文件里的 append_experience 辅助函数
                             # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
                             append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            if settings.get('collect_sil', False):
-                                append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                                append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
                         # 2.2 更新上一帧记录
                         last_decision_obs = b_obs
@@ -584,9 +583,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    if settings.get('collect_sil', False):
-                        append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                        append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
 
                 # 7. 打包结果
                 result_packet = {
@@ -661,7 +659,7 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    sigma_elo = 500,
+    sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
@@ -919,29 +917,6 @@ def run_MLP_simulation(
         workers.append(p)
         pipes.append(parent_conn)
 
-    # --- C. 启动辅助采集历史优胜智能体轨迹的额外Worker ---
-    sil_workers = []
-    sil_pipes = []
-    for i in range(2):
-        parent_conn, child_conn = mp.Pipe()
-        p = mp.Process(target=worker_process, kwargs={
-                           'rank': num_workers + i,
-                           'pipe': child_conn,
-                           'args': args,
-                           'state_dim': state_dim,
-                           'hidden_dim': hidden_dim,
-                           'action_dims_dict': action_dims_dict,
-                           'device_worker': worker_device,
-                           'dt_maneuver': dt_maneuver,
-                           'seed': seed + 5000,
-                           'opp_greedy_rate': opp_greedy_rate,
-                           'dt_move': dt_move,
-                           'no_crash': no_crash
-                       })
-        p.start()
-        sil_workers.append(p)
-        sil_pipes.append(parent_conn)
-
     # ELO 初始化
     elo_ratings = copy.deepcopy(init_elo_ratings)
     elite_elo_ratings = copy.deepcopy(elo_ratings)
@@ -1111,47 +1086,8 @@ def run_MLP_simulation(
                     'R_cage_range': R_cage_range # 将范围传给Worker
                 }
                 
-                
                 # 发送指令 pipe.send
                 pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
-
-            # 获取Elite_Elo最高的10个智能体供SIL采集使用
-            if not elite_elo_ratings:
-                top_10_elite = [k for k in elo_ratings.keys() if not k.startswith("__")]
-            else:
-                top_10_elite = sorted(elite_elo_ratings.keys(), key=lambda x: elite_elo_ratings[x], reverse=True)[:10]
-            if not top_10_elite:
-                top_10_elite = ["Rule_4"]
-
-            for rank in range(2):
-                selected_opponent_name = np.random.choice(top_10_elite)
-                opp_type = 'rule'
-                opp_data = 0
-                if "Rule" in selected_opponent_name:
-                    try: rule_num = int(selected_opponent_name.split('_')[1])
-                    except: rule_num = 0
-                    opp_data = rule_num
-                else:
-                    opp_type = 'nn'
-                    adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
-                    if os.path.exists(adv_path):
-                        opp_data = torch.load(adv_path, map_location='cpu', weights_only=1)
-                    else:
-                        opp_type = 'rule'
-                        opp_data = 0
-                
-                opp_info = (selected_opponent_name, opp_type, opp_data)
-                rb, bb = create_initial_state_worker(randomized_birth)
-                settings = {
-                    'randomized_birth': randomized_birth,
-                    'action_cycle_multiplier': action_cycle_multiplier,
-                    'weight_reward': weight_reward_0,
-                    'red_birth': rb,
-                    'blue_birth': bb,
-                    'R_cage_range': R_cage_range,
-                    'collect_sil': True
-                }
-                sil_pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
 
             # C. 等待所有 Worker 完成 (Barrier)
             batch_results = []
@@ -1161,7 +1097,6 @@ def run_MLP_simulation(
                 except EOFError: # <--- 【新增】捕获管道断开错误
                     print(f"[Error] Worker {rank} crashed silently.")
                     for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
                     raise RuntimeError(f"Worker {rank} crashed.")
                     
                 # [新增] 检查 Worker 是否传回了奔溃信息
@@ -1169,25 +1104,10 @@ def run_MLP_simulation(
                     print(f"--- Master received error from Worker {rank}, aborting. ---")
                     # 关闭所有子进程防止残留
                     for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
                     # 抛出具体的运行时错误
                     raise RuntimeError(f"Worker {rank} crashed with error:\n{res['error']}")
                     
                 batch_results.append(res)
-            
-            sil_batch_results = []
-            for rank in range(2):
-                try: 
-                    res = sil_pipes[rank].recv() 
-                except EOFError: 
-                    for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
-                    raise RuntimeError(f"SIL Worker {rank} crashed.")
-                if isinstance(res, dict) and 'error' in res:
-                    for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
-                    raise RuntimeError(f"SIL Worker {rank} crashed with error:\n{res['error']}")
-                sil_batch_results.append(res)
             
             # --- 3. 数据聚合与处理 ---
             batch_total_steps = 0
@@ -1221,7 +1141,19 @@ def run_MLP_simulation(
                 for k in transition_dict:
                     transition_dict[k].extend(l_tr[k])
                 
-                # 3.2 抛弃基础进程中的 ego_tr / enm_tr，由额外的 SIL worker 专门负责
+                # 3.2 SIL 数据收集 (需计算 return)
+                if use_sil:
+                    ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
+
+                    # if not metrics['lose']: # 赢或平，学自己
+                    #     # 计算回报 (Master 端计算)
+                    #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    #     il_transition_buffer.add(ego_tr)
+                    
+                    # if not metrics['win']: # 输或平，学对手
+                    #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                    #     il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1247,14 +1179,6 @@ def run_MLP_simulation(
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
                 print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
-
-            # 处理 SIL batch data
-            for sil_res in sil_batch_results:
-                if use_sil:
-                    enm_tr = sil_res['enm_trans']
-                    # 专门采集最优历史智能体的轨迹 (因为是最好状态的历史模型作为对手)
-                    enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                    il_transition_buffer.add(enm_tr)
 
             # 更新全局计数
             total_steps += batch_total_steps
@@ -1312,7 +1236,7 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
-                if use_sil and x_elo_diff < 0:
+                if use_sil:
                     if target_pool_keys:
                         
                         # # 变化尺度对称型函数
@@ -1509,9 +1433,9 @@ def run_MLP_simulation(
 
                     # 根据平均胜率打分动态调节对手方差(sigma_elo)
                     # 胜率=0.5时方差取500，>=0.7时方差为300，<=0.3时取1500
-                    sigma_elo = 500 # float(np.interp(np.clip(filtered_score, 0.3, 0.7), 
-                                                # [0.3, 0.5, 0.7], 
-                                                # [700, 500, 300]))
+                    sigma_elo = float(np.interp(np.clip(filtered_score, 0.3, 0.7), 
+                                                [0.3, 0.5, 0.7], 
+                                                [700, 500, 300]))
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)

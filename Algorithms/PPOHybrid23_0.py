@@ -1290,7 +1290,7 @@ class PPOHybrid:
                      beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_epochs=None,
                      sil_only_maneuver=True,
                      # 公共参数
-                     shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05, v_trace=2):
+                     shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05, v_trace=5):
         
         # =====================================================================
         # Part A: RL 数据准备
