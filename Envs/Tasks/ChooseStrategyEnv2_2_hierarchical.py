@@ -174,24 +174,24 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_shaping = 0.0    # 战术引导
 
         # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
-        # 高度限制奖励/惩罚
-        r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
-                        (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
+        # # 高度限制奖励/惩罚
+        # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+        #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
-        # 靠近边界惩罚
-        o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
-        ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
-        d_hor = ego_states["border"][0]
-        if d_hor <= 50e3:
-            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
-        else:
-            r_constraint += reward_weights['border_reward']
+        # # 靠近边界惩罚
+        # o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
+        # ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
+        # d_hor = ego_states["border"][0]
+        # if d_hor <= 50e3:
+        #     r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+        # else:
+        #     r_constraint += reward_weights['border_reward']
         
-        # 迎角惩罚
-        r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
-                                                         (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
-        # 俯仰角惩罚
-        r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
+        # # 迎角惩罚
+        # r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
+        #                                                  (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
+        # # 俯仰角惩罚
+        # r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
         # 开火代价控制
         shoot = action_shoot
@@ -278,7 +278,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if ego_win:
                 r_event += 150 # 140 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
             elif ego_lose:
-                r_event -= 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_event -= 180 # 125 + steps_left * total_shaping_sum # 旧 100 新 125
                 if self.out_range(ego) or ego.alt < self.min_alt:
                     r_event -= 50
             elif ego_draw:
