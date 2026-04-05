@@ -616,7 +616,7 @@ def run_MLP_simulation(
     k_entropy=None,
     alpha_il=1.0,
     il_batch_size=128,
-    il_batch_size2=2e4,
+    il_batch_size2=1e4,
     il_buffer_max_size=2e4,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,

@@ -1291,7 +1291,9 @@ class PPOHybrid:
                      sil_only_maneuver=True,
                      # 公共参数
                      shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05, v_trace=5):
-        
+        il_batch_size = min(il_batch_size, 1e4) # 模仿学习batch_size 限制，受显存约束
+        # 建议的RL mini-batch：128~1024
+        # 建议IL mini-batch: 越大越好，但是不能爆显存
         # =====================================================================
         # Part A: RL 数据准备
         # =====================================================================
