@@ -387,7 +387,8 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, 
+                   explore={'cont':1, 'cat':1, 'bern':1} , fire_tabu=0):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -528,7 +529,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.3 产生新动作 (No Grad)
                         with torch.no_grad():
                             # Blue Decision
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1)
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=explore)
                             b_action_label = b_action_exec['cat'][0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -536,18 +537,19 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             r_state_check = env.unscale_state(r_check_obs)
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
-                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
+                                p_random = 0.1 if explore['cat'] == 1 else 0
+                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=p_random)
                                 r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
-                                adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
+                                # adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore=explore)
                                 r_action_label = r_action_exec['cat'][0]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火
-                        b_m_id = launch_missile_immediately(env, 'b') if b_fire else None
-                        r_m_id = launch_missile_immediately(env, 'r') if r_fire else None
+                        b_m_id = launch_missile_immediately(env, 'b', tabu=fire_tabu) if b_fire else None
+                        r_m_id = launch_missile_immediately(env, 'r', tabu=fire_tabu) if r_fire else None
                         if b_m_id: m_fired += 1
                         
                         # 2.5 记录当前动作供下一帧存储
@@ -913,7 +915,9 @@ def run_MLP_simulation(
                            'seed': seed,
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
-                           'no_crash': no_crash
+                           'no_crash': no_crash,
+                           'explore': {'cont':1, 'cat':1, 'bern':1}, 
+                           'fire_tabu': 0,
                        })
         p.start()
         workers.append(p)
@@ -936,7 +940,9 @@ def run_MLP_simulation(
                            'seed': seed + 5000,
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
-                           'no_crash': no_crash
+                           'no_crash': no_crash,
+                           'explore': {'cont':1, 'cat':0, 'bern':1}, 
+                           'fire_tabu': 1,
                        })
         p.start()
         sil_workers.append(p)
