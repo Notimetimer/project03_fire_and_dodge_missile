@@ -1429,9 +1429,9 @@ def run_MLP_simulation(
 
                     # 根据平均胜率打分动态调节对手方差(sigma_elo)
                     # 胜率=0.5时方差取500，>=0.7时方差为300，<=0.3时取1500
-                    sigma_elo = float(np.interp(np.clip(filtered_score, 0.3, 0.7), 
-                                                [0.3, 0.5, 0.7], 
-                                                [700, 500, 300]))
+                    sigma_elo = 500 # float(np.interp(np.clip(filtered_score, 0.3, 0.7), 
+                                                # [0.3, 0.5, 0.7], 
+                                                # [700, 500, 300]))
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)

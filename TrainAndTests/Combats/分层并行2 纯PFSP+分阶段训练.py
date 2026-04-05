@@ -33,7 +33,7 @@ dt_decide = 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,0.5]) # 1,1,1 引导奖励很难说该不该有
+weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 4 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -56,9 +56,10 @@ if require_new_IL_data:
 
 
 # 加载数据
-original_il_transition_dict, transition_dict = load_il_and_transitions(
+original_il_transition_dict, _ = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
-    "il_transitions_combat_LR.pkl",
+    "il_transitions_top_agent_selfplay.pkl",
+    # "il_transitions_combat_LR.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
