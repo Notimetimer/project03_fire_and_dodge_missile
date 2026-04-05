@@ -4,7 +4,6 @@ from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定断点续训的目录。如果为 None，则正常开启新训练。
-# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_PFSP_DPC_混规则对手_挑战_并行_分层-run-20260403-172852"
 resume_target_dir = None
 
 mission_name = 'IL_and_PFSP_DPC2_混规则对手_挑战_并行_分层'
@@ -27,7 +26,7 @@ eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
 alpha_il = 2e-1  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
-il_batch_size2= 2e4 # il_batch_size
+il_batch_size2= 1e4 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
