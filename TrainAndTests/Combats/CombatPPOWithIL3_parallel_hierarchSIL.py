@@ -1353,7 +1353,7 @@ def run_MLP_simulation(
                     
                     # 记录动态参数到 TensorBoard
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                    logger.add("train_plus/alpha_exponent", exponent, total_steps)
+                    # logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)
