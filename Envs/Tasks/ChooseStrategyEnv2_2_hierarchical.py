@@ -214,15 +214,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if len(alive_ally_missiles) > 1:
                 r_constraint -= 10 * shoot
             
-            # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
-            if not ego.dead:
-                r_constraint += 1.0 * (pi/3 - alpha)/(pi/3)
-                r_constraint += 0.6 * (abs(AA_hor)/pi - 1)
-                r_constraint += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射
+            # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
+            # if not ego.dead:
+            #     r_constraint += 1.0 * (pi/3 - alpha)/(pi/3)
+            #     r_constraint += 0.6 * (abs(AA_hor)/pi - 1)
+            #     r_constraint += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射
                 
-                # 发射距离惩罚
-                if distance > 60e3:
-                    r_constraint += -5 * (distance - 60e3)/20e3
+                # # 发射距离惩罚
+                # if distance > 60e3:
+                #     r_constraint += -5 * (distance - 60e3)/20e3
 
         # --- 5. 引导奖励计算 (r_shaping) - 外部随步数衰减 ---
         # 为导弹提供制导

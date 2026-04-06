@@ -1253,10 +1253,18 @@ def run_MLP_simulation(
             # 处理 SIL batch data
             for sil_res in sil_batch_results:
                 if use_sil:
-                    enm_tr = sil_res['enm_trans']
-                    # 专门采集最优历史智能体的轨迹 (因为是最好状态的历史模型作为对手)
-                    enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                    il_transition_buffer.add(enm_tr)
+                    metrics = sil_res['metrics']
+                    # 如果 胜 或者 平局， 记录蓝方轨迹
+                    if metrics['win'] or metrics['draw']:
+                        ego_tr = sil_res['ego_trans']
+                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                        il_transition_buffer.add(ego_tr)
+                    # 如果 负 或者 平局， 记录红方轨迹 (红方胜)
+                    if metrics['lose'] or metrics['draw']:
+                        enm_tr = sil_res['enm_trans']
+                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                        il_transition_buffer.add(enm_tr)
+
 
             # 更新全局计数
             total_steps += batch_total_steps
