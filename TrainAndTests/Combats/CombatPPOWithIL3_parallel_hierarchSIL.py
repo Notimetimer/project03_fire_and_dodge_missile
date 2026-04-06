@@ -173,9 +173,23 @@ class IL_transition_buffer:
         self.addon_dict['obs'] = list(src.get('obs', src.get('states', [])))
         self.addon_dict['states'] = list(src.get('states', []))
         self.addon_dict['returns'] = list(src.get('returns', []))
-        self.addon_dict['actions'] = list(src.get('actions', []))
         
-        # 特殊处理：如果 returns 是 torch.tensor (如你截图中所示)，转为 list 存储
+        # 特殊处理 actions: 如果是 dict，说明被提前重构了，需要还原
+        actions = src.get('actions', [])
+        if isinstance(actions, dict):
+            cat_data = actions.get('cat', [])
+            bern_data = actions.get('bern', [])
+            n = len(cat_data) if len(cat_data) > 0 else len(bern_data)
+            self.addon_dict['actions'] = []
+            for i in range(n):
+                self.addon_dict['actions'].append({
+                    'cat': cat_data[i],
+                    'bern': bern_data[i]
+                })
+        else:
+            self.addon_dict['actions'] = list(actions)
+        
+        # 特殊处理：如果 returns 是 torch.tensor，转为 list 存储
         if torch.is_tensor(src.get('returns')):
             self.addon_dict['returns'] = src['returns'].tolist()
 
@@ -186,11 +200,24 @@ class IL_transition_buffer:
         """
         data: 包含 'obs', 'states', 'actions', 'returns' 的字典，值应为 List。
         """
-        # 1. 提取新数据并确保格式为 list (防止 data 缺失 'obs'，逻辑同 init)
+        # 1. 提取新数据并确保格式为 list
         new_obs = list(data.get('obs', data.get('states', [])))
         new_states = list(data.get('states', []))
         new_returns = list(data.get('returns', []))
-        new_actions = list(data.get('actions', []))
+        
+        actions = data.get('actions', [])
+        if isinstance(actions, dict):
+            cat_data = actions.get('cat', [])
+            bern_data = actions.get('bern', [])
+            n = len(cat_data) if len(cat_data) > 0 else len(bern_data)
+            new_actions = []
+            for i in range(n):
+                new_actions.append({
+                    'cat': cat_data[i],
+                    'bern': bern_data[i]
+                })
+        else:
+            new_actions = list(actions)
         
         # 处理可能传入的 tensor
         if torch.is_tensor(data.get('returns')):
