@@ -726,7 +726,7 @@ def run_MLP_simulation(
     if resume_dir is not None and os.path.exists(resume_dir):
         log_dir = resume_dir
         print(f"Resuming from directory: {log_dir}")
-        IL_epoches = 0  # 断点续训跳过预训练
+        IL_epoches = 0  # 中断续训跳过预训练
     else:
         log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
         os.makedirs(log_dir, exist_ok=True)
@@ -738,7 +738,7 @@ def run_MLP_simulation(
     save_meta_once(actor_meta_path, student_agent.actor.state_dict())
     save_meta_once(critic_meta_path, student_agent.critic.state_dict())
 
-    # 断点续训
+    # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
         actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
         if len(actor_files) > 0:

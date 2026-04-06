@@ -3,7 +3,7 @@ from CombatPPOWithIL3_parallel_hierarchSIL import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-# 指定断点续训的目录。如果为 None，则正常开启新训练。
+# 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
 mission_name = 'IL_and_PFSP_DPC2_混规则对手_挑战_并行_分层'
@@ -135,7 +135,7 @@ if __name__=='__main__':
         device = device,
         max_il_exponent = -2.0,
         k_shape_il = 0.0, # 常数
-        resume_dir=resume_target_dir, # 指定断点续训目录
+        resume_dir=resume_target_dir, # 指定中断续训目录
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

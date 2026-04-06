@@ -2,7 +2,7 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-# 指定断点续训的目录。如果为 None，则正常开启新训练。
+# 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260402-104852" 
 
@@ -133,7 +133,7 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
-        resume_dir=resume_target_dir, # 指定断点续训目录
+        resume_dir=resume_target_dir, # 指定中断续训目录
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
