@@ -126,6 +126,7 @@ if __name__=='__main__':
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
         resume_dir=resume_target_dir, # 指定断点续训目录
+        init_il_data = original_il_transition_dict, # 传入模仿数据集
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
