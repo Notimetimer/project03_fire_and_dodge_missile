@@ -1583,3 +1583,7 @@ class PPOHybrid:
         
         check_weights_bias_nan(self.actor, "actor", "mixed_update后")
         check_weights_bias_nan(self.critic, "critic", "mixed_update后")
+        
+        # [新增] 清理显存缓存，避免随着仿真进行越来越大
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
