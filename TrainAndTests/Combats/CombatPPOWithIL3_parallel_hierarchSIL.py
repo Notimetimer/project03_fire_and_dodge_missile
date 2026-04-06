@@ -1318,7 +1318,7 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
-                if use_sil and x_elo_diff < 0:
+                if use_sil and x_elo_diff < 0 and total_steps >= WARM_UP_STEPS:
                     # if target_pool_keys:
                         
                     #     # # 变化尺度对称型函数
