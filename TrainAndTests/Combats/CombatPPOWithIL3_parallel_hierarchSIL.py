@@ -1319,36 +1319,37 @@ def run_MLP_simulation(
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
                 if use_sil and x_elo_diff < 0:
-                    if target_pool_keys:
+                    # if target_pool_keys:
                         
-                        # # 变化尺度对称型函数
-                        # a_p = -8
-                        # k_p = 0.006
-                        # mid = log10(alpha_il)
-                        # b_p = 2 * mid - a_p
-                        # scale = (b_p - a_p) / 2.0      # 3.0
-                        # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                        # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                        # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                        # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                        # exponent = min(exponent, -2)
+                    #     # # 变化尺度对称型函数
+                    #     # a_p = -8
+                    #     # k_p = 0.006
+                    #     # mid = log10(alpha_il)
+                    #     # b_p = 2 * mid - a_p
+                    #     # scale = (b_p - a_p) / 2.0      # 3.0
+                    #     # # 计算指数部分: exponent = mid - scale * tanh(k * x)
+                    #     # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
+                    #     # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
+                    #     # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
+                    #     # exponent = min(exponent, -2)
                         
-                        # # 非对称函数
-                        # --- 自定义参数配置 ---
-                        M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                        b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
+                    #     # # 非对称函数
+                    #     # --- 自定义参数配置 ---
+                    #     M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
+                    #     b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
                                                 
-                        # 原·根据elo插值缩放指数
-                        # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                        # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-                        # 现·根据训练步数逐渐缩小指数
-                        k_shape = 4/4e6
-                        exponent = np.clip( b - k_shape * total_steps, -20, M )
+                    #     # 原·根据elo插值缩放指数
+                    #     # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
+                    #     # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
+                    #     # 现·根据训练步数逐渐缩小指数
+                    #     k_shape = 4/4e6
+                    #     exponent = np.clip( b - k_shape * total_steps, -20, M )
                         
-                        # 得到最终 alpha_il (10 的 exponent 次方)
-                        dynamic_alpha_il = 10 ** max(exponent, -20)
-                    else:
-                        dynamic_alpha_il = alpha_il
+                    #     # 得到最终 alpha_il (10 的 exponent 次方)
+                    #     dynamic_alpha_il = 10 ** max(exponent, -20)
+                    # else:
+                    #     dynamic_alpha_il = alpha_il
+                    dynamic_alpha_il = alpha_il
                     
                     # 记录动态参数到 TensorBoard
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
