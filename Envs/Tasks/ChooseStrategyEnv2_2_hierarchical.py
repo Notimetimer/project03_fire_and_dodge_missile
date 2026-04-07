@@ -97,35 +97,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         elif done: 
             ego_draw = 1
 
-        # # --原有判定法--
-        # if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
-        #     ego_win = 1
-        #     done = 1
-        # # 如果友方和友方的所有导弹都没了，且敌方飞机还在，判定为负
-        # elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
-        #     ego_lose = 1
-        #     done = 1
-            
-        # # 如果友方和敌方打光导弹且都存活，或双方飞机都没了，判定为平
-        # elif ego.ammo == 0 and enm.ammo == 0 and (not ego.dead) and (not enm.dead) or \
-        #         (ego.dead and enm.dead):
-        #     ego_draw = 1
-        #     done = 1
-        # else:
-        #     done = 0
-        # if self.t > self.game_time_limit:
-        #     done = 1
-        #     # 如果超时，我方打光导弹，导弹全自爆，对手导弹还有剩，且存活，判定为负
-        #     if ego.ammo + len(alive_ally_missiles) == 0 and \
-        #         enm.ammo + len(alive_enm_missiles) > 0 and not enm.dead:
-        #         ego_lose = 1
-        #     # 如果超时，对手打光导弹，导弹全自爆，我方导弹还有剩，且存活，判定为胜
-        #     elif enm.ammo + len(alive_enm_missiles) == 0 and \
-        #         ego.ammo + len(alive_ally_missiles) > 0 and not ego.dead:
-        #         ego_win = 1                
-        #     # 如果超时，双方均未打光导弹/仍有导弹在空中飞，且双方均存活, 或者双方都死，判定为平
-        #     else:
-        #         ego_draw = 1
 
         # 回合的胜负取决于ego_side
         if ego.side == self.ego_side:
@@ -174,24 +145,24 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_shaping = 0.0    # 战术引导
 
         # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
-        # # 高度限制奖励/惩罚
-        # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
-        #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
+        # 高度限制奖励/惩罚
+        r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+                        (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
-        # # 靠近边界惩罚
-        # o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
-        # ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
-        # d_hor = ego_states["border"][0]
-        # if d_hor <= 50e3:
-        #     r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
-        # else:
-        #     r_constraint += reward_weights['border_reward']
+        # 靠近边界惩罚
+        o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
+        ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
+        d_hor = ego_states["border"][0]
+        if d_hor <= 50e3:
+            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+        else:
+            r_constraint += reward_weights['border_reward']
         
-        # # 迎角惩罚
-        # r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
-        #                                                  (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
-        # # 俯仰角惩罚
-        # r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
+        # 迎角惩罚
+        r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
+                                                         (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
+        # 俯仰角惩罚
+        r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
         # 开火代价控制
         shoot = action_shoot
@@ -215,14 +186,14 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 r_constraint -= 10 * shoot
             
             # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
-            # if not ego.dead:
-            #     r_constraint += 1.0 * (pi/3 - alpha)/(pi/3)
-            #     r_constraint += 0.6 * (abs(AA_hor)/pi - 1)
-            #     r_constraint += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射
+            if not ego.dead:
+                r_constraint += 1.0 * (pi/3 - alpha)/(pi/3)
+                r_constraint += 0.6 * (abs(AA_hor)/pi - 1)
+                r_constraint += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射
                 
-                # # 发射距离惩罚
-                # if distance > 60e3:
-                #     r_constraint += -5 * (distance - 60e3)/20e3
+                # 发射距离惩罚
+                if distance > 60e3:
+                    r_constraint += -5 * (distance - 60e3)/20e3
 
         # --- 5. 引导奖励计算 (r_shaping) - 外部随步数衰减 ---
         # 为导弹提供制导

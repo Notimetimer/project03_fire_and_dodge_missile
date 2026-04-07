@@ -53,7 +53,7 @@ def test_worker(model_state_dict, rule_num,
     actor = HybridActorWrapper(net, action_dims_dict, None, device).to(device)
     actor.load_state_dict(model_state_dict)
     actor.eval() # 设置为评估模式
-    action_cycle = action_cycle_multiplier
+    action_cycle = 30 # action_cycle_multiplier 锁死测试回合的动作间隔，便于做课程学习
     
     # 3. 运行对战逻辑
     result = 0
