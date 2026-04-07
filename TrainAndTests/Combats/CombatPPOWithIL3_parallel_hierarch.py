@@ -292,7 +292,7 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
     # 1. 处理 PFSP 系列 (高斯核采样)
     if SP_type.startswith('PFSP'):
         if SP_type == 'PFSP_challenge':
-            actual_target = np.max(elos)
+            actual_target = min(np.max(elos), float(target_elo) + 300)
         elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
             actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
         else: # 默认通用的 'PFSP' 逻辑
