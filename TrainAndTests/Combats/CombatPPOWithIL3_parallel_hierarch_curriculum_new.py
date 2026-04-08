@@ -972,7 +972,8 @@ def run_MLP_simulation(
         while total_steps < current_max_steps:
             action_cycle_multiplier = int(max(30, 60 - 30 * (total_steps / 5e6)))
             student_agent.gamma = gamma ** (30.0 / action_cycle_multiplier)
-            student_agent.lmbda = lmbda ** (30.0 / action_cycle_multiplier)
+            student_agent.lmbda = lmbda ** (30.0 / action_cycle_multiplier) # 缩放技巧1 按时间缩放lambda
+            # student_agent.lmbda = lmbda * gamma ** (1-action_cycle_multiplier/30.0) # 缩放技巧2 按步数缩放lambda
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
             # --- 1. 并行测试触发逻辑 (Async) ---
