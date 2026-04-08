@@ -6,7 +6,7 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260402-104852" 
 
-mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
+mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s'
 
 "IL_and_MixedPFSP_分阶段_挑战_并行_分层"
 
@@ -30,11 +30,11 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 6
+dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,0.5]) # 1,1,1 引导奖励很难说该不该有
+weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 4 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

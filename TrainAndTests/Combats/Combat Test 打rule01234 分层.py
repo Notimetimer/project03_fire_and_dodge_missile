@@ -22,7 +22,7 @@ from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediate
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
 
 # --- [修正] 在此处直接定义缺失的常量 ---
-action_cycle_multiplier = 30
+action_cycle_multiplier = 10
 dt_maneuver = 0.2
 # -----------------------------------------
 
@@ -111,7 +111,7 @@ if __name__ == "__main__":
         env.visualize_cage()
 
     env.shielded = 1
-    env.no_out = 1 # 强制防止出界，训练的时候为0，测试的时候为1
+    env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
     rule_opponents = [0, 1, 2, 3, 4]
@@ -155,14 +155,14 @@ if __name__ == "__main__":
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
-                        launch_missile_immediately(env, 'r', tabu=1)
+                        launch_missile_immediately(env, 'r', tabu=0)
 
                     # --- 蓝方 (规则智能体) ---
                     b_state_check = env.unscale_state(b_check_obs)
                     b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b', tabu=1)
+                        launch_missile_immediately(env, 'b', tabu=0)
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
