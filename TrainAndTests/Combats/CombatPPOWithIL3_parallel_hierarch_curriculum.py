@@ -958,7 +958,7 @@ def run_MLP_simulation(
     # =========================================================
     while True:
         while total_steps < current_max_steps:
-            action_cycle_multiplier = int(max(30, 60 - 30 * (total_steps / 5e6)))
+            action_cycle_multiplier = int(max(10, 40 - 10 * (total_steps / 8e6))) # 8s 缩小到2s
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
             # --- 1. 并行测试触发逻辑 (Async) ---
