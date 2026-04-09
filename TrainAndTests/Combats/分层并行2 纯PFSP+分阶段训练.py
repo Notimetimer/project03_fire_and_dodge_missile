@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-mission_name = 'IL_and_PFSP_挑战_并行_分层'
+mission_name = 'IL_and_PFSP_挑战_并行_分层2s'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
