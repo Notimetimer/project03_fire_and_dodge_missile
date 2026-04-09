@@ -1,14 +1,22 @@
-from CombatPPOWithIL3_parallel_hierarch import *
+# from CombatPPOWithIL3_parallel_hierarch_curriculum import *
+from CombatPPOWithIL3_parallel_hierarch_curriculum_new import *
+
+# CombatPPOWithIL3_parallel_hierarch_curriculum # 无gamma 和 奖励函数缩放
+# CombatPPOWithIL3_parallel_hierarch_curriculum_new 有gamma 和 奖励函数缩放
+
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
+# 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s'
+mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s_curr3'
 
-# IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
-# IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
-# IL_and_PFSP_分阶段_混规则对手_平衡对手_无淘汰   PFSP_balanced
+# 不带new的为curr1，不缩放奖励函数、gamma或者lambda
+# 带new的为curr2，缩放密集奖励、gamma和lambda
+# 带new但是只修改gamma不修改lambda的为curr3
+# 带new但是labmda和gamma都不修改的为curr4
+
 
 
 # 超参数
@@ -29,7 +37,7 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 2 # 6
+dt_decide = 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -56,10 +64,10 @@ if require_new_IL_data:
 
 
 # 加载数据
-original_il_transition_dict, transition_dict = load_il_and_transitions(
+original_il_transition_dict, _ = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
-    "il_transitions_combat_LR.pkl",
     # "il_transitions_top_agent_selfplay.pkl",
+    "il_transitions_combat_LR.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
@@ -74,8 +82,6 @@ if original_il_transition_dict is not None:
 
 if __name__=='__main__':
     print('Hello')
-    
-    
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
