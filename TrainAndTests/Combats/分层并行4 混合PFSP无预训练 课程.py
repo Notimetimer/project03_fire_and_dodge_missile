@@ -1,5 +1,5 @@
-# from CombatPPOWithIL3_parallel_hierarch_curriculum import *
-from CombatPPOWithIL3_parallel_hierarch_curriculum_new import *
+from CombatPPOWithIL3_parallel_hierarch_curriculum import *
+# from CombatPPOWithIL3_parallel_hierarch_curriculum_new import *
 
 # CombatPPOWithIL3_parallel_hierarch_curriculum # 无gamma 和 奖励函数缩放
 # CombatPPOWithIL3_parallel_hierarch_curriculum_new 有gamma 和 奖励函数缩放
@@ -10,7 +10,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s_curr3'
+mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s_curr1'
 
 # 不带new的为curr1，不缩放奖励函数、gamma或者lambda
 # 带new的为curr2，缩放密集奖励、gamma和lambda
