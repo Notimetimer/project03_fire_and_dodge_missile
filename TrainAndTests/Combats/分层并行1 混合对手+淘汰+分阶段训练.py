@@ -60,6 +60,7 @@ if require_new_IL_data:
 original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
     "il_transitions_combat_LR.pkl",
+    # "il_transitions_top_agent_selfplay.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
@@ -134,6 +135,7 @@ if __name__=='__main__':
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
         resume_dir=resume_target_dir, # 指定中断续训目录
+        init_il_data = original_il_transition_dict, # 传入模仿数据集
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

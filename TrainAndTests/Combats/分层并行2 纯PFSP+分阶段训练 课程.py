@@ -1,9 +1,15 @@
-from CombatPPOWithIL3_parallel_hierarch_curriculum import *
+# from CombatPPOWithIL3_parallel_hierarch_curriculum import *
+from CombatPPOWithIL3_parallel_hierarch_curriculum_new import *
+
+# CombatPPOWithIL3_parallel_hierarch_curriculum # 无gamma 和 奖励函数缩放
+# CombatPPOWithIL3_parallel_hierarch_curriculum_new 有gamma 和 奖励函数缩放
+
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
-resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_PFSP_挑战_并行_分层_curr-run-20260407-185722"
+resume_target_dir = None
+# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层_curr-run-20260407-185719" 
 
 mission_name = 'IL_and_PFSP_挑战_并行_分层_curr'
 
@@ -59,8 +65,8 @@ if require_new_IL_data:
 # 加载数据
 original_il_transition_dict, _ = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
-    "il_transitions_top_agent_selfplay.pkl",
-    # "il_transitions_combat_LR.pkl",
+    # "il_transitions_top_agent_selfplay.pkl",
+    "il_transitions_combat_LR.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
