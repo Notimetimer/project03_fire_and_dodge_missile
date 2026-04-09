@@ -17,6 +17,8 @@ mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s_curr1'
 # 带new但是只修改gamma不修改lambda的为curr3
 # 带new但是labmda和gamma都不修改的为curr4
 
+# curr1 ? curr3 > curr2
+# no_curr > curr3
 
 
 # 超参数

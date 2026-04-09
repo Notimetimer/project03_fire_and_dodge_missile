@@ -18,7 +18,7 @@ mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层_curr3'
 # 带new但是只修改gamma不修改lambda的为curr3
 # 带new但是labmda和gamma都不修改的为curr4
 
-
+# curr1 ? curr3 > curr2
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3

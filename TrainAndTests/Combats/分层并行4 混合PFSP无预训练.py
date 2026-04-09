@@ -6,9 +6,8 @@ resume_target_dir = None
 
 mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s'
 
-# IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
-# IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
-# IL_and_PFSP_分阶段_混规则对手_平衡对手_无淘汰   PFSP_balanced
+# NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s
+# NoILPFSP_分阶段_挑战_并行_分层2s
 
 
 # 超参数
@@ -117,7 +116,8 @@ if __name__=='__main__':
             'Rule_3': 1200,
             'Rule_4': 1200,
             # 'Rule_5': 1200,
-            },
+            }, # 
+        # init_elo_ratings = {}, # 纯自博弈
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
