@@ -8,6 +8,7 @@ import re
 from math import pi
 import time
 import datetime
+import matplotlib.pyplot as plt
 
 # # --- 1. 项目路径和模块导入 ---
 
@@ -44,7 +45,12 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230"
+
+    # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
+    # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
+
+    
 
     # 次要
     experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
@@ -58,7 +64,7 @@ if __name__ == "__main__":
     blue_agent_id = 200
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=40e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -113,7 +119,7 @@ if __name__ == "__main__":
         env.visualize_cage()
 
     env.shielded = 1
-    env.no_out = 1 # 强制防止出界，训练的时候为0，测试的时候为1
+    env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
     t_bias = 0
@@ -133,6 +139,13 @@ if __name__ == "__main__":
             last_b_action_label = 0
             r_action_label = 0
             b_action_label = 0
+
+            # --- 初始化数据记录 ---
+            history = {
+                'time': [],
+                'r_ny': [], 'r_alpha': [],
+                'b_ny': [], 'b_alpha': []
+            }
 
             # 回合仿真循环
             for count in range(round(env_args.max_episode_len / dt_maneuver)):

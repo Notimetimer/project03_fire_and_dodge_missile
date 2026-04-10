@@ -8,6 +8,7 @@ import re
 from math import pi
 import time
 import datetime
+import pandas as pd
 import matplotlib.pyplot as plt
 
 # # --- 1. 项目路径和模块导入 ---
@@ -115,7 +116,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0, 1, 2, 3, 4]
+    rule_opponents = [4]
     t_bias = 0
 
     try:
@@ -137,8 +138,8 @@ if __name__ == "__main__":
             # --- 初始化数据记录 ---
             history = {
                 'time': [],
-                'r_ny': [], 'r_alpha': [],
-                'b_ny': [], 'b_alpha': []
+                'r_ny': [], 'r_alpha': [], 'r_alt': [],
+                'b_ny': [], 'b_alpha': [], 'b_alt': [],
             }
 
             # 回合仿真循环
@@ -180,11 +181,13 @@ if __name__ == "__main__":
                 done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
 
                 # --- 记录数据 ---
-                history['time'].append(count * dt_maneuver)
+                history['time'].append(count * action_cycle_multiplier * dt_maneuver)
                 history['r_ny'].append(env.RUAV.Ny)
                 history['r_alpha'].append(env.RUAV.alpha_air * 180 / np.pi)
+                history['r_alt'].append(env.RUAV.alt)
                 history['b_ny'].append(env.BUAV.Ny)
                 history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
+                history['b_alt'].append(env.BUAV.alt)
 
                 env.render(t_bias=t_bias)
 
@@ -197,6 +200,16 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             
+            # --- 保存作战记录到 CSV ---
+            try:
+                df_history = pd.DataFrame(history)
+                save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+                save_path = os.path.join(project_root, "logs", save_name)
+                df_history.to_csv(save_path, index=False)
+                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            except Exception as e:
+                print(f"Failed to save CSV: {e}")
+
             # --- 绘制曲线 ---
             plt.figure(figsize=(10, 6))
             plt.subplot(2, 1, 1)
