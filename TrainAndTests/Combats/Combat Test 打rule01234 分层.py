@@ -8,6 +8,7 @@ import re
 from math import pi
 import time
 import datetime
+import matplotlib.pyplot as plt
 
 # # --- 1. 项目路径和模块导入 ---
 
@@ -23,7 +24,7 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯ML
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
-dt_maneuver = 0.2
+dt_maneuver = 0.02  # 0.2
 # -----------------------------------------
 
 # --- 2. 辅助函数 ---
@@ -133,6 +134,13 @@ if __name__ == "__main__":
             r_action_label = 0
             b_action_label = 0
 
+            # --- 初始化数据记录 ---
+            history = {
+                'time': [],
+                'r_ny': [], 'r_alpha': [],
+                'b_ny': [], 'b_alpha': []
+            }
+
             # 回合仿真循环
             for count in range(round(env_args.max_episode_len / dt_maneuver)):
                 if not env.running or done:
@@ -170,6 +178,14 @@ if __name__ == "__main__":
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
                 done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
+
+                # --- 记录数据 ---
+                history['time'].append(count * dt_maneuver)
+                history['r_ny'].append(env.RUAV.Ny)
+                history['r_alpha'].append(env.RUAV.alpha_air * 180 / np.pi)
+                history['b_ny'].append(env.BUAV.Ny)
+                history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
+
                 env.render(t_bias=t_bias)
 
             # 报告结果
@@ -180,6 +196,28 @@ if __name__ == "__main__":
             
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
+            
+            # --- 绘制曲线 ---
+            plt.figure(figsize=(10, 6))
+            plt.subplot(2, 1, 1)
+            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
+            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
+            plt.ylabel('Ny (g)')
+            plt.title(f'Test vs Rule {rule_num}: Normal Load Factor (Ny)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(2, 1, 2)
+            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
+            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
+            plt.ylabel('Alpha (deg)')
+            plt.xlabel('Time (s)')
+            plt.title('Angle of Attack (Alpha)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
             
             # input("Press Enter to continue to the next test...")
 
