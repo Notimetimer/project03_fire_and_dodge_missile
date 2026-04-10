@@ -111,15 +111,15 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
     if name_list is not None and name_list_show is not None:
         # 如果未传入，则使用默认的列名、标题和线型
         if win_rate_cols is None:
-            win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2', 'VsRule3', 'VsRule4']
+            win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2'] # , 'VsRule3', 'VsRule4']
         if display_titles is None:
-            display_titles = ['Rule1', 'Rule2', 'Rule3', 'Rule4', 'Rule5']
+            display_titles = ['Rule1', 'Rule2', 'Rule3'] # , 'Rule4', 'Rule5']
         if linestyles is None:
             # 索引对应：0, 1, 2(点线), 3, 4(点划线), 5(点划线)
             linestyles = ['-', '-', ':', '-', '-.', '-.']
         
         n_cols = len(win_rate_cols)
-        fig2, axes2 = plt.subplots(1, n_cols, figsize=(2.8 * n_cols, 5.5))
+        fig2, axes2 = plt.subplots(1, n_cols, figsize=(4.0 * n_cols, 4.5))
         fig2.suptitle("Win Rate Against All Rules", fontsize=16, y=0.81)
         
         if n_cols == 1:
@@ -130,7 +130,8 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
         for i, (col, display_title) in enumerate(zip(win_rate_cols, display_titles)):
             ax = axes2[i]
             
-            # 由于可能出现数据缺失的情况，我们需要记录有没有画线
+            # 记录当前子图所有平滑曲线的最小值和最大值
+            y_min_total, y_max_total = float('inf'), float('-inf')
             has_plotted = False
             for j, (name, show_name) in enumerate(zip(name_list, name_list_show)):
                 win_file = os.path.join(data_dir, f"{name}_win_rate.csv")
@@ -140,6 +141,9 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
                         raw_data = df[col]
                         smoothed_data = moving_average(raw_data, 101)
                         
+                        y_min_total = min(y_min_total, np.nanmin(smoothed_data))
+                        y_max_total = max(y_max_total, np.nanmax(smoothed_data))
+
                         # 获取当前实验对应的线型
                         ls = linestyles[j % len(linestyles)]
                         # 根据线型动态调整粗细：点线必须加粗到1.7，否则用1.4
@@ -152,7 +156,14 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
                 except Exception as e:
                     pass
                 
-            ax.set_ylim(-0.05, 1.05)
+            if has_plotted and y_min_total < y_max_total:
+                pad = (y_max_total - y_min_total) * 0.05
+                ax.set_ylim(y_min_total - pad, y_max_total + pad)
+            elif has_plotted:
+                ax.set_ylim(y_min_total - 0.05, y_min_total + 0.05)
+            else:
+                ax.set_ylim(-0.05, 1.05)
+
             ax.set_xlabel('Step')
             ax.set_ylabel('')
             # 显示对应映射的新名称，而不是原CSV列名
@@ -169,10 +180,10 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
         # Fallback for single experiment
         win_rate_cols = [col for col in df_win.columns if col.startswith('VsRule')]
         if not win_rate_cols:
-            win_rate_cols = ['VsRule1', 'VsRule2', 'VsRule3', 'VsRule4', 'VsRule5']
+            win_rate_cols = ['VsRule1', 'VsRule2', 'VsRule3'] # , 'VsRule4', 'VsRule5']
         
         n_cols = len(win_rate_cols)
-        fig2, axes2 = plt.subplots(1, n_cols, figsize=(2.2 * n_cols, 5.5))
+        fig2, axes2 = plt.subplots(1, n_cols, figsize=(4.0 * n_cols, 4.0))
         fig2.suptitle("Win Rate Against All Rules", fontsize=16, y=0.81)
         
         if n_cols == 1:
@@ -186,7 +197,13 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
                 
                 sns.lineplot(x=df_win['Step'], y=raw_data, ax=ax, color='tab:red', alpha=0.06) # alpha=0.05
                 sns.lineplot(x=df_win['Step'], y=smoothed_data, ax=ax, label=col, color='tab:red', linewidth=1.6)
-                ax.set_ylim(-0.05, 1.05)
+                
+                y_min, y_max = np.nanmin(smoothed_data), np.nanmax(smoothed_data)
+                if y_min < y_max:
+                    pad = (y_max - y_min) * 0.05
+                    ax.set_ylim(y_min - pad, y_max + pad)
+                else:
+                    ax.set_ylim(y_min - 0.05, y_min + 0.05)
             else:
                 ax.text(0.5, 0.5, f"{col} Data Missing", ha='center', va='center')
                 
@@ -228,6 +245,8 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
                 
                 # 为不同的 Rule 设置调色盘
                 palette4 = sns.color_palette("tab10", len(win_rate_cols))
+                # 计算 Figure 4 的 y 轴范围 (基于所有平滑之后的曲线)
+                y_min4, y_max4 = float('inf'), float('-inf')
                 has_plotted4 = False
                 
                 for k, (col, display_title) in enumerate(zip(win_rate_cols, display_titles)):
@@ -235,6 +254,8 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
                         raw_data = df_win1[col]
                         # 降低平滑度，单独对 Figure 4 使用较弱的平滑 (比如 31 或 41)
                         smoothed_data = moving_average(raw_data, 41)
+                        y_min4 = min(y_min4, np.nanmin(smoothed_data))
+                        y_max4 = max(y_max4, np.nanmax(smoothed_data))
                         
                         sns.lineplot(x=df_win1['Step'], y=raw_data, ax=ax4, color=palette4[k], alpha=0.1)
                         sns.lineplot(x=df_win1['Step'], y=smoothed_data, ax=ax4, label=display_title, 
@@ -242,12 +263,17 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
                         has_plotted4 = True
                 
                 # 画出 0, 0.5 和 1 的黑色虚线
-                ax4.axhline(0, color='black', linestyle='--', linewidth=1.5, alpha=0.6)
-                ax4.axhline(0.5, color='black', linestyle='--', linewidth=1.5, alpha=0.6)
-                ax4.axhline(1, color='black', linestyle='--', linewidth=1.5, alpha=0.6)
+                ax4.axhline(0, color='black', linestyle='--', linewidth=1.5, alpha=0.3)
+                ax4.axhline(0.5, color='black', linestyle='--', linewidth=1.5, alpha=0.3)
+                ax4.axhline(1, color='black', linestyle='--', linewidth=1.5, alpha=0.3)
 
                 if has_plotted4:
-                    ax4.set_ylim(-0.05, 1.05)
+                    if y_min4 < y_max4:
+                        pad4 = (y_max4 - y_min4) * 0.05
+                        ax4.set_ylim(y_min4 - pad4, y_max4 + pad4)
+                    else:
+                        ax4.set_ylim(y_min4 - 0.05, y_min4 + 0.05)
+                        
                     ax4.set_xlabel('Step', fontweight='bold')
                     ax4.set_ylabel('Win Rate', fontweight='bold')
                     # ax4.set_title(f"Win Rate of {first_algo_name} Against All Rules", fontweight='bold')
@@ -354,8 +380,8 @@ if __name__ == "__main__":
         6,
     ]
     
-    win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2', 'VsRule3', 'VsRule4']
-    display_titles = ['vs Rule1', 'vs Rule2', 'vs Rule3', 'vs Rule4', 'vs Rule5']
+    win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2'] # , 'VsRule3', 'VsRule4']
+    display_titles = ['vs Rule1', 'vs Rule2', 'vs Rule3'] # , 'vs Rule4', 'vs Rule5']
     linestyles = ['-', '-', '--', '-', '--', ':']
     
     plot_training_curves(DATA_DIRECTORY, EXPERIMENT_NAME, name_list, name_list_show, 
