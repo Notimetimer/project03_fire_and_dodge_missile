@@ -173,23 +173,9 @@ class IL_transition_buffer:
         self.addon_dict['obs'] = list(src.get('obs', src.get('states', [])))
         self.addon_dict['states'] = list(src.get('states', []))
         self.addon_dict['returns'] = list(src.get('returns', []))
+        self.addon_dict['actions'] = list(src.get('actions', []))
         
-        # 特殊处理 actions: 如果是 dict，说明被提前重构了，需要还原
-        actions = src.get('actions', [])
-        if isinstance(actions, dict):
-            cat_data = actions.get('cat', [])
-            bern_data = actions.get('bern', [])
-            n = len(cat_data) if len(cat_data) > 0 else len(bern_data)
-            self.addon_dict['actions'] = []
-            for i in range(n):
-                self.addon_dict['actions'].append({
-                    'cat': cat_data[i],
-                    'bern': bern_data[i]
-                })
-        else:
-            self.addon_dict['actions'] = list(actions)
-        
-        # 特殊处理：如果 returns 是 torch.tensor，转为 list 存储
+        # 特殊处理：如果 returns 是 torch.tensor (如你截图中所示)，转为 list 存储
         if torch.is_tensor(src.get('returns')):
             self.addon_dict['returns'] = src['returns'].tolist()
 
@@ -200,24 +186,11 @@ class IL_transition_buffer:
         """
         data: 包含 'obs', 'states', 'actions', 'returns' 的字典，值应为 List。
         """
-        # 1. 提取新数据并确保格式为 list
+        # 1. 提取新数据并确保格式为 list (防止 data 缺失 'obs'，逻辑同 init)
         new_obs = list(data.get('obs', data.get('states', [])))
         new_states = list(data.get('states', []))
         new_returns = list(data.get('returns', []))
-        
-        actions = data.get('actions', [])
-        if isinstance(actions, dict):
-            cat_data = actions.get('cat', [])
-            bern_data = actions.get('bern', [])
-            n = len(cat_data) if len(cat_data) > 0 else len(bern_data)
-            new_actions = []
-            for i in range(n):
-                new_actions.append({
-                    'cat': cat_data[i],
-                    'bern': bern_data[i]
-                })
-        else:
-            new_actions = list(actions)
+        new_actions = list(data.get('actions', []))
         
         # 处理可能传入的 tensor
         if torch.is_tensor(data.get('returns')):
@@ -319,7 +292,7 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
     # 1. 处理 PFSP 系列 (高斯核采样)
     if SP_type.startswith('PFSP'):
         if SP_type == 'PFSP_challenge':
-            actual_target = np.max(elos)
+            actual_target = min(np.max(elos), float(target_elo) + 300)
         elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
             actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
         else: # 默认通用的 'PFSP' 逻辑
@@ -399,8 +372,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, 
-                   explore={'cont':1, 'cat':1, 'bern':1} , fire_tabu=0):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -528,9 +500,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             # 注意：这里调用你原文件里的 append_experience 辅助函数
                             # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
                             append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            if settings.get('collect_sil', False):
-                                append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                                append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
                         # 2.2 更新上一帧记录
                         last_decision_obs = b_obs
@@ -541,7 +512,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.3 产生新动作 (No Grad)
                         with torch.no_grad():
                             # Blue Decision
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=explore)
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1)
                             b_action_label = b_action_exec['cat'][0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -549,19 +520,18 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             r_state_check = env.unscale_state(r_check_obs)
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
-                                p_random = 0.1 if explore['cat'] == 1 else 0
-                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=p_random)
+                                r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
                                 r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
-                                # adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore=explore)
+                                adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
                                 r_action_label = r_action_exec['cat'][0]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火
-                        b_m_id = launch_missile_immediately(env, 'b', tabu=fire_tabu) if b_fire else None
-                        r_m_id = launch_missile_immediately(env, 'r', tabu=fire_tabu) if r_fire else None
+                        b_m_id = launch_missile_immediately(env, 'b') if b_fire else None
+                        r_m_id = launch_missile_immediately(env, 'r') if r_fire else None
                         if b_m_id: m_fired += 1
                         
                         # 2.5 记录当前动作供下一帧存储
@@ -598,9 +568,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    if settings.get('collect_sil', False):
-                        append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                        append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
 
                 # 7. 打包结果
                 result_packet = {
@@ -675,7 +644,7 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    sigma_elo = 500,
+    sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
@@ -806,6 +775,20 @@ def run_MLP_simulation(
                     print("Loaded optimizer states.")
                 except Exception as e:
                     print(f"Failed to load optimizers: {e}")
+
+            # === 自动加载 il_transition_buffer ===
+            il_buffer_path = os.path.join(log_dir, "il_transition_buffer.pkl")
+            if os.path.exists(il_buffer_path):
+                with open(il_buffer_path, "rb") as f:
+                    loaded_buffer = pickle.load(f)
+                # 保证类型为 IL_transition_buffer
+                if isinstance(loaded_buffer, IL_transition_buffer):
+                    il_transition_buffer = loaded_buffer
+                elif isinstance(loaded_buffer, dict):
+                    il_transition_buffer = IL_transition_buffer(loaded_buffer, max_size=il_buffer_max_size)
+                else:
+                    raise TypeError("Loaded il_transition_buffer is not a recognized type.")
+                print(f"Loaded il_transition_buffer from: {il_buffer_path}")
     
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
@@ -938,38 +921,11 @@ def run_MLP_simulation(
                            'seed': seed,
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
-                           'no_crash': no_crash,
-                           'explore': {'cont':1, 'cat':1, 'bern':1}, 
-                           'fire_tabu': 0,
+                           'no_crash': no_crash
                        })
         p.start()
         workers.append(p)
         pipes.append(parent_conn)
-
-    # --- C. 启动辅助采集历史优胜智能体轨迹的额外Worker ---
-    sil_workers = []
-    sil_pipes = []
-    for i in range(2):
-        parent_conn, child_conn = mp.Pipe()
-        p = mp.Process(target=worker_process, kwargs={
-                           'rank': num_workers + i,
-                           'pipe': child_conn,
-                           'args': args,
-                           'state_dim': state_dim,
-                           'hidden_dim': hidden_dim,
-                           'action_dims_dict': action_dims_dict,
-                           'device_worker': worker_device,
-                           'dt_maneuver': dt_maneuver,
-                           'seed': seed + 5000,
-                           'opp_greedy_rate': opp_greedy_rate,
-                           'dt_move': dt_move,
-                           'no_crash': no_crash,
-                           'explore': {'cont':1, 'cat':0, 'bern':1}, 
-                           'fire_tabu': 1,
-                       })
-        p.start()
-        sil_workers.append(p)
-        sil_pipes.append(parent_conn)
 
     # ELO 初始化
     elo_ratings = copy.deepcopy(init_elo_ratings)
@@ -1140,47 +1096,8 @@ def run_MLP_simulation(
                     'R_cage_range': R_cage_range # 将范围传给Worker
                 }
                 
-                
                 # 发送指令 pipe.send
                 pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
-
-            # 获取Elite_Elo最高的10个智能体供SIL采集使用
-            if not elite_elo_ratings:
-                top_10_elite = [k for k in elo_ratings.keys() if not k.startswith("__")]
-            else:
-                top_10_elite = sorted(elite_elo_ratings.keys(), key=lambda x: elite_elo_ratings[x], reverse=True)[:10]
-            if not top_10_elite:
-                top_10_elite = ["Rule_4"]
-
-            for rank in range(2):
-                selected_opponent_name = np.random.choice(top_10_elite)
-                opp_type = 'rule'
-                opp_data = 0
-                if "Rule" in selected_opponent_name:
-                    try: rule_num = int(selected_opponent_name.split('_')[1])
-                    except: rule_num = 0
-                    opp_data = rule_num
-                else:
-                    opp_type = 'nn'
-                    adv_path = os.path.join(log_dir, f"{selected_opponent_name}.pt")
-                    if os.path.exists(adv_path):
-                        opp_data = torch.load(adv_path, map_location='cpu', weights_only=1)
-                    else:
-                        opp_type = 'rule'
-                        opp_data = 0
-                
-                opp_info = (selected_opponent_name, opp_type, opp_data)
-                rb, bb = create_initial_state_worker(randomized_birth)
-                settings = {
-                    'randomized_birth': randomized_birth,
-                    'action_cycle_multiplier': action_cycle_multiplier,
-                    'weight_reward': weight_reward_0,
-                    'red_birth': rb,
-                    'blue_birth': bb,
-                    'R_cage_range': R_cage_range,
-                    'collect_sil': True
-                }
-                sil_pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
 
             # C. 等待所有 Worker 完成 (Barrier)
             batch_results = []
@@ -1190,7 +1107,6 @@ def run_MLP_simulation(
                 except EOFError: # <--- 【新增】捕获管道断开错误
                     print(f"[Error] Worker {rank} crashed silently.")
                     for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
                     raise RuntimeError(f"Worker {rank} crashed.")
                     
                 # [新增] 检查 Worker 是否传回了奔溃信息
@@ -1198,25 +1114,10 @@ def run_MLP_simulation(
                     print(f"--- Master received error from Worker {rank}, aborting. ---")
                     # 关闭所有子进程防止残留
                     for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
                     # 抛出具体的运行时错误
                     raise RuntimeError(f"Worker {rank} crashed with error:\n{res['error']}")
                     
                 batch_results.append(res)
-            
-            sil_batch_results = []
-            for rank in range(2):
-                try: 
-                    res = sil_pipes[rank].recv() 
-                except EOFError: 
-                    for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
-                    raise RuntimeError(f"SIL Worker {rank} crashed.")
-                if isinstance(res, dict) and 'error' in res:
-                    for p in workers: p.terminate()
-                    for p in sil_workers: p.terminate()
-                    raise RuntimeError(f"SIL Worker {rank} crashed with error:\n{res['error']}")
-                sil_batch_results.append(res)
             
             # --- 3. 数据聚合与处理 ---
             batch_total_steps = 0
@@ -1250,7 +1151,19 @@ def run_MLP_simulation(
                 for k in transition_dict:
                     transition_dict[k].extend(l_tr[k])
                 
-                # 3.2 抛弃基础进程中的 ego_tr / enm_tr，由额外的 SIL worker 专门负责
+                # 3.2 SIL 数据收集 (需计算 return)
+                if use_sil:
+                    ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
+
+                    # if not metrics['lose']: # 赢或平，学自己
+                    #     # 计算回报 (Master 端计算)
+                    #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    #     il_transition_buffer.add(ego_tr)
+                    
+                    # if not metrics['win']: # 输或平，学对手
+                    #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                    #     il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1277,22 +1190,6 @@ def run_MLP_simulation(
             if batch_idx % 1 == 0:
                 print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
 
-            # 处理 SIL batch data
-            for sil_res in sil_batch_results:
-                if use_sil:
-                    metrics = sil_res['metrics']
-                    # 如果 胜 或者 平局， 记录蓝方轨迹
-                    if metrics['win'] or metrics['draw']:
-                        ego_tr = sil_res['ego_trans']
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
-                    # 如果 负 或者 平局， 记录红方轨迹 (红方胜)
-                    if metrics['lose'] or metrics['draw']:
-                        enm_tr = sil_res['enm_trans']
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
-
-
             # 更新全局计数
             total_steps += batch_total_steps
             batch_idx += 1
@@ -1309,7 +1206,7 @@ def run_MLP_simulation(
                 ema_score = (1 - alpha_ema) * ema_score + alpha_ema * batch_score
             
             # 使用带有偏差修正的滤波值
-            filtered_score = ema_score / (1 - (1 - alpha_ema) ** ema_step)
+            filtered_score = ema_score
             logger.add("train_plus/batch_score", batch_score, total_steps)
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
 
@@ -1349,42 +1246,41 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
-                if use_sil and x_elo_diff < 0 and total_steps >= WARM_UP_STEPS:
-                    # if target_pool_keys:
+                if use_sil:
+                    if target_pool_keys:
                         
-                    #     # # 变化尺度对称型函数
-                    #     # a_p = -8
-                    #     # k_p = 0.006
-                    #     # mid = log10(alpha_il)
-                    #     # b_p = 2 * mid - a_p
-                    #     # scale = (b_p - a_p) / 2.0      # 3.0
-                    #     # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                    #     # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                    #     # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                    #     # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                    #     # exponent = min(exponent, -2)
+                        # # 变化尺度对称型函数
+                        # a_p = -8
+                        # k_p = 0.006
+                        # mid = log10(alpha_il)
+                        # b_p = 2 * mid - a_p
+                        # scale = (b_p - a_p) / 2.0      # 3.0
+                        # # 计算指数部分: exponent = mid - scale * tanh(k * x)
+                        # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
+                        # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
+                        # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
+                        # exponent = min(exponent, -2)
                         
-                    #     # # 非对称函数
-                    #     # --- 自定义参数配置 ---
-                    #     M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                    #     b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
+                        # # 非对称函数
+                        # --- 自定义参数配置 ---
+                        M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
+                        b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
                                                 
-                    #     # 原·根据elo插值缩放指数
-                    #     # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                    #     # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-                    #     # 现·根据训练步数逐渐缩小指数
-                    #     k_shape = 4/4e6
-                    #     exponent = np.clip( b - k_shape * total_steps, -20, M )
+                        # 原·根据elo插值缩放指数
+                        # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
+                        # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
+                        # 现·根据训练步数逐渐缩小指数
+                        k_shape = 4/4e6
+                        exponent = np.clip( b - k_shape * total_steps, -20, M )
                         
-                    #     # 得到最终 alpha_il (10 的 exponent 次方)
-                    #     dynamic_alpha_il = 10 ** max(exponent, -20)
-                    # else:
-                    #     dynamic_alpha_il = alpha_il
-                    dynamic_alpha_il = alpha_il
+                        # 得到最终 alpha_il (10 的 exponent 次方)
+                        dynamic_alpha_il = 10 ** max(exponent, -20)
+                    else:
+                        dynamic_alpha_il = alpha_il
                     
                     # 记录动态参数到 TensorBoard
                     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                    # logger.add("train_plus/alpha_exponent", exponent, total_steps)
+                    logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
                     # 读取 IL 数据
                     il_data = il_transition_buffer.read(il_batch_size2)

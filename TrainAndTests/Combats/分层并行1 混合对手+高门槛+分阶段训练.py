@@ -4,11 +4,10 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-mission_name = 'IL_and_deltaFSP_挑战_并行_分层2s'
+# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260402-104852" 
 
-# IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
-# IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
-# IL_and_PFSP_分阶段_混规则对手_平衡对手_无淘汰   PFSP_balanced
+mission_name = 'IL_and_MixedPFSP_低门槛_挑战_并行_分层2s'
+
 
 
 # 超参数
@@ -40,7 +39,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 10*60  # 10*60 # 回合最长时间，单位s
+max_episode_duration = 10*60 # 回合最长时间，单位s
 R_cage= 45e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
@@ -111,15 +110,21 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-        }, # 不允许规则对手进入，这样就是纯自博弈了, 
-        self_play_type = 'deltaFSP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            # 'Rule_5': 1200,
+            },
+        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
         sigma_elo = 500,  # 200,
-        WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
-        ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
+        WARM_UP_STEPS = 0, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = 0.0,
         MAX_HISTORY_SIZE = 300,  # 100
-        rule_actor_rate = 0.0, # “复习”概率
+        rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样

@@ -6,7 +6,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
-mission_name = 'IL_and_PFSP_DPC2_混规则对手_挑战_并行_分层'
+mission_name = 'IL_and_PFSP_DPC2_混规则对手_挑战_并行_分层2s'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -24,14 +24,14 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
-alpha_il = 2e-1  # 设置为0就是纯强化学习
+alpha_il = 2e-2  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 6
+dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -61,6 +61,7 @@ if require_new_IL_data:
 original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
     "il_transitions_combat_LR.pkl",
+    # "il_transitions_top_agent_selfplay.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
@@ -75,6 +76,8 @@ if original_il_transition_dict is not None:
 
 if __name__=='__main__':
     print('Hello')
+    
+    
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
@@ -136,6 +139,7 @@ if __name__=='__main__':
         max_il_exponent = -2.0,
         k_shape_il = 0.0, # 常数
         resume_dir=resume_target_dir, # 指定中断续训目录
+        init_il_data = original_il_transition_dict, # 传入模仿数据集
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

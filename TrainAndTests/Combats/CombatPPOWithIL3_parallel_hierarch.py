@@ -1341,7 +1341,11 @@ def run_MLP_simulation(
                         min_rule_elo = np.min(rule_elos)
                         max_rule_elo = np.max(rule_elos)
                     
-                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
+                    # rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
+                    #     (1-ADMISSION_THRESHOLD) * min_rule_elo
+
+                    # 仅对高门槛使用
+                    rule_elo_thres = ADMISSION_THRESHOLD * rule_elos['Rule2'] +\
                         (1-ADMISSION_THRESHOLD) * min_rule_elo
 
                     if main_agent_elo >= rule_elo_thres:

@@ -6,7 +6,7 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260402-104852" 
 
-mission_name = 'IL_and_MixedPFSP_低门槛_挑战_并行_分层2s'
+mission_name = 'IL_and_MixedPFSP_高门槛_挑战_并行_分层2s'
 
 
 
@@ -122,7 +122,7 @@ if __name__=='__main__':
         use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 0, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.0,
+        ADMISSION_THRESHOLD = 1.0,
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
