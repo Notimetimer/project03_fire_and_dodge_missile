@@ -2,14 +2,18 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
-resume_target_dir = 'None'
-mission_name = '纯Rule4训练_分层_挑战2s'
+resume_target_dir = None
+
+mission_name = 'NoILPFSP_分阶段_挑战_并行_分层2s'
+
+# NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s
+# NoILPFSP_分阶段_挑战_并行_分层2s
 
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
+IL_epoches= 0
 max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -106,14 +110,14 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_4': 1200,
-            },
+            }, # 
+        # init_elo_ratings = {}, # 纯自博弈
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 0, # 不允许自博弈
+        hist_agent_as_opponent = 1,
         use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 1.0, # 0.5 这里可能不宜太低
+        ADMISSION_THRESHOLD = 0.5, # 几乎不设门限
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
