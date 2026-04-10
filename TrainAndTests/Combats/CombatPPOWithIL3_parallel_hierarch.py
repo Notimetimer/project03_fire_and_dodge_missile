@@ -1345,7 +1345,7 @@ def run_MLP_simulation(
                     #     (1-ADMISSION_THRESHOLD) * min_rule_elo
 
                     # 仅对高门槛使用
-                    rule_elo_thres = ADMISSION_THRESHOLD * rule_elos['Rule2'] +\
+                    rule_elo_thres = ADMISSION_THRESHOLD * elo_ratings['Rule_2'] +\
                         (1-ADMISSION_THRESHOLD) * min_rule_elo
 
                     if main_agent_elo >= rule_elo_thres:
