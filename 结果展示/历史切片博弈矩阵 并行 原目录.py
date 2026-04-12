@@ -193,7 +193,10 @@ def plot_elo_sampling(log_dir, teams, team_labels, name):
 
 # --- 主程序 ---
 if __name__ == "__main__":
-    name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341'
+    # 6s
+    # name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341'
+    # 2s
+    name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230'
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log_dir = os.path.join(project_root, "logs","combat", name)

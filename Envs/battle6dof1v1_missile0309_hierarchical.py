@@ -918,7 +918,7 @@ class Battle(object):
         s["weapon"] /= 120
         s["threat"][3] /= 10e3
         s["border"][0] = min(1, s["border"][0] / 50e3)
-        s["border"][1] = s["border"][1] if s["border"][0] < 1 else 0  # 仅在测试时屏蔽if后半句
+        s["border"][1] = s["border"][1] # if s["border"][0] < 1 else 0  # 仅在测试时屏蔽if后半句
         return s
 
     def unscale_state2(self, obs_input):

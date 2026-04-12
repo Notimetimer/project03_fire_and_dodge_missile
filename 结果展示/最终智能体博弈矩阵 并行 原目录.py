@@ -186,14 +186,26 @@ def worker_process_battle(args_pack):
 # --- 3. 主程序 ---
 if __name__ == "__main__":
     # --- [在此处修改输入列表] ---
+    # 6s
+    # mission_names = [
+    #     'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341',
+    #     'IL_and_PFSP_挑战_并行_分层-run-20260323-165715',
+    #     'MixedPFSP_挑战_并行_分层-run-20260323-165740',
+    #     'IL_and_deltaFSP_挑战_并行_分层-run-20260323-152514',
+    #     'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C-run-20260329-174051',
+    #     '纯Rule4训练_分层_挑战-run-20260328-114343',
+    # ]
+
+    # 2s
     mission_names = [
-        'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341',
-        'IL_and_PFSP_挑战_并行_分层-run-20260323-165715',
-        'MixedPFSP_挑战_并行_分层-run-20260323-165740',
-        'IL_and_deltaFSP_挑战_并行_分层-run-20260323-152514',
-        'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C-run-20260329-174051',
-        # 'IL_and_MixedPFSP_分阶段_挑战_并行_分层_A3C-run-20260324-153858',
-        '纯Rule4训练_分层_挑战-run-20260328-114343',
+        'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230',
+        'IL_and_MixedPFSP_低门槛_挑战_并行_分层2s-run-20260410-091105',
+        'IL_and_MixedPFSP_高门槛_挑战_并行_分层2s-run-20260410-203506',
+        'IL_and_PFSP_挑战_并行_分层2s-run-20260409-090711',
+        '纯Rule4训练_分层_挑战2s-run-20260410-090534',
+        'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s-run-20260409-095656',
+        'NoILPFSP_分阶段_挑战_并行_分层2s-run-20260410-090800',
+        'IL_and_deltaFSP_挑战_并行_分层2s-run-20260410-201949',
     ]
     
     # team_labels = range(len(mission_names))
