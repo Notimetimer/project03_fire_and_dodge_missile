@@ -17,7 +17,7 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 from read_n_draw_inter_experiment_tests import draw_combat_matrix
 
 # --- 1. 配置参数 ---
-action_cycle_multiplier = 30
+action_cycle_multiplier = 10
 dt_maneuver = 0.2
 TOTAL_ROUNDS = 80    # 每对任务之间对抗 100 场
 TEAM_SIZE = 30        # 每队从 Elo 排行中取前 50 名

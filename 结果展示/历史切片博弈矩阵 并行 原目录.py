@@ -21,7 +21,7 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 from read_n_draw_inter_experiment_tests import draw_combat_matrix
 
 # --- 1. 参数配置 ---
-action_cycle_multiplier = 30
+action_cycle_multiplier = 10
 dt_maneuver = 0.2
 TOTAL_ROUNDS = 100 # 每两队之间打100场
 TEAM_SIZE = 25     # 每队成员数
@@ -78,7 +78,7 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
     """仿真逻辑 (保持与文件 1 一致)"""
     env.reset(red_init_ammo=6, blue_init_ammo=6, ego_side='b')
     env.shielded = 1 # 测试时开启防撞地面
-    env.no_out = 1 # 测试时防止出界
+    env.no_out = 0 # 测试时防止出界 1
 
     done = False
     r_label, b_label = 0, 0
