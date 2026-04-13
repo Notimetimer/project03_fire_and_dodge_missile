@@ -364,12 +364,14 @@ if __name__ == "__main__":
     EXPERIMENT_NAME = "ILHOPFSP"
 
     name_list = [
-        "ILHOPFSP",
-        "ILPFSP",
-        "HOPFSP",
-        "ILDFSP",
-        "A3C",
-        "Rule4"
+        "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s",
+        "IL_and_MixedPFSP_低门槛_挑战_并行_分层2s",
+        "IL_and_MixedPFSP_高门槛_挑战_并行_分层2s",
+        "IL_and_PFSP_挑战_并行_分层2s",
+        "纯Rule4训练_分层_挑战2s",
+        "NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s",
+        "NoILPFSP_分阶段_挑战_并行_分层2s",
+        "IL_and_deltaFSP_挑战_并行_分层2s",
     ]
     name_list_show = [
         1,
@@ -378,11 +380,13 @@ if __name__ == "__main__":
         4,
         5,
         6,
+        7,
+        8,
     ]
     
     win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2'] # , 'VsRule3', 'VsRule4']
     display_titles = ['vs Rule1', 'vs Rule2', 'vs Rule3'] # , 'vs Rule4', 'vs Rule5']
-    linestyles = ['-', '-', '--', '-', '--', ':']
+    linestyles = ['-', '-', '--', '-', '--', ':', '-', '--']
     
     plot_training_curves(DATA_DIRECTORY, EXPERIMENT_NAME, name_list, name_list_show, 
                          win_rate_cols, display_titles, linestyles)

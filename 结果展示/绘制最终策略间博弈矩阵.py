@@ -1,12 +1,14 @@
 from read_n_draw_inter_experiment_tests import *
 
 mission_names = [
-        1, # 'IL_HOPFSP_PPO',
-        2, # 'IL_PFSP_PPO',
-        3, # 'HOPFSP_PPO',
-        4, # 'IL_ΔFSP_PPO',
-        5, # 'IL_HOPFSP_A3C',
-        6, # 'IL_Rule4_PPO',
+        1, # 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s',
+        2, # 'IL_and_MixedPFSP_低门槛_挑战_并行_分层2s',
+        3, # 'IL_and_MixedPFSP_高门槛_挑战_并行_分层2s',
+        4, # 'IL_and_PFSP_挑战_并行_分层2s',
+        5, # '纯Rule4训练_分层_挑战2s',
+        6, # 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s',
+        7, # NoILPFSP_分阶段_挑战_并行_分层2s
+        8, # IL_and_deltaFSP_挑战_并行_分层2s
     ]
 
 csv_path = os.path.join(project_root, "结果展示", "outputs", "combat_matrix.csv")
