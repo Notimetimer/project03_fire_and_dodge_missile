@@ -84,11 +84,11 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
             ax1.grid(False, axis='y')
             ax1.grid(True, axis='x', alpha=0.4)
             
-            # Score放右侧纵坐标 (改名为 Avg Win Rate)
+            # Score放右侧纵坐标 (改名为 Episode Score)
             ax1_twin = ax1.twinx()
             sns.lineplot(x=df_main['Step'], y=Score, ax=ax1_twin, color=color_score_line, alpha=0.1)
-            sns.lineplot(x=df_main['Step'], y=Score_smoothed, ax=ax1_twin, label='Avg Win Rate', color=color_score_line, linewidth=1.5)
-            ax1_twin.set_ylabel('Avg Win Rate', color=color_score_label, fontweight='bold')
+            sns.lineplot(x=df_main['Step'], y=Score_smoothed, ax=ax1_twin, label='Episode Score', color=color_score_line, linewidth=1.5)
+            ax1_twin.set_ylabel('Episode Score', color=color_score_label, fontweight='bold')
             ax1_twin.tick_params(axis='y', labelcolor=color_score_label)
             # 开启右侧y轴的网格线，同样置于底层
             ax1_twin.set_axisbelow(True)
@@ -101,31 +101,35 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
             if ax1_twin.get_legend() is not None:
                 ax1_twin.get_legend().remove()
             
-            ax1.set_title('Episode Reward & Avg Win Rate', fontweight='bold')
+            ax1.set_title('Episode Reward & Avg score', fontweight='bold')
             plot_idx += 1
             
         # 增加 pad 并控制 rect 以确保左右两边和窗口边缘有足够的留白
         fig1.tight_layout(pad=3.0, rect=[0.05, 0.05, 0.95, 0.95])
 
-    # ---------------- 3. 绘制第二个 Figure: Win Rate ----------------
+    # ---------------- 3. 绘制第二个 Figure: Score ----------------
     if name_list is not None and name_list_show is not None:
         # 如果未传入，则使用默认的列名、标题和线型
         if win_rate_cols is None:
             win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2'] # , 'VsRule3', 'VsRule4']
         if display_titles is None:
-            display_titles = ['Rule1', 'Rule2', 'Rule3'] # , 'Rule4', 'Rule5']
+            display_titles = ['Agent Vs Rule1', 'Agent Vs Rule2', 'Agent Vs Rule3'] # , 'Rule4', 'Rule5']
         if linestyles is None:
             # 索引对应：0, 1, 2(点线), 3, 4(点划线), 5(点划线)
             linestyles = ['-', '-', ':', '-', '-.', '-.']
         
         n_cols = len(win_rate_cols)
         fig2, axes2 = plt.subplots(1, n_cols, figsize=(4.0 * n_cols, 4.5))
-        fig2.suptitle("Win Rate Against All Rules", fontsize=16, y=0.81)
+        fig2.suptitle("Score vs. All Rules", fontsize=16, y=0.81)
         
         if n_cols == 1:
             axes2 = [axes2]
             
-        palette = sns.color_palette("tab10", len(name_list))
+        palette = list(sns.color_palette("tab10", max(10, len(name_list))))
+        # 强行定制显眼的颜色区分：5号加深，8号设为纯黑
+        if len(palette) >= 8:
+            palette[4] = (0.8, 0.0, 0.8) # 5号: 亮紫洋红
+            palette[7] = (0.0, 0.0, 0.0) # 8号: 纯黑
             
         for i, (col, display_title) in enumerate(zip(win_rate_cols, display_titles)):
             ax = axes2[i]
@@ -134,7 +138,7 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
             y_min_total, y_max_total = float('inf'), float('-inf')
             has_plotted = False
             for j, (name, show_name) in enumerate(zip(name_list, name_list_show)):
-                win_file = os.path.join(data_dir, f"{name}_win_rate.csv")
+                win_file = os.path.join(data_dir, f"{show_name}.csv") # READ {show_name}.csv (which is 1.csv to 8.csv)
                 try:
                     df = pd.read_csv(win_file)
                     if col in df.columns:
@@ -146,10 +150,10 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
 
                         # 获取当前实验对应的线型
                         ls = linestyles[j % len(linestyles)]
-                        # 根据线型动态调整粗细：点线必须加粗到1.7，否则用1.4
-                        lw = 1.7 if ls == ':' else 1.4
+                        # 根据线型动态调整粗细：点线加粗到1.36，否则用1.12 (约为原先0.8倍)
+                        lw = 1.36 if ls == ':' else 1.12
                         
-                        sns.lineplot(x=df['Step'], y=raw_data, ax=ax, color=palette[j], alpha=0.04) # 调低背景线透明度
+                        # sns.lineplot(x=df['Step'], y=raw_data, ax=ax, color=palette[j], alpha=0.04) # 移除原始数据背景
                         sns.lineplot(x=df['Step'], y=smoothed_data, ax=ax, label=str(show_name), 
                                      color=palette[j], linewidth=lw, linestyle=ls)
                         has_plotted = True
@@ -168,9 +172,14 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
             ax.set_ylabel('')
             # 显示对应映射的新名称，而不是原CSV列名
             ax.set_title(display_title)
+            
+            # 添加参考线 (无图例)
+            for hval in [0, 0.5, 1.0]:
+                ax.axhline(hval, color='gray', linestyle='-', linewidth=0.8, alpha=1.0, zorder=5)
+                
             # 只有在真正画了线的情况下才调用 legend，避免 No artists 警告
             if has_plotted:
-                ax.legend(loc="lower right") 
+                ax.legend(loc="lower right", fontsize='small', ncol=2) 
 
         # pad=1.0 减小多余空白，避免挤压图表高度
         # 将 w_pad 从 1.0 调低到 0.4，让子图在横向上贴得更近
@@ -180,11 +189,11 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
         # Fallback for single experiment
         win_rate_cols = [col for col in df_win.columns if col.startswith('VsRule')]
         if not win_rate_cols:
-            win_rate_cols = ['VsRule1', 'VsRule2', 'VsRule3'] # , 'VsRule4', 'VsRule5']
+            win_rate_cols = ['Agent Vs Rule1', 'Agent Vs Rule2', 'Agent Vs Rule3'] 
         
         n_cols = len(win_rate_cols)
         fig2, axes2 = plt.subplots(1, n_cols, figsize=(4.0 * n_cols, 4.0))
-        fig2.suptitle("Win Rate Against All Rules", fontsize=16, y=0.81)
+        fig2.suptitle("Score vs. All Rules", fontsize=16, y=0.81)
         
         if n_cols == 1:
             axes2 = [axes2]
@@ -211,150 +220,83 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
             ax.set_ylabel('')
             ax.set_title(col)
             
+            # 添加参考线 (无图例)
+            for hval in [0, 0.5, 1.0]:
+                ax.axhline(hval, color='gray', linestyle='-', linewidth=0.8, alpha=1.0, zorder=5)
+            
         fig2.tight_layout(pad=1.0, w_pad=0.4, rect=[0, 0, 1, 0.86])
 
-    # ---------------- 4. 绘制第三个 Figure: Actor Loss (ILCurve) ----------------
+    # ---------------- 4. 绘制第三个 Figure: 实验 1 的 Score 曲线变化 ----------------
+    csv_1_file = os.path.join(data_dir, "1.csv")
+    if os.path.exists(csv_1_file):
+        try:
+            df1 = pd.read_csv(csv_1_file)
+            fig3, ax3 = plt.subplots(figsize=(8, 5))
+            
+            colors_rules = sns.color_palette("tab10", len(win_rate_cols))
+            
+            y_min3, y_max3 = 1.0, 0.0
+            has_plotted3 = False
+            
+            for i, (col, display_title) in enumerate(zip(win_rate_cols, display_titles)):
+                if col in df1.columns:
+                    raw = df1[col]
+                    smooth = moving_average(raw, 51)
+                    
+                    sns.lineplot(x=df1['Step'], y=raw, ax=ax3, color=colors_rules[i], alpha=0.1) # 恢复原始数据背景
+                    sns.lineplot(x=df1['Step'], y=smooth, ax=ax3, label=display_title, color=colors_rules[i], linewidth=1.6)
+                    
+                    y_min3 = min(y_min3, np.nanmin(smooth))
+                    y_max3 = max(y_max3, np.nanmax(smooth))
+                    has_plotted3 = True
+            
+            ax3.set_xlabel("Step", fontweight='bold')
+            ax3.set_ylabel("Test Score", fontweight='bold')
+
+            # 添加参考线 (无图例)
+            for hval in [0, 0.5, 1.0]:
+                ax3.axhline(hval, color='gray', linestyle='-', linewidth=0.8, alpha=1.0, zorder=5)
+            
+            if has_plotted3:
+                ax3.legend(loc='lower right')
+                p_range3 = y_max3 - y_min3
+                if p_range3 > 0:
+                    ax3.set_ylim(y_min3 - 0.05 * p_range3, y_max3 + 0.05 * p_range3)
+                else:
+                    ax3.set_ylim(y_min3 - 0.05, y_min3 + 0.05)
+            
+            fig3.tight_layout(pad=3.0)
+        except Exception as e:
+            print(f"读取或绘制 {csv_1_file} 失败: {e}")
+
+
+    # ---------------- 5. 绘制第四个 Figure: Imitation Learning 收敛曲线 ----------------
     il_curve_file = os.path.join(data_dir, "ILCurve.csv")
     if os.path.exists(il_curve_file):
         try:
             df_il = pd.read_csv(il_curve_file)
             if 'Epoch' in df_il.columns and 'ActorLoss' in df_il.columns:
-                fig3, ax3 = plt.subplots(figsize=(8, 4))
-                loss_data = df_il['ActorLoss']
+                fig4, ax4 = plt.subplots(figsize=(8, 5))
                 
-                # Figure 3 不需要平滑，直接绘制原始数据
-                sns.lineplot(x=df_il['Epoch'], y=loss_data, ax=ax3, color='tab:purple', linewidth=1.5)
+                raw_loss = df_il['ActorLoss']
+                # 使用滑动平均平滑数据
+                smooth_loss = moving_average(raw_loss, 15)
                 
-                ax3.set_title('Imitation Learning Actor Loss')
-                ax3.set_xlabel('Epoch')
-                ax3.set_ylabel('Actor Loss')
-                # ax3.legend(loc='upper right') # 只有一条线时也可以不用 legend
-                # 增加 pad 并控制 rect 以确保左右两边和窗口边缘有足够的留白
-                fig3.tight_layout(pad=3.0, rect=[0.05, 0.05, 0.95, 0.95])
+                # 绘制浅色原始曲线
+                sns.lineplot(x=df_il['Epoch'], y=raw_loss, ax=ax4, color='tab:green', alpha=0.2)
+                # 绘制深色平滑曲线
+                sns.lineplot(x=df_il['Epoch'], y=smooth_loss, ax=ax4, color='darkgreen', linewidth=1.8)
+                
+                ax4.set_xlabel("Epoch", fontweight='bold')
+                ax4.set_ylabel("Actor Loss", fontweight='bold')
+                
+                # 解决网格遮挡曲线的问题
+                ax4.set_axisbelow(True)
+                ax4.grid(True, alpha=0.4)
+                
+                fig4.tight_layout(pad=3.0)
         except Exception as e:
             print(f"读取或绘制 {il_curve_file} 失败: {e}")
-
-    # ---------------- 5. 绘制第四个 Figure: Win Rate of Algorithm 1 Against All Rules ----------------
-    if name_list is not None and len(name_list) > 0:
-        first_algo_name = name_list[0]
-        first_algo_win_file = os.path.join(data_dir, f"{first_algo_name}_win_rate.csv")
-        if os.path.exists(first_algo_win_file):
-            try:
-                df_win1 = pd.read_csv(first_algo_win_file)
-                fig4, ax4 = plt.subplots(figsize=(8, 6))
-                
-                # 为不同的 Rule 设置调色盘
-                palette4 = sns.color_palette("tab10", len(win_rate_cols))
-                # 计算 Figure 4 的 y 轴范围 (基于所有平滑之后的曲线)
-                y_min4, y_max4 = float('inf'), float('-inf')
-                has_plotted4 = False
-                
-                for k, (col, display_title) in enumerate(zip(win_rate_cols, display_titles)):
-                    if col in df_win1.columns:
-                        raw_data = df_win1[col]
-                        # 降低平滑度，单独对 Figure 4 使用较弱的平滑 (比如 31 或 41)
-                        smoothed_data = moving_average(raw_data, 41)
-                        y_min4 = min(y_min4, np.nanmin(smoothed_data))
-                        y_max4 = max(y_max4, np.nanmax(smoothed_data))
-                        
-                        sns.lineplot(x=df_win1['Step'], y=raw_data, ax=ax4, color=palette4[k], alpha=0.1)
-                        sns.lineplot(x=df_win1['Step'], y=smoothed_data, ax=ax4, label=display_title, 
-                                     color=palette4[k], linewidth=1.5)
-                        has_plotted4 = True
-                
-                # 画出 0, 0.5 和 1 的黑色虚线
-                ax4.axhline(0, color='black', linestyle='--', linewidth=1.5, alpha=0.3)
-                ax4.axhline(0.5, color='black', linestyle='--', linewidth=1.5, alpha=0.3)
-                ax4.axhline(1, color='black', linestyle='--', linewidth=1.5, alpha=0.3)
-
-                if has_plotted4:
-                    if y_min4 < y_max4:
-                        pad4 = (y_max4 - y_min4) * 0.05
-                        ax4.set_ylim(y_min4 - pad4, y_max4 + pad4)
-                    else:
-                        ax4.set_ylim(y_min4 - 0.05, y_min4 + 0.05)
-                        
-                    ax4.set_xlabel('Step', fontweight='bold')
-                    ax4.set_ylabel('Win Rate', fontweight='bold')
-                    # ax4.set_title(f"Win Rate of {first_algo_name} Against All Rules", fontweight='bold')
-                    ax4.legend(loc='lower right')
-                    fig4.tight_layout(pad=3.0, rect=[0.05, 0.05, 0.95, 0.95])
-            except Exception as e:
-                print(f"读取或绘制 {first_algo_win_file} (Figure 4) 失败: {e}")
-    # ---------------- 6. 绘制第五个 Figure: Elo Rank & Elite Opponent Pool Size ----------------
-    if name_list is not None and len(name_list) > 0:
-        first_algo_name = name_list[0]
-        rank_file = os.path.join(data_dir, f"{first_algo_name}_Elo_Rank.csv")
-        pool_file = os.path.join(data_dir, f"{first_algo_name}_pool_size.csv")
-        
-        has_rank = os.path.exists(rank_file)
-        has_pool = os.path.exists(pool_file)
-        
-        if has_rank or has_pool:
-            try:
-                fig5, ax5 = plt.subplots(figsize=(8, 5))
-                color_rank = 'tab:green'
-                color_pool = 'tab:red'
-                
-                # 绘制 Elo Rank (左边Y轴)
-                if has_rank:
-                    df_rank = pd.read_csv(rank_file)
-                    if 'Step' in df_rank.columns and 'Rank' in df_rank.columns:
-                        rank_data = df_rank['Rank']
-                        rank_smoothed = moving_average(rank_data, 21)
-                        
-                        sns.lineplot(x=df_rank['Step'], y=rank_data, ax=ax5, color=color_rank, alpha=0.1)
-                        sns.lineplot(x=df_rank['Step'], y=rank_smoothed, ax=ax5, label='Elo Rank', color=color_rank, linewidth=1.5)
-                        
-                        ax5.set_xlabel('Step', fontweight='bold')
-                        ax5.set_ylabel('Elo Rank', color=color_rank, fontweight='bold')
-                        ax5.tick_params(axis='y', labelcolor=color_rank)
-                        for label in ax5.get_yticklabels():
-                            label.set_fontweight('bold')
-                            label.set_color(color_rank)
-                        for label in ax5.get_xticklabels():
-                            label.set_fontweight('bold')
-                            
-                        ax5.set_axisbelow(True)
-                        ax5.grid(False, axis='y')
-                        ax5.grid(True, axis='x', alpha=0.4)
-                
-                # 绘制 Elite Opponent Pool Size (右边Y轴)
-                if has_pool:
-                    ax5_twin = ax5.twinx() if has_rank else ax5
-                    df_pool = pd.read_csv(pool_file)
-                    
-                    if 'Step' in df_pool.columns and 'PoolSize' in df_pool.columns:
-                        pool_data = df_pool['PoolSize']
-                        pool_smoothed = moving_average(pool_data, 21)
-                        
-                        sns.lineplot(x=df_pool['Step'], y=pool_data, ax=ax5_twin, color=color_pool, alpha=0.1)
-                        sns.lineplot(x=df_pool['Step'], y=pool_smoothed, ax=ax5_twin, label='Elite Opponent Pool Size', color=color_pool, linewidth=1.5)
-                        
-                        ax5_twin.set_ylabel('Elite Opponent Pool Size', color=color_pool, fontweight='bold')
-                        ax5_twin.tick_params(axis='y', labelcolor=color_pool)
-                        for label in ax5_twin.get_yticklabels():
-                            label.set_fontweight('bold')
-                            label.set_color(color_pool)
-                            
-                        ax5_twin.set_axisbelow(True)
-                        ax5_twin.grid(True, alpha=0.4)
-                        
-                        # 合并图例 (如果有两轴的话)
-                        if has_rank:
-                            handles5, labels5 = ax5.get_legend_handles_labels()
-                            handles5_twin, labels5_twin = ax5_twin.get_legend_handles_labels()
-                            ax5.legend(handles5 + handles5_twin, labels5 + labels5_twin, loc='center right')
-                            if ax5_twin.get_legend() is not None:
-                                ax5_twin.get_legend().remove()
-                        else:
-                            ax5_twin.legend(loc='center right')
-                
-                ax5.set_title('Elo Rank & Elite Opponent Pool Size', fontweight='bold')
-                fig5.tight_layout(pad=3.0, rect=[0.05, 0.05, 0.95, 0.95])
-            
-            except Exception as e:
-                print(f"读取或绘制 Figure 5 (Rank & PoolSize) 失败: {e}")
 
     plt.show()
 
@@ -384,9 +326,9 @@ if __name__ == "__main__":
         8,
     ]
     
-    win_rate_cols = ['VsRule0', 'VsRule1', 'VsRule2'] # , 'VsRule3', 'VsRule4']
-    display_titles = ['vs Rule1', 'vs Rule2', 'vs Rule3'] # , 'vs Rule4', 'vs Rule5']
-    linestyles = ['-', '-', '--', '-', '--', ':', '-', '--']
+    win_rate_cols = ['0', '1', '2'] 
+    display_titles = ['Agent Vs Rule1', 'Agent Vs Rule2', 'Agent Vs Rule3'] 
+    linestyles = ['-', '-', '--', '-', '-.', '--', '-', ':'] # 使5(dash-dot)和8(dotted)线型完全不同
     
     plot_training_curves(DATA_DIRECTORY, EXPERIMENT_NAME, name_list, name_list_show, 
                          win_rate_cols, display_titles, linestyles)
