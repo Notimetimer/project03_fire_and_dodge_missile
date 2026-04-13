@@ -96,8 +96,8 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
                 r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temp=temp_dict)
                 b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temp=temp_dict)
             # 交给环境物理函数使用 tabu=1 (相对宽松的条件) 拦截无效开火
-            if r_act['bern'][0]: launch_missile_immediately(env, 'r', tabu=1)
-            if b_act['bern'][0]: launch_missile_immediately(env, 'b', tabu=1)
+            if r_act['bern'][0]: launch_missile_immediately(env, 'r', tabu=0)
+            if b_act['bern'][0]: launch_missile_immediately(env, 'b', tabu=0)
             r_label, b_label = r_act['cat'][0], b_act['cat'][0]
 
         r_maneuver = env.maneuver14LR(env.RUAV, r_label)
@@ -122,7 +122,7 @@ def worker_process_battle(args_pack):
     
     # 1. 初始化环境
     # 注意：这里假设 Namespace 参数是固定的，如果需要动态传参需修改 args_pack
-    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=10 * 60, R_cage=45e3), tacview_show=0)
+    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=12 * 60, R_cage=45e3), tacview_show=0)
     state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
     
     # 2. 初始化模型
@@ -196,6 +196,7 @@ if __name__ == "__main__":
     # 6s
     # name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341'
     # 2s
+    # name = 'IL_and_MixedPFSP_高门槛_挑战_并行_分层2s-run-20260410-203506'
     name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230'
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

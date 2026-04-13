@@ -2,6 +2,7 @@ from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
+# 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
 mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s'
@@ -123,7 +124,7 @@ if __name__=='__main__':
         use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5, # 几乎不设门限
+        ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了

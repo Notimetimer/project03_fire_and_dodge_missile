@@ -55,7 +55,7 @@ def create_initial_state_worker(randomized=1):
 if __name__ == "__main__":
 
     # experiment_name = "只模仿学习" # "只模仿学习"
-    experiment_name = "无学习-run-20260413-100719"
+    experiment_name = "只模仿学习-run-20260413-100737"
     
     "只模仿学习-run-20260413-100737"
     "无学习-run-20260413-100719"
