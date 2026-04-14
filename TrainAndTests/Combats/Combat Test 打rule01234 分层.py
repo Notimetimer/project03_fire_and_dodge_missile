@@ -138,8 +138,8 @@ if __name__ == "__main__":
             # --- 初始化数据记录 ---
             history = {
                 'time': [],
-                'r_ny': [], 'r_alpha': [], 'r_alt': [],
-                'b_ny': [], 'b_alpha': [], 'b_alt': [],
+                'r_ny': [], 'r_alpha': [], 'r_alt': [], 'r_mach': [],
+                'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
             }
 
             # 回合仿真循环
@@ -185,9 +185,11 @@ if __name__ == "__main__":
                 history['r_ny'].append(env.RUAV.Ny)
                 history['r_alpha'].append(env.RUAV.alpha_air * 180 / np.pi)
                 history['r_alt'].append(env.RUAV.alt)
+                history['r_mach'].append(env.RUAV.mach)
                 history['b_ny'].append(env.BUAV.Ny)
                 history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
                 history['b_alt'].append(env.BUAV.alt)
+                history['b_mach'].append(env.BUAV.mach)
 
                 env.render(t_bias=t_bias)
 
@@ -211,21 +213,37 @@ if __name__ == "__main__":
                 print(f"Failed to save CSV: {e}")
 
             # --- 绘制曲线 ---
-            plt.figure(figsize=(10, 6))
-            plt.subplot(2, 1, 1)
+            plt.figure(figsize=(10, 10))
+            plt.subplot(4, 1, 1)
             plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
             plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
             plt.ylabel('Ny (g)')
-            plt.title(f'Test vs Rule {rule_num}: Normal Load Factor (Ny)')
+            plt.title(f'Test vs Rule {rule_num}: Metrics')
             plt.legend()
             plt.grid(True, alpha=0.3)
 
-            plt.subplot(2, 1, 2)
+            plt.subplot(4, 1, 2)
             plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
             plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
             plt.ylabel('Alpha (deg)')
-            plt.xlabel('Time (s)')
             plt.title('Angle of Attack (Alpha)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(4, 1, 3)
+            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
+            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
+            plt.ylabel('Mach')
+            plt.title('Flight Mach Number')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(4, 1, 4)
+            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
+            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
+            plt.ylabel('Alt (m)')
+            plt.xlabel('Time (s)')
+            plt.title('Altitude (Height)')
             plt.legend()
             plt.grid(True, alpha=0.3)
             

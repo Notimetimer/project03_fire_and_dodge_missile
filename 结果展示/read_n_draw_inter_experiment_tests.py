@@ -14,7 +14,8 @@ def draw_combat_matrix(csv_path, team_labels=None,
                        xlabel="Opponent Team (Column)",
                        ylabel="Evaluated Team (Row)",
                        cbar_label="Win Rate",
-                       color_theme='blue'):
+                       color_theme='blue',
+                       show=True):
     """
     读取 CSV 并绘制博弈矩阵热力图。
     :param csv_path: CSV 文件路径
@@ -140,7 +141,63 @@ def draw_combat_matrix(csv_path, team_labels=None,
 
     # 只需要原始边距，去掉下方文字说明
     plt.subplots_adjust(top=0.82, bottom=0.12, left=0.15, right=0.95)
-    plt.show()
+    if show:
+        plt.show()
+
+def draw_row_means_bar_chart(csv_path, team_labels=None, 
+                             xlabel="Avg Score", 
+                             title=None,
+                             show=True):
+    """
+    绘制矩阵每行的均值及其标准差的横向条形图。
+    """
+    if not os.path.exists(csv_path):
+        return
+
+    df = pd.read_csv(csv_path, index_col=0)
+    means = df.mean(axis=1)
+    stds = df.std(axis=1)
+    
+    if team_labels is not None:
+        labels = team_labels
+    else:
+        labels = df.index.tolist()
+
+    # 绘制
+    # 动态调整高度
+    fig_height = max(5, len(labels) * 0.6)
+    plt.figure(figsize=(10, fig_height))
+    
+    y_pos = range(len(labels))
+    
+    # 使用 seaborn 调色板
+    colors = sns.color_palette("Blues_d", len(labels))
+    colors = colors[::-1] # 反转颜色，让均值高的颜色更深
+    
+    # 重新按均值排序以获得更好的视觉效果？或者保持原序？
+    # 用户通常希望保持矩阵行序，或者按性能排序。这里保持矩阵行序。
+    plt.barh(y_pos, means, xerr=stds, align='center', alpha=0.85, 
+             color=colors, edgecolor='black', linewidth=1.2, capsize=8)
+    
+    plt.yticks(y_pos, labels, fontsize=12)
+    plt.xticks(fontsize=12)
+    plt.gca().invert_yaxis()  # 反转 Y 轴，使第一行在顶部
+    
+    plt.xlabel(xlabel, fontsize=14, fontweight='bold')
+    if title:
+        plt.title(title, fontsize=16, fontweight='bold', pad=20)
+    else:
+        plt.title("Performance Average Across All Opponents", fontsize=16, fontweight='bold', pad=20)
+        
+    plt.grid(axis='x', linestyle='--', alpha=0.5)
+    
+    # 在条形图末尾标注数值
+    for i, v in enumerate(means):
+        plt.text(v + stds[i] + 0.01, i, f"{v:.2f}", color='black', va='center', fontweight='bold')
+
+    plt.tight_layout()
+    if show:
+        plt.show()
 
 if __name__ == "__main__":
     # 绘制实验内自博弈进度对比（历史切片博弈矩阵）

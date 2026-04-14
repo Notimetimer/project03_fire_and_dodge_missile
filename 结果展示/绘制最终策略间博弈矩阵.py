@@ -29,7 +29,21 @@ if os.path.exists(csv_path):
         title=None,
         xlabel="Opponent / Column",
         ylabel="Evaluated / Row",
-        cbar_label="Win Rate",
+        cbar_label="Pairwise Avg Score",
+        show=False  # 设置为 False，不立即阻塞
     )
+
+    # --- Figure 2: Row Means Bar Chart ---
+    print(f"正在读取并绘制: {csv_path} (各行均值与标准差)")
+    draw_row_means_bar_chart(
+        csv_path = csv_path,
+        team_labels = team_labels,
+        xlabel="Cross-Opponent Mean Score",
+        title="Main Agent Mean Performance Against All Opponents",
+        show=False  # 设置为 False，不立即阻塞
+    )
+
+    # 最后统一显示所有窗口
+    plt.show()
 else:
     print(f"找不到文件: {csv_path}，请先运行生成矩阵的脚本。")

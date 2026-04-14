@@ -11,7 +11,7 @@ if os.path.exists(csv_path):
         title=None,
         xlabel="Opponent / Column",
         ylabel="Evaluated / Row",
-        cbar_label="Score Rate",
+        cbar_label="Avg Score",
     )
 else:
     print(f"找不到文件: {csv_path}，请先运行生成矩阵的脚本。")

@@ -156,6 +156,9 @@ class UAVModel(object):
         self.Ny = self.sim["accelerations/Nz"]  # 法向过载
         self.Nz = self.sim["accelerations/Ny"]  # 侧向过载
         self.Nx = self.sim["accelerations/Nx"]  # 前向过载
+        
+        # 马赫数
+        self.mach = self.sim["velocities/mach"]
 
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
@@ -175,17 +178,17 @@ class UAVModel(object):
         
         self.missile_launch_time = []
 
-    # todo 阻力系数：应该是和马赫数和迎角有关的，但是先借用下导弹的阻力系数函数了
-    def Cd(self, mach):
-        if 0 < mach <= 0.9:
-            cd = 0.16
-        if 0.9 < mach <= 1.1:
-            cd = 0.16 + 0.29 * (mach - 0.9) / 0.2
-        if 1.1 < mach <= 3:
-            cd = 0.45 - 0.25 * (mach - 1.1) / 1.9
-        else:
-            cd = 0.2
-        return cd / 10
+    # # todo 阻力系数：应该是和马赫数和迎角有关的，但是先借用下导弹的阻力系数函数了
+    # def Cd(self, mach):
+    #     if 0 < mach <= 0.9:
+    #         cd = 0.16
+    #     if 0.9 < mach <= 1.1:
+    #         cd = 0.16 + 0.29 * (mach - 0.9) / 0.2
+    #     if 1.1 < mach <= 3:
+    #         cd = 0.45 - 0.25 * (mach - 1.1) / 1.9
+    #     else:
+    #         cd = 0.2
+    #     return cd / 10
 
     def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=None):
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
@@ -219,6 +222,10 @@ class UAVModel(object):
         self.Ny = self.sim["accelerations/Nz"]  # 垂直过载
         self.Nz = self.sim["accelerations/Ny"]  # 侧向过载
         self.Nx = self.sim["accelerations/Nx"]  # 纵向过载
+
+        # 马赫数
+        self.mach = self.sim["velocities/mach"]
+
 
         gamma_angle = atan2(vu, sqrt(vn ** 2 + ve ** 2)) * 180 / pi  # 爬升角（度）
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
