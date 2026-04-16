@@ -202,15 +202,15 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             
-            # --- 保存作战记录到 CSV ---
-            try:
-                df_history = pd.DataFrame(history)
-                save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-                save_path = os.path.join(project_root, "logs", save_name)
-                df_history.to_csv(save_path, index=False)
-                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            except Exception as e:
-                print(f"Failed to save CSV: {e}")
+            # # --- 保存作战记录到 CSV ---
+            # try:
+            #     df_history = pd.DataFrame(history)
+            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+            #     save_path = os.path.join(project_root, "logs", save_name)
+            #     df_history.to_csv(save_path, index=False)
+            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            # except Exception as e:
+            #     print(f"Failed to save CSV: {e}")
 
             # --- 绘制曲线 ---
             plt.figure(figsize=(10, 10))

@@ -23,7 +23,7 @@ from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediate
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
 
 # --- [修正] 在此处直接定义缺失的常量 ---
-action_cycle_multiplier = 30
+action_cycle_multiplier = 10
 dt_maneuver = 0.2
 # -----------------------------------------
 
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'IL_and_PFSP_分阶段_混规则对手_挑战_并行_分层_A3C'
+    experiment_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s"
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     blue_agent_id = 200
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=50e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -158,7 +158,7 @@ if __name__ == "__main__":
                 # 决策
                 if count % action_cycle_multiplier == 0:
                     explore_dict = {'cat': 1, 'bern': 1}
-                    temp_dict = {'cat': 0.1, 'bern': 1.0}
+                    temp_dict = {'cat': 0.1, 'bern': 0.8}
                     # --- 红方 (RL 智能体 700) ---
                     with torch.no_grad():
                         # 由于训练时没有 state_check，去除 check_obs
