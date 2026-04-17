@@ -428,10 +428,10 @@ class Battle(object):
                 _ego_main_realtime = np.array([
                     float(UAV.speed),          # 0 本机速度 m/s
                     float(UAV.alt),            # 1 本机高度 m
-                    float(sin(UAV.theta)),     # 2
-                    float(cos(UAV.theta)),     # 3
-                    float(sin(UAV.phi)),       # 4
-                    float(cos(UAV.phi)),       # 5
+                    float(cos(UAV.theta)),     # 2
+                    float(sin(UAV.theta)),     # 3
+                    float(cos(UAV.phi)),       # 4
+                    float(sin(UAV.phi)),       # 5
                     0,                         # 6 弹药量（控制器训练时始终置0）
                 ])
                 # 对齐训练环境: ego_control[4] 是目标航向与 速度矢量(psi_v) 的差角
