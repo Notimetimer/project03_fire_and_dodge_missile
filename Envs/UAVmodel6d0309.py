@@ -305,7 +305,7 @@ class UAVModel(object):
         # 取姿态角度
         self.phi = self.sim["attitude/phi-deg"] * pi / 180  # 滚转角 (roll)
         self.theta = self.sim["attitude/theta-deg"] * pi / 180  # 俯仰角 (pitch)
-        self.psi = self.sim["attitude/psi-deg"] * pi / 180  # 航向角 (yaw)
+        self.psi = sub_of_radian(self.sim["attitude/psi-deg"] * pi / 180, 0)  # 航向角 (yaw)
 
         self.vel_ = np.array([vn, vu, ve]) # ft.s转m/s
         self.point_ = active_rotation(np.array([1,0,0]), self.psi, self.theta, self.phi)
@@ -456,7 +456,7 @@ class UAVModel(object):
         # 如果分母有效，继续计算
         angle = np.arccos(np.dot(L_ego_m_, self.vel_) / (dist * norm(self.vel_)))
 
-        if angle * 180 / pi < 60 and dist <= 50e3:  # 假设飞机雷达和导弹的通信距离在50km
+        if angle * 180 / pi < 60: # and dist <= 50e3:  # 假设飞机雷达和导弹的通信距离在50km
             target_uav = None
             # 根据导弹目标id查找目标
             for uav in UAVs:

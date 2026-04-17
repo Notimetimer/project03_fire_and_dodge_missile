@@ -15,7 +15,7 @@ from Math_calculates.sub_of_angles import *
 import re
 
 use_tacview = 1  # 是否可视化
-action_cycle_multiplier = 30
+action_cycle_multiplier = 15
 
 def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     '''
@@ -40,12 +40,12 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     t_fired = state_check["weapon"] # 导弹发射后计时，<12s不允许发射新导弹
     ATA = state_check["target_information"][4]
     AA_hor = state_check["target_information"][6]
-    sin_theta = state_check["ego_main"][2]
+    sin_theta = state_check["ego_main"][3]
 
     # 1. 计算初始的开火意图
     fire_missile = False
-    if distance < 60e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
-        if t_fired >= 12 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
+    if distance < 80e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+        if t_fired >= 20 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
             fire_missile = True
 
     # # 2. 根据目标相对高度选择基础进攻机动
@@ -162,15 +162,15 @@ if __name__=='__main__':
     # 在这里调用规则(编号)下的策略
     parser = argparse.ArgumentParser("UAV swarm confrontation")
     # Environment
-    parser.add_argument("--max-episode-len", type=float, default=10*60,  # 8 * 60,
+    parser.add_argument("--max-episode-len", type=float, default=12*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=55e3,  # 70e3 还是太大了
+    parser.add_argument("--R-cage", type=float, default=75e3,
                         help="")
     args = parser.parse_args()
 
     env = ChooseStrategyEnv(args, tacview_show=use_tacview)
     # test
-    env.dt_move = 0.05 # 0.025
+    env.dt_move = 0.02 # 0.025
 
     env.shielded = 1 # 0 # 有防撞地就可以不要这个
 
@@ -187,7 +187,7 @@ if __name__=='__main__':
         red_psi = -pi/2
         blue_psi = pi/2
         red_N = 0
-        red_E = 45e3
+        red_E = 50e3
         blue_N = red_N
         blue_E = -red_E
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
@@ -255,6 +255,7 @@ if __name__=='__main__':
                 # 获取观测信息
                 r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
                 b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+                
                 # 在这里将观测信息压入记忆
                 # env.RUAV.obs_memory = r_check_obs.copy()
                 # env.BUAV.obs_memory = b_check_obs.copy()
@@ -274,22 +275,33 @@ if __name__=='__main__':
 
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(env.obs2obs_check(r_obs))  # r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, 0) # i_episode 或 5 
+                    r_action_label, r_fire = basic_rules(r_state_check, 4) # i_episode 或 5 
                     last_r_action_label = r_action_label
                     if r_fire:
                         launch_missile_immediately(env, 'r')
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(env.obs2obs_check(b_obs))  # b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, 0)
+                    b_action_label, b_fire = basic_rules(b_state_check, 4)
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')
 
                     decide_steps_after_update += 1
                     
+                    r_action_list.append(np.array([env.t + t_bias, r_action_label]))
                     b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                     current_action = b_action_label
+
+                    # debug
+                    if env.t > 80:
+                        print("r_state_check", r_state_check["threat"])
+                        print("r_action_label", r_action_label)
+                        print()
+                        print("b_state_check", b_state_check["threat"])
+                        print("b_action_label", b_action_label)
+                        print()
+
 
                 r_action = env.maneuver14LR(env.RUAV, r_action_label)
                 b_action = env.maneuver14LR(env.BUAV, b_action_label)
@@ -336,19 +348,27 @@ if __name__=='__main__':
         if b_action_arrays.size == 0:
             print("b_action_arrays is empty, nothing to plot.")
         else:
-            x = b_action_arrays[:, 0].astype(float)
-            y = b_action_arrays[:, 1].astype(float)
+            # 绘制红方和蓝方的动作
+            x_b = b_action_arrays[:, 0].astype(float)
+            y_b = b_action_arrays[:, 1].astype(float)
+            
+            r_action_arrays = np.array(r_action_list)
+            x_r = r_action_arrays[:, 0].astype(float)
+            y_r = r_action_arrays[:, 1].astype(float)
 
-            fig, ax = plt.subplots(figsize=(12, 4))
-            ax.plot(x, y, marker='o', linestyle='-')
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.plot(x_b, y_b, marker='o', linestyle='-', label='Blue (Action Type)', color='blue', alpha=0.7)
+            ax.plot(x_r, y_r, marker='x', linestyle='--', label='Red (Action Type)', color='red', alpha=0.7)
+            
             ax.set_xlabel('time (s)')
-            ax.set_ylabel('b_action_label')
-            ax.set_title('b_action over time')
+            ax.set_ylabel('Action Label')
+            ax.set_title('Red & Blue Action Type over time')
+            ax.legend()
 
             # 自定义 x 轴刻度：每 10s 一个刻度；若刻度能被60整除，额外在刻度下方显示整除后的结果（分钟数），
             # 否则显示该刻度除以60后的余数（秒）
             step = 10
-            xmin, xmax = x.min(), x.max()
+            xmin, xmax = min(x_b.min(),x_r.min()), max(x_b.max(),x_r.max())
             ticks = np.arange(np.floor(xmin / step) * step, np.ceil(xmax / step) * step + 1, step)
             labels = []
             for t in ticks:

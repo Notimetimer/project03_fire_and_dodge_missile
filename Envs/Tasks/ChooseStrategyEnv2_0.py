@@ -30,7 +30,6 @@ from Envs.battle6dof1v1_missile0919 import *
 from Envs.Tasks.AttackManeuverEnv import *
 from Envs.Tasks.CrankManeuverEnv import *
 from Envs.Tasks.EscapeManeuverEnv import *
-from Algorithms.Rules import *
 
 
 # 通过继承构建观测空间、奖励函数和终止条件
@@ -94,7 +93,7 @@ class ChooseStrategyEnv(Battle):
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
         self.last_obs = None
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=0, ego_side='b'):
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=1, ego_side='b'):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
         super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo, ego_side=ego_side)
         # # 初始化红蓝远离速度
@@ -109,6 +108,10 @@ class ChooseStrategyEnv(Battle):
         self.last_obs = None 
         
         self.pomdp = pomdp   
+
+        # 开场数据支持，至少背对背决斗时需要知道“对手在后面”
+        self.RUAV.state_memory = copy.deepcopy(self.get_state('r'))
+        self.BUAV.state_memory = copy.deepcopy(self.get_state('b'))
     
     def obs_1v1(self, side, pomdp=0, reward_fn=0):
         pre_full_obs = self.base_obs(side, pomdp, reward_fn)
@@ -399,44 +402,44 @@ class ChooseStrategyEnv(Battle):
         # 水平跟踪
         if action == 0:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = 0
-            speed_cmd = 400
+            delta_height_cmd = 135
+            speed_cmd = 340
 
         # 30°爬升加速
         if action == 1:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
             delta_height_cmd = 2500
-            speed_cmd = 400
+            speed_cmd = 340
 
         # 60°爬升加速
         if action == 2:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
             delta_height_cmd = 5000
-            speed_cmd = 400
+            speed_cmd = 340
 
         # -30°俯冲跟踪
         if action == 3:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
             delta_height_cmd = -5000/3
-            speed_cmd = 400
+            speed_cmd = 340
 
         # -60°俯冲跟踪
         if action == 4:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
             delta_height_cmd = -5000/3*2
-            speed_cmd = 400
+            speed_cmd = 340
 
         # 左60°水平偏移
         if action == 5:
             delta_psi_cmd = sub_of_radian(delta_psi - 55 * pi/180, 0)
             delta_height_cmd = 0
-            speed_cmd = 350
+            speed_cmd = 340
 
         # 右60°水平偏移
         if action == 6:
             delta_psi_cmd = sub_of_radian(delta_psi + 55 * pi/180, 0)
             delta_height_cmd = 0
-            speed_cmd = 350
+            speed_cmd = 340
 
         # 水平蛇形机动
         if action == 7:
@@ -449,12 +452,12 @@ class ChooseStrategyEnv(Battle):
             else:
                 delta_psi_cmd = sub_of_radian(delta_psi-pi/3, 0)
             delta_height_cmd = 0
-            speed_cmd = 350
+            speed_cmd = 340
 
         # 破s
         if action == 8:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = sub_of_radian(delta_psi, pi)
+            delta_psi_cmd = sub_of_radian(delta_psi_temp, pi)
             delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
             speed_cmd = 300
 
@@ -463,35 +466,35 @@ class ChooseStrategyEnv(Battle):
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
             delta_psi_cmd = sub_of_radian(delta_psi_temp - pi/2, 0)
             delta_height_cmd = 0
-            speed_cmd = 400
+            speed_cmd = 340
 
         # 水平9线机动
         if action == 10:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
             delta_psi_cmd = sub_of_radian(delta_psi_temp + pi/2, 0)
             delta_height_cmd = 0
-            speed_cmd = 400
+            speed_cmd = 340
 
         # 水平快置尾
         if action == 11:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
             delta_height_cmd = -500 if abs(delta_psi_temp)<pi/2 else 0
-            speed_cmd = 400
+            speed_cmd = 340
 
         # 水平快置尾后-30°俯冲
         if action == 12:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
             delta_height_cmd = -5000/3
-            speed_cmd = 400
+            speed_cmd = 340
 
         # 水平快置尾后-60°俯冲
         if action == 13:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
             delta_height_cmd = -5000/3*2
-            speed_cmd = 400
+            speed_cmd = 340
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
     
 
