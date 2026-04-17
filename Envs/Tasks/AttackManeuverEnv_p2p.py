@@ -91,8 +91,8 @@ class AttackTrainEnv(Battle):
 
         # 角度奖励
         r_angle = 1 - alpha / (pi / 3)  # 超出雷达范围就惩罚狠一点
-        sin_phi = state["ego_main"][4]
-        cos_phi = state["ego_main"][5]
+        sin_phi = state["ego_main"][5]
+        cos_phi = state["ego_main"][4]
         phi = atan2(sin_phi, cos_phi)
         # 滚转角惩罚
         r_angle -= 0.1 * abs(phi / pi)

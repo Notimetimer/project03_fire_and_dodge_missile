@@ -712,10 +712,10 @@ class Battle(object):
             "ego_main": np.array([
                 float(v_own),  # 0本机速度 m/s
                 float(h_own),  # 1本机高度 m
-                float(sin_theta),  # 2
-                float(cos_theta),  # 3
-                float(sin_phi),  # 4
-                float(cos_phi),  # 5
+                float(cos_theta),  # 2
+                float(sin_theta),  # 3
+                float(cos_phi),  # 4
+                float(sin_phi),  # 5
                 int(ammo)  # 6剩余导弹数量
             ]),
 

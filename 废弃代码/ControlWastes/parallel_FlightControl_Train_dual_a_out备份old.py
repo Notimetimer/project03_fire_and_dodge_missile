@@ -159,10 +159,10 @@ class track_env():
             "ego_main": np.array([
                 float(v_own),  # 0本机速度 m/s
                 float(h_own),  # 1本机高度 m
-                float(sin_theta),  # 2
-                float(cos_theta),  # 3
-                float(sin_phi),  # 4
-                float(cos_phi),  # 5
+                float(cos_theta),  # 2
+                float(sin_theta),  # 3
+                float(cos_phi),  # 4
+                float(sin_phi),  # 5
                 int(ammo)  # 6剩余导弹数量
             ]),
 
@@ -341,10 +341,10 @@ class track_env():
         ruav_state = self.get_state()
         speed = ruav_state["ego_main"][0]
         alt = ruav_state["ego_main"][1]
-        sin_theta = ruav_state["ego_main"][2]
-        cos_theta = ruav_state["ego_main"][3]
-        sin_phi = ruav_state["ego_main"][4]
-        cos_phi = ruav_state["ego_main"][5]
+        sin_theta = ruav_state["ego_main"][3]
+        cos_theta = ruav_state["ego_main"][2]
+        sin_phi = ruav_state["ego_main"][5]
+        cos_phi = ruav_state["ego_main"][4]
         phi = atan2(sin_phi, cos_phi)
         p = ruav_state["ego_control"][0]
         q = ruav_state["ego_control"][1]

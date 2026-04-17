@@ -137,7 +137,7 @@ class EscapeTrainEnv(Battle):
             if ego.alt >= self.max_alt_save and ego.theta > 0:
                 r_angle_v -= abs(ego.theta / pi * 2)
 
-            # sin_theta = state["ego_main"][2]
+            # sin_theta = state["ego_main"][3]
             # if -threat_delta_theta>-pi/6:
             #     sin_theta_opt = -1*np.clip((alt-self.min_alt_save)/5000, -0.99, 0.99)
             # else:

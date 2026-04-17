@@ -40,7 +40,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     t_fired = state_check["weapon"] # 导弹发射后计时，<12s不允许发射新导弹
     ATA = state_check["target_information"][4]
     AA_hor = state_check["target_information"][6]
-    sin_theta = state_check["ego_main"][2]
+    sin_theta = state_check["ego_main"][3]
 
     # 1. 计算初始的开火意图
     fire_missile = False

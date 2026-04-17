@@ -464,6 +464,11 @@ class Battle(object):
                     scaled_control_input_state["ego_control"],
                     scaled_control_input_state["flight_cmd"]
                 ])
+                # debug
+                if self.t > 80 and self.t % 3 == 0:
+                    print(UAV.side)
+                    print(control_input_state["flight_cmd"])
+                    print()
                 # 控制器作用
                 control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                 aileron, elevator, rudder, throttle = control_action['cont']
@@ -708,11 +713,12 @@ class Battle(object):
             threat_delta_thetas = np.zeros(len(alive_enm_missiles))
             for i, missile in enumerate(alive_enm_missiles):
                 distances[i] = missile.distance
-                if missile.distance < missile.detect_range and missile.in_angle:
-                    missile.lock_on = 1
+                if missile.distance < 60e3:
                     warnings[i] = 1
                     threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
+                    if missile.distance < missile.detect_range and missile.in_angle:
+                        missile.lock_on = 1
                 else:
                     missile.lock_on = 0
                     if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
@@ -806,10 +812,10 @@ class Battle(object):
             "ego_main": np.array([
                 float(v_own),  # 0本机速度 m/s
                 float(h_own),  # 1本机高度 m
-                float(sin_theta),  # 2
-                float(cos_theta),  # 3
-                float(sin_phi),  # 4
-                float(cos_phi),  # 5
+                float(cos_theta),  # 2
+                float(sin_theta),  # 3
+                float(cos_phi),  # 4
+                float(sin_phi),  # 5
                 int(ammo)  # 6剩余导弹数量
             ]),
 
@@ -1014,13 +1020,28 @@ class Battle(object):
             ATA = state["target_information"][4]
             dist = state["target_information"][3]
 
-            # 2. 根据条件决定是 "全覆盖" 还是 "部分覆盖"
+            # 【新增：提取之前的绝对姿态】
+            if "inertial_target_psi" in memory:
+                mem_inertial_psi = memory["inertial_target_psi"]
+                mem_inertial_theta = memory["inertial_target_theta"]
+            else:
+                mem_inertial_psi = sub_of_radian(uav.psi + atan2(memory["target_information"][1], memory["target_information"][0]), 0)
+                mem_inertial_theta = uav.theta + memory["target_information"][2]
+
+            # 计算在全盲情况下应该显示的基于惯性系更新后的相对角度
+            blind_delta_psi = sub_of_radian(mem_inertial_psi - uav.psi, 0)
+            blind_delta_theta = mem_inertial_theta - uav.theta
+
+            # 根据条件决定是 "全覆盖" 还是 "部分覆盖"
             
             # 情况A: 超出探测距离 -> 完全不可见
             if dist > 160e3:
                 state["target_observable"] = 0
-                # 整体覆盖：所有信息都用旧的
+                # 整体覆盖：除更新航向补偿外其他信息都用旧的
                 state["target_information"] = memory["target_information"].copy()
+                state["target_information"][0] = cos(blind_delta_psi)
+                state["target_information"][1] = sin(blind_delta_psi)
+                state["target_information"][2] = blind_delta_theta
             
             # 情况B: 距离较近
             elif dist > 10e3:
@@ -1029,6 +1050,9 @@ class Battle(object):
                     state["target_observable"] = 0
                     # 整体覆盖
                     state["target_information"] = memory["target_information"].copy()
+                    state["target_information"][0] = cos(blind_delta_psi)
+                    state["target_information"][1] = sin(blind_delta_psi)
+                    state["target_information"][2] = blind_delta_theta
                 
                 # B2: 角度大 但 被锁定 (RWR告警) -> 部分可见
                 elif ATA > pi / 3 and state["locked_by_target"] == 1:
@@ -1055,6 +1079,12 @@ class Battle(object):
         
         if reward_fn == 0: # 防止在奖励函数里面调用的时候泄露信息
             uav.state_memory = copy.deepcopy(state)
+            
+            # 计算绝对方位角并存入记忆，确保断锁等不可见情况下能保持惯性系正确性
+            current_delta_psi = atan2(state["target_information"][1], state["target_information"][0])
+            current_delta_theta = state["target_information"][2]
+            uav.state_memory["inertial_target_psi"] = sub_of_radian(uav.psi + current_delta_psi, 0)
+            uav.state_memory["inertial_target_theta"] = uav.theta + current_delta_theta
 
         # 在把 state 传入 scale_state 之前移除时间戳 't'
         if 't' in state:
@@ -1341,59 +1371,6 @@ class Battle(object):
 
         self.tacview.send_data_to_client(data_to_send)
         print('cage set')
-
-    # 规则机动模型
-    def track_behavior(self, ego_height, delta_psi, speed_cmd=1.5*340):
-        """
-        追踪行为：返回 (heading_cmd, speed_cmd)
-        """
-        height_cmd = 7e3 - ego_height
-        heading_cmd = delta_psi
-        return np.array([height_cmd, heading_cmd, speed_cmd])
-
-    def escape_behavior(self, ego_height, enm_delta_psi, warning, threat_delta_psi, speed_cmd=1.5 * 340):
-        """
-        逃逸行为：返回 (heading_cmd, speed_cmd)
-        没有导弹威胁的时候躲飞机，有导弹威胁的时候躲导弹
-        """
-        height_cmd = 7e3 - ego_height
-        if warning:
-            heading_cmd = np.clip(sub_of_radian(threat_delta_psi, pi), -pi / 2, pi / 2)
-        else:
-            heading_cmd = np.clip(sub_of_radian(enm_delta_psi, pi), -pi / 2, pi / 2)
-
-        return np.array([height_cmd, heading_cmd, speed_cmd])
-
-    def left_crank_behavior(self, ego_height, delta_psi, speed_cmd = 1.1 * 340):
-        """
-        crank 行为：返回 (heading_cmd, speed_cmd)
-        """
-        height_cmd = 7e3 - ego_height
-        heading_cmd = np.clip(delta_psi - pi / 4, -pi / 2, pi / 2)
-        # temp = 0.4 * (delta_psi - pi / 4) / (pi / 4) * 2
-        # heading_cmd = np.clip(temp, -0.4, 0.4)
-
-        return np.array([height_cmd, heading_cmd, speed_cmd])
-
-    def right_crank_behavior(self, ego_height, delta_psi, speed_cmd = 1.1 * 340):
-        """
-        crank 行为：返回 (heading_cmd, speed_cmd)
-        """
-        height_cmd = 7e3 - ego_height
-        heading_cmd = np.clip(delta_psi + pi / 4, -pi / 2, pi / 2)
-        # temp = 0.4 * (delta_psi + pi / 4) / (pi / 4) * 2
-        # heading_cmd = np.clip(temp, -0.4, 0.4)
-
-        return np.array([height_cmd, heading_cmd, speed_cmd])
-
-    def wander_behavior(self, speed_cmd = 300):
-        """
-        wander 随机漫步行为：返回 (alt_cmd, heading_cmd, speed_cmd)
-        """
-        alt_cmd = 3000 * np.random.uniform(-1, 1)
-        heading_cmd = np.random.normal(0, 25 * pi / 180)
-
-        return np.array([alt_cmd, heading_cmd, speed_cmd])
 
     def back_in_cage(self, cmd, ego_pos_, ego_psi):
         height_cmd, heading_cmd, speed_cmd = cmd

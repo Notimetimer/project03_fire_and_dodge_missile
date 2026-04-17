@@ -46,10 +46,10 @@ class UnifiedPolicyWrapper:
         delta_psi_cmd = np.arctan2(sin_delta_psi, cos_delta_psi)
         ego_height = state_check["ego_main"][1]
         delta_heading = delta_psi_cmd
-        theta = np.arcsin(np.clip(state_check["ego_main"][2], -0.9999, 0.9999))
+        theta = np.arcsin(np.clip(state_check["ego_main"][3], -0.9999, 0.9999))
         speed = state_check["ego_main"][0]
         set_speed = speed + delta_speed_cmd
-        phi = np.arctan2(state_check["ego_main"][4], state_check["ego_main"][5])
+        phi = np.arctan2(state_check["ego_main"][5], state_check["ego_main"][4])
         alpha_air = state_check["ego_control"][5]
         beta_air = state_check["ego_control"][6]
         p = state_check["ego_control"][0]

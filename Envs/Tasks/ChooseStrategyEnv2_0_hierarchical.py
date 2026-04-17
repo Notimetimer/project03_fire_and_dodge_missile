@@ -323,7 +323,7 @@ class ChooseStrategyEnv(Battle):
         # 破s
         if action == 8:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = sub_of_radian(delta_psi, pi)
+            delta_psi_cmd = sub_of_radian(delta_psi_temp, pi)
             delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
             speed_cmd = 300
 
@@ -344,21 +344,21 @@ class ChooseStrategyEnv(Battle):
         # 水平快置尾
         if action == 11:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
             delta_height_cmd = -500 if abs(delta_psi_temp)<pi/2 else 0
             speed_cmd = 340
 
         # 水平快置尾后-30°俯冲
         if action == 12:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
             delta_height_cmd = -5000/3
             speed_cmd = 340
 
         # 水平快置尾后-60°俯冲
         if action == 13:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi, pi), -pi/2, pi/2)
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
             delta_height_cmd = -5000/3*2
             speed_cmd = 340
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])

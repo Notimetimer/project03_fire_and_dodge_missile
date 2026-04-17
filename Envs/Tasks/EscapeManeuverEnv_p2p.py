@@ -72,10 +72,10 @@ class EscapeTrainEnv(Battle):
         state = self.get_state(side)
         speed = state["ego_main"][0]
         alt = state["ego_main"][1]
-        cos_theta = state["ego_main"][3]
-        sin_theta = state["ego_main"][2]
+        cos_theta = state["ego_main"][2]
+        sin_theta = state["ego_main"][3]
         theta = atan2(sin_theta, cos_theta)
-        sin_phi = state["ego_main"][4]
+        sin_phi = state["ego_main"][5]
         p = state["ego_control"][0]
         q = state["ego_control"][1]
         r = state["ego_control"][2]
@@ -100,8 +100,8 @@ class EscapeTrainEnv(Battle):
                                    cos(delta_theta_threat)*sin_delta_psi_threat])
         alpha_threat = np.arccos(np.dot(fake_L_threat_, fake_current_heading_) / (1 + 1e-5))
         p = state["ego_control"][0]
-        sin_phi = state["ego_main"][4]
-        cos_phi = state["ego_main"][5]
+        sin_phi = state["ego_main"][5]
+        cos_phi = state["ego_main"][4]
         phi = atan2(sin_phi, cos_phi)
         # cos_threat_psi, sin_threat_psi, threat_delta_theta, threat_distance =\
         #     state["threat"]

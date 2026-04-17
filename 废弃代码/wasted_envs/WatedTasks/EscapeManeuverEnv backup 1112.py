@@ -71,10 +71,10 @@ class EscapeTrainEnv(Battle):
         state = self.get_state(side)
         speed = state["ego_main"][0]
         alt = state["ego_main"][1]
-        cos_theta = state["ego_main"][3]
-        sin_theta = state["ego_main"][2]
+        cos_theta = state["ego_main"][2]
+        sin_theta = state["ego_main"][3]
         theta = atan2(sin_theta, cos_theta)
-        sin_phi = state["ego_main"][4]
+        sin_phi = state["ego_main"][5]
         p = state["ego_control"][0]
         q = state["ego_control"][1]
         r = state["ego_control"][2]
@@ -192,7 +192,7 @@ class EscapeTrainEnv(Battle):
             # 下高奖励
             # ego.theta_v 在高空至少应该俯冲，但是俯冲角度超过-30°就不再额外奖励
 
-            # sin_theta = state["ego_main"][2]
+            # sin_theta = state["ego_main"][3]
             # if -threat_delta_theta>-pi/6:
             #     sin_theta_opt = -1*np.clip((alt-self.min_alt_safe)/5000, -0.99, 0.99)
             # else:

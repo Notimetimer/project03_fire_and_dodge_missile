@@ -75,7 +75,7 @@ class EscapeTrainEnv(Battle):
         delta_theta = state["target_information"][2]
         dist = state["target_information"][3]
         alpha = state["target_information"][4]
-        sin_phi = state["ego_main"][4]
+        sin_phi = state["ego_main"][5]
         p = state["ego_control"][0]
         q = state["ego_control"][1]
         r = state["ego_control"][2]

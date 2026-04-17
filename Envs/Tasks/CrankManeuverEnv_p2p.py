@@ -139,8 +139,8 @@ class CrankTrainEnv(Battle):
             r_angle -= 3 * np.sign(x) * delta_psi_dot * 180 / pi * self.dt_maneuver / 4
 
         
-        sin_phi = state["ego_main"][4]
-        cos_phi = state["ego_main"][5]
+        sin_phi = state["ego_main"][5]
+        cos_phi = state["ego_main"][4]
         phi = atan2(sin_phi, cos_phi)
         # 滚转角惩罚
         r_angle -= 0.1 * abs(phi / pi)
@@ -272,8 +272,8 @@ class CrankTrainEnv(Battle):
             r_angle -= 3 * np.sign(x) * delta_psi_dot * 180 / pi * self.dt_maneuver / 4
 
         
-        sin_phi = state["ego_main"][4]
-        cos_phi = state["ego_main"][5]
+        sin_phi = state["ego_main"][5]
+        cos_phi = state["ego_main"][4]
         phi = atan2(sin_phi, cos_phi)
         # 滚转角惩罚
         r_angle -= 0.2 * abs(phi / pi) # 禁止倒飞
