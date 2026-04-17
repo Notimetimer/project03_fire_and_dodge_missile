@@ -159,7 +159,7 @@ action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1.1,1.1],[-1.1,1.1],[-1.1,1.1],[-0.2,1.2]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr'
+mission_name = '对比实验FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr'
 
 if __name__=='__main__':
     # dof = 3
