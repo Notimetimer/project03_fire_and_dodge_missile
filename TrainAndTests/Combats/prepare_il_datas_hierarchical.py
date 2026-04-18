@@ -3,7 +3,7 @@ import numpy as np
 from BasicRules_new_hierarchical import *  # 可以直接读同一级目录
 from Algorithms.Utils import compute_monte_carlo_returns
 
-def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multiplier=15, shielded=1, current_rule=4):
+def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multiplier=10, shielded=1, current_rule=4):
     gamma = gamma
     
     # 在这里调用规则(编号)下的策略
@@ -16,7 +16,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
     args = parser.parse_args()
 
     env = ChooseStrategyEnv(args, tacview_show=1)
-
+    env.dt_move = 0.04 # 0.025 0.02
     env.shielded = shielded
 
     def creat_initial_state(randomized=0):
@@ -28,7 +28,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
         blue_psi = -pi/2 + np.random.uniform(-1,1)*pi/3
         init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
         red_N = init_North
-        red_E = 45e3
+        red_E = 50e3
         blue_N = red_N
         blue_E = -red_E
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),

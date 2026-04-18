@@ -142,9 +142,9 @@ class missile_class:
         self.max_g0 = 40
         self.max_g = self.max_g0
         # 最大马赫数
-        self.max_mach = 5
+        self.max_mach = 4.0
         # 特征面积
-        self.area = 0.4 # 0.4  # m2
+        self.area = 0.405 # 0.4  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
         self.speed_min = 0.35 * 340  # m/s
@@ -172,7 +172,7 @@ class missile_class:
         self.last_target_t = None
         self.last_target_v = None
         self.radar_on = False
-        self.radar_lock_state = False
+        self.lock_on = False
         self.side = None
         self.datalink = None
         self.A_pole_moment = None
@@ -452,6 +452,8 @@ class missile_class:
             self.in_distance = 1
         else:
             self.in_distance = 0
+        
+        self.lock_on = self.in_angle and self.in_distance
 
         vtt = np.linalg.norm(vtt_)
         psi_mt = np.arctan2(vmt_[2], vmt_[0])

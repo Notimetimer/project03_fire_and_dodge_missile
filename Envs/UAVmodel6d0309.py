@@ -419,18 +419,6 @@ class UAVModel(object):
         self.last_launch_time = current_time
         return new_missile
 
-    # 是否可探测到目标
-    def can_detect_target(self, target):
-        can = False
-        if self.dead:  # 本机已死，拒绝探测目标
-            return False
-        L_ego_enm_ = target.pos_ - self.pos_
-        dist = norm(L_ego_enm_)
-        if dist <= 130e3:
-            angle = np.arccos(np.dot(L_ego_enm_, self.vel_) / (dist * self.speed))
-            if angle <= self.max_radar_angle_rad:
-                can = True
-        return can
 
     # 是否可跟踪目标
     def can_track_target(self, target):
@@ -439,9 +427,9 @@ class UAVModel(object):
             return False
         L_ego_enm_ = target.pos_ - self.pos_
         dist = norm(L_ego_enm_)
-        if dist <= 80e3:
+        if dist <= self.max_radar_range:
             angle = np.arccos(np.dot(L_ego_enm_, self.vel_) / (dist * norm(self.vel_)))
-            if angle * 180 / pi <= 55:
+            if angle <= self.max_radar_angle_rad:
                 can = True
         return can
 
@@ -460,7 +448,7 @@ class UAVModel(object):
         # 如果分母有效，继续计算
         angle = np.arccos(np.dot(L_ego_m_, self.vel_) / (dist * norm(self.vel_)))
 
-        if angle * 180 / pi < 60: # and dist <= 50e3:  # 假设飞机雷达和导弹的通信距离在50km
+        if angle * 180 / pi < 90: # and dist <= 50e3:  # 假设飞机雷达和导弹的通信距离在50km
             target_uav = None
             # 根据导弹目标id查找目标
             for uav in UAVs:

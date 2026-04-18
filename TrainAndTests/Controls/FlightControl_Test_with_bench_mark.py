@@ -62,7 +62,7 @@ time_limit = 2 * 60  # 每组测试限时 5 分钟
 target_range = 3e3
 
 # 是否跟踪动目标（会导致超调量记录失效）
-chasing_wave = 0
+chasing_wave = 1
 realistic = 1
 
 avg_height_overshoot = 0
@@ -100,7 +100,7 @@ t_bias = 0 # 用于 Tacview 时间偏移，防止轨道重叠
 print(f"\nBenchmark 开始，当前测试配置 [{mission_name}]，共 {total_cases} 组测试案例...")
 i=0
 for init_h in height_list:
-    height_req = np.clip(init_h - 5000, 3000, 13000)
+    height_req = np.clip(init_h - 5000, 1000, 13000)
     for target_v in speed_list:
         i+=1
         print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
@@ -136,13 +136,13 @@ for init_h in height_list:
                 env.psi_req = sub_of_radian(env.psi_req, 0)
                 
                 # 高度变化率波动
-                # h_dot_t = A_h_dot * sin(w_h * current_t)
+                # h_dot_t = A_h_dot * - sin(w_h * current_t)
                 # env.height_req += h_dot_t * dt_decide
 
-                theta_req = 45 * (pi/180) * sin(w_h * current_t)
+                theta_req = 60 * (pi/180) * -sin(w_h * current_t)
                 env.height_req = env.RUAV.alt + theta_req * 5000/(pi/2)
 
-                env.height_req = np.clip(env.height_req, 3000, 13000)
+                env.height_req = np.clip(env.height_req, 1000, 13000)
             else:
                 if env.t >= 30:
                     env.height_req = 5000

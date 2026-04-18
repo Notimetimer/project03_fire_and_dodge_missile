@@ -58,8 +58,8 @@ class track_env():
                                }
         
         self.time_limit = time_limit
-        self.min_alt = 1e3
-        self.min_alt_safe = 3e3
+        self.min_alt = 0.1e3
+        self.min_alt_safe = 1e3
 
         self.max_alt_safe = 13e3
         self.max_alt = 15e3
@@ -685,7 +685,7 @@ if __name__=='__main__':
             
             height_req = np.clip(init_height + \
                     warm_up * np.random.uniform(-1, 1)*5000, \
-                        3000, 13000)
+                        1000, 13000)
 
             psi_req = np.random.uniform(-pi, pi) * warm_up # 预热，0.3以后真正开始动真格
             v_req = np.random.uniform(0.8, 2.5)*340

@@ -14,7 +14,7 @@ from Math_calculates.sub_of_angles import *
 import re
 
 use_tacview = 1  # 是否可视化
-action_cycle_multiplier = 15
+action_cycle_multiplier = 10
 
 def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     '''
@@ -53,7 +53,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     # 1. 计算初始的开火意图
     fire_missile = False
-    if distance < 85e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+    if distance < 95e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
         if t_fired >= 20 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
             fire_missile = True
 
@@ -178,7 +178,7 @@ if __name__=='__main__':
 
     env = ChooseStrategyEnv(args, tacview_show=use_tacview)
     # test
-    env.dt_move = 0.02 # 0.025
+    env.dt_move = 0.04 # 0.025 0.02
 
     env.shielded = 1 # 0 # 有防撞地就可以不要这个
 
@@ -223,6 +223,8 @@ if __name__=='__main__':
     try:
         r_action_list = []
         b_action_list = []
+        r_guide_list = []
+        b_guide_list = []
         
         # 采集不同轨迹的动作
         for i_episode in range(1): # 5
@@ -283,14 +285,14 @@ if __name__=='__main__':
 
                     # 红方根据规则活动
                     r_state_check = env.unscale_state(env.obs2obs_check(r_obs))  # r_check_obs)
-                    r_action_label, r_fire = basic_rules(r_state_check, 4) # i_episode 或 5 
+                    r_action_label, r_fire = basic_rules(r_state_check, rules_num=2) # i_episode 或 5 
                     last_r_action_label = r_action_label
                     if r_fire:
                         launch_missile_immediately(env, 'r')
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(env.obs2obs_check(b_obs))  # b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, 4)
+                    b_action_label, b_fire = basic_rules(b_state_check, rules_num=2)
                     last_b_action_label = b_action_label
                     if b_fire:
                         launch_missile_immediately(env, 'b')
@@ -301,20 +303,22 @@ if __name__=='__main__':
                     b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                     current_action = b_action_label
 
-                    # debug
-                    if env.t > 40:
-                        print("r_state_check", r_state_check["warning"])
-                        print("r_action_label", r_action_label)
-                        print()
-                        print("b_state_check", b_state_check["warning"])
-                        print("b_action_label", b_action_label)
-                        print()
+                    # # debug
+                    # if env.t > 40:
+                    #     print("r_state_check", r_state_check["warning"])
+                    #     print("r_action_label", r_action_label)
+                    #     print()
+                    #     print("b_state_check", b_state_check["warning"])
+                    #     print("b_action_label", b_action_label)
+                    #     print()
 
 
                 r_action = env.maneuver14LR(env.RUAV, r_action_label)
                 b_action = env.maneuver14LR(env.BUAV, b_action_label)
 
                 env.step(r_action, b_action) # Environment updates every dt_maneuver
+                r_guide_list.append(np.array([env.t + t_bias, env.r_can_guide]))
+                b_guide_list.append(np.array([env.t + t_bias, env.b_can_guide]))
                 done, b_reward_event, b_reward_constraint, b_reward_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire)
                 b_reward = b_reward_event + b_reward_constraint + b_reward_shaping
 
@@ -350,6 +354,8 @@ if __name__=='__main__':
         import matplotlib.pyplot as plt
         r_action_arrays = np.array(r_action_list)
         b_action_arrays = np.array(b_action_list)
+        r_guide_arrays = np.array(r_guide_list)
+        b_guide_arrays = np.array(b_guide_list)
 
         # 绘制红方和蓝方的动作
         x_b = b_action_arrays[:, 0].astype(float)
@@ -358,19 +364,34 @@ if __name__=='__main__':
         x_r = r_action_arrays[:, 0].astype(float)
         y_r = r_action_arrays[:, 1].astype(float)
 
-        fig, ax = plt.subplots(figsize=(12, 5))
+        x_bg = b_guide_arrays[:, 0].astype(float)
+        y_bg = b_guide_arrays[:, 1].astype(float)
+        x_rg = r_guide_arrays[:, 0].astype(float)
+        y_rg = r_guide_arrays[:, 1].astype(float)
+
+        fig, (ax, ax_guide) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
         ax.plot(x_b, y_b, marker='o', linestyle='-', label='Blue (Action Type)', color='blue', alpha=0.7)
         ax.plot(x_r, y_r, marker='x', linestyle='--', label='Red (Action Type)', color='red', alpha=0.7)
         
-        ax.set_xlabel('time (s)')
         ax.set_ylabel('Action Label')
         ax.set_title('Red & Blue Action Type over time')
         ax.legend()
+        ax.grid(True)
+
+        # 绘制制导状态
+        ax_guide.plot(x_bg, y_bg, label='Blue Guidance Status', color='blue', alpha=0.7)
+        ax_guide.plot(x_rg, y_rg, label='Red Guidance Status', color='red', alpha=0.7)
+        ax_guide.set_xlabel('time (s)')
+        ax_guide.set_ylabel('Guidance Status')
+        ax_guide.set_title('Red & Blue Guidance Status (can_guide) over time')
+        ax_guide.legend()
+        ax_guide.grid(True)
 
         # 自定义 x 轴刻度：每 10s 一个刻度；若刻度能被60整除，额外在刻度下方显示整除后的结果（分钟数），
         # 否则显示该刻度除以60后的余数（秒）
         step = 10
-        xmin, xmax = min(x_b.min(),x_r.min()), max(x_b.max(),x_r.max())
+        xmin = min(x_b.min(), x_r.min(), x_rg.min(), x_bg.min())
+        xmax = max(x_b.max(), x_r.max(), x_rg.max(), x_bg.max())
         ticks = np.arange(np.floor(xmin / step) * step, np.ceil(xmax / step) * step + 1, step)
         labels = []
         for t in ticks:
@@ -379,10 +400,9 @@ if __name__=='__main__':
                 labels.append(f"{ti}\n{ti//60}")
             else:
                 labels.append(str(ti % 60))
-        ax.set_xticks(ticks)
-        ax.set_xticklabels(labels)
+        ax_guide.set_xticks(ticks)
+        ax_guide.set_xticklabels(labels)
 
-        ax.grid(True)
         plt.tight_layout()
         plt.show()
         print()

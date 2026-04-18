@@ -25,7 +25,7 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯ML
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
-dt_maneuver = 0.02  # 0.2
+dt_maneuver = 0.2  # 0.2
 # -----------------------------------------
 
 # --- 2. 辅助函数 ---

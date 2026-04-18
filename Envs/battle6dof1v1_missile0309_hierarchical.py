@@ -121,9 +121,9 @@ class Battle(object):
         self.max_alt = 15e3
         self.max_alt_danger = 14e3
         self.max_alt_safe = 13e3
-        self.min_alt_safe = 3e3
-        self.min_alt_danger = 2e3
-        self.min_alt = 0.5e3  # 1e3
+        self.min_alt_safe = 1e3 # 3e3
+        self.min_alt_danger = 5e2 # 2e3
+        self.min_alt = 100 # 0.5e3  # 1e3
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
         self.RWR_distance = 60e3 # 最大告警距离
         self.RWR_ranging_distance = self.RWR_distance # 最大告警可测距
@@ -153,6 +153,9 @@ class Battle(object):
         
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, seed=None, options=None, ego_side='b'):  # 重置位置和状态
         self.set_ego_side(ego_side)
+        # debug
+        self.r_can_guide = 0
+        self.b_can_guide = 0
         
         # [新增] 如果需要支持随机种子控制，可以在这里设置
         if seed is not None:
@@ -396,6 +399,9 @@ class Battle(object):
         # 导弹发射不在这里执行，这里只处理运动解算，且发射在step之前
         # 运动按照dt_move更新，结果合并到dt_maneuver中
 
+        self.r_can_guide = 0
+        self.b_can_guide = 0
+
         for j1 in range(int(report_move_time_rate)):
             # 飞机移动
             for UAV, action in zip(self.UAVs, actions):
@@ -508,6 +514,10 @@ class Battle(object):
                     if uav.id == missile.launcher_id:
                         if uav.can_offer_guidance(missile, self.UAVs):
                             has_datalink = True
+                            if uav.red:
+                                self.r_can_guide = max(1, self.r_can_guide)
+                            else:
+                                self.b_can_guide = max(1, self.b_can_guide)
                 last_vmt_, last_pmt_, _, _, _, _, _, _, _, _ = \
                     missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
                 # 毁伤判别
