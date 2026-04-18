@@ -464,11 +464,11 @@ class Battle(object):
                     scaled_control_input_state["ego_control"],
                     scaled_control_input_state["flight_cmd"]
                 ])
-                # debug
-                if self.t > 80 and self.t % 3 == 0:
-                    print(UAV.side)
-                    print(control_input_state["flight_cmd"])
-                    print()
+                # # debug
+                # if self.t > 80 and self.t % 3 == 0:
+                #     print(UAV.side)
+                #     print(control_input_state["flight_cmd"])
+                #     print()
                 # 控制器作用
                 control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                 aileron, elevator, rudder, throttle = control_action['cont']
