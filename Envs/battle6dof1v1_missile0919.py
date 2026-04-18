@@ -564,7 +564,7 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        if ATA <= own.max_radar_angle and dist <= own.max_radar_range and target_alive:
+        if ATA <= own.max_radar_angle_rad and dist <= own.max_radar_range and target_alive:
             target_locked = 1
         else:
             target_locked = 0
@@ -599,7 +599,7 @@ class Battle(object):
 
         # 目标雷达跟踪标志 bool
         alpha_enm = np.arccos(np.dot(-L_, adv.vel_) / (norm(adv.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
-        if alpha_enm < own.max_radar_angle and dist < own.max_radar_range:
+        if alpha_enm < own.max_radar_angle_rad and dist < own.max_radar_range:
             locked_by_target = 1
         else:
             locked_by_target = 0
@@ -617,7 +617,7 @@ class Battle(object):
             threat_delta_thetas = np.zeros(len(alive_enm_missiles))
             for i, missile in enumerate(alive_enm_missiles):
                 distances[i] = missile.distance
-                if missile.distance < missile.detect_range and missile.in_angle:
+                if missile.in_distance and missile.in_angle:
                     warnings[i] = 1
                     threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
@@ -919,7 +919,7 @@ class Battle(object):
             # 2. 根据条件决定是 "全覆盖" 还是 "部分覆盖"
             
             # 情况A: 超出探测距离 -> 完全不可见
-            if dist > 160e3:
+            if dist > 130e3:
                 state["target_observable"] = 0
                 # 整体覆盖：所有信息都用旧的
                 state["target_information"] = memory["target_information"].copy()
@@ -927,13 +927,13 @@ class Battle(object):
             # 情况B: 距离较近
             elif dist > 10e3:
                 # B1: 角度大 且 未被锁定 -> 完全不可见
-                if ATA > pi / 3 and state["locked_by_target"] == 0:
+                if ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 0:
                     state["target_observable"] = 0
                     # 整体覆盖
                     state["target_information"] = memory["target_information"].copy()
                 
                 # B2: 角度大 但 被锁定 (RWR告警) -> 部分可见
-                elif ATA > pi / 3 and state["locked_by_target"] == 1:
+                elif ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 1:
                     state["target_observable"] = 1
                     # 【核心逻辑】只覆盖运动学信息 (dist, speed, AA)，保留当前真实的 RWR 信息 (角度, ATA)
                     # 因为 memory['dist'] 已经是上一步复制下来的旧值，所以这里再次复制依然是旧值
@@ -1344,7 +1344,7 @@ def launch_missile_immediately(env, side='r', tabu=0):
     # 发射导弹
     if uav.ammo>0 and not uav.dead:
         if not tabu or\
-                target_locked and ego_state["weapon"]>=0.1 and ATA<=60 *pi/180:
+                target_locked and ego_state["weapon"]>=0.1 and ATA<=env.RUAV.max_radar_angle_rad:
             new_missile = uav.launch_missile(target, env.t, missile_class)
             uav.ammo -= 1
 
@@ -1394,13 +1394,13 @@ def launch_missile_with_basic_rules(env, side='r'):
     if can_shoot:
         should_shoot = 0
         if dist<=5e3:
-            should_shoot = (1-ATA/(60*pi/180))**2
+            should_shoot = (1-ATA/(self.RUAV.max_radar_angle_rad))**2
 
         elif dist<=20e3 and abs(AA_hor)>=pi/2:
-            should_shoot = (1-ATA/(60*pi/180))**2
+            should_shoot = (1-ATA/(self.RUAV.max_radar_angle_rad))**2
 
         elif dist<=80e3 and interval>=20:
-            should_shoot = (1-ATA/(60*pi/180))**2
+            should_shoot = (1-ATA/(self.RUAV.max_radar_angle_rad))**2
     
     if dist > 10e3 and AA_hor<pi/6:
         should_shoot = 0

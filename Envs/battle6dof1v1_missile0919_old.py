@@ -538,11 +538,11 @@ class Battle(object):
             dist = state[4]
 
             # 超出探测距离
-            if dist > 160e3: # 啥也看不到
+            if dist > 130e3: # 啥也看不到
                 state[0, 12, 15] = 0
                 state[1:5+1] = memory[1:5+1]
             # 跟踪距离到探测距离
-            elif dist > 120e3: # 不能跟踪目标，
+            elif dist > 130e3: # 不能跟踪目标，
                 state[12] = 0
                 if alpha > 60*pi/180 and state[20]==0:  # 夹角>3/pi时观测不到目标
                     state[0] = 0
@@ -650,7 +650,7 @@ class Battle(object):
             self.train_side_win = 1
 
         # 角度奖励
-        r_angle = 1-alpha/(60*pi/180)  # 超出雷达范围就惩罚狠一点
+        r_angle = 1-alpha/(self.RUAV.max_radar_angle_rad  # 超出雷达范围就惩罚狠一点
 
         # 高度奖励
         pre_alt_opt = target_alt + np.clip((dist-10e3)/(40e3-10e3)*5e3, 0, 5e3)

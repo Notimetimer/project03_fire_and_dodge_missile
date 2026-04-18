@@ -3,19 +3,19 @@ import numpy as np
 from BasicRules_new_hierarchical import *  # 可以直接读同一级目录
 from Algorithms.Utils import compute_monte_carlo_returns
 
-def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multiplier=30, shielded=0, current_rule=4):
+def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multiplier=15, shielded=1, current_rule=4):
     gamma = gamma
     
     # 在这里调用规则(编号)下的策略
     parser = argparse.ArgumentParser("UAV swarm confrontation")
     # Environment
-    parser.add_argument("--max-episode-len", type=float, default=10*60,  # 8 * 60,
+    parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=45e3,  # 70e3 还是太大了
+    parser.add_argument("--R-cage", type=float, default=71e3,
                         help="")
     args = parser.parse_args()
 
-    env = ChooseStrategyEnv(args, tacview_show=0)
+    env = ChooseStrategyEnv(args, tacview_show=1)
 
     env.shielded = shielded
 
@@ -49,7 +49,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
         transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
         il_transition_dict = {'states':[], 'actions': [], 'returns': []}
         
-        for _ in range(4):
+        for _ in range(5):
             # 示范数据采集
             for i_episode in range(5):
 

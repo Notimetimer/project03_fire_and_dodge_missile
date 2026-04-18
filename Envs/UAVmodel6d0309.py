@@ -62,8 +62,8 @@ class UAVModel(object):
         self.set_height = None
         self.set_speed = None
         # 雷达性能约束
-        self.max_radar_angle = 60*pi/180
-        self.max_radar_range = 120e3
+        self.max_radar_angle_rad = 75 * pi/180 # 60
+        self.max_radar_range = 130e3
 
         # 导弹相关属性
         self.ammo = 6  # 最大可携带导弹数量
@@ -191,6 +191,10 @@ class UAVModel(object):
     #     return cd / 10
 
     def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=None):
+        # 无限燃油
+        self.sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
+        self.sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
+
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
             self.set_height = target_height
@@ -422,9 +426,9 @@ class UAVModel(object):
             return False
         L_ego_enm_ = target.pos_ - self.pos_
         dist = norm(L_ego_enm_)
-        if dist <= 160e3:
+        if dist <= 130e3:
             angle = np.arccos(np.dot(L_ego_enm_, self.vel_) / (dist * self.speed))
-            if angle * 180 / pi <= 60:
+            if angle <= self.max_radar_angle_rad:
                 can = True
         return can
 

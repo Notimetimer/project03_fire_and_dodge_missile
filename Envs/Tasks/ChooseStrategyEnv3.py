@@ -305,7 +305,7 @@ class ChooseStrategyEnv(Battle):
         cos_ATA_enm = np.dot(enm.vel_, L_enm2ego) / (norm(enm.vel_) * dist_enm2ego + 0.001)
         ATA_enm = np.arccos(np.clip(cos_ATA_enm, -1, 1))
         # [新增] 严格的被锁定判定：系统判定被锁 + 距离限制 + 角度限制
-        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= pi/3)
+        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= self.RUAV.max_radar_angle_rad)
         # [新增] 初始化或获取上一时刻的状态字典
         if self.last_obs is None:
             self.last_obs = {'r': {}, 'b': {}}

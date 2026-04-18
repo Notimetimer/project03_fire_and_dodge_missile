@@ -32,7 +32,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "PID"
+mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
@@ -80,7 +80,7 @@ max_alpha = 0
 min_alpha = float('inf')
 max_beta = 0
 
-env = track_env(dt_move=dt_move, tacview_show=0, time_limit=time_limit)
+env = track_env(dt_move=dt_move, tacview_show=1, time_limit=time_limit)
 env.realistic = realistic
 
 # PID 策略初始化

@@ -126,7 +126,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_psi = atan2(sin_delta_psi, cos_delta_psi)
         alpha = ego_states["target_information"][4]
         # 严格被锁判定
-        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= pi/3)
+        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= self.RUAV.max_radar_angle_rad)
         
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]

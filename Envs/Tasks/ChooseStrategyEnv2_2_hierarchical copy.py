@@ -160,7 +160,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_psi = atan2(sin_delta_psi, cos_delta_psi)
         alpha = ego_states["target_information"][4]
         # 严格被锁判定
-        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= pi/3)
+        strict_locked_by_target = ego_states["locked_by_target"] and (dist_enm2ego <= 80e3) and (ATA_enm <= self.RUAV.max_radar_angle_rad)
         
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
@@ -272,7 +272,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # [加回] 开火引导逻辑 (Should fire vs Shoot)
         should_fire_missile = False
-        if distance < 60e3 and alpha < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+        if distance < 60e3 and alpha < self.RUAV.max_radar_angle_rad and abs(delta_psi) < 30*pi/180:
             if missile_time_since_shoot >= 20 and not missile_in_mid_term and not (distance > 12e3 and abs(AA_hor) < 30*pi/180):
                 should_fire_missile = True
         

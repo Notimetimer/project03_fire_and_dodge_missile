@@ -443,7 +443,7 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        if ATA < own.max_radar_angle and dist < own.max_radar_range:
+        if ATA < own.max_radar_angle_rad and dist < own.max_radar_range:
             target_locked = 1
         else:
             target_locked = 0
@@ -467,7 +467,7 @@ class Battle(object):
 
         # 目标雷达跟踪标志 bool
         alpha_enm = np.arccos(np.dot(-L_, adv.vel_) / (norm(adv.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
-        if alpha_enm < own.max_radar_angle and dist < own.max_radar_range:
+        if alpha_enm < own.max_radar_angle_rad and dist < own.max_radar_range:
             locked_by_target = 1
         else:
             locked_by_target = 0
@@ -484,7 +484,7 @@ class Battle(object):
             threat_delta_psis = np.zeros(len(alive_enm_missiles))
             threat_delta_thetas = np.zeros(len(alive_enm_missiles))
             for i, missile in enumerate(alive_enm_missiles):
-                if missile.distance < missile.detect_range and missile.in_angle:
+                if missile.in_distance and missile.in_angle:
                     warnings[i] = 1
                     distances[i] = missile.distance
                     # # 作为追踪去训练，视图避开(pi -pi)突变点问题
@@ -646,15 +646,15 @@ class Battle(object):
             dist = state["target_information"][3]
 
             # 超出探测距离
-            if dist > 160e3:  # 啥也看不到
+            if dist > 130e3:  # 啥也看不到
                 state["target_observable"] = 0
                 state["target_information"] = memory["target_information"].copy()
             # 探测距离到近距
             elif dist > 10e3:
-                if ATA > pi / 3 and state["locked_by_target"] == 0:  # 夹角>3/pi时观测不到目标
+                if ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 0:  # 夹角>3/pi时观测不到目标
                     state["target_observable"] = 0
                     state["target_information"] = memory["target_information"].copy()
-                elif ATA > pi / 3 and state["locked_by_target"] == 1:  # 被目标探测后有对目标的角度信息
+                elif ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 1:  # 被目标探测后有对目标的角度信息
                     state["target_observable"] = 1
                     for idx in (0, 3, 5, 6, 7):
                         state["target_information"][idx] = memory["target_information"][idx]

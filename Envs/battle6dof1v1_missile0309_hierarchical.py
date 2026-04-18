@@ -125,6 +125,8 @@ class Battle(object):
         self.min_alt_danger = 2e3
         self.min_alt = 0.5e3  # 1e3
         self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
+        self.RWR_distance = 60e3 # 最大告警距离
+        self.RWR_ranging_distance = self.RWR_distance # 最大告警可测距
 
         # # 智能体的观察空间
         # self.r_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
@@ -658,7 +660,7 @@ class Battle(object):
         ammo = own.ammo
 
         # 雷达可跟踪标志
-        if ATA <= own.max_radar_angle and dist <= own.max_radar_range and target_alive:
+        if ATA <= own.max_radar_angle_rad and dist <= own.max_radar_range and target_alive:
             target_locked = 1
             own.lock_on = 1
         else:
@@ -695,43 +697,45 @@ class Battle(object):
 
         # 目标雷达跟踪标志 bool
         alpha_enm = np.arccos(np.dot(-L_, adv.vel_) / (norm(adv.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
-        if alpha_enm < own.max_radar_angle and dist < own.max_radar_range:
+        if alpha_enm < own.max_radar_angle_rad and dist < own.max_radar_range:
             locked_by_target = 1
         else:
             locked_by_target = 0
 
         # 告警信息
+        # 默认值
+        warning = 0
+        threat_delta_psi = pi  # pi 0
+        threat_delta_theta = 0
+        threat_distance = self.RWR_distance
+        direct_threat = 0 # 是否受到导弹的直接威胁
         if not alive_enm_missiles:
-            warning = 0
-            threat_delta_psi = pi  # pi 0
-            threat_delta_theta = 0
-            threat_distance = 30e3
-        else:  # 敌导弹一发射就告警
-            warnings = np.zeros(len(alive_enm_missiles))
-            distances = np.ones(len(alive_enm_missiles)) * 30e3
-            threat_delta_psis = np.zeros(len(alive_enm_missiles))
-            threat_delta_thetas = np.zeros(len(alive_enm_missiles))
+            pass
+        else:
+            # 存在敌导弹
+            dist_closest = 200e3
             for i, missile in enumerate(alive_enm_missiles):
-                distances[i] = missile.distance
-                if missile.distance < 60e3:
-                    warnings[i] = 1
-                    threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
-                    threat_delta_thetas[i] = -missile.q_epsilon
-                    if missile.distance < missile.detect_range and missile.in_angle:
-                        missile.lock_on = 1
+                distance_this_one = missile.distance
+                # 告警距离大于导弹锁定距离，只要导弹雷达开机
+                if missile.in_angle and missile.radar_on and distance_this_one < self.RWR_distance:
+                    warning = 1
+                    direct_threat = 1
+                    if distance_this_one < dist_closest:
+                        dist_closest = distance_this_one # 这个导弹目前最近
+                        threat_delta_psi = sub_of_radian(pi + missile.q_beta, own.psi)
+                        threat_delta_theta = -missile.q_epsilon
+                    # 如果处于可测距范围(当作和告警距离一样远)，就报告威胁距离
+                    if 1:
+                        threat_distance = min(threat_distance, missile.distance)
                 else:
-                    missile.lock_on = 0
                     if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
                         # 进入告警距离前用敌机方位作为导弹告警方位
-                        threat_delta_psis[i] = delta_psi
-                        threat_delta_thetas[i] = delta_theta + own.theta
+                        warning = 1 # 敌机为导弹提供中制导也会触发我机告警信号
+                        # 如果没有受到导弹的直接锁定，才报告敌机的方位
+                        if direct_threat == 0:
+                            threat_delta_psi = delta_psi
+                            threat_delta_theta = delta_theta + own.theta
 
-            # 告警标志 bool
-            warning = bool(max(warnings))
-            min_idx = int(np.argmin(distances))
-            threat_delta_psi = threat_delta_psis[min_idx]
-            threat_delta_theta = threat_delta_thetas[min_idx]
-            threat_distance = distances[min_idx]
 
         p = own.p
         q = own.q
@@ -749,17 +753,6 @@ class Battle(object):
 
         # 目标相对方位角速度 (rad/s) / 0.35 与 目标相对俯仰角速度 (rad/s) / 0.35
         vT_ = adv.vel_
-        # vr_ = vT_ - v_
-        # vr_radial = np.dot(vr_, L_) / dist  # 径向速度
-        # vr_tangent_ = np.cross(L_, vr_) / dist # 目标周向速度矢量
-        # omega_ = vr_tangent_/dist # 目标相对角速度矢量
-        # down_ = np.array([0,-1,0])
-        # L_left_ = np.cross(L_, down_)/dist
-        # L_left_ = L_left_/norm(L_left_)
-        # omega_vert_ = np.dot(omega_, down_) * 1
-        # omega_hor_ = omega_ - omega_vert_
-        # delta_psi_dot = np.dot(omega_vert_, down_) # 目标相对方位角速度
-        # delta_theta_dot = -np.dot(omega_hor_, L_left_) # 目标相对俯仰角速度
 
         psi_vT = atan2(vT_[2], vT_[0])
         theta_vT = atan2(vT_[1], sqrt(vT_[0] ** 2 + vT_[2] ** 2))
@@ -1000,14 +993,12 @@ class Battle(object):
         self.state_init["missile_in_mid_term"] = 0
         self.state_init["locked_by_target"] = 0
         self.state_init["warning"] = 0
-        # self.state_init["target_information"] = np.array([0, 0, 0, 100e3, 0, 0, 0, 0])
         self.state_init["target_information"] = np.array([1, 0, 0, 100e3, 0, 0, 0, 0])
         self.state_init["ego_main"] = np.array([300, 5000, 0, 1, 0, 1, 0])
         self.state_init["ego_control"] = np.array(
             [0, 0, 0, 0, 0, 0, 0, 0])
         self.state_init["weapon"] = 120
-        # self.state_init["threat"] = np.array([pi, 0, 30e3])  # [pi,0,30e3]  [0,0,30e3]
-        self.state_init["threat"] = np.array([1, 0, 0, 30e3])
+        self.state_init["threat"] = np.array([1, 0, 0, self.RWR_distance])
         self.state_init["border"] = np.array([50e3, 0])
 
         if pomdp:  # 只有在部分观测情况下需要添加屏蔽
@@ -1035,7 +1026,7 @@ class Battle(object):
             # 根据条件决定是 "全覆盖" 还是 "部分覆盖"
             
             # 情况A: 超出探测距离 -> 完全不可见
-            if dist > 160e3:
+            if dist > 130e3:
                 state["target_observable"] = 0
                 # 整体覆盖：除更新航向补偿外其他信息都用旧的
                 state["target_information"] = memory["target_information"].copy()
@@ -1046,7 +1037,7 @@ class Battle(object):
             # 情况B: 距离较近
             elif dist > 10e3:
                 # B1: 角度大 且 未被锁定 -> 完全不可见
-                if ATA > pi / 3 and state["locked_by_target"] == 0:
+                if ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 0:
                     state["target_observable"] = 0
                     # 整体覆盖
                     state["target_information"] = memory["target_information"].copy()
@@ -1055,7 +1046,7 @@ class Battle(object):
                     state["target_information"][2] = blind_delta_theta
                 
                 # B2: 角度大 但 被锁定 (RWR告警) -> 部分可见
-                elif ATA > pi / 3 and state["locked_by_target"] == 1:
+                elif ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 1:
                     state["target_observable"] = 1
                     # 【核心逻辑】只覆盖运动学信息 (dist, speed, AA)，保留当前真实的 RWR 信息 (角度, ATA)
                     # 因为 memory['dist'] 已经是上一步复制下来的旧值，所以这里再次复制依然是旧值
@@ -1426,44 +1417,6 @@ class Battle(object):
         return cmd
 
 
-def launch_missile_if_possible(env, side='r'):
-    """
-    根据条件判断是否发射导弹
-    """
-    if side == 'r':
-        uav = env.RUAV
-        ally_missiles = env.Rmissiles
-        target = env.BUAV
-    else:  # side == 'b'
-        uav = env.BUAV
-        ally_missiles = env.Bmissiles
-        target = env.RUAV
-
-    waite = False
-    for missile in ally_missiles:
-        if not missile.dead:
-            waite = True
-            break
-
-    if not waite:
-        # 判断是否可以发射导弹
-        if uav.can_launch_missile(target, env.t):
-            # 发射导弹
-            new_missile = uav.launch_missile(target, env.t, missile_class)
-            new_missile.lock_on = 0
-            uav.ammo -= 1
-            new_missile.side = 'r' if side == 'r' else 'b'
-            if side == 'r':
-                env.Rmissiles.append(new_missile)
-            else:
-                env.Bmissiles.append(new_missile)
-            env.missiles = env.Rmissiles + env.Bmissiles
-            
-        return 1
-    else:
-        return 0
-
-
 def launch_missile_immediately(env, side='r', tabu=0):
     """
     立即发射导弹
@@ -1487,9 +1440,8 @@ def launch_missile_immediately(env, side='r', tabu=0):
     # 发射导弹
     if uav.ammo>0 and not uav.dead:
         if not tabu or\
-                target_locked and ego_state["weapon"]>=0.1 and ATA<=60 *pi/180:
+                target_locked and ego_state["weapon"]>=0.1 and ATA<=env.RUAV.max_radar_angle_rad:
             new_missile = uav.launch_missile(target, env.t, missile_class)
-            new_missile.lock_on = 0
             uav.ammo -= 1
 
             # 记录导弹发射瞬间的 ATA、distance 和 AA_hor
@@ -1507,66 +1459,3 @@ def launch_missile_immediately(env, side='r', tabu=0):
     
     return new_missile_id
 
-
-def launch_missile_with_basic_rules(env, side='r'):
-    """
-    立即发射导弹
-    """
-    if side == 'r':
-        uav = env.RUAV
-        ally_missiles = env.Rmissiles
-        target = env.BUAV
-    else:  # side == 'b'
-        uav = env.BUAV
-        ally_missiles = env.Bmissiles
-        target = env.RUAV
-
-    ego_state = env.get_state(uav.side)
-    target_locked = ego_state["target_locked"]
-    alt = ego_state["ego_main"][1]
-    dist = ego_state["target_information"][3]
-    ATA = ego_state["target_information"][4]
-    AA_hor = ego_state["target_information"][6]
-    interval = ego_state["weapon"]
-
-    # 发射导弹
-    can_shoot = 0
-    should_shoot = 0
-    if uav.ammo>0 and not uav.dead and target_locked and interval>=3:
-        can_shoot = 1
-    
-    if can_shoot:
-        should_shoot = 0
-        if dist<=5e3:
-            should_shoot = (1-ATA/(60*pi/180))**2
-
-        elif dist<=20e3 and abs(AA_hor)>=pi/2:
-            should_shoot = (1-ATA/(60*pi/180))**2
-
-        elif dist<=80e3 and interval>=20:
-            should_shoot = (1-ATA/(60*pi/180))**2
-    
-    if dist > 10e3 and AA_hor<pi/6:
-        should_shoot = 0
-    if interval <= 30 and dist > 40e3:
-        should_shoot = 0
-    
-    if dist > 45e3:
-        should_shoot = 0
-
-
-    if np.random.rand() < should_shoot: # np.random.rand() 生成的是在区间 [0, 1) 上的独立均匀分布
-        new_missile = uav.launch_missile(target, env.t, missile_class)
-        new_missile.lock_on = 0
-        uav.ammo -= 1
-        new_missile.side = 'r' if side == 'r' else 'b'
-        if side == 'r':
-            env.Rmissiles.append(new_missile)
-        else:
-            env.Bmissiles.append(new_missile)
-        env.missiles = env.Rmissiles + env.Bmissiles
-        
-
-        return 1
-    else:
-        return 0

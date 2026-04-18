@@ -62,8 +62,8 @@ class UAVModel(object):
         self.set_height = None
         self.set_speed = None
         # 雷达性能约束
-        self.max_radar_angle = 60*pi/180
-        self.max_radar_range = 120e3
+        self.max_radar_angle_rad = 60*pi/180
+        self.max_radar_range = 130e3
 
         # 导弹相关属性
         self.ammo = 6  # 最大可携带导弹数量
@@ -411,9 +411,9 @@ class UAVModel(object):
             return False
         L_ego_enm_ = target.pos_ - self.pos_
         dist = norm(L_ego_enm_)
-        if dist <= 160e3:
+        if dist <= 130e3:
             angle = np.arccos(np.dot(L_ego_enm_, self.vel_) / (dist * self.speed))
-            if angle * 180 / pi <= 60:
+            if angle <= self.max_radar_angle_rad:
                 can = True
         return can
 

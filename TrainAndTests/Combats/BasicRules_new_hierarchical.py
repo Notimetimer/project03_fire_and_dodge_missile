@@ -9,7 +9,6 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 
 
-from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_if_possible
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 三元组奖励
 from Math_calculates.sub_of_angles import *
 import re
@@ -36,20 +35,29 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     delta_psi = atan2(sin_delta_psi, cos_delta_psi)
     delta_psi_threat = atan2(state_check["threat"][1], state_check["threat"][0])
     RWR = state_check["warning"] # 受到威胁标志
+    threat_distance = state_check["threat"][3] # 威胁距离
     on_guiding = state_check["missile_in_mid_term"] # 中制导状态标志
     t_fired = state_check["weapon"] # 导弹发射后计时，<12s不允许发射新导弹
     ATA = state_check["target_information"][4]
     AA_hor = state_check["target_information"][6]
     sin_theta = state_check["ego_main"][3]
 
+    threat_distance_list = np.array([
+                                    0, # 0
+                                    45, # 1
+                                    45, # 2
+                                    45, # 3
+                                    45, # 4
+                                    45, # 5
+                                    ]) * 1e3
+
     # 1. 计算初始的开火意图
     fire_missile = False
-    if distance < 80e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+    if distance < 85e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
         if t_fired >= 20 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
             fire_missile = True
 
     # # 2. 根据目标相对高度选择基础进攻机动
-    
     if abs(delta_theta) < 30:
         base_offensive_action = 0  # 平飞追踪
     elif delta_theta >= 30:
@@ -67,7 +75,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     elif rules_num in [1, 3]:
         # 规则1: 带防御机动
-        if RWR: # 受到威胁
+        if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             # 优先俯冲回转至5000m以下
             if alt > 5000:
                 action_number = 12 # 俯冲回转
@@ -82,7 +90,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     elif rules_num in [2, 4]:
         # 规则2: Loft爬升射击序列
-        if RWR: # 受到威胁
+        if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_number = 8 # 立刻 split-S
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
@@ -98,7 +106,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         fire_missile_affirmative = fire_missile
     
     elif rules_num in [5]:
-        if RWR: # 受到威胁
+        if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_number = 8 # 立刻 split-S
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
@@ -162,9 +170,9 @@ if __name__=='__main__':
     # 在这里调用规则(编号)下的策略
     parser = argparse.ArgumentParser("UAV swarm confrontation")
     # Environment
-    parser.add_argument("--max-episode-len", type=float, default=12*60,  # 8 * 60,
+    parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=75e3,
+    parser.add_argument("--R-cage", type=float, default=71e3,
                         help="")
     args = parser.parse_args()
 
@@ -294,11 +302,11 @@ if __name__=='__main__':
                     current_action = b_action_label
 
                     # debug
-                    if env.t > 80:
-                        print("r_state_check", r_state_check["threat"])
+                    if env.t > 40:
+                        print("r_state_check", r_state_check["warning"])
                         print("r_action_label", r_action_label)
                         print()
-                        print("b_state_check", b_state_check["threat"])
+                        print("b_state_check", b_state_check["warning"])
                         print("b_action_label", b_action_label)
                         print()
 
@@ -328,8 +336,6 @@ if __name__=='__main__':
             # print(t_bias)
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
-            r_action_list = np.array(r_action_list)
-            # b_action_list is no longer appended every dt_maneuver, need to rethink if you need this for logging
 
 
         training_end_time = time.time()  # 记录结束时间
@@ -341,46 +347,42 @@ if __name__=='__main__':
     finally:
         env.end_render() # 停止发送
 
+        import matplotlib.pyplot as plt
+        r_action_arrays = np.array(r_action_list)
         b_action_arrays = np.array(b_action_list)
 
-        import matplotlib.pyplot as plt
+        # 绘制红方和蓝方的动作
+        x_b = b_action_arrays[:, 0].astype(float)
+        y_b = b_action_arrays[:, 1].astype(float)
+        
+        x_r = r_action_arrays[:, 0].astype(float)
+        y_r = r_action_arrays[:, 1].astype(float)
 
-        if b_action_arrays.size == 0:
-            print("b_action_arrays is empty, nothing to plot.")
-        else:
-            # 绘制红方和蓝方的动作
-            x_b = b_action_arrays[:, 0].astype(float)
-            y_b = b_action_arrays[:, 1].astype(float)
-            
-            r_action_arrays = np.array(r_action_list)
-            x_r = r_action_arrays[:, 0].astype(float)
-            y_r = r_action_arrays[:, 1].astype(float)
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(x_b, y_b, marker='o', linestyle='-', label='Blue (Action Type)', color='blue', alpha=0.7)
+        ax.plot(x_r, y_r, marker='x', linestyle='--', label='Red (Action Type)', color='red', alpha=0.7)
+        
+        ax.set_xlabel('time (s)')
+        ax.set_ylabel('Action Label')
+        ax.set_title('Red & Blue Action Type over time')
+        ax.legend()
 
-            fig, ax = plt.subplots(figsize=(12, 5))
-            ax.plot(x_b, y_b, marker='o', linestyle='-', label='Blue (Action Type)', color='blue', alpha=0.7)
-            ax.plot(x_r, y_r, marker='x', linestyle='--', label='Red (Action Type)', color='red', alpha=0.7)
-            
-            ax.set_xlabel('time (s)')
-            ax.set_ylabel('Action Label')
-            ax.set_title('Red & Blue Action Type over time')
-            ax.legend()
+        # 自定义 x 轴刻度：每 10s 一个刻度；若刻度能被60整除，额外在刻度下方显示整除后的结果（分钟数），
+        # 否则显示该刻度除以60后的余数（秒）
+        step = 10
+        xmin, xmax = min(x_b.min(),x_r.min()), max(x_b.max(),x_r.max())
+        ticks = np.arange(np.floor(xmin / step) * step, np.ceil(xmax / step) * step + 1, step)
+        labels = []
+        for t in ticks:
+            ti = int(round(t))
+            if ti % 60 == 0:
+                labels.append(f"{ti}\n{ti//60}")
+            else:
+                labels.append(str(ti % 60))
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels)
 
-            # 自定义 x 轴刻度：每 10s 一个刻度；若刻度能被60整除，额外在刻度下方显示整除后的结果（分钟数），
-            # 否则显示该刻度除以60后的余数（秒）
-            step = 10
-            xmin, xmax = min(x_b.min(),x_r.min()), max(x_b.max(),x_r.max())
-            ticks = np.arange(np.floor(xmin / step) * step, np.ceil(xmax / step) * step + 1, step)
-            labels = []
-            for t in ticks:
-                ti = int(round(t))
-                if ti % 60 == 0:
-                    labels.append(f"{ti}\n{ti//60}")
-                else:
-                    labels.append(str(ti % 60))
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels)
-
-            ax.grid(True)
-            plt.tight_layout()
-            plt.show()
-            print()
+        ax.grid(True)
+        plt.tight_layout()
+        plt.show()
+        print()
