@@ -30,7 +30,7 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training2_hierarch import test_worker
 
-dt_move = 0.05
+dt_move = 0.04
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))

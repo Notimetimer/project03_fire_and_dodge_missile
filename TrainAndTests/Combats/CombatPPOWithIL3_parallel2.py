@@ -39,7 +39,7 @@ from UPolicyWrapper import UnifiedPolicyWrapper
 
 EXEC_COUNT = 0
 
-dt_move = 0.05
+dt_move = 0.04
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))

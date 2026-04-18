@@ -123,7 +123,7 @@ if __name__=='__main__':
 
     env = ChooseStrategyEnv(args, tacview_show=use_tacview)
     # test
-    env.dt_move = 0.05
+    env.dt_move = 0.04
 
     env.shielded = 1
 

@@ -509,11 +509,11 @@ class Battle(object):
         '''
 
         if side == 'r':
-            own = self.RUAV
+            ego = self.RUAV
             adv = self.BUAV
 
         else:  # if side=='b':
-            own = self.BUAV
+            ego = self.BUAV
             adv = self.RUAV
 
 
@@ -530,41 +530,41 @@ class Battle(object):
         # 目标可见性标志 0 完全不可见 1 可获取角度信息 2 可获取全部信息
         target_observable = 2  # 难保不搞成one-hot的形式
         # 目标相对高度
-        delta_alt_obs = adv.alt - own.alt
+        delta_alt_obs = adv.alt - ego.alt
         # 目标相对方位角
-        L_ = adv.pos_ - own.pos_
+        L_ = adv.pos_ - ego.pos_
         q_beta = atan2(L_[2], L_[0])
         L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
         L_v = L_[1]
         q_epsilon = atan2(L_v, L_h)
-        delta_psi = sub_of_radian(q_beta, own.psi)
+        delta_psi = sub_of_radian(q_beta, ego.psi)
         # 目标相对俯仰角
-        delta_theta = sub_of_radian(q_epsilon, own.theta)
+        delta_theta = sub_of_radian(q_epsilon, ego.theta)
         # 目标相对距离
         dist = norm(L_)
         dist_obs = dist
         # 夹角
-        v_ = own.vel_
-        vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
-        vv_ = own.vel_[1]  # 掩模 取垂直速度
+        v_ = ego.vel_
+        vh_ = ego.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
+        vv_ = ego.vel_[1]  # 掩模 取垂直速度
         v = norm(v_)
-        ATA = np.arccos(np.dot(L_, own.point_) / (dist * norm(own.point_) + 0.001))  # 防止计算误差导致分子>分母
+        ATA = np.arccos(np.dot(L_, ego.point_) / (dist * norm(ego.point_) + 0.001))  # 防止计算误差导致分子>分母
         # 速度观测量
         v_own = v
         # 本机高度
-        h_own = own.alt
+        h_own = ego.alt
         # 本机俯仰角
-        sin_theta = sin(own.theta)
-        cos_theta = cos(own.theta)
+        sin_theta = sin(ego.theta)
+        cos_theta = cos(ego.theta)
         # 本机滚转角
-        sin_phi = sin(own.phi)
-        cos_phi = cos(own.phi)
+        sin_phi = sin(ego.phi)
+        cos_phi = cos(ego.phi)
 
         # 剩余导弹量
-        ammo = own.ammo
+        ammo = ego.ammo
 
         # 雷达可跟踪标志
-        if ATA <= own.max_radar_angle_rad and dist <= own.max_radar_range and target_alive:
+        if ATA <= ego.max_radar_angle_rad and dist <= ego.max_radar_range and target_alive:
             target_locked = 1
         else:
             target_locked = 0
@@ -599,7 +599,7 @@ class Battle(object):
 
         # 目标雷达跟踪标志 bool
         alpha_enm = np.arccos(np.dot(-L_, adv.vel_) / (norm(adv.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
-        if alpha_enm < own.max_radar_angle_rad and dist < own.max_radar_range:
+        if alpha_enm < ego.max_radar_angle_rad and dist < ego.max_radar_range:
             locked_by_target = 1
         else:
             locked_by_target = 0
@@ -619,12 +619,12 @@ class Battle(object):
                 distances[i] = missile.distance
                 if missile.in_distance and missile.in_angle:
                     warnings[i] = 1
-                    threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, own.psi)
+                    threat_delta_psis[i] = sub_of_radian(pi + missile.q_beta, ego.psi)
                     threat_delta_thetas[i] = -missile.q_epsilon
                 elif locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
                     # 进入告警距离前用敌机方位作为导弹告警方位
                     threat_delta_psis[i] = delta_psi
-                    threat_delta_thetas[i] = delta_theta + own.theta
+                    threat_delta_thetas[i] = delta_theta + ego.theta
 
             # 告警标志 bool
             warning = bool(max(warnings))
@@ -633,17 +633,17 @@ class Battle(object):
             threat_delta_theta = threat_delta_thetas[min_idx]
             threat_distance = distances[min_idx]
 
-        p = own.p
-        q = own.q
-        r = own.r
+        p = ego.p
+        q = ego.q
+        r = ego.r
 
 
-        theta_v = own.theta_v
-        psi_v = own.psi_v
-        delta_psi_v = sub_of_radian(own.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
+        theta_v = ego.theta_v
+        psi_v = ego.psi_v
+        delta_psi_v = sub_of_radian(ego.target_heading, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
-        alpha_air = own.alpha_air # 弧度制
-        beta_air = own.beta_air # 弧度制
+        alpha_air = ego.alpha_air # 弧度制
+        beta_air = ego.beta_air # 弧度制
 
         speed_T = adv.speed
 
@@ -668,7 +668,7 @@ class Battle(object):
         AA_hor = sub_of_radian(psi_vT, q_beta)  # 向右飞为正
         AA_vert = sub_of_radian(theta_vT, q_epsilon)  # 向上飞为正
 
-        d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, own.pos_, own.psi)
+        d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, ego.pos_, ego.psi)
 
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [

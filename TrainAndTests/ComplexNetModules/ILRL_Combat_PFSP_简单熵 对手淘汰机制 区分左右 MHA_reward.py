@@ -327,7 +327,7 @@ if __name__ == "__main__":
     print(f"tacview_show={tacview_show}")
     env = ChooseStrategyEnv(args, tacview_show=tacview_show)
     env.shielded = 1 # 不得不全程带上，否则对手也会撞地
-    env.dt_move = 0.05 # 仿真跑得快点
+    env.dt_move = 0.04 # 仿真跑得快点
     
     t_bias = 0
     

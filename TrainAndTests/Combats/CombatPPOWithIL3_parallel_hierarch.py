@@ -30,7 +30,7 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training2_hierarch import test_worker
 
-dt_move = 0.05
+dt_move = 0.04
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -661,6 +661,7 @@ def run_MLP_simulation(
     R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
+    pomdp = 0,
 ):
 
     # 1. 设置随机数种子 (Master)

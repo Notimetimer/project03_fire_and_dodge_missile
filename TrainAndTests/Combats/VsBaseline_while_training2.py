@@ -40,7 +40,7 @@ def test_worker(model_state_dict, rule_num,
     # 关闭渲染以节省资源
     test_env = ChooseStrategyEnv(env_args, tacview_show=0)
     test_env.shielded = 1
-    test_env.dt_move = 0.05
+    test_env.dt_move = 0.04
     test_env.dt_maneuver = dt_maneuver_val # 使用传入的值，不依赖全局变量
     
     # 2. 局部初始化网络并加载权重

@@ -377,7 +377,7 @@ if __name__ == "__main__":
         def _thunk():
             env = ChooseStrategyEnv(args, tacview_show=0) # 并行训练通常不开可视化
             env.shielded = 1
-            env.dt_move = 0.05
+            env.dt_move = 0.04
             return env
         return _thunk
     

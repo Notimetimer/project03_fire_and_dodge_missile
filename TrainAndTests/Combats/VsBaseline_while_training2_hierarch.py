@@ -37,7 +37,7 @@ def test_worker(model_state_dict, rule_num,
     """
     device = torch.device(device_name)
 
-    env_args.R_cage = 45e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
+    env_args.R_cage = 71e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
     # env_args.max_episode_len = 10*60  # 测试给12分钟，超出训练时长
     
     # 1. 局部初始化环境 (必须在子进程内创建)
@@ -45,7 +45,7 @@ def test_worker(model_state_dict, rule_num,
     test_env = ChooseStrategyEnv(env_args, tacview_show=0)
     test_env.shielded = 1
     test_env.no_out = no_out
-    test_env.dt_move = 0.05
+    test_env.dt_move = 0.04
     test_env.dt_maneuver = dt_maneuver_val # 使用传入的值，不依赖全局变量
     
     # 2. 局部初始化网络并加载权重

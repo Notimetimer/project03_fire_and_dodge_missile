@@ -39,9 +39,9 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 10*60  # 10*60 # 回合最长时间，单位s
-R_cage= 45e3 # 55e3 # 场地半径，单位m
+dt_move = 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+max_episode_duration = 15*60  # 10*60 # 回合最长时间，单位s
+R_cage= 71e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 
@@ -114,8 +114,8 @@ if __name__=='__main__':
             'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
+            # 'Rule_3': 1200,
+            # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             }, # 
         # init_elo_ratings = {}, # 纯自博弈
@@ -136,6 +136,7 @@ if __name__=='__main__':
         R_cage_range = (R_cage, R_cage), # 固定场地大小
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
+        pomdp = 0, # 0表示全信息，1表示部分信息
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

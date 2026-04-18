@@ -30,7 +30,7 @@ from Algorithms.Utils import compute_monte_carlo_returns
 # from prepare_il_datas import run_rules
 from VsBaseline_while_training2 import test_worker
 
-dt_move = 0.05
+dt_move = 0.04
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))

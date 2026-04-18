@@ -115,38 +115,38 @@ class track_env():
         默认值在这里设定
         '''
 
-        own = self.RUAV
+        ego = self.RUAV
 
         # 夹角
-        v_ = own.vel_
-        vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
-        vv_ = own.vel_[1]  # 掩模 取垂直速度
+        v_ = ego.vel_
+        vh_ = ego.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
+        vv_ = ego.vel_[1]  # 掩模 取垂直速度
         v = norm(v_)
         
         # 速度观测量
         v_own = v
         # 本机高度
-        h_own = own.alt
+        h_own = ego.alt
         # 本机俯仰角
-        sin_theta = sin(own.theta)
-        cos_theta = cos(own.theta)
+        sin_theta = sin(ego.theta)
+        cos_theta = cos(ego.theta)
         # 本机滚转角
-        sin_phi = sin(own.phi)
-        cos_phi = cos(own.phi)
+        sin_phi = sin(ego.phi)
+        cos_phi = cos(ego.phi)
 
         # 剩余导弹量
         ammo = 0
 
-        p = own.p
-        q = own.q
-        r = own.r
+        p = ego.p
+        q = ego.q
+        r = ego.r
 
-        theta_v = own.theta_v
-        psi_v = own.psi_v
+        theta_v = ego.theta_v
+        psi_v = ego.psi_v
         delta_psi_v = sub_of_radian(self.psi_req, psi_v)  # 水平速度分量和目标航向之间的差角(弧度)
 
-        alpha_air = own.alpha_air
-        beta_air = own.beta_air
+        alpha_air = ego.alpha_air
+        beta_air = ego.beta_air
 
         delta_psi_control = sub_of_radian(self.psi_req, self.RUAV.psi)
         cos_delta_psi = cos(delta_psi_control)

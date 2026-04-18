@@ -37,9 +37,9 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 10*60 # 回合最长时间，单位s
-R_cage= 45e3 # 55e3 # 场地半径，单位m
+dt_move = 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+max_episode_duration = 15*60 # 回合最长时间，单位s
+R_cage= 71e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 
@@ -109,8 +109,8 @@ if __name__=='__main__':
             'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
+            # 'Rule_3': 1200,
+            # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈

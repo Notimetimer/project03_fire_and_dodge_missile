@@ -607,18 +607,18 @@ class Battle(object):
             6、空置
         '''
         if side == 'r':
-            own = self.RUAV
+            ego = self.RUAV
             adv = self.BUAV
         else:  # if side=='b':
-            own = self.BUAV
+            ego = self.BUAV
             adv = self.RUAV
         own_situations = np.zeros((6,), dtype=np.float32)
         adv_situations = np.zeros((7,), dtype=np.float32)
         # todo 观测空间欠缺归一化！暂不考虑局部观测的问题，
-        own_situations[0:3] = own.pos_
-        v_ = own.vel_
-        vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
-        vv_ = own.vel_[1]  # 掩模 取垂直速度
+        own_situations[0:3] = ego.pos_
+        v_ = ego.vel_
+        vh_ = ego.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
+        vv_ = ego.vel_[1]  # 掩模 取垂直速度
         # print(vv_)
         theta = atan2(vv_, np.linalg.norm(vh_))
         psi = atan2(vh_[2], vh_[0])
@@ -627,7 +627,7 @@ class Battle(object):
         own_situations[5] = psi
         # 目标观测信息
         # 补充:能否观测标记
-        L_ = adv.pos_ - own.pos_
+        L_ = adv.pos_ - ego.pos_
         q_beta = atan2(L_[2], L_[0])
         L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
         L_v = L_[1]

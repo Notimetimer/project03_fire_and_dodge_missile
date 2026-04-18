@@ -376,47 +376,47 @@ class Battle(object):
         side = self.UAV_ids
         
         if side == 'r':
-            own = self.RUAV
+            ego = self.RUAV
             adv = self.BUAV
             own_missiles = self.Rmissiles
             enm_missiles = self.Bmissiles
         else:  # if side=='b':
-            own = self.BUAV
+            ego = self.BUAV
             adv = self.RUAV
             own_missiles = self.Bmissiles
             enm_missiles = self.Rmissiles
         # 目标可见性标志 bool
         target_observable = 1
         # 目标相对高度
-        delta_alt_obs = adv.alt-own.alt
+        delta_alt_obs = adv.alt-ego.alt
         # 目标相对方位角
-        L_ = adv.pos_ - own.pos_
+        L_ = adv.pos_ - ego.pos_
         q_beta = atan2(L_[2], L_[0])
         L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
         L_v = L_[1]
         q_epsilon = atan2(L_v, L_h)
-        delta_psi = sub_of_radian(q_beta, own.psi)
+        delta_psi = sub_of_radian(q_beta, ego.psi)
         # 目标相对俯仰角
-        delta_theta = sub_of_radian(q_epsilon, own.theta)
+        delta_theta = sub_of_radian(q_epsilon, ego.theta)
         # 目标相对距离
         dist = norm(L_)
         dist_obs = dist
         # 夹角
-        v_ = own.vel_
-        vh_ = own.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
-        vv_ = own.vel_[1]  # 掩模 取垂直速度
+        v_ = ego.vel_
+        vh_ = ego.vel_ * np.array([1, 0, 1])  # 掩模 取水平速度
+        vv_ = ego.vel_[1]  # 掩模 取垂直速度
         v = norm(v_)
         alpha = np.arccos(np.dot(L_,v_)/(v*dist))
         # 速度观测量
         v_obs = v
         # 本机高度
-        h_abs_obs = own.alt
+        h_abs_obs = ego.alt
         # 本机俯仰角
-        sin_theta = sin(own.theta)
-        cos_theta = cos(own.theta)
+        sin_theta = sin(ego.theta)
+        cos_theta = cos(ego.theta)
         # 本机滚转角
-        sin_phi = sin(own.phi)
-        cos_phi = cos(own.phi)
+        sin_phi = sin(ego.phi)
+        cos_phi = cos(ego.phi)
         # 雷达可跟踪标志
         target_tracked = 1
 

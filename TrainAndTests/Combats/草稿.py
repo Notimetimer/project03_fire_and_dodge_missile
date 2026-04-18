@@ -265,7 +265,7 @@ if __name__ == "__main__":
     student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
     
     env = ChooseStrategyEnv(args, tacview_show=0)
-    env.dt_move = 0.05 # 仿真跑得快点
+    env.dt_move = 0.04 # 仿真跑得快点
     
     from BasicRules import * # 可以直接读同一级目录
     t_bias = 0
