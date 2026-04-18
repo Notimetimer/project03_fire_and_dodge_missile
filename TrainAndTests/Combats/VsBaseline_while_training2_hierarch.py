@@ -27,7 +27,7 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 def test_worker(model_state_dict, rule_num, 
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
-                device_name='cpu', num_runs=1, action_cycle_multiplier=30,
+                device_name='cpu', num_runs=1, action_cycle_multiplier=10,
                 no_out=0):
     seed = 42
     random.seed(seed)
@@ -37,8 +37,8 @@ def test_worker(model_state_dict, rule_num,
     """
     device = torch.device(device_name)
 
-    env_args.R_cage = 71e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
-    # env_args.max_episode_len = 10*60  # 测试给12分钟，超出训练时长
+    env_args.R_cage = 71e3
+    env_args.max_episode_len = 15*60
     
     # 1. 局部初始化环境 (必须在子进程内创建)
     # 关闭渲染以节省资源
@@ -63,7 +63,7 @@ def test_worker(model_state_dict, rule_num,
     loses = 0
     draws = 0
     for _ in range(num_runs):
-        test_env.reset(red_init_ammo=6, blue_init_ammo=6, pomdp=0)
+        test_env.reset(red_init_ammo=6, blue_init_ammo=6, pomdp=1) # 0
         
         steps = 0
         done = False

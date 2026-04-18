@@ -476,7 +476,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 blue_birth = settings['blue_birth']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
-                r_min, r_max = settings.get('R_cage_range', (45e3, 45e3))
+                r_min, r_max = settings.get('R_cage_range', (71e3, 71e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
@@ -671,7 +671,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
-    R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
+    R_cage_range = (71e3, 71e3), # 新增：环境随机化范围
     resume_dir = None,
 ):
 

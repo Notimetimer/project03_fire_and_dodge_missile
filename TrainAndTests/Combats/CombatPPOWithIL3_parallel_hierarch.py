@@ -147,7 +147,7 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     修改：增加 obs 输入，用于存储局部观测
     """
     td['obs'].append(obs) # 新增：存储Actor用的局部观测
-    td['states'].append(state) # 修改：这里存储Critic用的全局状态(pomdp=0)
+    td['states'].append(state) # 修改：这里存储Critic用的全局状态
     td['actions'].append(action)
     td['rewards'].append(reward)
     td['next_states'].append(next_state)
@@ -463,10 +463,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 blue_birth = settings['blue_birth']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
-                r_min, r_max = settings.get('R_cage_range', (45e3, 45e3))
+                r_min, r_max = settings.get('R_cage_range', (71e3, 71e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=1) # 0
                 
                 # 状态变量初始化
                 done = False
@@ -658,7 +658,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
-    R_cage_range = (45e3, 45e3), # 新增：环境随机化范围
+    R_cage_range = (71e3, 71e3), # 新增：环境随机化范围
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     pomdp = 0,
@@ -970,7 +970,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in [0, 1, 2, 3, 4]:
+                for r_idx in [0, 1, 2]: # , 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
