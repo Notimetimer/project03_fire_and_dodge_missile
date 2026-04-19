@@ -671,18 +671,7 @@ class Battle(object):
 
         # 导弹中制导状态 bool 与 导弹发射间隔时间
         missile_in_mid_term = 0
-        # 废弃，剩余命中时间
-        # missile_time_since_shoot = 120
-        # if not alive_own_missiles:  # len(alive_own_missiles) == 0
-        #     pass
-        # else:
-        #     time2hits = np.ones(len(alive_own_missiles)) * 120
-        #     for i, missile in enumerate(alive_own_missiles):
-        #         time2hits[i] = missile.time2hit
-        #         if missile.guidance_stage < 3:
-        #             missile_in_mid_term = 1
-        #             break
-        #     missile_time_since_shoot = min(time2hits)
+
         missile_time_since_shoot = 120
         if not alive_own_missiles:  # len(alive_own_missiles) == 0
             pass

@@ -456,7 +456,7 @@ class Battle(object):
         else:
             time2hits = np.ones(len(alive_own_missiles)) * 120
             for i, missile in enumerate(alive_own_missiles):
-                time2hits[i] = missile.time2hit
+                time2hits[i] = missile.t_go
                 if missile.guidance_stage < 3:
                     missile_in_mid_term = 1
                     break

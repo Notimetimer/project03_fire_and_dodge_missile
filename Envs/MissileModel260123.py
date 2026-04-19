@@ -150,7 +150,7 @@ class missile_class:
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
         self.t = 0  # 导弹初始计时
         self.t_max = 120  # 最大运行时间
-        self.time2hit = 120
+        self.t_go = 120
         self.trajectory = np.empty((0, 7))  # 导弹轨迹, 结构为时间、位置（3）、速度（3）
         self.guidance_stage = 2  # 2为中制导，3为末制导
         self.in_angle = 1
@@ -408,7 +408,7 @@ class missile_class:
 
         v_rel_ = vtt_-vmt_
         L_dot = np.dot(v_rel_, line_t_)/distance
-        self.time2hit = -distance/L_dot if L_dot<0 else 120 # 弹目距离
+        self.t_go = -distance/L_dot # if L_dot<0 else self.t_max # 弹目距离
         vmt = np.linalg.norm(vmt_)
         if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):
             self.in_angle = 1
