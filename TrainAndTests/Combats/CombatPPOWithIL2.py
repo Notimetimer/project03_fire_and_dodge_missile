@@ -454,7 +454,7 @@ def run_MLP_simulation(
         red_psi = -pi/2
         blue_psi = pi/2
         red_N = 0
-        red_E = 50e3 # 45e3
+        red_E = 55e3 # 45e3
         blue_N = red_N
         blue_E = -red_E
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),

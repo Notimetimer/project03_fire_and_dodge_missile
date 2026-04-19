@@ -144,7 +144,7 @@ class missile_class:
         # 最大马赫数
         self.max_mach = 4.0
         # 特征面积
-        self.area = 0.405 # 0.4  # m2
+        self.area = 0.435 # 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
         self.speed_min = 0.35 * 340  # m/s
@@ -153,7 +153,7 @@ class missile_class:
         # 最大跟踪视角速度
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
-        self.detect_range = 23e3  # 25e3 20e3  # m todo 计算截获距离
+        self.detect_range = 25e3  # 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
@@ -255,8 +255,8 @@ class missile_class:
         return target_information
 
     def get_max_g(self, current_rho, v):
-        rho0 = rho(4000) # 假设的取得最大过载量的高度
-        v0 = 340 * 3.5 # 假设取得最大过载量的速度
+        rho0 = rho(5000) # 假设的取得最大过载量的高度
+        v0 = 340 * 3.2 # 假设取得最大过载量的速度
         presssure0 = 0.5*rho0*v0**2 # 假设取得最大过载量的动压
         pressure = 0.5*current_rho*v**2 # 当前动压
         self.max_g = self.max_g0 * min(pressure / presssure0, 1)
@@ -362,12 +362,13 @@ class missile_class:
         line_psi = np.arctan2(line_t_[2], line_t_[0])
         delta_psi = sub_of_radian(line_psi, psi)
 
-        if distance > 40e3:
-            k_y = 3
-        elif distance > 20e3:
-            k_y = 3.5
-        else:
-            k_y = 4
+        # if distance > 40e3:
+        #     k_y = 3
+        # elif distance > 20e3:
+        #     k_y = 3.5
+        # else:
+        #     k_y = 4
+        k_y = 4
         
         # # 最优制导率？越靠近过载量越小，很容易错过目标
         # k_y = 3 # self.t_go**3 / (6 + self.t_go**3 / 3)

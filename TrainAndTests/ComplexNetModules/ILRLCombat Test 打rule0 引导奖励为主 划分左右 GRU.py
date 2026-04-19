@@ -30,8 +30,8 @@ def create_initial_state():
     """创建固定的初始状态"""
     blue_height, red_height = 9000, 9000
     red_psi, blue_psi = -pi / 2, pi / 2
-    red_N, red_E = 0, 50e3  # 45e3
-    blue_N, blue_E = 0, -50e3 # -45e3
+    red_N, red_E = 0, 55e3  # 45e3
+    blue_N, blue_E = red_N, -red_E # -45e3
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE

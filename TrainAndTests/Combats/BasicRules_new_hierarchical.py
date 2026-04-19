@@ -53,7 +53,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
 
     # 1. 计算初始的开火意图
     fire_missile = False
-    if distance < 95e3 and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+    case1 = distance < 105e3 and sin_theta >= sin(30*pi/180)
+    case2 = distance < 80e3
+    if (case1 or case2) and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
         if t_fired >= 20 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
             fire_missile = True
 
@@ -155,10 +157,10 @@ action_optionsLR = {
                     4: "-60track",
                     5: "L60crank",
                     6: "R60crank",
-                    7: "snake",
+                    7: "snake",   "notch"
                     8: "splitS",
-                    9: "3",
-                    10: "9",
+                    9: "3",     "left
+                    10: "9",    "right
                     11: "fastTurn",
                     12: "-30turn",
                     13: "-60turn",
@@ -195,7 +197,7 @@ if __name__=='__main__':
         red_psi = -pi/2
         blue_psi = pi/2
         red_N = 0
-        red_E = 50e3
+        red_E = 55e3
         blue_N = red_N
         blue_E = -red_E
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),

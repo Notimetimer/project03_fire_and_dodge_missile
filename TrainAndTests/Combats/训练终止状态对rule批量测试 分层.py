@@ -43,7 +43,7 @@ def create_initial_state_worker(randomized=1):
     blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-np.pi/3, np.pi/3) * randomized)
     init_North = np.random.uniform(-30e3, 30e3) * randomized
     red_N = init_North
-    red_E = 50e3 # 45e3
+    red_E = 55e3 # 45e3
     blue_N = init_North
     blue_E = -45e3
 

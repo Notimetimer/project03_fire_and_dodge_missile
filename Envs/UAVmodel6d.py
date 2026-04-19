@@ -187,7 +187,10 @@ class UAVModel(object):
             cd = 0.2
         return cd / 10
 
-    def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=False, rudder=None):
+    def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=False, rudder=None, dt=None):
+        if dt is not None:
+            self.dt = dt
+            self.sim.set_dt(self.dt)
         # 单位：m, rad, mm/s, metric公制单位，imperial英制单位
         if relevant_height==False: # 使用绝对高度指令
             self.set_height = target_height

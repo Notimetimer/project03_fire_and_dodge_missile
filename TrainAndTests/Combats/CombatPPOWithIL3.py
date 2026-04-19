@@ -309,7 +309,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 45e3, # 55e3,
+    R_cage = 71e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
@@ -488,7 +488,7 @@ def run_MLP_simulation(
         blue_psi = pi/2
         init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
         red_N = init_North
-        red_E = 50e3 # 45e3
+        red_E = 55e3 # 45e3
         blue_N = init_North
         blue_E = -red_E
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),

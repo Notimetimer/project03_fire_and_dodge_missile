@@ -158,7 +158,7 @@ if __name__=="__main__":
                 red_height = np.clip(blue_height+random.uniform(-2e3, 2e3), 3e3, 12e3)
                 blue_psi = pi/2
                 red_psi = -pi/2
-                red_N = 0 # random.choice([-54e3, 54e3]) # red_N = random.uniform(-50e3, 50e3)
+                red_N = 0 # random.choice([-54e3, 54e3]) # red_N = random.uniform(-55e3, 55e3)
                 red_E = 35e3
                 blue_N = red_N
                 blue_E = -35e3

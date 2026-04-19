@@ -103,7 +103,7 @@ def main(TARGET_LOG_DIR):
     # ==================================
     class DummyArgs:
         max_episode_len = 600
-        R_cage = 45e3
+        R_cage = 71e3 # 45
     dummy_env = ChooseStrategyEnv(DummyArgs())
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}

@@ -331,6 +331,16 @@ class Battle(object):
 
 
     def step(self, r_actions, b_actions):
+        # 变步长
+        alive_missiles = [m for m in self.missiles if not m.dead]
+        if not alive_missiles:
+            self.dt_move = 0.05
+        else:
+            self.dt_move = 0.04
+            for m in alive_missiles:
+                if m.distance < 5000: # 5km
+                    self.dt_move = 0.02
+                    break
         report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
@@ -416,8 +426,8 @@ class Battle(object):
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
 
                 # 动作平滑，用一阶惯性环节
-                target_height_changing_limit = 5000/(pi/2) * pi / 180 * 30 # 每秒限制改变俯仰角度数
-                target_psi_changing_limit = pi / 180 * 20 # 每秒限制航向误差改变度数
+                target_height_changing_limit = 5000/(pi/2) * pi / 180 * 60 if UAV.alt>self.min_alt_safe else np.inf # 每秒限制改变俯仰角度数
+                target_psi_changing_limit = pi / 180 * 90 # 每秒限制航向误差改变度数
                 target_speed_changing_limit = np.inf
                 action[0] = np.clip(action[0], 
                     UAV.action_memory[0]-target_height_changing_limit*self.dt_move,
@@ -497,7 +507,7 @@ class Battle(object):
                 control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                 aileron, elevator, rudder, throttle = control_action['cont']
 
-                UAV.move(elevator, aileron, throttle, relevant_height=True, p2p=True, rudder=rudder)
+                UAV.move(elevator, aileron, throttle, relevant_height=True, p2p=True, rudder=rudder, dt=self.dt_move)
                 # 上一步动作
                 # UAV.action_memory = np.array([action[0],action[1],action[2]])
 

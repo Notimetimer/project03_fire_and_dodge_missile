@@ -190,7 +190,10 @@ class UAVModel(object):
     #         cd = 0.2
     #     return cd / 10
 
-    def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=None):
+    def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=None, dt=None):
+        if dt is not None:
+            self.dt = dt
+            self.sim.set_dt(self.dt)
         # 无限燃油
         self.sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
         self.sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
