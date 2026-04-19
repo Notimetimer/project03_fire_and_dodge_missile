@@ -51,7 +51,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'alt_limit_penalty': 1.0,
             'border_penalty_scale': 0.2,
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
-            'angle_advantage': 1.0,
+            'angle_advantage': 0.03,
             'height_advantage': 0.1,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
@@ -232,10 +232,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # if enm_states["warning"] and enm_states["threat"][3] <= 20e3:
         #     r_shaping += reward_weights['enemy_gets_warning']
 
-        # # 进攻引导
-        # if len(alive_ally_missiles) == 0 and ego.ammo > 0 and not warning:
-        #     # 角度奖励
-        #     r_shaping += cos(delta_psi) * reward_weights['angle_advantage']
+        # 进攻引导
+        if len(alive_ally_missiles) == 0:
+            # 角度奖励
+            r_constraint += cos(delta_psi) * reward_weights['angle_advantage']
 
         # # 防御引导
         # if warning:
