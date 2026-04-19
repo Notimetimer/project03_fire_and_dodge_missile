@@ -131,7 +131,7 @@ def worker(remote, parent_remote, env_fn_wrapper):
                     red_psi = -pi/2
                     blue_psi = pi/2
                     red_N = 0
-                    red_E = 45e3
+                    red_E = 50e3 # 45e3
                     blue_N = red_N
                     blue_E = -red_E
                     # 添加一些随机扰动

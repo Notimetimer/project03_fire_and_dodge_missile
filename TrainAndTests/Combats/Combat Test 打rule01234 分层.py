@@ -35,8 +35,8 @@ def create_initial_state():
     """创建固定的初始状态"""
     blue_height, red_height = 9000, 9000
     red_psi, blue_psi = -pi / 2, pi / 2
-    red_N, red_E = 0, 45e3
-    blue_N, blue_E = 0, -45e3
+    red_N, red_E = 0, 50e3  # 45e3
+    blue_N, blue_E = 0, -50e3 # -45e3
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
@@ -45,7 +45,7 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230"
+    dir_name = None # "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230"
 
     # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
     # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层'
+    experiment_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     args.agent_id = None # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=71e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

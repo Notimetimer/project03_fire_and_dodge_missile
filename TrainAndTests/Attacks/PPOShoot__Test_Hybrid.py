@@ -145,7 +145,7 @@ if __name__ == "__main__":
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
 
             # 飞机出生状态指定
-            red_E = 45e3 # random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
+            red_E = 50e3 # 45e3 # random.uniform(30e3, 40e3)  # 20, 60 特意训练一个近的，测试一个远的
             blue_E= -red_E
             red_height = random.uniform(3e3, 12e3)
             blue_height = random.uniform(3e3, 12e3)

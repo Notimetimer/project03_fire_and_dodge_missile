@@ -36,8 +36,8 @@ def create_initial_state():
     """创建固定的初始状态"""
     blue_height, red_height = 9000, 9000
     red_psi, blue_psi = -pi / 2, pi / 2
-    red_N, red_E = 0, 45e3
-    blue_N, blue_E = 0, -45e3
+    red_N, red_E = 0, 50e3  # 45e3
+    blue_N, blue_E = 0, -50e3 # -45e3
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     args = parser.parse_args()    
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=10*60, R_cage=55e3)
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=71e3)
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

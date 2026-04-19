@@ -43,7 +43,7 @@ def create_initial_state_worker(randomized=1):
     blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-np.pi/3, np.pi/3) * randomized)
     init_North = np.random.uniform(-30e3, 30e3) * randomized
     red_N = init_North
-    red_E = 45e3
+    red_E = 50e3 # 45e3
     blue_N = init_North
     blue_E = -45e3
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
     
     # # --- 环境和模型参数 (必须与训练时一致) ---
-    # env_args = argparse.Namespace(max_episode_len=12*60, R_cage=45e3) # 训练时默认是 45e3
+    # env_args = argparse.Namespace(max_episode_len=15*60, R_cage=71e3) # 训练时默认是 45e3
     args.max_episode_len = 12*60
     args.R_cage=45e3
 
