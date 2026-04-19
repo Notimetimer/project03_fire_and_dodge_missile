@@ -198,6 +198,7 @@ class Battle(object):
         for i in range(self.Rnum):
             UAV = UAVModel(dt=self.dt_move)
             UAV.state_memory = None
+            UAV.action_memory = np.array([0,0,340])
             UAV.last_state = None
             UAV.current_state = None
             UAV.launch_states = []
@@ -240,6 +241,7 @@ class Battle(object):
         for i in range(self.Bnum):
             UAV = UAVModel(dt=self.dt_move)
             UAV.state_memory = None
+            UAV.action_memory = np.array([0,0,340])
             UAV.last_state = None
             UAV.current_state = None
             UAV.launch_states = []
@@ -413,6 +415,28 @@ class Battle(object):
                 target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
 
+                # 动作平滑，用一阶惯性环节
+                target_height_changing_limit = 5000/(pi/2) * pi / 180 * 30 # 每秒限制改变俯仰角度数
+                target_psi_changing_limit = pi / 180 * 20 # 每秒限制航向误差改变度数
+                target_speed_changing_limit = np.inf
+                action[0] = np.clip(action[0], 
+                    UAV.action_memory[0]-target_height_changing_limit*self.dt_move,
+                    UAV.action_memory[0]+target_height_changing_limit*self.dt_move,
+                    )
+                action[1] = np.clip(action[1], 
+                    UAV.action_memory[1]-target_psi_changing_limit*self.dt_move,
+                    UAV.action_memory[1]+target_psi_changing_limit*self.dt_move,
+                    )
+                action[2] = np.clip(action[2], 
+                    UAV.action_memory[2]-target_speed_changing_limit*self.dt_move,
+                    UAV.action_memory[2]+target_speed_changing_limit*self.dt_move,
+                    )
+                UAV.action_memory = np.array([
+                    action[0],
+                    action[1],
+                    action[2],
+                ])
+
                 # 计算当前子步下，实际机头指向与固定目标点之间的动态差角
                 dynamic_delta_psi = sub_of_radian(UAV.target_heading, UAV.psi)
 
@@ -475,7 +499,7 @@ class Battle(object):
 
                 UAV.move(elevator, aileron, throttle, relevant_height=True, p2p=True, rudder=rudder)
                 # 上一步动作
-                # UAV.act_memory = np.array([action[0],action[1],action[2]])
+                # UAV.action_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
             self.update_missile_state() # 先把存活的导弹找出来

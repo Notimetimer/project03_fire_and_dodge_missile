@@ -293,7 +293,7 @@ if __name__ == "__main__":
                 env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
                 done, b_reward, b_event_reward = env.get_terminate_and_reward('b', u, missile_id)
                 next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
-                env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
+                env.BUAV.action_memory = b_action_n.copy()  # 存储上一步动作
                 total_steps += 1
 
                 # # 退火奖励塑形

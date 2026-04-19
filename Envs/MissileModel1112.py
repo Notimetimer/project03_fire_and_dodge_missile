@@ -153,7 +153,7 @@ class missile_class:
         # 最大跟踪视角速度
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
-        self.detect_range = 25e3  # 20e3  # m todo 计算截获距离
+        self.detect_range = 23e3  # 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
@@ -176,6 +176,7 @@ class missile_class:
         self.side = None
         self.datalink = None
         self.A_pole_moment = None
+        self.delta_height = 0
 
     def Cd(self, mach):
         lis0 = np.array([
@@ -314,6 +315,15 @@ class missile_class:
         else:
             k_y = 3
         nyt1 = k_y * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
+
+        # 时间过半以后如果目标低于当前飞行高度，不能还在爬升
+        delta_height = self.delta_height
+        max_available_theta_when_above = pi/3 * np.clip(1 - self.t * 2/self.t_max, 0, 1)
+        if delta_height < -1000: # 高于目标高度1000m
+            theta_req = min(self.theta, max_available_theta_when_above)
+        else:
+            theta_req = self.theta
+        nyt1 += (theta_req-self.theta) * 2  # / (self.t_go / )
         
         # 飞过预测点后弱化导引率
         if distance_dot < 0:
@@ -359,8 +369,11 @@ class missile_class:
         else:
             k_y = 4
         
+        # # 最优制导率？越靠近过载量越小，很容易错过目标
+        # k_y = 3 # self.t_go**3 / (6 + self.t_go**3 / 3)
+        
         nyt1 = k_y * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
-        nzt1 = 4 * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)  # debug
+        nzt1 = k_y * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)  # debug
 
         # 导引头脱锁模拟, 速度方向当做导弹头部方向
         off_lock = False
@@ -433,6 +446,7 @@ class missile_class:
         line_t_ = ptt_ - pmt_
         distance = np.linalg.norm(line_t_)
         self.distance = distance
+        self.delta_height = line_t_[1] # 与目标的高度差
         # print('导弹感知到的距离:' + str(distance))
 
         case, temp = self.guidance(vmt_, vtt_, pmt_, ptt_, datalink=datalink)
@@ -440,6 +454,8 @@ class missile_class:
         v_rel_ = vtt_-vmt_
         L_dot = np.dot(v_rel_, line_t_)/distance
         self.t_go = -distance/L_dot # if L_dot<0 else self.t_max # 弹目距离
+        self.t_go = max(self.t_go, 0.1)
+
         vmt = np.linalg.norm(vmt_)
 
         # 目标是否进入锁定角度范围
@@ -522,6 +538,8 @@ class missile_class:
         # 更新时间
         self.t += dt
         self.t = round(self.t, 2)  # 保留两位小数
+
+
         # print(self.t)
         # 记录运行轨迹
         if record:

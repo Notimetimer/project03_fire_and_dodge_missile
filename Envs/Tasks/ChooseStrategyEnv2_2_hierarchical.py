@@ -55,7 +55,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'height_advantage': 0.1,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
-            'to_center_reward' : 0.08 # 占领中心点的价值
+            'to_center_reward' : 0.02 # 占领中心点的价值
         }
 
         ego_win=0

@@ -210,7 +210,7 @@ if __name__ == "__main__":
                 env.step(r_action_n, b_action_n)
                 done, b_reward, _ = env.get_terminate_and_reward('b')
                 next_b_obs, _ = env.attack_obs('b')
-                env.BUAV.act_memory = b_action_n.copy()
+                env.BUAV.action_memory = b_action_n.copy()
                 total_steps += 1
 
                 # --- [修改 6] 存储经验 ---

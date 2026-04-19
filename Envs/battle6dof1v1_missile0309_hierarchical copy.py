@@ -470,7 +470,7 @@ class Battle(object):
 
                 UAV.move(elevator, aileron, throttle, relevant_height=True, p2p=True, rudder=rudder)
                 # 上一步动作
-                # UAV.act_memory = np.array([action[0],action[1],action[2]])
+                # UAV.action_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
             self.update_missile_state() # 先把存活的导弹找出来

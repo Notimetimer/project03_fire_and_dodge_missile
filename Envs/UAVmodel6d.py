@@ -171,7 +171,7 @@ class UAVModel(object):
         self.PIDController = F16PIDController()
 
         self.obs_memory = None
-        self.act_memory = np.array([0,0,340]) # 动作记忆
+        self.action_memory = np.array([0,0,340]) # 动作记忆
         
         self.missile_launch_time = []
 

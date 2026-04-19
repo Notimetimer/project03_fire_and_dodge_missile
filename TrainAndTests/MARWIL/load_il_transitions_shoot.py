@@ -242,7 +242,7 @@ if __name__ == "__main__":
             env.step(r_action_n, b_action_n)  # 2、环境更新并反馈
             done, b_reward, _ = env.get_terminate_and_reward('b', u)
             next_b_obs, _ = env.attack_obs('b')  # 子策略的训练不要用get_obs
-            env.BUAV.act_memory = b_action_n.copy()  # 存储上一步动作
+            env.BUAV.action_memory = b_action_n.copy()  # 存储上一步动作
 
             # state = next_state
             episode_return += b_reward * env.dt_maneuver

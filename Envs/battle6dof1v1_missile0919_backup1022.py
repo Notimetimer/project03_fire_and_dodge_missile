@@ -246,7 +246,7 @@ class Battle(object):
                 # for i in range(int(self.dt_maneuver // dt_move)):
                 UAV.move(target_height, delta_heading, target_speed, relevant_height=True)
                 # 上一步动作
-                # UAV.act_memory = np.array([action[0],action[1],action[2]])
+                # UAV.action_memory = np.array([action[0],action[1],action[2]])
 
             # 导弹移动
             self.missiles = self.Rmissiles + self.Bmissiles
@@ -506,7 +506,7 @@ class Battle(object):
         r = ego.r
 
         # 上一步动作
-        act1_last, act2_last, act3_last = ego.act_memory
+        act1_last, act2_last, act3_last = ego.action_memory
 
         theta_v = ego.theta_v
         psi_v = ego.psi_v
