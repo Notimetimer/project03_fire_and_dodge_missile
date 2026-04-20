@@ -194,78 +194,47 @@ class Battle(object):
         self.win = 0
         self.lose = 0
         self.draw = 0
-        # 红方初始化
-        for i in range(self.Rnum):
+        # 无人机统一初始化
+        for i in range(self.Rnum + self.Bnum):
+            is_red = i < self.Rnum
+            index_in_side = i if is_red else i - self.Rnum
+            
             UAV = UAVModel(dt=self.dt_move)
             UAV.state_memory = None
-            UAV.action_memory = np.array([0,0,340])
+            UAV.action_memory = np.array([0, 0, 340])
             UAV.last_state = None
             UAV.current_state = None
             UAV.launch_states = []
             UAV.launch_states_order = None
-            UAV.init_ammo = red_init_ammo
-            UAV.ammo = red_init_ammo
-            UAV.id = i + 1
-            UAV.red = True
-            UAV.blue = False
-            UAV.side = 'r'
-            UAV.color = np.array([1, 0, 0])
-            # 红方出生点
-            UAV.pos_ = red_birth_state['position']  # np.array([-38841.96119795, 9290.02131746, -1686.95469864])
+            UAV.init_ammo = red_init_ammo if is_red else blue_init_ammo
+            UAV.ammo = red_init_ammo if is_red else blue_init_ammo
+            UAV.id = (index_in_side + 1) if is_red else (index_in_side + 201)
+            UAV.red = is_red
+            UAV.blue = not is_red
+            UAV.side = 'r' if is_red else 'b'
+            UAV.color = np.array([1, 0, 0]) if is_red else np.array([0, 0, 1])
+            
+            birth_state = red_birth_state if is_red else blue_birth_state
+            
+            # 出生点 (注意：使用 copy 防止修改外部传入的字典数据)
+            UAV.pos_ = birth_state['position'].copy()
             # 不能出生在外面
             init_R = norm([UAV.pos_[0], UAV.pos_[2]])
-            safe_R_cage = self.R_cage-5e3
-            if init_R > self.R_cage-5e3:
-                UAV.pos_[0] *= max(5e3, safe_R_cage-5e3)/init_R
-                UAV.pos_[2] *= max(5e3, safe_R_cage-5e3)/init_R
+            safe_R_cage = self.R_cage - 5e3
+            if init_R > safe_R_cage:
+                scale_factor = safe_R_cage / init_R
+                UAV.pos_[0] *= scale_factor
+                UAV.pos_[2] *= scale_factor
+                
             # 判断是否有自定义初始速度、theta、phi
-            UAV.speed = red_birth_state.get('speed', 300)  # (UAV.speed_max - UAV.speed_min) / 2
-            # speed = UAV.speed
-            # mach, _ = calc_mach(speed, UAV.pos_[1])
-            # UAV.mach = mach
-            UAV.psi = red_birth_state['psi']
-            UAV.theta = red_birth_state.get('theta', 0 * pi / 180)
-            UAV.gamma = red_birth_state.get('phi', 0 * pi / 180)
-            UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
-                                             sin(UAV.theta),
-                                             cos(UAV.theta) * sin(UAV.psi)])
-            lon_uav, lat_uav, h_uav = NUE2LLH(UAV.pos_[0], UAV.pos_[1], UAV.pos_[2], lon_o=o00[0], lat_o=o00[1], h_o=0)
-            UAV.reset(lon0=lon_uav, lat0=lat_uav, h0=h_uav, v0=UAV.speed, psi0=UAV.psi, phi0=UAV.gamma,
-                      theta0=UAV.theta, o00=o00)
-            UAV.got_hit = False
-            UAV.escape_once = 0
-            self.RUAVs.append(UAV)
-            self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
-            UAV.lock_on = 0
-        # 蓝方初始化
-        for i in range(self.Bnum):
-            UAV = UAVModel(dt=self.dt_move)
-            UAV.state_memory = None
-            UAV.action_memory = np.array([0,0,340])
-            UAV.last_state = None
-            UAV.current_state = None
-            UAV.launch_states = []
-            UAV.launch_states_order = None
-            UAV.init_ammo = blue_init_ammo
-            UAV.ammo = blue_init_ammo
-            UAV.id = i + 201
-            UAV.red = False
-            UAV.blue = True
-            UAV.side = 'b'
-            UAV.color = np.array([0, 0, 1])
-            # 蓝方出生点
-            UAV.pos_ = blue_birth_state['position']  # np.array([38005.14540582, 6373.80721704, -1734.42509136])
-            # 不能出生在外面
-            init_R = norm([UAV.pos_[0], UAV.pos_[2]])
-            safe_R_cage = self.R_cage-5e3
-            if init_R > self.R_cage-5e3:
-                UAV.pos_[0] *= safe_R_cage/init_R
-                UAV.pos_[2] *= safe_R_cage/init_R
-            UAV.speed = blue_birth_state.get('speed', (UAV.speed_max - UAV.speed_min) / 2)
-            UAV.psi = blue_birth_state['psi']
-            UAV.theta = blue_birth_state.get('theta', 0 * pi / 180)
-            UAV.gamma = blue_birth_state.get('phi', 0 * pi / 180)
+            default_speed = 300 if is_red else (UAV.speed_max - UAV.speed_min) / 2
+            UAV.speed = birth_state.get('speed', default_speed)
+            
+            UAV.psi = birth_state['psi']
+            UAV.theta = birth_state.get('theta', 0 * pi / 180)
+            UAV.gamma = birth_state.get('phi', 0 * pi / 180)
             UAV.psi = sub_of_radian(UAV.psi, 0)
+            
             UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
                                              sin(UAV.theta),
                                              cos(UAV.theta) * sin(UAV.psi)])
@@ -274,8 +243,14 @@ class Battle(object):
                       theta0=UAV.theta, o00=o00)
             UAV.got_hit = False
             UAV.escape_once = 0
-            self.BUAVs.append(UAV)
-            self.BUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
+            
+            if is_red:
+                self.RUAVs.append(UAV)
+                self.RUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
+            else:
+                self.BUAVs.append(UAV)
+                self.BUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
+                
             UAV.lock_on = 0
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
@@ -516,15 +491,15 @@ class Battle(object):
             # self.missiles = self.Rmissiles + self.Bmissiles
             for missile in self.alive_missiles[:]:  # 使用切片创建副本以允许删除
                 target = self.get_target_by_id(missile.target_id)
+                missile.target = target
+                
+                # 1v1加快仿真速度用的，多对多得去掉
                 if target is None:  # 目标不存在, 不更换目标而是击毁导弹
                     missile.dead = True
                     continue
                 elif target.dead:  # test 目标死亡, 不更换目标而是击毁导弹
                     missile.dead = True # todo 改成missile.target = None, 并在missile类里改成丢失目标飞直线，并且无法触发hit
                     continue
-                else:
-                    missile.target = target
-                # if not missile.dead:
                 
                 # 计算前导弹和目标位速
                 last_pmt_ = missile.pos_

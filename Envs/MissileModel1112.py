@@ -128,7 +128,7 @@ class missile_class:
         self.stage1_weight = 20.28  # kg
         self.stage2_weight = 44.9  # kg
         self.stage1_time = 2.3  # s
-        self.stage2_time = 10.5 # 11  # s
+        self.stage2_time = 10 # 10.5 11  # s
         self.stage1_burn_rate = self.stage1_weight / self.stage1_time  # 一级燃烧率kg/s
         self.stage2_burn_rate = self.stage2_weight / self.stage2_time  # 二级燃烧率kg/s
         self.stage1_thrust = 20393  # N
@@ -144,7 +144,7 @@ class missile_class:
         # 最大马赫数
         self.max_mach = 4.0
         # 特征面积
-        self.area = 0.43 # 435 0.405  # m2
+        self.area = 0.425 # 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
         self.speed_min = 0.65 * 340  # m/s

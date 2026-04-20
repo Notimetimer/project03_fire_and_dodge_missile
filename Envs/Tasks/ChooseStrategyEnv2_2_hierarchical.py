@@ -263,13 +263,16 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 150 # 140 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event += 180 # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
             elif ego_lose:
                 r_event -= 180 # 125 + steps_left * total_shaping_sum # 旧 100 新 125
                 if self.out_range(ego) or ego.alt < self.min_alt:
                     r_event -= 50
             elif ego_draw:
                 r_event -= 50
+                # “同归于尽补偿奖励”
+                if enm.dead:
+                    r_event += 10 * enm.ammo
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
