@@ -205,7 +205,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if not ego.dead:
                 r_constraint += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
                 r_constraint += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
-                r_constraint += 1.5 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射
+                r_constraint += 1.5 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0
                 
                 # # 发射距离惩罚
                 # if distance > 60e3:
