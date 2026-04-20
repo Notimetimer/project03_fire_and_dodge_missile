@@ -306,16 +306,17 @@ class Battle(object):
 
 
     def step(self, r_actions, b_actions):
-        # 变步长
-        alive_missiles = [m for m in self.missiles if not m.dead]
-        if not alive_missiles:
-            self.dt_move = 0.05
-        else:
-            self.dt_move = 0.04
-            for m in alive_missiles:
-                if m.distance < 5000: # 5km
-                    self.dt_move = 0.02
-                    break
+        # # 变步长
+        # alive_missiles = [m for m in self.missiles if not m.dead]
+        # if not alive_missiles:
+        #     self.dt_move = 0.05
+        # else:
+        #     self.dt_move = 0.04
+        #     for m in alive_missiles:
+        #         if m.distance < 5000: # 5km
+        #             self.dt_move = 0.02
+        #             break
+
         report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
@@ -534,7 +535,7 @@ class Battle(object):
                     missile.dead = True
                 if missile.t >= 0 + self.dt_move and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
-                                                       dt=self.dt_move)
+                                                       dt=self.dt_move, kill_range=missile.kill_range)
                     if hit:
                         print(target.side, 'is hit')
                         missile.dead = True
