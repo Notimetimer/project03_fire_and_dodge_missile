@@ -274,13 +274,13 @@ class ChooseStrategyEnv(Battle):
         # 30°爬升加速
         if action == 1:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = 2500
+            delta_height_cmd = 5000/3
             speed_cmd = 340
 
         # 60°爬升加速
         if action == 2:
             delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = 5000
+            delta_height_cmd = 5000*2/3
             speed_cmd = 340
 
         # -30°俯冲跟踪
@@ -297,27 +297,29 @@ class ChooseStrategyEnv(Battle):
 
         # 左60°水平偏移
         if action == 5:
-            delta_psi_cmd = sub_of_radian(delta_psi - 65 * pi/180, 0)
+            delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
             delta_height_cmd = 0
             speed_cmd = 340
 
         # 右60°水平偏移
         if action == 6:
-            delta_psi_cmd = sub_of_radian(delta_psi + 65 * pi/180, 0)
+            delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
             delta_height_cmd = 0
             speed_cmd = 340
 
-        # 水平蛇形机动
+        # 占领中心机动
         if action == 7:
-            if delta_psi > 50 * pi/180:
-                delta_psi_cmd = sub_of_radian(delta_psi, 0)
-            if delta_psi < -50 * pi/180:
-                delta_psi_cmd = sub_of_radian(delta_psi, 0)
-            elif UAV.phi>=0:
-                delta_psi_cmd = sub_of_radian(delta_psi+pi/3, 0)
+            line2center = np.array([self.horizontal_center[0]-UAV.pos_[0], self.horizontal_center[1]-UAV.pos_[2]])
+            psi2center = np.arctan2(line2center[1], line2center[0])
+            dist2center = norm(line2center)
+            delta_psi_cmd = sub_of_radian(psi2center, UAV.psi) * dist2center/self.R_cage
+            # 保持在安全高度
+            if UAV.alt < self.min_alt_safe:
+                delta_height_cmd = 300
+            elif UAV.alt > self.max_alt_safe:
+                delta_height_cmd = -300
             else:
-                delta_psi_cmd = sub_of_radian(delta_psi-pi/3, 0)
-            delta_height_cmd = 0
+                delta_height_cmd = 0
             speed_cmd = 340
 
         # 破s
