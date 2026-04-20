@@ -326,12 +326,12 @@ class ChooseStrategyEnv(Battle):
         # 如果死了，就把剩余导弹损耗的惩罚一并加上，禁止自杀套利
         
         # [修改] 引入 last_dead 判定，确保死亡惩罚只扣一次
-        is_dead_now = ego.dead or self.out_range(ego)
-        if is_dead_now and not getattr(ego, 'last_dead', False):
+        now_dead = ego.dead or self.out_range(ego)
+        if now_dead and not getattr(ego, 'last_dead', False):
             shoot = ego.ammo
             wasted = ego.ammo
             ego.last_dead = True
-        elif is_dead_now and getattr(ego, 'last_dead', False):
+        elif now_dead and getattr(ego, 'last_dead', False):
             # 已经死过一次了，不再重复扣除剩余导弹的惩罚
             shoot = 0
             wasted = 0

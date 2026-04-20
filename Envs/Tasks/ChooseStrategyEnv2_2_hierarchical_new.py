@@ -172,12 +172,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 开火代价控制
         shoot = action_shoot
         wasted = 0
-        is_dead_now = ego.dead or self.out_range(ego)
-        if is_dead_now and not getattr(ego, 'last_dead', False):
+        now_dead = ego.dead or self.out_range(ego)
+        if now_dead and not getattr(ego, 'last_dead', False):
             shoot = ego.ammo
             wasted = ego.ammo
             ego.last_dead = True
-        elif is_dead_now:
+        elif now_dead:
             shoot = 0 # 已经死过了，不再重复扣除
 
         if shoot >= 1:
