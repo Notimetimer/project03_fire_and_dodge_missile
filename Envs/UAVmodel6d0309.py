@@ -62,7 +62,7 @@ class UAVModel(object):
         self.set_height = None
         self.set_speed = None
         # 雷达性能约束
-        self.max_radar_angle_rad = 75 * pi/180 # 60
+        self.max_radar_angle_rad = 64 * pi/180 # 60
         self.max_radar_range = 130e3
 
         # 导弹相关属性
