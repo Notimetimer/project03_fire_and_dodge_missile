@@ -281,9 +281,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     r_event -= 50
             elif ego_draw:
                 r_event -= 50
-                # “同归于尽收回导弹浪费惩罚”
-                if enm.dead:
-                    r_event += 15 * ego.ammo
+                # # “同归于尽收回导弹浪费惩罚，先死才有补偿，后死照样惩罚”
+                # if enm.dead and getattr(ego, 'last_dead', False):
+                #     r_event += 15 * ego.ammo
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
