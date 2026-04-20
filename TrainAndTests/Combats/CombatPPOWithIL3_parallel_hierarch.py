@@ -515,7 +515,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             # “警报响起，少整活、多保命”
                             b_state_check = env.unscale_state(b_check_obs)
                             if b_state_check["warning"]:
-                                temperature = 0.3
+                                temperature = 1 # 0.3
                             else:
                                 temperature = 1
                             b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
@@ -525,7 +525,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             # Red Decision
                             r_state_check = env.unscale_state(r_check_obs)
                             if r_state_check["warning"]:
-                                temperature = 0.3
+                                temperature = 1 # 0.3
                             else:
                                 temperature = 1
                             if adv_is_rule:
