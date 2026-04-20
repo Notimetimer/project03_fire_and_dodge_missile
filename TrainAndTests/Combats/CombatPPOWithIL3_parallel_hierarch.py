@@ -1489,9 +1489,6 @@ def run_MLP_simulation(
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
                     logger.add("Elo/History_Pool_Size", hist_count, total_steps)
 
-                    # 记录详细分数
-                    # 记录最新个体的绝对分和相对均值的居中分
-                    logger.add("Elo_Centered/Latest_Best", main_agent_elo - mean_elo, total_steps)
 
                     # 3. 提取所有的 Rule 对手并遍历，一步到位记录 Rule信息 和 差值
                     rule_keys = [k for k in valid_elos.keys() if k.startswith("Rule_")]
@@ -1500,7 +1497,6 @@ def run_MLP_simulation(
                         
                         # 记录 Rule 的绝对分与居中分
                         logger.add(f"Elo_Raw/{rk}", rule_elo, total_steps)
-                        logger.add(f"Elo_Centered/{rk}", rule_elo - mean_elo, total_steps)
                         
                         # 直接计算并记录 最强个体 vs 规则对手 的差值
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", main_agent_elo - rule_elo, total_steps)
