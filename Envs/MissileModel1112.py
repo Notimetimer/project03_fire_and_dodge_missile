@@ -137,7 +137,7 @@ class missile_class:
         self.stage2_start = self.stage1_start + self.stage1_time  # s
         self.stage2_end = self.stage1_start + self.stage1_time + self.stage2_time  # s
         # 杀伤半径
-        self.kill_range = 20
+        self.kill_range = 20  # 为了提高训练效率，这个半径可以被放大 80m，从而避免变步长
         # 最大过载
         self.max_g0 = 40
         self.max_g = self.max_g0
