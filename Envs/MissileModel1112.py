@@ -144,16 +144,16 @@ class missile_class:
         # 最大马赫数
         self.max_mach = 4.0
         # 特征面积
-        self.area = 0.435 # 0.405  # m2
+        self.area = 0.43 # 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
-        self.speed_min = 0.35 * 340  # m/s
+        self.speed_min = 0.65 * 340  # m/s
         # 最大视角
         self.sight_angle_max = pi / 2  # rad
         # 最大跟踪视角速度
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
-        self.detect_range = 25e3  # 25e3 20e3  # m todo 计算截获距离
+        self.detect_range = 23e3  # 23 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
@@ -366,15 +366,20 @@ class missile_class:
         #     k_y = 3
         # elif distance > 20e3:
         #     k_y = 3.5
-        # else:
+        # elif distance > 10e3:
         #     k_y = 4
-        k_y = 4
+        # # k_y = 4
+
+        # 2/(1/5-1/30) = 12, 从30s到5s逐渐由3增大到5
+        k = (5-3)/(1/5-1/30)
+        k_z = np.clip(3+k*(1/self.t_go-1/30), 3, 5)
+        k_y = k_z
         
         # # 最优制导率？越靠近过载量越小，很容易错过目标
         # k_y = 3 # self.t_go**3 / (6 + self.t_go**3 / 3)
         
         nyt1 = k_y * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
-        nzt1 = k_y * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)  # debug
+        nzt1 = k_z * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)  # debug
 
         # 导引头脱锁模拟, 速度方向当做导弹头部方向
         off_lock = False

@@ -425,27 +425,27 @@ class Battle(object):
                 target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
 
-                # 动作平滑，用一阶惯性环节
-                target_height_changing_limit = 5000/(pi/2) * pi / 180 * 60 if UAV.alt>self.min_alt_safe else np.inf # 每秒限制改变俯仰角度数
-                target_psi_changing_limit = pi / 180 * 90 # 每秒限制航向误差改变度数
-                target_speed_changing_limit = np.inf
-                action[0] = np.clip(action[0], 
-                    UAV.action_memory[0]-target_height_changing_limit*self.dt_move,
-                    UAV.action_memory[0]+target_height_changing_limit*self.dt_move,
-                    )
-                action[1] = np.clip(action[1], 
-                    UAV.action_memory[1]-target_psi_changing_limit*self.dt_move,
-                    UAV.action_memory[1]+target_psi_changing_limit*self.dt_move,
-                    )
-                action[2] = np.clip(action[2], 
-                    UAV.action_memory[2]-target_speed_changing_limit*self.dt_move,
-                    UAV.action_memory[2]+target_speed_changing_limit*self.dt_move,
-                    )
-                UAV.action_memory = np.array([
-                    action[0],
-                    action[1],
-                    action[2],
-                ])
+                # # 动作平滑，用一阶惯性环节
+                # target_height_changing_limit = 5000/(pi/2) * pi / 180 * 60 if UAV.alt>self.min_alt_safe else np.inf # 每秒限制改变俯仰角度数
+                # target_psi_changing_limit = pi / 180 * 90 # 每秒限制航向误差改变度数
+                # target_speed_changing_limit = np.inf
+                # action[0] = np.clip(action[0], 
+                #     UAV.action_memory[0]-target_height_changing_limit*self.dt_move,
+                #     UAV.action_memory[0]+target_height_changing_limit*self.dt_move,
+                #     )
+                # action[1] = np.clip(action[1], 
+                #     UAV.action_memory[1]-target_psi_changing_limit*self.dt_move,
+                #     UAV.action_memory[1]+target_psi_changing_limit*self.dt_move,
+                #     )
+                # action[2] = np.clip(action[2], 
+                #     UAV.action_memory[2]-target_speed_changing_limit*self.dt_move,
+                #     UAV.action_memory[2]+target_speed_changing_limit*self.dt_move,
+                #     )
+                # UAV.action_memory = np.array([
+                #     action[0],
+                #     action[1],
+                #     action[2],
+                # ])
 
                 # 计算当前子步下，实际机头指向与固定目标点之间的动态差角
                 dynamic_delta_psi = sub_of_radian(UAV.target_heading, UAV.psi)
@@ -548,10 +548,7 @@ class Battle(object):
                     missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
-                # 第一个漂亮结果之前的导弹慢速自爆逻辑
-                # if vmt1 < missile.speed_min and missile.t > 0.5 + missile.stage1_time + missile.stage2_time:
-                #     missile.dead = True
-                # 新导弹慢速自爆逻辑
+                # 导弹慢速自爆，节省计算量
                 if vmt1 < missile.speed_min \
                     and missile.t > 0.5 + missile.stage1_time + missile.stage2_time \
                         and last_pmt_[1] < 3000:
