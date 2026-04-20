@@ -15,7 +15,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                         help="")
     args = parser.parse_args()
 
-    env = ChooseStrategyEnv(args, tacview_show=1)
+    env = ChooseStrategyEnv(args, tacview_show=0)
     env.dt_move = 0.04 # 0.025 0.02
     env.shielded = shielded
 
