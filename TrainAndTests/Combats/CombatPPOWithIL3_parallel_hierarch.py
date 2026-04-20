@@ -1,4 +1,4 @@
-﻿'''
+'''
 同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
@@ -580,6 +580,37 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
                     append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
                     append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+
+                # --- 序列时空修正 (Credit Assignment Fix) ---死后时间压缩
+                # 由于代理死亡后 active_mask 变为 False，回合结束时的同归于尽补偿等延迟奖励
+                # 无法回传(会乘以 mask=0)。因此将死亡后产生的所有收益收束到最后一个存活步，并截断死亡后的冗余数据。
+                def truncate_and_shift(td):
+                    if not td or len(td.get('rewards', [])) == 0:
+                        return td
+                    
+                    active = td['active_masks']
+                    last_idx = -1
+                    for i in range(len(active)-1, -1, -1):
+                        if active[i]:
+                            last_idx = i
+                            break
+                    
+                    if last_idx != -1 and last_idx < len(td['rewards']) - 1:
+                        # 收束后续所有收益到最后一个决策点
+                        td['rewards'][last_idx] += sum(td['rewards'][last_idx+1:])
+                        td['dones'][last_idx] = True # 将此步标识为事实上的终止步
+                        # 不用传送同归于尽的最后一步next_states到先死瞬间，因为 td_target = rewards + self.gamma * next_vals * (1 - dones)
+                        
+                        # 截断死亡后的垫充帧
+                        for k in td.keys():
+                            if isinstance(td[k], list):
+                                td[k] = td[k][:last_idx+1]
+                    return td
+                
+                local_trans = truncate_and_shift(local_trans)
+                ego_trans = truncate_and_shift(ego_trans)
+                enm_trans = truncate_and_shift(enm_trans)
+                # ----------------------------------------------
 
                 # 7. 打包结果
                 result_packet = {

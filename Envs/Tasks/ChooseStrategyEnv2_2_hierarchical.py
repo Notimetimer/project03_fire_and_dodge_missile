@@ -179,37 +179,23 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 俯仰角惩罚
         r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
-        # 开火代价控制
-        shoot = action_shoot
-        wasted = 0
-        is_dead_now = ego.dead or self.out_range(ego)
-        if is_dead_now and not getattr(ego, 'last_dead', False):
-            shoot = ego.ammo
-            wasted = ego.ammo
-            ego.last_dead = True
-        elif is_dead_now:
-            shoot = 0 # 已经死过了，不再重复扣除
+        r_constraint *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
-        if shoot >= 1:
-            # 发射惩罚 (硬编码)
-            r_constraint -= 4 * shoot
-            # if alpha*180/pi > 30:
-            #     r_constraint -= 4 * shoot
-            # else:
-            #     r_constraint -= 3 * shoot
-            
-            if len(alive_ally_missiles) > 1:
-                r_constraint -= 13 * shoot # 10
-            
-            # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
-            if not ego.dead:
-                r_constraint += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
-                r_constraint += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
-                r_constraint += 1.5 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0
-                
-                # # 发射距离惩罚
-                # if distance > 60e3:
-                #     r_constraint += -5 * (distance - 60e3)/20e3
+        # 开火代价控制
+        wasted = 0
+        now_dead = ego.dead or self.out_range(ego)
+        if not getattr(ego, 'last_dead', False):
+            if now_dead:
+                shoot = ego.ammo # 死亡瞬间，记录清仓惩罚
+                wasted = ego.ammo
+                ego.last_dead = True
+            else:
+                shoot = action_shoot # 还在飞，正常记录
+        else:
+            shoot = 0 # 死后不再记录任何幻影开火
+            wasted = 0
+
+
 
         # # --- 5. 引导奖励计算 (r_shaping) - 外部随步数衰减 ---
         # # 为导弹提供制导
@@ -235,7 +221,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 进攻引导
         if len(alive_ally_missiles) == 0:
             # 角度奖励
-            r_constraint += cos(delta_psi) * reward_weights['angle_advantage']
+            r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
 
         # # 防御引导
         # if warning:
@@ -245,13 +231,38 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     else:
         #         r_shaping += 0
 
+        # r_constraint *= (1-ego.dead) # 密集奖励只有在
+
+        r_shaping *= (1-ego.dead)
+
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
+        if shoot >= 1:
+            # 发射惩罚 (硬编码)
+            r_event -= 4 * shoot
+            # if alpha*180/pi > 30:
+            #     r_constraint -= 4 * shoot
+            # else:
+            #     r_constraint -= 3 * shoot
+            
+            if len(alive_ally_missiles) > 1:
+                r_event -= 13 * shoot # 10
+            
+            # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
+            if not ego.dead:
+                r_event += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
+                r_event += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
+                r_event += 1.5 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0
+                
+                # # 发射距离惩罚
+                # if distance > 60e3:
+                #     r_constraint += -5 * (distance - 60e3)/20e3
+
         # 逃脱导弹
         if ego.escape_once:
-            r_event += 20
+            r_event += 20 * (1-ego.dead) # 活着才算逃脱，否则只是游戏机制
         # 导弹被逃脱
         if enm.escape_once:
-            r_event -= 20
+            r_event -= 20 * (1-enm.dead)
             
         # 死了也当剩下导弹全被逃脱处理 (自杀代价补偿)
         if wasted > 0:
