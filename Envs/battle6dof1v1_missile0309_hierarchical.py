@@ -276,34 +276,6 @@ class Battle(object):
         self.UAVs = []
         self.missiles = []
 
-    def launch_missile(self, side='r'):
-        """
-        立即发射导弹
-        """
-        if side == 'r':
-            uav = self.RUAV
-            ally_missiles = self.Rmissiles
-            target = self.BUAV
-        if side == 'b':
-            uav = self.BUAV
-            ally_missiles = self.Bmissiles
-            target = self.RUAV
-        else:
-            print("请检查阵营")
-            raise ValueError
-
-        # 发射导弹
-        if uav.ammo>0 and not uav.dead:
-            new_missile = uav.launch_missile(target, self.t, missile_class)
-            uav.ammo -= 1
-            new_missile.side = 'r' if side == 'r' else 'b'
-            if side == 'r':
-                self.Rmissiles.append(new_missile)
-            else:
-                self.Bmissiles.append(new_missile)
-            self.missiles = self.Rmissiles + self.Bmissiles
-            
-
 
     def step(self, r_actions, b_actions):
         # # 变步长
@@ -1333,11 +1305,9 @@ def launch_missile_immediately(env, side='r', tabu=0):
     new_missile_id = None
     if side == 'r':
         uav = env.RUAV
-        ally_missiles = env.Rmissiles
         target = env.BUAV
     else:  # side == 'b'
         uav = env.BUAV
-        ally_missiles = env.Bmissiles
         target = env.RUAV
 
     ego_state = env.get_state(uav.side)
@@ -1364,7 +1334,6 @@ def launch_missile_immediately(env, side='r', tabu=0):
             else:
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
-            
-    
+
     return new_missile_id
 
