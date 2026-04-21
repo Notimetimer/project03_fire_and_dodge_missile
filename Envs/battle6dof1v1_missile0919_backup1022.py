@@ -656,8 +656,10 @@ class Battle(object):
                     state["target_information"] = memory["target_information"].copy()
                 elif ATA > self.RUAV.max_radar_angle_rad and state["locked_by_target"] == 1:  # 被目标探测后有对目标的角度信息
                     state["target_observable"] = 1
-                    for idx in (0, 3, 5, 6, 7):
+                    for idx in (0, 3, 5):
                         state["target_information"][idx] = memory["target_information"][idx]
+                        state["target_information"][6] = pi # 被锁定了，必须假设这时候目标笔直对着我
+                        state["target_information"][7] = 0 
                 else:
                     state["target_observable"] = 2  # 否则除了不能发射导弹，都是可见的
             else:

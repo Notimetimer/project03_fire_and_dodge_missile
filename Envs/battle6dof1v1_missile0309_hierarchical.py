@@ -989,8 +989,10 @@ class Battle(object):
                     state["target_observable"] = 1
                     # 【核心逻辑】只覆盖运动学信息 (dist, speed, AA)，保留当前真实的 RWR 信息 (角度, ATA)
                     # 因为 memory['dist'] 已经是上一步复制下来的旧值，所以这里再次复制依然是旧值
-                    for idx in (3, 5, 6, 7):
+                    for idx in (3, 5):
                         state["target_information"][idx] = memory["target_information"][idx]
+                        state["target_information"][6] = pi # 被锁定了，必须假设这时候目标笔直对着我
+                        state["target_information"][7] = 0
                 
                 # B3: 角度合适 -> 完全可见
                 else:
