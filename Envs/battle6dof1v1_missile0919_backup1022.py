@@ -646,7 +646,7 @@ class Battle(object):
             dist = state["target_information"][3]
 
             # 超出探测距离
-            if dist > 130e3:  # 啥也看不到
+            if dist > uav.max_radar_range:  # 啥也看不到
                 state["target_observable"] = 0
                 state["target_information"] = memory["target_information"].copy()
             # 探测距离到近距

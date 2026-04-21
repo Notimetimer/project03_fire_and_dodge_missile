@@ -965,7 +965,7 @@ class Battle(object):
             # 根据条件决定是 "全覆盖" 还是 "部分覆盖"
             
             # 情况A: 超出探测距离 -> 完全不可见
-            if dist > 130e3:
+            if dist > uav.max_radar_range:
                 state["target_observable"] = 0
                 # 整体覆盖：除更新航向补偿外其他信息都用旧的
                 state["target_information"] = memory["target_information"].copy()

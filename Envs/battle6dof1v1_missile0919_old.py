@@ -538,11 +538,11 @@ class Battle(object):
             dist = state[4]
 
             # 超出探测距离
-            if dist > 130e3: # 啥也看不到
+            if dist > uav.max_radar_range: # 啥也看不到
                 state[0, 12, 15] = 0
                 state[1:5+1] = memory[1:5+1]
             # 跟踪距离到探测距离
-            elif dist > 130e3: # 不能跟踪目标，
+            elif dist > uav.max_radar_range: # 不能跟踪目标，
                 state[12] = 0
                 if alpha > 60*pi/180 and state[20]==0:  # 夹角>3/pi时观测不到目标
                     state[0] = 0
