@@ -372,7 +372,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -466,7 +466,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 r_min, r_max = settings.get('R_cage_range', (71e3, 71e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=1) # 0
+                # 进场瞬间给全信息
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
                 
                 # 状态变量初始化
                 done = False
@@ -488,8 +489,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     if not env.running or done: break
                     
                     # 1. 获取观测
-                    r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
-                    b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+                    r_obs, r_check_obs = env.obs_1v1('r', pomdp=pomdp)
+                    b_obs, b_check_obs = env.obs_1v1('b', pomdp=pomdp)
                     b_state_global, _ = env.obs_1v1('b', reward_fn=1)
                     r_state_global, _ = env.obs_1v1('r', reward_fn=1)
 
@@ -702,7 +703,7 @@ def run_MLP_simulation(
     R_cage_range = (71e3, 71e3), # 新增：环境随机化范围
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
-    pomdp = 0,
+    POMDP = 0, # 0全信息，1部分信息
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -932,11 +933,6 @@ def run_MLP_simulation(
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()
         p = mp.Process(target=worker_process, 
-                       # args=(
-                       #     i, child_conn, args, state_dim, hidden_dim, 
-                       #     action_dims_dict, worker_device, dt_maneuver, 
-                       #     seed, opp_greedy_rate, dt_move, no_crash
-                       # ),
                        kwargs={
                            'rank': i,
                            'pipe': child_conn,
@@ -949,7 +945,8 @@ def run_MLP_simulation(
                            'seed': seed,
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
-                           'no_crash': no_crash
+                           'no_crash': no_crash,
+                           'pomdp': POMDP
                        })
         p.start()
         workers.append(p)

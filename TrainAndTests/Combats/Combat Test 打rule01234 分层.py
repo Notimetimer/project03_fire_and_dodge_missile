@@ -53,7 +53,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s'
+    experiment_name = 'NoILPFSP_分阶段_挑战_并行_分层2s'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
