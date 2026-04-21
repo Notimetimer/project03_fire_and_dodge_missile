@@ -234,7 +234,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
         # crank引导
         if enm_threat_dist < distance:
-            r_constraint -= abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_penalty'] * (1-ego.dead)
+            r_constraint -= abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead)
 
         # # 防御引导
         # if warning:
