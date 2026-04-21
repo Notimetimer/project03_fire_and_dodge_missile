@@ -223,19 +223,18 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         enm_threat_dist = enm_states["threat"][3]
         if enm_threat_dist < distance:
             r_constraint += 0.001 * (1 - ego.dead)
-        else:
-            r_constraint -= 0.001 * (1 - ego.dead)
 
         # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
         if threat_distance < distance:
             r_constraint -= 0.001 * (1 - ego.dead)
-        else:
-            r_constraint += 0.001 * (1 - ego.dead)
 
+        # 角度奖励
         # 进攻引导
-        if len(alive_ally_missiles) == 0:
-            # 角度奖励
+        if len(alive_enm_missiles) == 0:
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
+        # crank引导
+        if enm_threat_dist < distance:
+            r_constraint -= abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_penalty'] * (1-ego.dead)
 
         # # 防御引导
         # if warning:

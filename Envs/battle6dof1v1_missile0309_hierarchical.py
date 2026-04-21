@@ -340,7 +340,7 @@ class Battle(object):
             if self.no_out:
                 d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, UAV.pos_, UAV.psi_v)
                 if d_hor < 8e3: # 8e3
-                    if left_or_right == 1:
+                    if left_or_right > 0:
                         delta_heading = min(-pi/2, delta_heading)
                     else:
                         delta_heading = max(pi/2, delta_heading)
@@ -811,7 +811,7 @@ class Battle(object):
 
             "border": np.array([
                 float(d_hor),  # 0
-                int(left_or_right),  # 1
+                float(left_or_right),  # 1
             ])
 
         }
