@@ -1242,8 +1242,9 @@ def run_MLP_simulation(
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
-            logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
-
+            # 找最好的智能体
+            logger.add("agent/ episode_step", batch_idx * num_workers, total_steps)
+            logger.add("agent/ batch_step", batch_idx, total_steps)
 
             # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
             if batch_idx % save_interval == 0 and \

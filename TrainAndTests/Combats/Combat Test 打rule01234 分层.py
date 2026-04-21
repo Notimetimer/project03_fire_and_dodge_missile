@@ -53,7 +53,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'NoILPFSP_分阶段_挑战_并行_分层2s'
+    experiment_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3,4]
+    rule_opponents = [0,1,2]
     t_bias = 0
 
     try:
