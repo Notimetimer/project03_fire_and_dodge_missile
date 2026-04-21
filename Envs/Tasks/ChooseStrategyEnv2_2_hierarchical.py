@@ -251,12 +251,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
-            # 发射惩罚 (硬编码)
-            r_event -= 4 * shoot
-            # if alpha*180/pi > 30:
-            #     r_constraint -= 4 * shoot
-            # else:
-            #     r_constraint -= 3 * shoot
+            # 正当防卫不惩罚
+            if shoot == 1 and threat_distance < 25e3 and ego_states["target_locked"]:
+                r_event += 1
+            else:
+                r_event -= 5 * shoot
             
             if len(alive_ally_missiles) > 1:
                 r_event -= 13 * shoot # 10
@@ -265,7 +264,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if not ego.dead:
                 r_event += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
                 r_event += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
-                r_event += 1.5 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0
+                r_event += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0
                 
                 # # 发射距离惩罚
                 # if distance > 60e3:
