@@ -147,7 +147,7 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     修改：增加 obs 输入，用于存储局部观测
     """
     td['obs'].append(obs) # 新增：存储Actor用的局部观测
-    td['states'].append(state) # 修改：这里存储Critic用的全局状态(pomdp=0)
+    td['states'].append(state) # 修改：这里存储Critic用的全局状态
     td['actions'].append(action)
     td['rewards'].append(reward)
     td['next_states'].append(next_state)
@@ -259,7 +259,7 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
 
 def get_opponent_probabilities(win_rates, elite_win_rates=None, 
                                SP_type='PFSP_classic', 
-                               rule_rate=0.5, p_factor=2.0):
+                               rule_rate=0.5, p_factor=0.3):
     """
     经典 PFSP 采样逻辑：
     win_rates: dict, 记录 Learner 对阵各对手的胜率 P
@@ -322,7 +322,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -416,6 +416,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 r_min, r_max = settings.get('R_cage_range', (71e3, 71e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
+                # 进场瞬间给全信息
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
                 
                 # 状态变量初始化
@@ -438,8 +439,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     if not env.running or done: break
                     
                     # 1. 获取观测
-                    r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
-                    b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+                    r_obs, r_check_obs = env.obs_1v1('r', pomdp=pomdp)
+                    b_obs, b_check_obs = env.obs_1v1('b', pomdp=pomdp)
                     b_state_global, _ = env.obs_1v1('b', reward_fn=1)
                     r_state_global, _ = env.obs_1v1('r', reward_fn=1)
 
@@ -462,12 +463,22 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.3 产生新动作 (No Grad)
                         with torch.no_grad():
                             # Blue Decision
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1)
+                            # “警报响起，少整活、多保命”
+                            b_state_check = env.unscale_state(b_check_obs)
+                            if b_state_check["warning"]:
+                                temperature = 1 # 0.3
+                            else:
+                                temperature = 1
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
                             b_action_label = b_action_exec['cat'][0]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
                             r_state_check = env.unscale_state(r_check_obs)
+                            if r_state_check["warning"]:
+                                temperature = 1 # 0.3
+                            else:
+                                temperature = 1
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
@@ -475,7 +486,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1})
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature)
                                 r_action_label = r_action_exec['cat'][0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -520,6 +531,37 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
                     append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
                     append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+
+                # --- 序列时空修正 (Credit Assignment Fix) ---死后时间压缩
+                # 由于代理死亡后 active_mask 变为 False，回合结束时的同归于尽补偿等延迟奖励
+                # 无法回传(会乘以 mask=0)。因此将死亡后产生的所有收益收束到最后一个存活步，并截断死亡后的冗余数据。
+                def truncate_and_shift(td):
+                    if not td or len(td.get('rewards', [])) == 0:
+                        return td
+                    
+                    active = td['active_masks']
+                    last_idx = -1
+                    for i in range(len(active)-1, -1, -1):
+                        if active[i]:
+                            last_idx = i
+                            break
+                    
+                    if last_idx != -1 and last_idx < len(td['rewards']) - 1:
+                        # 收束后续所有收益到最后一个决策点
+                        td['rewards'][last_idx] += sum(td['rewards'][last_idx+1:])
+                        td['dones'][last_idx] = True # 将此步标识为事实上的终止步
+                        # 不用传送同归于尽的最后一步next_states到先死瞬间，因为 td_target = rewards + self.gamma * next_vals * (1 - dones)
+                        
+                        # 截断死亡后的垫充帧
+                        for k in td.keys():
+                            if isinstance(td[k], list):
+                                td[k] = td[k][:last_idx+1]
+                    return td
+                
+                local_trans = truncate_and_shift(local_trans)
+                ego_trans = truncate_and_shift(ego_trans)
+                enm_trans = truncate_and_shift(enm_trans)
+                # ----------------------------------------------
 
                 # 7. 打包结果
                 result_packet = {
@@ -594,7 +636,7 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    sigma_elo = 400,
+    p_factor = 0.3,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 300,  # 100
@@ -611,6 +653,7 @@ def run_MLP_simulation(
     R_cage_range = (71e3, 71e3), # 新增：环境随机化范围
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
+    POMDP = 0, # 0全信息，1部分信息
 ):
 
     # 1. 设置随机数种子 (Master)
@@ -621,8 +664,6 @@ def run_MLP_simulation(
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
-    sigma_elo0 = sigma_elo
     
     # --- [修改] 灵活加载模仿学习数据集 ---
     if init_il_data is not None:
@@ -840,11 +881,6 @@ def run_MLP_simulation(
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()
         p = mp.Process(target=worker_process, 
-                       # args=(
-                       #     i, child_conn, args, state_dim, hidden_dim, 
-                       #     action_dims_dict, worker_device, dt_maneuver, 
-                       #     seed, opp_greedy_rate, dt_move, no_crash
-                       # ),
                        kwargs={
                            'rank': i,
                            'pipe': child_conn,
@@ -857,7 +893,8 @@ def run_MLP_simulation(
                            'seed': seed,
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
-                           'no_crash': no_crash
+                           'no_crash': no_crash,
+                           'pomdp': POMDP
                        })
         p.start()
         workers.append(p)
@@ -915,7 +952,7 @@ def run_MLP_simulation(
     empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
     transition_dict = copy.deepcopy(empty_transition_dict)
 
-    # 初始化基于胜率的在线 EMA 变量（用于在随后的训练中调整 sigma_elo）
+    # 初始化基于胜率的在线 EMA 变量
     ema_score = 0.5
     ema_step = 0
 
@@ -935,7 +972,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in [0, 1, 2, 3, 4]:
+                for r_idx in [0, 1, 2]: # , 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1000,7 +1037,7 @@ def run_MLP_simulation(
                     elite_win_rates,
                     SP_type=self_play_type,
                     rule_rate=rule_actor_rate,
-                    p_factor=2.0 
+                    p_factor=p_factor
                 )
                 selected_opponent_name = np.random.choice(opponent_keys, p=probs)
                 
@@ -1164,8 +1201,9 @@ def run_MLP_simulation(
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
-            logger.add("train/11 episode/step", batch_idx * num_workers, total_steps)
-
+            # 找最好的智能体
+            logger.add("agent/ episode_step", batch_idx * num_workers, total_steps)
+            logger.add("agent/ batch_step", batch_idx, total_steps)
 
             # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
             if batch_idx % save_interval == 0 and \
@@ -1384,22 +1422,11 @@ def run_MLP_simulation(
                     curr_rank = 0.5 if elo_spread == 0 else (main_agent_elo - min_elo) / elo_spread
                     logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
-                    # 线性缩放 sigma_elo: 落后 200 分或以上时放大到 1000，0 分以后保持 sigma_elo0
-                    # scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
-                    # sigma_elo = sigma_elo0 + scale * max(0, 1000 - sigma_elo0)
-
-                    # 根据平均胜率打分动态调节对手方差(sigma_elo)
-                    # 胜率=0.5时方差取500，>=0.7时方差为300，<=0.3时取1500
-                    sigma_elo = 500 # float(np.interp(np.clip(filtered_score, 0.3, 0.7), 
-                                                # [0.3, 0.5, 0.7], 
-                                                # [700, 500, 300]))
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
                     # critic_lr = actor_lr * 5
                     # student_agent.set_learning_rate(actor_lr, critic_lr)
-
-                    logger.add("Elo/sigma_elo", sigma_elo, total_steps)
 
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
                     logger.add("Elo/History_Pool_Size", hist_count, total_steps)
@@ -1415,7 +1442,6 @@ def run_MLP_simulation(
                         
                         # 记录 Rule 的绝对分与居中分
                         logger.add(f"Elo_Raw/{rk}", rule_elo, total_steps)
-                        logger.add(f"Elo_Centered/{rk}", rule_elo - mean_elo, total_steps)
                         
                         # 直接计算并记录 最强个体 vs 规则对手 的差值
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", main_agent_elo - rule_elo, total_steps)
