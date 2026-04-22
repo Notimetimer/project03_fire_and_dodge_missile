@@ -5,11 +5,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None # r""
 
-mission_name = 'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s'
-
-"IL_and_MixedPFSP_分阶段_挑战_并行_分层"
-
-
+mission_name = 'IL_and_MixedPFSP_挑战_并行_分层_调步长'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -29,7 +25,7 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 2 # 6
+dt_decide = 4 # 6 2 
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10

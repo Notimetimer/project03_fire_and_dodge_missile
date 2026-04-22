@@ -55,7 +55,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'height_advantage': 0.1,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
-            'to_center_reward' : 0.005 # 0.02 占领中心点的价值
+            'to_center_reward' : 0.005, # 0.02 占领中心点的价值
+            'speed_penalty': 0.01, # 慢速惩罚
         }
 
         ego_win=0
@@ -234,7 +235,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
         # crank引导
         if enm_threat_dist < distance:
-            r_constraint -= abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint -= 4 * abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead) # 引导太弱
+
+        # 速度惩罚
+        slow_mach = 0.7
+        if ego.speed < slow_mach*340:
+            r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
         # # 防御引导
         # if warning:
@@ -263,7 +269,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if not ego.dead:
                 r_event += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
                 r_event += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
-                r_event += 1.0 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0
+                r_event += 0.7 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
                 
                 # # 发射距离惩罚
                 # if distance > 60e3:
