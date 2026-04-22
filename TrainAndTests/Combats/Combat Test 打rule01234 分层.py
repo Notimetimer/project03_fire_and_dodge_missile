@@ -60,7 +60,7 @@ if __name__ == "__main__":
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
     args = parser.parse_args()    
 
-    args.agent_id = None # 838
+    args.agent_id = None # 172 # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=15*60, R_cage=71e3) # 55e3

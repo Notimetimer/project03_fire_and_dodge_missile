@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-mission_name = '经典PFSP无规则对手训练'
+mission_name = 'no_IL经典PFSP无规则对手训练'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -14,7 +14,7 @@ mission_name = '经典PFSP无规则对手训练'
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
+IL_epoches= 0 # 180
 max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
