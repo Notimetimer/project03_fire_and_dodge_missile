@@ -573,6 +573,10 @@ class PPOHybrid:
         self.entropy_cat = 0
         self.entropy_bern = 0
         self.entropy_cont = 0
+        
+        # [新增] 监控指标
+        self.td_error_var = 0     # TD error 的分布方差
+        self.grad_norm_ratio = 0  # actor 梯度与 critic 梯度的范数比
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
@@ -764,6 +768,7 @@ class PPOHybrid:
         entropy_cat_list = []
         entropy_bern_list = []
         entropy_cont_list = []
+        grad_norm_ratio_list = [] # [新增] 范数比列表
         
         # [新增] 初始化样本统计计数器 (包含重复更新累加)
         ppo_samples_total = 0
@@ -887,6 +892,10 @@ class PPOHybrid:
 
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
                 pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
+                
+                # [新增] 计算范数比 (Pre-clip)
+                grad_norm_ratio_list.append(pre_clip_actor_grad[-1] / (pre_clip_critic_grad[-1] + 1e-8))
+
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
@@ -936,6 +945,9 @@ class PPOHybrid:
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
         self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
         
+        # [新增] 汇总监控项
+        self.grad_norm_ratio = np.mean(grad_norm_ratio_list) if len(grad_norm_ratio_list) > 0 else 0
+        
         # [新增] 赋值有效样本监控项
         self.PPO_samples = ppo_samples_total
         self.PPO_valid_samples = ppo_valid_samples_total
@@ -959,11 +971,13 @@ class PPOHybrid:
 
         if len(y_true) > 1:
             var_y = np.var(y_true)
+            self.td_error_var = np.var(y_true - y_pred) # [新增] TD error 方差
             if var_y < 1e-8:
                 self.explained_var = 0.0
             else:
-                self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+                self.explained_var = 1 - self.td_error_var / var_y
         else:
+            self.td_error_var = 0.0
             self.explained_var = 0.0
 
         check_weights_bias_nan(self.actor, "actor", "update后")
@@ -1320,7 +1334,9 @@ class PPOHybrid:
             'entropy': self.entropy_mean,
             'ratio': self.ratio_mean,
             'pre_clip_actor': self.pre_clip_actor_grad,
-            'pre_clip_critic': self.pre_clip_critic_grad
+            'pre_clip_critic': self.pre_clip_critic_grad,
+            'td_error_var': self.td_error_var,      # [新增]
+            'grad_norm_ratio': self.grad_norm_ratio  # [新增]
         }
 
         # =====================================================================
@@ -1396,6 +1412,7 @@ class PPOHybrid:
         actor_loss_list, critic_loss_list = [], [],
         actor_grad_list, critic_grad_list = [], []
         pre_clip_actor_grad, pre_clip_critic_grad = [], []
+        grad_norm_ratio_list = [] # [新增]
         
         il_actor_loss_list, il_critic_loss_list = [], [] 
         
@@ -1536,6 +1553,7 @@ class PPOHybrid:
             # [修复] 记录裁剪前梯度
             pre_clip_actor_grad.append(model_grad_norm(self.actor))
             pre_clip_critic_grad.append(model_grad_norm(self.critic))
+            grad_norm_ratio_list.append(pre_clip_actor_grad[-1] / (pre_clip_critic_grad[-1] + 1e-8)) # [新增]
             
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
             nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
@@ -1570,6 +1588,11 @@ class PPOHybrid:
         
         self.pre_clip_actor_grad = weighted_avg(ppo_stats['pre_clip_actor'], np.mean(pre_clip_actor_grad))
         self.pre_clip_critic_grad = weighted_avg(ppo_stats['pre_clip_critic'], np.mean(pre_clip_critic_grad))
+        self.grad_norm_ratio = weighted_avg(ppo_stats['grad_norm_ratio'], np.mean(grad_norm_ratio_list)) # [新增]
+        
+        # TD error var 融合 (简单加权平均)
+        il_td_error_var = np.var((il_r_batch - il_values).cpu().numpy())
+        self.td_error_var = weighted_avg(ppo_stats['td_error_var'], il_td_error_var)
         
         # 熵和Ratio只有PPO有，IL没有，所以乘以系数缩放或者直接保持PPO的
         # 为了避免 Log 里的值看起来突然变小，这里建议直接使用 PPO 的值，因为 IL 不产生 entropy/ratio 概念

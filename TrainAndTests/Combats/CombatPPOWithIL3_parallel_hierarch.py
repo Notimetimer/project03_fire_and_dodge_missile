@@ -1353,6 +1353,10 @@ def run_MLP_simulation(
                 logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
                 logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
+                # [新增] 诊断监控
+                logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
+                logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
+                
                 # IL-PPO信号强度对比
                 # 错误做法，更新强度数量级和样本数无关
                 # if use_sil:

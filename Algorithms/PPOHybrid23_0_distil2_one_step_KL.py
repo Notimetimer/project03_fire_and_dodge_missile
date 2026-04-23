@@ -61,9 +61,20 @@ class PolicyNetHybrid(torch.nn.Module):
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
+            # 原·单层输出
             self.fc_bern = nn.Linear(prev_size, bern_dim)
+            # # 现·多层输出
+            # layers = []
+            # for _ in range(1):
+            #     layers.append(nn.Linear(prev_size, 64))
+            #     layers.append(nn.ReLU())
+            #     prev_size = 64
+            # layers.append(nn.Linear(prev_size, bern_dim))
+            # self.fc_bern = nn.Sequential(*layers)
+
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            nn.init.constant_(self.fc_bern.bias, -2.0)
+            nn.init.constant_(self.fc_bern.bias, -2.0) # 原·单层输出
+            # nn.init.constant_(self.fc_bern[-1].bias, -2.0) # 现·多层输出
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temp=1.0)
@@ -71,6 +82,13 @@ class PolicyNetHybrid(torch.nn.Module):
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temp 参数
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0):
+        if isinstance(temp, dict):
+            temp_cat = temp.get('cat', 1.0)
+            temp_bern = temp.get('bern', 1.0)
+        else:
+            temp_cat = temp
+            temp_bern = temp
+
         shared_features = self.net(x)
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -79,7 +97,7 @@ class PolicyNetHybrid(torch.nn.Module):
             mu = self.fc_mu(shared_features)
             # 计算 std
             std = torch.exp(self.log_std_cont)
-            std = torch.clamp(std, min=min_std, max=max_std) # 在处在边界外时，其相对于输入变量的 导数（梯度）是 0
+            std = torch.clamp(std, min=min_std, max=max_std)
             # 扩展维度以匹配 batch
             if mu.dim() > 1:
                 std = std.unsqueeze(0).expand_as(mu)
@@ -95,6 +113,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
             # temps = 1.0  # [修改] 使用传入的 temp
+            # >2 强随机，<0.1 强确定性
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
             # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
@@ -102,9 +121,8 @@ class PolicyNetHybrid(torch.nn.Module):
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
                 # 对应的温度: temps[i]
-                # scaled_logits = logits / (temps[i] + 1e-8)
-                # 使用传入的 temp 进行缩放, 防止除0
-                scaled_logits = logits / (temp + 1e-8)
+                # 使用 temp_cat 进行缩放, 防止除0
+                scaled_logits = logits / (temp_cat + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
             
             outputs['cat'] = final_probs_list
@@ -120,9 +138,9 @@ class PolicyNetHybrid(torch.nn.Module):
                 # mask == 0 代表禁止开火，设为极小值
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
-            # [修改] 使用传入的 temp
+            # [修改] 使用我们提取的 temp_bern
             # temps = 1.0 
-            scaled_bern_logits = bern_logits / (temp + 1e-8)
+            scaled_bern_logits = bern_logits / (temp_bern + 1e-8)
             outputs['bern'] = scaled_bern_logits
             
         return outputs
@@ -466,6 +484,15 @@ class HybridActorWrapper(nn.Module):
                     # 标准 CE: - log_p[target]
                     # gather 需要 index 维度为 (Batch, 1)
                     ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                    '''
+                    log_probs.gather()
+                    从所有动作的概率分布 log_probs 中，精准地抽取出“实际执行了的那个动作” expert_idx 对应的概率值。
+                    - 1 (第一个参数)：表示在第 1 维（列维度）进行选取。
+                    - expert_idx.unsqueeze(1)：将原来形状为(Batch,)的索引变成(Batch, 1)。
+                     这是因为 gather 要求索引的维度必须和原张量一致。
+                    - .squeeze(1)：取完值后，形状还是(Batch, 1)用 squeeze 把那个多余的维度删掉，
+                    变成平铺的 (Batch,)，方便后续算 Loss。
+                    '''
                 
                 total_loss_per_sample += ce_loss
 
@@ -551,6 +578,10 @@ class PPOHybrid:
         self.entropy_cat = 0
         self.entropy_bern = 0
         self.entropy_cont = 0
+        
+        # [新增] 监控指标
+        self.td_error_var = 0     # TD error 的分布方差
+        self.grad_norm_ratio = 0  # actor 梯度与 critic 梯度的范数比
 
         # [新增] 独立记录模仿学习与策略蒸馏的指标
         self.il_actor_loss = 0
@@ -605,7 +636,10 @@ class PPOHybrid:
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
+    def update(self, transition_dict, adv_normed=False, 
+                clip_vf=False, clip_range=0.2, shuffled=1, 
+                mini_batch_size=None, alpha_logit_reg=0.05,
+                v_trace=None):
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -749,6 +783,7 @@ class PPOHybrid:
         entropy_cat_list = []
         entropy_bern_list = []
         entropy_cont_list = []
+        grad_norm_ratio_list = [] # [新增] 范数比列表
         
         # [新增] 初始化样本统计计数器 (包含重复更新累加)
         ppo_samples_total = 0
@@ -807,6 +842,11 @@ class PPOHybrid:
                     clip_fracs = (((ratio - 1.0).abs() > self.eps).float() * mb_active_masks).sum() / (active_sum + mask_eps)
                     clip_frac_list.append(clip_fracs.item())
                 
+                # 借用一点IMPALA的经验，防止ratio过大导致梯度被炸飞
+                # 建议设置数值：2.0~5.0
+                if v_trace is not None:
+                    ratio = torch.clamp(ratio, max=v_trace)
+
                 surr1 = ratio * mb_advantage
                 surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * mb_advantage
                 
@@ -867,6 +907,10 @@ class PPOHybrid:
 
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
                 pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
+                
+                # [新增] 计算范数比 (Pre-clip)
+                grad_norm_ratio_list.append(pre_clip_actor_grad[-1] / (pre_clip_critic_grad[-1] + 1e-8))
+
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
@@ -916,6 +960,9 @@ class PPOHybrid:
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
         self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
         
+        # [新增] 汇总监控项
+        self.grad_norm_ratio = np.mean(grad_norm_ratio_list) if len(grad_norm_ratio_list) > 0 else 0
+        
         # [新增] 赋值有效样本监控项
         self.PPO_samples = ppo_samples_total
         self.PPO_valid_samples = ppo_valid_samples_total
@@ -939,11 +986,13 @@ class PPOHybrid:
 
         if len(y_true) > 1:
             var_y = np.var(y_true)
+            self.td_error_var = np.var(y_true - y_pred) # [新增] TD error 方差
             if var_y < 1e-8:
                 self.explained_var = 0.0
             else:
-                self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+                self.explained_var = 1 - self.td_error_var / var_y
         else:
+            self.td_error_var = 0.0
             self.explained_var = 0.0
 
         check_weights_bias_nan(self.actor, "actor", "update后")
