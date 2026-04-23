@@ -147,7 +147,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
         missile_in_mid_term = ego_states["missile_in_mid_term"]
-        missile_time_since_shoot = ego_states["weapon"]
+        # missile_time_since_shoot = ego_states["weapon"]
         
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
@@ -283,6 +283,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 r_event += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
                 r_event += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
                 r_event += 0.7 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
+                r_event -= max(1.0-ego.speed/340, 0)  # 开火时候的速度不能太低
                 
                 # # 发射距离惩罚
                 # if distance > 60e3:
@@ -324,7 +325,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         enm_avg_dist = r_avg_dist
                     
                     # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
-                    r_event += -50 * (ego_avg_dist-enm_avg_dist)/self.R_cage0
+                    r_event += -30 - 25 * (ego_avg_dist-enm_avg_dist)/self.R_cage0
 
                 else:
                     # 如果由于某种原因没有记录到态势数据，退回之前的默认惩罚或给0
