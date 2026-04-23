@@ -63,6 +63,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         ego_lose=0
         ego_draw=0
 
+        # --- [新增] 态势记录 ---
+        # 计算是否到达记录周期
+        cycle_time = self.dt_maneuver * action_cycle_multiplier
+        step_idx = round(self.t / cycle_time)
+        
+        # 允许极小的误差，并通过 last_record_t 避免在一帧内被两个智能体调用时重复记录
+        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_record_t) > (cycle_time * 0.5):
+            r_dist = np.linalg.norm(np.array([self.RUAV.pos_[0] - self.horizontal_center[0], self.RUAV.pos_[2] - self.horizontal_center[1]]))
+            b_dist = np.linalg.norm(np.array([self.BUAV.pos_[0] - self.horizontal_center[0], self.BUAV.pos_[2] - self.horizontal_center[1]]))
+            self.r_dist_seq.append(r_dist)
+            self.b_dist_seq.append(b_dist)
+            self.last_record_t = self.t
+
         self.close_range_kill() # 允许跑刀
         self.update_missile_state()
         
@@ -298,7 +311,26 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 if self.out_range(ego) or ego.alt < self.min_alt:
                     r_event -= 50
             elif ego_draw:
-                r_event -= 50
+                # [修改] 不再使用常数-50奖励，而是根据平均态势分来结算
+                if len(self.r_dist_seq) > 0 and len(self.b_dist_seq) > 0:
+                    r_avg_dist = sum(self.r_dist_seq) / len(self.r_dist_seq)
+                    b_avg_dist = sum(self.b_dist_seq) / len(self.b_dist_seq)
+                    
+                    if side == 'r':
+                        ego_avg_dist = r_avg_dist
+                        enm_avg_dist = b_avg_dist
+                    else:
+                        ego_avg_dist = b_avg_dist
+                        enm_avg_dist = r_avg_dist
+                        
+                    if ego_avg_dist < enm_avg_dist:
+                        r_event += 50
+                    else:
+                        r_event -= 50
+                else:
+                    # 如果由于某种原因没有记录到态势数据，退回之前的默认惩罚或给0
+                    pass
+                
                 # # “同归于尽收回导弹浪费惩罚，先死才有补偿，后死照样惩罚”
                 # if enm.dead and getattr(ego, 'last_dead', False):
                 #     r_event += 15 * ego.ammo
