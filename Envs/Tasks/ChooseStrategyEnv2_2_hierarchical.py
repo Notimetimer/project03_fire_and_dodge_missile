@@ -322,11 +322,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     else:
                         ego_avg_dist = b_avg_dist
                         enm_avg_dist = r_avg_dist
-                        
-                    if ego_avg_dist < enm_avg_dist:
-                        r_event += 50
-                    else:
-                        r_event -= 50
+                    
+                    # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
+                    r_event += -50 * (ego_avg_dist-enm_avg_dist)/self.R_cage0
+
                 else:
                     # 如果由于某种原因没有记录到态势数据，退回之前的默认惩罚或给0
                     pass
