@@ -283,8 +283,15 @@ def get_opponent_probabilities(win_rates, elite_win_rates=None,
         ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
         
         # 计算权重：(1 - P)^p
-        # 解释：胜率越低（越打不过），权重越高
+        # 解释：胜率越低（越打不过），权重越高，但太强太弱的对手被过滤掉
+        opponent_mask = np.ones_like(ps)
+        for i in range(len(ps)):
+            if ps[i] > 0.2 and ps[i] < 0.8:
+                opponent_mask[i] = 1.0
+            else:
+                opponent_mask[i] = 0.01
         weights = np.power((1.0 - ps), p_factor)
+        weights = weights * opponent_mask
         
         # 防止全为 0 的情况（例如胜率全是 1）
         if weights.sum() < 1e-8:
@@ -1149,6 +1156,7 @@ def run_MLP_simulation(
                 
                 # --- 胜率更新 (经典滑动平均) ---
                 alpha_win = 0.1
+                # 需要记录的是我对这个对手的胜率，数值越高表示对手相对我越弱
                 if opp_name in win_rates:
                     old_p = win_rates[opp_name]
                     win_rates[opp_name] = (1 - alpha_win) * old_p + alpha_win * actual_score

@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-mission_name = 'no_IL经典PFSP无规则对手训练'
+mission_name = 'no_IL经典PFSP无规则对手训练2s'
 
 # IL_and_PFSP_分阶段_混规则对手_强者优先   PFSP_challenge
 # IL_and_PFSP_分阶段_混规则对手_平衡对手   PFSP_balanced
@@ -15,7 +15,7 @@ mission_name = 'no_IL经典PFSP无规则对手训练'
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0 # 180
-max_steps = 8 * 165e4
+max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
@@ -29,7 +29,7 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 6
+dt_decide = 2
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -77,7 +77,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -113,7 +113,7 @@ if __name__=='__main__':
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
-        p_factor = 0.3,
+        p_factor = 0.23,
         WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
         ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
         MAX_HISTORY_SIZE = 300,  # 100

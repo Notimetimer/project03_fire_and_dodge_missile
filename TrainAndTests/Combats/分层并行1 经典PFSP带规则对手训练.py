@@ -5,7 +5,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
-mission_name = '经典PFSP带规则对手训练'
+mission_name = '经典PFSP带规则对手训练2s'
 
 "IL_and_MixedPFSP_分阶段_挑战_并行_分层"
 
@@ -15,7 +15,7 @@ mission_name = '经典PFSP带规则对手训练'
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 180
-max_steps = 8 * 165e4
+max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
@@ -29,11 +29,11 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 6
+dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,0.5]) # 1,1,1 引导奖励很难说该不该有
+weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 4 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -78,7 +78,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -120,7 +120,7 @@ if __name__=='__main__':
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
-        p_factor = 0.3,
+        p_factor = 0.23,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
@@ -133,6 +133,8 @@ if __name__=='__main__':
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
         resume_dir=resume_target_dir, # 指定中断续训目录
+        init_il_data = original_il_transition_dict, # 传入模仿数据集
+        POMDP=0, 
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
