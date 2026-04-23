@@ -657,17 +657,20 @@ class Battle(object):
 
         # 导弹中制导状态 bool 与 导弹发射间隔时间
         missile_in_mid_term = 0
-
+        missile_t_go = 120
         missile_time_since_shoot = 120
         if not alive_own_missiles:  # len(alive_own_missiles) == 0
             pass
         else:
             time_since_shoots = np.ones(len(alive_own_missiles)) * 120
+            missile_t_go = np.ones(len(alive_own_missiles)) * 120
             for i, missile in enumerate(alive_own_missiles):
                 time_since_shoots[i] = missile.t
+                missile_t_go[i] = missile.t_go
                 if missile.guidance_stage < 3:
                     missile_in_mid_term = 1
             missile_time_since_shoot = min(time_since_shoots)
+            missile_t_go = min(missile_t_go) # 预备增加观测空间
 
         # 首先找到所有存活的友方导弹是否由本机发射
         # 然后判断该导弹的 .guidance_stage是否<3
