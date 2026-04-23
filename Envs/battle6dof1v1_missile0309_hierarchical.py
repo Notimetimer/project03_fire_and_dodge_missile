@@ -160,6 +160,11 @@ class Battle(object):
         self.r_can_guide = 0
         self.b_can_guide = 0
         
+        # [新增] 平均态势分变量初始化
+        self.r_dist_seq = []
+        self.b_dist_seq = []
+        self.last_record_t = -1.0
+        
         # [新增] 如果需要支持随机种子控制，可以在这里设置
         if seed is not None:
             np.random.seed(seed)
