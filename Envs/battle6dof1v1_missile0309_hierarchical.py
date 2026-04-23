@@ -124,7 +124,8 @@ class Battle(object):
         self.min_alt_safe = 1e3 # 3e3
         self.min_alt_danger = 5e2 # 2e3
         self.min_alt = 100 # 0.5e3  # 1e3
-        self.R_cage = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
+        self.R_cage0 = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
+        self.R_cage = self.R_cage0
         self.RWR_distance = 60e3 # 最大告警距离
         self.RWR_ranging_distance = self.RWR_distance # 最大告警可测距
 
@@ -152,6 +153,7 @@ class Battle(object):
         self.ego_side = side
         
     def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, seed=None, options=None, ego_side='b'):  # 重置位置和状态
+        self.R_cage = self.R_cage0
         self.horizontal_center = horizontal_center
         self.set_ego_side(ego_side)
         # debug
@@ -1071,6 +1073,17 @@ class Battle(object):
         out = True
         if R_uav <= self.R_cage:
             out = False
+        
+        # 试验举措：敌机死后边界消失
+        # 敌机全都死了之后可以出界
+        # （警告，这样可能需要同步更改border观测项和奖励）
+        ego_side = UAV.side
+        enm_side = 'b' if ego_side == 'r' else 'r'
+        # 判断敌机阵营是否全灭
+        enm_uav = self.RUAV if enm_side =='r' else self.BUAV
+        if enm_uav.dead:
+            self.R_cage = np.inf
+            return False # 不出界
         return out
 
 
