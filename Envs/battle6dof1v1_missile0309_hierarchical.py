@@ -1321,9 +1321,9 @@ class Battle(object):
 
     def has_ammo_to_fire(self, side='r'):
         if side == 'r':
-            ego = env.RUAV
+            ego = self.RUAV
         else:  # side == 'b'
-            ego = env.BUAV
+            ego = self.BUAV
         if ego.ammo>0 and not ego.dead:
             return 1
         else:
