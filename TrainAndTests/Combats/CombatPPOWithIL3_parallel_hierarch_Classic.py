@@ -1,4 +1,4 @@
-﻿'''
+'''
 同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
@@ -497,17 +497,30 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                 r_action_label = r_action_exec['cat'][0]
                                 r_fire = r_action_exec['bern'][0]
 
-                        # 2.4 处理开火
-                        b_m_id = launch_missile_immediately(env, 'b') if b_fire else None
-                        r_m_id = launch_missile_immediately(env, 'r') if r_fire else None
-                        if b_m_id: m_fired += 1
+                        # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
+                        b_is_firing = 0
+                        r_is_firing = 0
+                        if b_fire: 
+                            env.BUAV.about_to_fire = 1
+                            b_is_firing = env.has_ammo_to_fire('b')
+                        if r_fire: 
+                            env.RUAV.about_to_fire = 1
+                            r_is_firing = env.has_ammo_to_fire('r')
                         
-                        # 2.5 记录当前动作供下一帧存储
+                        # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
                         current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_m_id is not None])}
-                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_m_id is not None])}
+                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
+                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
 
-                    # 3. 物理步进
+                    # 3. 物理步进与尝试发射
+                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label) if getattr(env.RUAV, 'about_to_fire', 0) else None
+                    
+                    if b_m_id: 
+                        m_fired += 1
+                    if r_m_id:
+                        pass
+
                     r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                     b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                     env.step(r_maneuver, b_maneuver)

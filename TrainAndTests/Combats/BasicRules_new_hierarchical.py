@@ -290,14 +290,14 @@ if __name__=='__main__':
                     r_action_label, r_fire = basic_rules(r_state_check, rules_num=2) # i_episode 或 5 
                     last_r_action_label = r_action_label
                     if r_fire:
-                        launch_missile_immediately(env, 'r')
+                        env.RUAV.about_to_fire = 1
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(env.obs2obs_check(b_obs))  # b_check_obs)
                     b_action_label, b_fire = basic_rules(b_state_check, rules_num=2)
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b')
+                        env.BUAV.about_to_fire = 1
 
                     decide_steps_after_update += 1
                     
@@ -313,7 +313,10 @@ if __name__=='__main__':
                     #     print("b_state_check", b_state_check["warning"])
                     #     print("b_action_label", b_action_label)
                     #     print()
-
+                if getattr(env.RUAV, 'about_to_fire', 0):
+                    launch_missile_immediately(env, 'r', action_label=r_action_label)
+                if getattr(env.BUAV, 'about_to_fire', 0):
+                    launch_missile_immediately(env, 'b', action_label=b_action_label)
 
                 r_action = env.maneuver14LR(env.RUAV, r_action_label)
                 b_action = env.maneuver14LR(env.BUAV, b_action_label)

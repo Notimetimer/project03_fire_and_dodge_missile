@@ -250,6 +250,7 @@ class Battle(object):
                       theta0=UAV.theta, o00=o00)
             UAV.got_hit = False
             UAV.escape_once = 0
+            UAV.about_to_fire = 0
             
             if is_red:
                 self.RUAVs.append(UAV)
@@ -1318,10 +1319,19 @@ class Battle(object):
 
         return cmd
 
+    def has_ammo_to_fire(self, side='r'):
+        if side == 'r':
+            ego = env.RUAV
+        else:  # side == 'b'
+            ego = env.BUAV
+        if ego.ammo>0 and not ego.dead:
+            return 1
+        else:
+            return 0
 
-def launch_missile_immediately(env, side='r', tabu=0):
+def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
     """
-    立即发射导弹
+    立即发射导弹 (受俯仰角限制)
     """
     new_missile_id = None
     if side == 'r':
@@ -1330,6 +1340,13 @@ def launch_missile_immediately(env, side='r', tabu=0):
     else:  # side == 'b'
         uav = env.BUAV
         target = env.RUAV
+
+    if action_label is not None and hasattr(env, 'maneuver14LR'):
+        action_array = env.maneuver14LR(uav, action_label)
+        target_height = action_array[0]
+        desired_theta = (target_height / 5000.0) * (pi / 2)
+        if abs(desired_theta - uav.theta) > (15 * pi / 180):
+            return None
 
     ego_state = env.get_state(uav.side)
     ATA = ego_state["target_information"][4]
@@ -1355,6 +1372,9 @@ def launch_missile_immediately(env, side='r', tabu=0):
             else:
                 env.Bmissiles.append(new_missile)
             env.missiles = env.Rmissiles + env.Bmissiles
+
+    if hasattr(uav, 'about_to_fire'):
+        uav.about_to_fire = 0
 
     return new_missile_id
 

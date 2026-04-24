@@ -81,7 +81,7 @@ def test_worker(model_state_dict, rule_num,
                 # 红方 (规则)
                 r_state_check = test_env.unscale_state(r_check)
                 r_action_label, r_fire = basic_rules(r_state_check, rule_num)
-                if r_fire: launch_missile_immediately(test_env, 'r', tabu=0)
+                if r_fire: test_env.RUAV.about_to_fire = 1
                 
                 # 蓝方 (神经网络 - 无法使用确定性决策，会导致测试回合与训练回合呈现巨大的性能差别)
                 with torch.no_grad():
@@ -90,9 +90,14 @@ def test_worker(model_state_dict, rule_num,
                     b_act_exec, _, _, _ = actor.get_action(b_obs, explore={'cont':1, 'cat':1, 'bern':1})
                     b_action_label = b_act_exec['cat'][0]
                     if b_act_exec['bern'][0]: 
-                        b_m_id = launch_missile_immediately(test_env, 'b', tabu=0)
-                    else:
-                        b_m_id = None
+                        test_env.BUAV.about_to_fire = 1
+
+            # 尝试发射
+            if getattr(test_env.RUAV, 'about_to_fire', 0):
+                launch_missile_immediately(test_env, 'r', action_label=r_action_label)
+            b_m_id = None
+            if getattr(test_env.BUAV, 'about_to_fire', 0):
+                b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_action_label)
 
             # 物理步
             r_maneuver = test_env.maneuver14LR(test_env.RUAV, r_action_label)

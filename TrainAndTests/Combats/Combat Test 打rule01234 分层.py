@@ -164,18 +164,24 @@ if __name__ == "__main__":
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
-                        launch_missile_immediately(env, 'r', tabu=0)
+                        env.RUAV.about_to_fire = 1
 
                     # --- 蓝方 (规则智能体) ---
                     b_state_check = env.unscale_state(b_check_obs)
                     b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b', tabu=0)
+                        env.BUAV.about_to_fire = 1
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
+                
+                if getattr(env.RUAV, 'about_to_fire', 0):
+                    launch_missile_immediately(env, 'r', tabu=0, action_label=r_action_label)
+                if getattr(env.BUAV, 'about_to_fire', 0):
+                    launch_missile_immediately(env, 'b', tabu=0, action_label=b_action_label)
+                    
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
                 done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)

@@ -127,7 +127,7 @@ class missile_class:
         self.empty_weight = 96.82  # kg
         self.stage1_weight = 20.28  # kg
         self.stage2_weight = 44.9  # kg
-        self.stage1_time = 2.3  # s
+        self.stage1_time = 2.3  # 2.3 s
         self.stage2_time = 10 # 10.5 11  # s
         self.stage1_burn_rate = self.stage1_weight / self.stage1_time  # 一级燃烧率kg/s
         self.stage2_burn_rate = self.stage2_weight / self.stage2_time  # 二级燃烧率kg/s
