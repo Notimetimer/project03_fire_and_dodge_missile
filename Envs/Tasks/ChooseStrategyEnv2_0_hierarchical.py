@@ -316,19 +316,47 @@ class ChooseStrategyEnv(Battle):
                     # 求解hot-cold关系
                     cos_ATA_r = np.dot(Lrb_, ruav.vel_) / (dist * ruav.speed)
                     cos_ATA_b = np.dot(Lbr_, buav.vel_) / (dist * buav.speed)
-                    # 双杀
-                    if cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
-                        ruav.dead = True
-                        buav.dead = True
-                        ruav.got_hit = True
-                        buav.got_hit = True
-                        print('近距双杀')
-                    # 单杀
+                    # 角度优势杀
                     if cos_ATA_r >= cos(pi / 3) and cos_ATA_b < cos(pi / 3):
                         buav.dead = True
                         buav.got_hit = True
                         print('近距单杀')
-                    if cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+                    elif cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
                         ruav.dead = True
                         ruav.got_hit = True
                         print('近距单杀')
+                    # 都在可攻击角度
+                    elif cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+                        # 看高度
+                        if buav.alt - ruav.alt > 1500:
+                            # 低于对面，近距处于劣势
+                            ruav.dead = True
+                            ruav.got_hit = True
+                            print('近距单杀')
+                        elif ruav.alt - buav.alt > 1500:
+                            # 高于对面，近距处于优势
+                            buav.dead = True
+                            buav.got_hit = True
+                            print('近距单杀')
+                        else:
+                            # 速度落后80m/s
+                            if buav.speed - ruav.speed > 80:
+                                ruav.dead = True
+                                ruav.got_hit = True
+                                print('近距单杀')
+                            elif ruav.speed - buav.speed > 80:
+                                buav.dead = True
+                                buav.got_hit = True
+                                print('近距单杀')
+                            else:
+                                ruav.dead = True
+                                buav.dead = True
+                                ruav.got_hit = True
+                                buav.got_hit = True
+                                print('近距双杀')
+                        
+                    else: # 都不在可攻击角度
+                        pass  # 无法杀
+
+                        
+                    

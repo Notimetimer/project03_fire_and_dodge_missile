@@ -342,7 +342,7 @@ class missile_class:
         # 超出跟踪角速度导致脱锁
         if np.linalg.norm(np.cross(line_t_, vrt_)) / distance ** 2 > self.sight_angle_rate_max:
             off_lock = True
-            
+
         # 矢量方程，脱锁处理
         if off_lock:
             aN_target_required_ = self.aN_target_required_
@@ -408,6 +408,7 @@ class missile_class:
 
         v_rel_ = vtt_-vmt_
         L_dot = np.dot(v_rel_, line_t_)/distance
+
         self.t_go = -distance/L_dot # if L_dot<0 else self.t_max # 弹目距离
         vmt = np.linalg.norm(vmt_)
         if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):

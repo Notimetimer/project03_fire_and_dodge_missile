@@ -177,6 +177,8 @@ class missile_class:
         self.datalink = None
         self.A_pole_moment = None
         self.delta_height = 0
+        self.close_rate = None
+        self.off_lock = False
 
     def Cd(self, mach):
         lis0 = np.array([
@@ -382,11 +384,11 @@ class missile_class:
         nzt1 = k_z * max(vmt, np.linalg.norm(vrt_)) * q_beta_dot / g * cos(theta_mt1)  # debug
 
         # 导引头脱锁模拟, 速度方向当做导弹头部方向
-        off_lock = False
+        self.off_lock = False
         # 假设脱锁会导致导弹沿直线继续飞
         # # 超出距离脱锁
         # if np.linalg.norm(distance) > self.detect_range:
-        #     off_lock = True
+        #     self.off_lock = True
         # 超出导引头视角导致脱锁
         aoa = np.arccos(np.dot(v_missile_, line_t_) / vmt / distance)
 
@@ -398,11 +400,19 @@ class missile_class:
                 nzt1 = min(0, nzt1)
 
         if np.dot(v_missile_, line_t_) / vmt / distance < cos(self.sight_angle_max):
-            off_lock = True
+            self.off_lock = True
         # 超出跟踪角速度导致脱锁
         if np.linalg.norm(np.cross(line_t_, vrt_)) / distance ** 2 > self.sight_angle_rate_max:
-            off_lock = True
-        if off_lock:
+            self.off_lock = True
+        
+        # 试验：多普勒 导致脱锁
+        if self.ground_close_rate is not None:
+            if abs(self.ground_close_rate - self.close_rate) < 40 and self.pos_[1] < 7000:
+                # 40m/s 约为塞斯纳起飞速度，7000m是随便设的
+                self.off_lock = True
+
+        # 矢量方程，脱锁处理
+        if self.off_lock:
             nzt1 = self.nzt  # 0
             nyt1 = self.nyt  # cos(theta_mt1)
         else:
@@ -464,6 +474,10 @@ class missile_class:
 
         vmt = np.linalg.norm(vmt_)
 
+        # 试验：多普勒速度窗口相关计算
+        self.close_rate = - L_dot
+        self.ground_close_rate = vmt if self.theta < np.radians(-15) else 0
+
         # 目标是否进入锁定角度范围
         if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):
             self.in_angle = 1
@@ -475,7 +489,7 @@ class missile_class:
         else:
             self.in_distance = 0
         
-        self.lock_on = self.in_angle and self.in_distance
+        self.lock_on = self.in_angle and self.in_distance and (not self.off_lock)
 
         vtt = np.linalg.norm(vtt_)
         psi_mt = np.arctan2(vmt_[2], vmt_[0])
