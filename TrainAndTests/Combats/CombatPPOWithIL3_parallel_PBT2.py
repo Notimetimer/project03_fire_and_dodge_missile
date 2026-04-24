@@ -467,8 +467,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
-                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label) if getattr(env.BUAV, 'about_to_fire', 0) else None
-                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label) if getattr(env.RUAV, 'about_to_fire', 0) else None
+                    # 采样时不能限制的太死，要"试错"
+                    b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                    r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     
                     if b_m_id: 
                         m_fired += 1

@@ -1343,8 +1343,9 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
 
     if action_label is not None and hasattr(env, 'maneuver14LR'):
         action_array = env.maneuver14LR(uav, action_label)
-        target_height = action_array[0]
-        desired_theta = (target_height / 5000.0) * (pi / 2)
+        delta_target_height = action_array[0]
+
+        desired_theta = (min(delta_target_height, env.max_alt_safe-uav.alt) / 5000.0) * (pi / 2) # 不能再爬升了，就得降低期望俯仰角
         if abs(desired_theta - uav.theta) > (15 * pi / 180):
             return None
 

@@ -177,6 +177,7 @@ if __name__ == "__main__":
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                 
+                # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
                     launch_missile_immediately(env, 'r', tabu=0, action_label=r_action_label)
                 if getattr(env.BUAV, 'about_to_fire', 0):

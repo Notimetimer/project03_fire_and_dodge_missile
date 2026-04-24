@@ -1,4 +1,4 @@
-'''
+﻿'''
 同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
@@ -513,8 +513,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
-                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label) if getattr(env.BUAV, 'about_to_fire', 0) else None
-                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label) if getattr(env.RUAV, 'about_to_fire', 0) else None
+                     # 采样的时候不适合限制动作次序，会妨碍“试错”
+                    b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                    r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     
                     if b_m_id: 
                         m_fired += 1
