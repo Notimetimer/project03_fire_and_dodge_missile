@@ -14,7 +14,7 @@ mission_name = 'IL_and_MixedPFSP_高门槛_挑战_并行_分层2s'
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 180
-max_steps = 8 * 165e4
+max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
@@ -78,7 +78,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -122,7 +122,7 @@ if __name__=='__main__':
         use_sil = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 0, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.0,
+        ADMISSION_THRESHOLD = 1.0,
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
