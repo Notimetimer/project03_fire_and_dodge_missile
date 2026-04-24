@@ -5,7 +5,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None # r""
 
-mission_name = 'IL_and_MixedPFSP_挑战_并行_分层_调步长'
+mission_name = 'IL_and_MixedPFSP_挑战_并行_分层_调动作次序'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
