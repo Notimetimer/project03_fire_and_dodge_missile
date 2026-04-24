@@ -179,6 +179,7 @@ class missile_class:
         self.delta_height = 0
         self.close_rate = None
         self.off_lock = False
+        self.ground_close_rate = None
 
     def Cd(self, mach):
         lis0 = np.array([
