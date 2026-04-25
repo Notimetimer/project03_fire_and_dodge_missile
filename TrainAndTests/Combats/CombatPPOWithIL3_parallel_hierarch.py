@@ -556,7 +556,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
-                     # 采样的时候不适合限制动作次序，会妨碍“试错”
+                     # 采样的时候不适合限制动作次序，会妨碍“试错”  r_action_label  b_action_label
                     b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
                     r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     
@@ -1020,7 +1020,7 @@ def run_MLP_simulation(
                 current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
 
                 # 2. 分发测试任务并【立即阻塞等待】
-                # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
+                # 第一种形式：测试条件和训练保持一致 (随机机动 + 不限次序)
                 test_tasks = []
                 for r_idx in [0, 1, 2]: # , 3, 4]:
                     obj = test_pool.apply_async(
@@ -1039,13 +1039,41 @@ def run_MLP_simulation(
                             'device_name': 'cpu',
                             'num_runs': num_runs,
                             'action_cycle_multiplier': action_cycle_multiplier,
-                            'no_out': 0  # 这里可以根据需要设为 1
+                            'no_out': 0,
+                            'deterministic': False,
+                            'restrict_fire': False
                         }
                     )
                     test_tasks.append(obj)
+                
+                # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
+                test_tasks_no_random = []
+                for r_idx in [0, 1, 2]:
+                    obj = test_pool.apply_async(
+                        test_worker, 
+                        kwds={
+                            'model_state_dict': current_weights,
+                            'rule_num': r_idx,
+                            'env_args': args,
+                            'state_dim': state_dim,
+                            'hidden_dim': hidden_dim,
+                            'action_dims_dict': action_dims_dict,
+                            'dt_maneuver_val': dt_maneuver,
+                            'device_name': 'cpu',
+                            'num_runs': num_runs,
+                            'action_cycle_multiplier': action_cycle_multiplier,
+                            'no_out': 0,
+                            'deterministic': True,     # 机动动作确定化
+                            'restrict_fire': True      # 动作次序限制打开
+                        }
+                    )
+                    test_tasks_no_random.append(obj)
+
                 # 等待所有测试进程结束
                 test_results = [t.get() for t in test_tasks]
+                test_results_no_random = [t.get() for t in test_tasks_no_random]
 
+                # 记录第一种测试结果
                 outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
                 outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
 
@@ -1053,6 +1081,15 @@ def run_MLP_simulation(
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
                     logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
+
+                # 记录第二种测试结果 (test_No_random)
+                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+
+                for r_num, score in outcomes_nr.items():
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
+                    print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score > 0.5 for score in outcomes.values()):

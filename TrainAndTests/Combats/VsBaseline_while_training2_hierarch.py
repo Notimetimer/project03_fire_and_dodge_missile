@@ -28,7 +28,7 @@ def test_worker(model_state_dict, rule_num,
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
-                no_out=0):
+                no_out=0, deterministic=False, restrict_fire=False):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -83,21 +83,25 @@ def test_worker(model_state_dict, rule_num,
                 r_action_label, r_fire = basic_rules(r_state_check, rule_num)
                 if r_fire: test_env.RUAV.about_to_fire = 1
                 
-                # 蓝方 (神经网络 - 无法使用确定性决策，会导致测试回合与训练回合呈现巨大的性能差别)
+                # 蓝方 (神经网络)
                 with torch.no_grad():
-                    # [修复] 调用 actor.get_action 而不是 take_action
-                    # get_action 返回 4 个值: actions_exec, actions_raw, h_state, actions_dist_check
-                    b_act_exec, _, _, _ = actor.get_action(b_obs, explore={'cont':1, 'cat':1, 'bern':1})
+                    # 如果 deterministic 为 True，则机动(cat)采用确定性决策，开火(bern)仍保持随机(1)
+                    explore_dict = {'cont': 0, 'cat': 0, 'bern': 1} if deterministic else {'cont': 1, 'cat': 1, 'bern': 1}
+                    b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict)
                     b_action_label = b_act_exec['cat'][0]
                     if b_act_exec['bern'][0]: 
                         test_env.BUAV.about_to_fire = 1
 
             # 尝试发射
             if getattr(test_env.RUAV, 'about_to_fire', 0):
-                launch_missile_immediately(test_env, 'r', action_label=r_action_label)
+                # 如果 restrict_fire 为 True，则限制动作次序（传入 r_action_label）
+                r_act_label_to_pass = r_action_label if restrict_fire else None
+                launch_missile_immediately(test_env, 'r', action_label=r_act_label_to_pass)
             b_m_id = None
             if getattr(test_env.BUAV, 'about_to_fire', 0):
-                b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_action_label)
+                # 如果 restrict_fire 为 True，则限制动作次序（传入 b_action_label）
+                b_act_label_to_pass = b_action_label if restrict_fire else None
+                b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_act_label_to_pass)
 
             # 物理步
             r_maneuver = test_env.maneuver14LR(test_env.RUAV, r_action_label)

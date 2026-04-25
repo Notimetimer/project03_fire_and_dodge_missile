@@ -317,9 +317,9 @@ if __name__=='__main__':
                 # action_label 设置为 r_action_label 或者 b_action_label 适合测试，完全禁止在动作没到位时开火
                 # 设置为 None 适合采样，试错，必须错才能学会
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', action_label=None)
+                    launch_missile_immediately(env, 'r', action_label=r_action_label)
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', action_label=None)
+                    launch_missile_immediately(env, 'b', action_label=b_action_label)
 
                 r_action = env.maneuver14LR(env.RUAV, r_action_label)
                 b_action = env.maneuver14LR(env.BUAV, b_action_label)
