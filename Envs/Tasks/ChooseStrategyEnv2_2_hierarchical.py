@@ -282,8 +282,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if not ego.dead:
                 r_event += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
                 r_event += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
-                r_event += 0.7 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
-                r_event -= max(1.0-ego.speed/340, 0)  # 开火时候的速度不能太低
+                r_event += 1.3 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
+                r_event -= 0.7 * max(1.0-ego.speed/340, 0)  # 开火时候的速度不能太低
                 
                 # # 发射距离惩罚
                 # if distance > 60e3:
