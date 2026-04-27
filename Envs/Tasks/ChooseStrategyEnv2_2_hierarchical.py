@@ -269,9 +269,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
-            # 正当防卫不惩罚
+            # r_event -= 5 * shoot
+            # 正当防卫豁免
             if shoot == 1 and threat_distance < 25e3 and ego_states["target_locked"]:
-                r_event += 1
+                r_event += - 1
             else:
                 r_event -= 5 * shoot
             

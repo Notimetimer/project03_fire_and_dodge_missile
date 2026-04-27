@@ -53,7 +53,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'IL_and_MixedPFSP_挑战_并行_分层_调动作次序_多重检测'
+    experiment_name = 'IL_and_MixedPFSP_挑战_并行_分层_训练做次序限制'
      # 'IL_and_MixedPFSP_挑战_并行_分层_调奖励', 'IL_and_MixedPFSP_挑战_并行_分层_调动作次序_多重检测'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
@@ -159,7 +159,7 @@ if __name__ == "__main__":
                             r_obs, explore={'cont':0, 'cat':0, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.4
                             )
                         
-                    r_action_label = r_action_exec['cat'][0]
+                    r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
                     last_r_action_label = r_action_label
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
