@@ -87,7 +87,8 @@ class ChooseStrategyEnv(Battle):
         # [确认存在/修改] 确保每个 Episode 开始时重置 last_obs
         self.last_obs = None 
         
-        self.pomdp = pomdp   
+        self.pomdp = pomdp
+        self.middle_hold_score = 0
 
         # 开场数据支持，至少背对背决斗时需要知道“对手在后面”
         self.RUAV.state_memory = copy.deepcopy(self.get_state('r'))

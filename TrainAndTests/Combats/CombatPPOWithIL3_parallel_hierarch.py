@@ -1520,7 +1520,10 @@ def run_MLP_simulation(
                     logger.add("Elo/Spread", elo_spread, total_steps)
 
                     curr_rank = 0.5 if elo_spread == 0 else (main_agent_elo - min_elo) / elo_spread
-                    logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
+                    
+                    # Elo分数没有稳定不许记录
+                    if total_steps >= WARM_UP_STEPS:
+                        logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
                     # 线性缩放 sigma_elo: 落后 200 分或以上时放大到 1000，0 分以后保持 sigma_elo0
                     # scale = np.clip(-elo_diff_to_thres / 200.0, 0.0, 1.0)
