@@ -60,12 +60,25 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             fire_missile = True
 
     # # 2. 根据目标相对高度选择基础进攻机动
-    if abs(delta_theta) < 30:
-        base_offensive_action = 0  # 平飞追踪
-    elif delta_theta >= 30:
-        base_offensive_action = 1  # 爬升追踪
-    else: # delta_theta < -pi/6
-        base_offensive_action = 3  # 下降追踪
+    if abs(delta_theta) < -30 * pi/180:
+        action_v = 3 # 下降
+        action_h = 1 # 追踪
+    elif delta_theta >= 30 * pi/180:
+        action_v = 1 # 爬升
+        action_h = 1 # 追踪
+    else:
+        action_v = 2 # 平飞
+        action_h = 1 # 追踪
+    action_number = [action_v, action_h] # 默认执行基础进攻
+    base_offensive_action = action_number
+
+    # # # 2. 根据目标相对高度选择基础进攻机动
+    # if abs(delta_theta) < 30:
+    #     base_offensive_action = 0  # 平飞追踪
+    # elif delta_theta >= 30:
+    #     base_offensive_action = 1  # 爬升追踪
+    # else: # delta_theta < -pi/6
+    #     base_offensive_action = 3  # 下降追踪
 
     action_number = base_offensive_action # 默认执行基础进攻
 
@@ -80,92 +93,104 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             # 优先俯冲回转至5000m以下
             if alt > 5000:
-                action_number = 12 # 俯冲回转
+                action_v = 4 # -60度俯冲
             else:
-                action_number = 11 # 水平回转
-            # fire_missile = False # 防御时不发射
+                action_v = 2 # 平飞
+            # 置尾机动
+            action_h = 6 # 水平方向背离
+            # # 优先俯冲回转至5000m以下
+            # if alt > 5000:
+            #     action_number = 12 # 俯冲回转
+            # else:
+            #     action_number = 11 # 水平回转
+            # # fire_missile = False # 防御时不发射
         elif on_guiding: # 如果本回合决定发射导弹
-            action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
+            if delta_psi < 0:
+                action_v = 2 # 平飞
+                action_h = 3 # Rcrank
+            else:
+                action_v = 2 # 平飞
+                action_h = 2 # Lcrank
+            # action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         else:
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
+        action_number = [action_v, action_h]
 
     elif rules_num in [2, 4]:
         # 规则2: Loft爬升射击序列
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
-            action_number = 8 # 立刻 split-S
+            action_v = 5
+            action_h = 6 # 置尾机动
+            action_number = [action_v, action_h]
+            # action_number = 8 # 立刻 split-S
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
-            action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
+            if delta_psi < 0:
+                action_v = 2 # 平飞
+                action_h = 3 # Rcrank
+                action_number = [action_v, action_h]
+                # action_number = 6 # 右crank
+            else:
+                action_v = 2 # 平飞
+                action_h = 2 # Lcrank
+                action_number = [action_v, action_h]
+                # action_number = 5 # 左crank
+            # action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
-            if sin_theta < sin(30*pi/180):  # last_action != 2: # 如果上一动作为非爬升
-                action_number = 2 # 则本回合执行爬升
+            if sin_theta < sin(30*pi/180) and alt < 9500:  # last_action != 2: # 如果上一动作为非爬升
+                action_v = 0 # 爬升
+                action_h = 1 # 追踪
+                # action_number = 2 # 则本回合执行爬升
                 fire_missile = False
+                action_number = [action_v, action_h]
             else:
                 fire_missile = True
         else:
             action_number = base_offensive_action
         fire_missile_affirmative = fire_missile
     
-    elif rules_num in [5]:
-        if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
-            action_number = 8 # 立刻 split-S
-            fire_missile = False # 防御时不发射
-        elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
-            action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
-        elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
-            if sin_theta < sin(30*pi/180):  # last_action != 2: # 如果上一动作为非爬升 达到高抛角度再发射导弹
-                action_number = 2 # 则本回合执行爬升
-                fire_missile = False
-            else:
-                fire_missile = True
-        else:
-            action_number = 3  # 低空苟分
-        fire_missile_affirmative = fire_missile
+    # elif rules_num in [5]:
+    #     if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
+    #         action_number = 8 # 立刻 split-S
+    #         fire_missile = False # 防御时不发射
+    #     elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
+    #         action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
+    #     elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
+    #         if sin_theta < sin(30*pi/180):  # last_action != 2: # 如果上一动作为非爬升 达到高抛角度再发射导弹
+    #             action_number = 2 # 则本回合执行爬升
+    #             fire_missile = False
+    #         else:
+    #             fire_missile = True
+    #     else:
+    #         action_number = 3  # 低空苟分
+    #     fire_missile_affirmative = fire_missile
         
-    if  np.random.rand() <= p_random:
-        action_number = np.random.randint(0, 13+1)
-        action_number = np.clip(action_number, 0, 13)
-        # # 不准因为随机行为而出界，效果不好，改回
-        # if d_hor < 8e3:
-        #     action_number = base_offensive_action
+    if np.random.rand() <= p_random:
+        v_action = np.random.randint(0, 6)
+        h_action = np.random.randint(0, 7)
+        action_number = [v_action, h_action]
+        # action_number = np.random.randint(0, 13+1)
+        # action_number = np.clip(action_number, 0, 13)
     
     if rules_num in [3, 4]:
         # 不准出界
         if d_hor < 8e3:
             action_number = base_offensive_action
     
-    # 防撞地规则
-    if alt < 3000:
-        if action_number in [0, 3, 4]:
-            action_number = 1
-        if action_number in [8,11,12,13]:
-            action_number = 11
-    # 防破升限
-    if alt > 12000:
-        if action_number in [1,2]:
-            action_number = 0
+    # # 防撞地规则
+    # if alt < 3000:
+    #     if action_number in [0, 3, 4]:
+    #         action_number = 1
+    #     if action_number in [8,11,12,13]:
+    #         action_number = 11
+    # # 防破升限
+    # if alt > 12000:
+    #     if action_number in [1,2]:
+    #         action_number = 0
 
-    return action_number, fire_missile_affirmative
+    return np.array(action_number), fire_missile_affirmative
 
-"""
-action_optionsLR = {
-                    0: "track",
-                    1: "30track",
-                    2: "60track",
-                    3: "-30track",
-                    4: "-60track",
-                    5: "L60crank",
-                    6: "R60crank",
-                    7: "snake",   "notch"
-                    8: "splitS",
-                    9: "3",     "left
-                    10: "9",    "right
-                    11: "fastTurn",
-                    12: "-30turn",
-                    13: "-60turn",
-                }
-"""
 
 if __name__=='__main__':
     print("\n根目录为：", project_root, "\n")
@@ -229,7 +254,7 @@ if __name__=='__main__':
         b_guide_list = []
         
         # 采集不同轨迹的动作
-        for i_episode in range(1): # 5
+        for i_episode in range(3): # 5
 
             last_r_action_label = 0
             last_b_action_label = 0
@@ -294,15 +319,15 @@ if __name__=='__main__':
 
                     # 蓝方根据规则活动
                     b_state_check = env.unscale_state(env.obs2obs_check(b_obs))  # b_check_obs)
-                    b_action_label, b_fire = basic_rules(b_state_check, rules_num=2)
+                    b_action_label, b_fire = basic_rules(b_state_check, rules_num=i_episode)
                     last_b_action_label = b_action_label
                     if b_fire:
                         env.BUAV.about_to_fire = 1
 
                     decide_steps_after_update += 1
                     
-                    r_action_list.append(np.array([env.t + t_bias, r_action_label]))
-                    b_action_list.append(np.array([env.t + t_bias, b_action_label]))
+                    # r_action_list.append(np.array([env.t + t_bias, r_action_label]))
+                    # b_action_list.append(np.array([env.t + t_bias, b_action_label]))
                     current_action = b_action_label
 
                     # # debug
@@ -317,9 +342,9 @@ if __name__=='__main__':
                 # action_label 设置为 r_action_label 或者 b_action_label 适合测试，完全禁止在动作没到位时开火
                 # 设置为 None 适合采样，试错，必须错才能学会
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', action_label=r_action_label)
+                    launch_missile_immediately(env, 'r', action_label=None) # r_action_label)
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', action_label=b_action_label)
+                    launch_missile_immediately(env, 'b', action_label=None) # b_action_label)
 
                 r_action = env.maneuver14LR(env.RUAV, r_action_label)
                 b_action = env.maneuver14LR(env.BUAV, b_action_label)
@@ -359,58 +384,58 @@ if __name__=='__main__':
     finally:
         env.end_render() # 停止发送
 
-        import matplotlib.pyplot as plt
-        r_action_arrays = np.array(r_action_list)
-        b_action_arrays = np.array(b_action_list)
-        r_guide_arrays = np.array(r_guide_list)
-        b_guide_arrays = np.array(b_guide_list)
+        # import matplotlib.pyplot as plt
+        # r_action_arrays = np.array(r_action_list)
+        # b_action_arrays = np.array(b_action_list)
+        # r_guide_arrays = np.array(r_guide_list)
+        # b_guide_arrays = np.array(b_guide_list)
 
-        # 绘制红方和蓝方的动作
-        x_b = b_action_arrays[:, 0].astype(float)
-        y_b = b_action_arrays[:, 1].astype(float)
+        # # 绘制红方和蓝方的动作
+        # x_b = b_action_arrays[:, 0].astype(float)
+        # y_b = b_action_arrays[:, 1].astype(float)
         
-        x_r = r_action_arrays[:, 0].astype(float)
-        y_r = r_action_arrays[:, 1].astype(float)
+        # x_r = r_action_arrays[:, 0].astype(float)
+        # y_r = r_action_arrays[:, 1].astype(float)
 
-        x_bg = b_guide_arrays[:, 0].astype(float)
-        y_bg = b_guide_arrays[:, 1].astype(float)
-        x_rg = r_guide_arrays[:, 0].astype(float)
-        y_rg = r_guide_arrays[:, 1].astype(float)
+        # x_bg = b_guide_arrays[:, 0].astype(float)
+        # y_bg = b_guide_arrays[:, 1].astype(float)
+        # x_rg = r_guide_arrays[:, 0].astype(float)
+        # y_rg = r_guide_arrays[:, 1].astype(float)
 
-        fig, (ax, ax_guide) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-        ax.plot(x_b, y_b, marker='o', linestyle='-', label='Blue (Action Type)', color='blue', alpha=0.7)
-        ax.plot(x_r, y_r, marker='x', linestyle='--', label='Red (Action Type)', color='red', alpha=0.7)
+        # fig, (ax, ax_guide) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+        # ax.plot(x_b, y_b, marker='o', linestyle='-', label='Blue (Action Type)', color='blue', alpha=0.7)
+        # ax.plot(x_r, y_r, marker='x', linestyle='--', label='Red (Action Type)', color='red', alpha=0.7)
         
-        ax.set_ylabel('Action Label')
-        ax.set_title('Red & Blue Action Type over time')
-        ax.legend()
-        ax.grid(True)
+        # ax.set_ylabel('Action Label')
+        # ax.set_title('Red & Blue Action Type over time')
+        # ax.legend()
+        # ax.grid(True)
 
-        # 绘制制导状态
-        ax_guide.plot(x_bg, y_bg, label='Blue Guidance Status', color='blue', alpha=0.7)
-        ax_guide.plot(x_rg, y_rg, label='Red Guidance Status', color='red', alpha=0.7)
-        ax_guide.set_xlabel('time (s)')
-        ax_guide.set_ylabel('Guidance Status')
-        ax_guide.set_title('Red & Blue Guidance Status (can_guide) over time')
-        ax_guide.legend()
-        ax_guide.grid(True)
+        # # 绘制制导状态
+        # ax_guide.plot(x_bg, y_bg, label='Blue Guidance Status', color='blue', alpha=0.7)
+        # ax_guide.plot(x_rg, y_rg, label='Red Guidance Status', color='red', alpha=0.7)
+        # ax_guide.set_xlabel('time (s)')
+        # ax_guide.set_ylabel('Guidance Status')
+        # ax_guide.set_title('Red & Blue Guidance Status (can_guide) over time')
+        # ax_guide.legend()
+        # ax_guide.grid(True)
 
-        # 自定义 x 轴刻度：每 10s 一个刻度；若刻度能被60整除，额外在刻度下方显示整除后的结果（分钟数），
-        # 否则显示该刻度除以60后的余数（秒）
-        step = 10
-        xmin = min(x_b.min(), x_r.min(), x_rg.min(), x_bg.min())
-        xmax = max(x_b.max(), x_r.max(), x_rg.max(), x_bg.max())
-        ticks = np.arange(np.floor(xmin / step) * step, np.ceil(xmax / step) * step + 1, step)
-        labels = []
-        for t in ticks:
-            ti = int(round(t))
-            if ti % 60 == 0:
-                labels.append(f"{ti}\n{ti//60}")
-            else:
-                labels.append(str(ti % 60))
-        ax_guide.set_xticks(ticks)
-        ax_guide.set_xticklabels(labels)
+        # # 自定义 x 轴刻度：每 10s 一个刻度；若刻度能被60整除，额外在刻度下方显示整除后的结果（分钟数），
+        # # 否则显示该刻度除以60后的余数（秒）
+        # step = 10
+        # xmin = min(x_b.min(), x_r.min(), x_rg.min(), x_bg.min())
+        # xmax = max(x_b.max(), x_r.max(), x_rg.max(), x_bg.max())
+        # ticks = np.arange(np.floor(xmin / step) * step, np.ceil(xmax / step) * step + 1, step)
+        # labels = []
+        # for t in ticks:
+        #     ti = int(round(t))
+        #     if ti % 60 == 0:
+        #         labels.append(f"{ti}\n{ti//60}")
+        #     else:
+        #         labels.append(str(ti % 60))
+        # ax_guide.set_xticks(ticks)
+        # ax_guide.set_xticklabels(labels)
 
-        plt.tight_layout()
-        plt.show()
-        print()
+        # plt.tight_layout()
+        # plt.show()
+        # print()

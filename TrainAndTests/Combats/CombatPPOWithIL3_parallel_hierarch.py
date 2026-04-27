@@ -520,7 +520,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 temperature = 1
                             b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
-                            b_action_label = b_action_exec['cat'][0]
+                            b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
@@ -532,12 +532,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
-                                r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
+                                r_action_exec = {'cat': r_action_label, 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
                                 r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature)
-                                r_action_label = r_action_exec['cat'][0]
+                                r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)

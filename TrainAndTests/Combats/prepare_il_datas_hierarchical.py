@@ -15,7 +15,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                         help="")
     args = parser.parse_args()
 
-    env = ChooseStrategyEnv(args, tacview_show=0)
+    env = ChooseStrategyEnv(args, tacview_show=1)
     env.dt_move = 0.04 # 0.025 0.02
     env.shielded = shielded
 
@@ -43,15 +43,13 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
 
     decide_steps_after_update = 0
     try:
-        r_action_list = []
-        b_action_list = []
         
         transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': []}
         il_transition_dict = {'states':[], 'actions': [], 'returns': []}
         
         for _ in range(5):
             # 示范数据采集
-            for i_episode in range(5):
+            for i_episode in range(3):
 
                 last_r_action_label = 0
                 last_b_action_label = 0
@@ -114,14 +112,12 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
 
                         decide_steps_after_update += 1
                         
-                        b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-                        current_action = {'cat': np.array([b_action_label]), 'bern': np.array([b_fire])}
-                        # current_action = np.array([b_action_label, b_fire])
+                        current_action = {'cat': np.array(b_action_label), 'bern': np.array([b_fire])}
 
                     if getattr(env.RUAV, 'about_to_fire', 0):
-                        launch_missile_immediately(env, 'r', action_label=r_action_label)
+                        launch_missile_immediately(env, 'r', action_label=r_action_label, tabu=1) # r_action_label)
                     if getattr(env.BUAV, 'about_to_fire', 0):
-                        launch_missile_immediately(env, 'b', action_label=b_action_label)
+                        launch_missile_immediately(env, 'b', action_label=b_action_label, tabu=1) # b_action_label)
 
                     r_action = env.maneuver14LR(env.RUAV, r_action_label)
                     b_action = env.maneuver14LR(env.BUAV, b_action_label)
@@ -154,7 +150,6 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                 # print(t_bias)
                 env.clear_render(t_bias=t_bias)
                 t_bias += env.t
-                r_action_list = np.array(r_action_list)
 
 
         # 计算蒙特卡洛回报

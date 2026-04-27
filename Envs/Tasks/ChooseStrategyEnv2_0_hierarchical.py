@@ -67,7 +67,7 @@ class ChooseStrategyEnv(Battle):
             "border",  # 2
         ]
         self.obs_dim = 1*6+8+7+1+4+2
-        self.fly_act_dim = [14]
+        self.fly_act_dim = [6, 7] # 14
         self.fire_dim = 1
         
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
@@ -199,160 +199,208 @@ class ChooseStrategyEnv(Battle):
 
         move_action = np.zeros(3)
 
-        # 水平跟踪
-        if action == 0:
-            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        # 动作空间正交化
+        action_v, action_h = action
+        # 速度指令，锁定340
+        speed_cmd = 340
+
+        # 垂直方向指令
+        if action_v == 0:
+            delta_height_cmd = min(5000*2/3, self.max_alt_safe-UAV.alt)
+        if action_v == 1:
+            delta_height_cmd = min(5000/3, self.max_alt_safe-UAV.alt)
+        if action_v == 2:
             delta_height_cmd = 135
-            speed_cmd = 340
+        if action_v == 3:
+            delta_height_cmd = max(-5000/3, self.min_alt_safe-UAV.alt)
+        if action_v == 4:
+            delta_height_cmd = max(-5000/3*2, self.min_alt_safe-UAV.alt)
+        if action_v == 5:
+            delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
 
-        # 30°爬升加速
-        if action == 1:
-            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = 5000/3
-            speed_cmd = 340
-
-        # 60°爬升加速
-        if action == 2:
-            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = 5000*2/3
-            speed_cmd = 340
-
-        # -30°俯冲跟踪
-        if action == 3:
-            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = -5000/3
-            speed_cmd = 340
-
-        # -60°俯冲跟踪
-        if action == 4:
-            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-            delta_height_cmd = -5000/3*2
-            speed_cmd = 340
-
-        # 左60°水平偏移
-        if action == 5:
-            delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
-            delta_height_cmd = 0
-            speed_cmd = 340
-
-        # 右60°水平偏移
-        if action == 6:
-            delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
-            delta_height_cmd = 0
-            speed_cmd = 340
-
-        # 占领中心机动
-        if action == 7:
+        # 水平方向指令：
+        # 回中心
+        if action_h == 0:
             line2center = np.array([self.horizontal_center[0]-UAV.pos_[0], self.horizontal_center[1]-UAV.pos_[2]])
             psi2center = np.arctan2(line2center[1], line2center[0])
             dist2center = norm(line2center)
             delta_psi_cmd = sub_of_radian(psi2center, UAV.psi) * dist2center/self.R_cage
-            # 保持在安全高度
-            if UAV.alt < self.min_alt_safe:
-                delta_height_cmd = 300
-            elif UAV.alt > self.max_alt_safe:
-                delta_height_cmd = -300
-            else:
-                delta_height_cmd = 0
-            speed_cmd = 340
-
-        # 破s
-        if action == 8:
-            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = sub_of_radian(delta_psi_temp, pi)
-            delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
-            speed_cmd = 300
-
-        # 水平3线机动
-        if action == 9:
+        # 追踪
+        if action_h == 1:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        # 左crank
+        if action_h == 2:
+            delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
+        # 右crank
+        if action_h == 3:
+            delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
+        # 3线
+        if action_h == 4:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
             delta_psi_cmd = sub_of_radian(delta_psi_temp - pi/2, 0)
-            delta_height_cmd = 0
-            speed_cmd = 340
-
-        # 水平9线机动
-        if action == 10:
+        # 9线
+        if action_h == 5:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
             delta_psi_cmd = sub_of_radian(delta_psi_temp + pi/2, 0)
-            delta_height_cmd = 0
-            speed_cmd = 340
-
-        # 水平快置尾
-        if action == 11:
+        # 置尾机动
+        if action_h == 6:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
             delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
-            delta_height_cmd = -500 if abs(delta_psi_temp)<pi/2 else 0
-            speed_cmd = 340
 
-        # 水平快置尾后-30°俯冲
-        if action == 12:
-            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
-            delta_height_cmd = -5000/3
-            speed_cmd = 340
+        # # 水平跟踪
+        # if action == 0:
+        #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        #     delta_height_cmd = 135
+        #     speed_cmd = 340
 
-        # 水平快置尾后-60°俯冲
-        if action == 13:
-            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
-            delta_height_cmd = -5000/3*2
-            speed_cmd = 340
+        # # 30°爬升加速
+        # if action == 1:
+        #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        #     delta_height_cmd = 5000/3
+        #     speed_cmd = 340
+
+        # # 60°爬升加速
+        # if action == 2:
+        #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        #     delta_height_cmd = 5000*2/3
+        #     speed_cmd = 340
+
+        # # -30°俯冲跟踪
+        # if action == 3:
+        #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        #     delta_height_cmd = -5000/3
+        #     speed_cmd = 340
+
+        # # -60°俯冲跟踪
+        # if action == 4:
+        #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        #     delta_height_cmd = -5000/3*2
+        #     speed_cmd = 340
+
+        # # 左60°水平偏移
+        # if action == 5:
+        #     delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
+        #     delta_height_cmd = 0
+        #     speed_cmd = 340
+
+        # # 右60°水平偏移
+        # if action == 6:
+        #     delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
+        #     delta_height_cmd = 0
+        #     speed_cmd = 340
+
+        # # 占领中心机动
+        # if action == 7:
+        #     line2center = np.array([self.horizontal_center[0]-UAV.pos_[0], self.horizontal_center[1]-UAV.pos_[2]])
+        #     psi2center = np.arctan2(line2center[1], line2center[0])
+        #     dist2center = norm(line2center)
+        #     delta_psi_cmd = sub_of_radian(psi2center, UAV.psi) * dist2center/self.R_cage
+        #     # 保持在安全高度
+        #     if UAV.alt < self.min_alt_safe:
+        #         delta_height_cmd = 300
+        #     elif UAV.alt > self.max_alt_safe:
+        #         delta_height_cmd = -300
+        #     else:
+        #         delta_height_cmd = 0
+        #     speed_cmd = 340
+
+        # # 破s
+        # if action == 8:
+        #     delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        #     delta_psi_cmd = sub_of_radian(delta_psi_temp, pi)
+        #     delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
+        #     speed_cmd = 300
+
+        # # 水平3线机动
+        # if action == 9:
+        #     delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        #     delta_psi_cmd = sub_of_radian(delta_psi_temp - pi/2, 0)
+        #     delta_height_cmd = 0
+        #     speed_cmd = 340
+
+        # # 水平9线机动
+        # if action == 10:
+        #     delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        #     delta_psi_cmd = sub_of_radian(delta_psi_temp + pi/2, 0)
+        #     delta_height_cmd = 0
+        #     speed_cmd = 340
+
+        # # 水平快置尾
+        # if action == 11:
+        #     delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        #     delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
+        #     delta_height_cmd = -500 if abs(delta_psi_temp)<pi/2 else 0
+        #     speed_cmd = 340
+
+        # # 水平快置尾后-30°俯冲
+        # if action == 12:
+        #     delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        #     delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
+        #     delta_height_cmd = -5000/3
+        #     speed_cmd = 340
+
+        # # 水平快置尾后-60°俯冲
+        # if action == 13:
+        #     delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        #     delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
+        #     delta_height_cmd = -5000/3*2
+        #     speed_cmd = 340
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
 
     # 重写近距杀方法（加了print）
     def close_range_kill(self,):
-        for ruav in self.RUAVs:
-            if ruav.dead:
+        for RUAV in self.RUAVs:
+            if RUAV.dead:
                 continue
-            for buav in self.BUAVs:
-                if buav.dead:
+            for BUAV in self.BUAVs:
+                if BUAV.dead:
                     continue
-                elif norm(ruav.pos_ - buav.pos_) >= 8e3:
+                elif norm(RUAV.pos_ - BUAV.pos_) >= 8e3:
                     continue
                 else:
-                    Lbr_ = ruav.pos_ - buav.pos_
-                    Lrb_ = buav.pos_ - ruav.pos_
+                    Lbr_ = RUAV.pos_ - BUAV.pos_
+                    Lrb_ = BUAV.pos_ - RUAV.pos_
                     dist = norm(Lbr_)
                     # 求解hot-cold关系
-                    cos_ATA_r = np.dot(Lrb_, ruav.vel_) / (dist * ruav.speed)
-                    cos_ATA_b = np.dot(Lbr_, buav.vel_) / (dist * buav.speed)
+                    cos_ATA_r = np.dot(Lrb_, RUAV.vel_) / (dist * RUAV.speed)
+                    cos_ATA_b = np.dot(Lbr_, BUAV.vel_) / (dist * BUAV.speed)
                     # 角度优势杀
                     if cos_ATA_r >= cos(pi / 3) and cos_ATA_b < cos(pi / 3):
-                        buav.dead = True
-                        buav.got_hit = True
+                        BUAV.dead = True
+                        BUAV.got_hit = True
                         print('近距单杀')
                     elif cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
-                        ruav.dead = True
-                        ruav.got_hit = True
+                        RUAV.dead = True
+                        RUAV.got_hit = True
                         print('近距单杀')
                     # 都在可攻击角度
                     elif cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
                         # 看高度
-                        if buav.alt - ruav.alt > 1500:
+                        if BUAV.alt - RUAV.alt > 1500:
                             # 低于对面，近距处于劣势
-                            ruav.dead = True
-                            ruav.got_hit = True
+                            RUAV.dead = True
+                            RUAV.got_hit = True
                             print('近距单杀')
-                        elif ruav.alt - buav.alt > 1500:
+                        elif RUAV.alt - BUAV.alt > 1500:
                             # 高于对面，近距处于优势
-                            buav.dead = True
-                            buav.got_hit = True
+                            BUAV.dead = True
+                            BUAV.got_hit = True
                             print('近距单杀')
                         else:
                             # 速度落后80m/s
-                            if buav.speed - ruav.speed > 80:
-                                ruav.dead = True
-                                ruav.got_hit = True
+                            if BUAV.speed - RUAV.speed > 80:
+                                RUAV.dead = True
+                                RUAV.got_hit = True
                                 print('近距单杀')
-                            elif ruav.speed - buav.speed > 80:
-                                buav.dead = True
-                                buav.got_hit = True
+                            elif RUAV.speed - BUAV.speed > 80:
+                                BUAV.dead = True
+                                BUAV.got_hit = True
                                 print('近距单杀')
                             else:
-                                ruav.dead = True
-                                buav.dead = True
-                                ruav.got_hit = True
-                                buav.got_hit = True
+                                RUAV.dead = True
+                                BUAV.dead = True
+                                RUAV.got_hit = True
+                                BUAV.got_hit = True
                                 print('近距双杀')
                         
                     else: # 都不在可攻击角度
