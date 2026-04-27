@@ -1346,7 +1346,7 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
         delta_target_height = action_array[0]
 
         desired_theta = (min(delta_target_height, env.max_alt_safe-uav.alt) / 5000.0) * (pi / 2) # 不能再爬升了，就得降低期望俯仰角
-        if abs(desired_theta - uav.theta) > (15 * pi / 180):
+        if desired_theta - uav.theta > (15 * pi / 180):
             return None
 
     ego_state = env.get_state(uav.side)
