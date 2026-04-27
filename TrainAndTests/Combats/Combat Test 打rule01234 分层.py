@@ -156,7 +156,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.4
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.4
                             )
                         
                     r_action_label = r_action_exec['cat'] # [0]
@@ -180,9 +180,9 @@ if __name__ == "__main__":
                 
                 # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', tabu=0, action_label=r_action_label)
+                    launch_missile_immediately(env, 'r', tabu=0, action_label=None) # r_action_label)
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', tabu=0, action_label=b_action_label)
+                    launch_missile_immediately(env, 'b', tabu=0, action_label=None) # b_action_label)
                     
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态

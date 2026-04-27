@@ -373,35 +373,42 @@ class ChooseStrategyEnv(Battle):
                         RUAV.dead = True
                         RUAV.got_hit = True
                         print('近距单杀')
-                    # 都在可攻击角度
                     elif cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
-                        # 看高度
-                        if BUAV.alt - RUAV.alt > 1500:
-                            # 低于对面，近距处于劣势
-                            RUAV.dead = True
-                            RUAV.got_hit = True
-                            print('近距单杀')
-                        elif RUAV.alt - BUAV.alt > 1500:
-                            # 高于对面，近距处于优势
-                            BUAV.dead = True
-                            BUAV.got_hit = True
-                            print('近距单杀')
-                        else:
-                            # 速度落后80m/s
-                            if BUAV.speed - RUAV.speed > 80:
-                                RUAV.dead = True
-                                RUAV.got_hit = True
-                                print('近距单杀')
-                            elif RUAV.speed - BUAV.speed > 80:
-                                BUAV.dead = True
-                                BUAV.got_hit = True
-                                print('近距单杀')
-                            else:
-                                RUAV.dead = True
-                                BUAV.dead = True
-                                RUAV.got_hit = True
-                                BUAV.got_hit = True
-                                print('近距双杀')
+                        RUAV.dead = True
+                        BUAV.dead = True
+                        RUAV.got_hit = True
+                        BUAV.got_hit = True
+                        print('近距双杀')
+
+                    # # 都在可攻击角度
+                    # elif cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+                    #     # 看高度
+                    #     if BUAV.alt - RUAV.alt > 1500:
+                    #         # 低于对面，近距处于劣势
+                    #         RUAV.dead = True
+                    #         RUAV.got_hit = True
+                    #         print('近距单杀')
+                    #     elif RUAV.alt - BUAV.alt > 1500:
+                    #         # 高于对面，近距处于优势
+                    #         BUAV.dead = True
+                    #         BUAV.got_hit = True
+                    #         print('近距单杀')
+                    #     else:
+                    #         # 速度落后80m/s
+                    #         if BUAV.speed - RUAV.speed > 80:
+                    #             RUAV.dead = True
+                    #             RUAV.got_hit = True
+                    #             print('近距单杀')
+                    #         elif RUAV.speed - BUAV.speed > 80:
+                    #             BUAV.dead = True
+                    #             BUAV.got_hit = True
+                    #             print('近距单杀')
+                    #         else:
+                    #             RUAV.dead = True
+                    #             BUAV.dead = True
+                    #             RUAV.got_hit = True
+                    #             BUAV.got_hit = True
+                    #             print('近距双杀')
                         
                     else: # 都不在可攻击角度
                         pass  # 无法杀
