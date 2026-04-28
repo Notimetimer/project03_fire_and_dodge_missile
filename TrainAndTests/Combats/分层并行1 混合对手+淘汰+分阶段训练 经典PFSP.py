@@ -1,11 +1,11 @@
-from CombatPPOWithIL3_parallel_hierarch import *
+from CombatPPOWithIL3_parallel_hierarch_Classic import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None # r""
 
-mission_name = 'IL_and_MixedPFSP_挑战_并行_分层_训练不带次序限制'
+mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练不带次序限制'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -25,7 +25,7 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.2 # 0.3 
 label_smoothing_mixed=0.01
-dt_decide = 2 # 6 2 
+dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -117,7 +117,7 @@ if __name__=='__main__':
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
-        sigma_elo = 500,  # 200,
+        p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100

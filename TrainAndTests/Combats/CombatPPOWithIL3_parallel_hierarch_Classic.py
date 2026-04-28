@@ -259,7 +259,7 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
 
 def get_opponent_probabilities(win_rates, elite_win_rates=None, 
                                SP_type='PFSP_classic', 
-                               rule_rate=0.5, p_factor=0.3):
+                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
     """
     经典 PFSP 采样逻辑：
     win_rates: dict, 记录 Learner 对阵各对手的胜率 P
@@ -300,10 +300,50 @@ def get_opponent_probabilities(win_rates, elite_win_rates=None,
             probs = weights / weights.sum()
             
         return probs, keys
-    
-    # 3. 兜底均匀采样
-    probs = np.ones(len(keys)) / len(keys)
-    return probs, keys
+
+    # 2. 处理 FSP (全样本均匀分布)
+    elif SP_type == 'FSP':
+        probs = np.ones(len(keys)) / len(keys)
+        return probs, keys
+
+    # 3. 处理 deltaFSP (新旧池切分)
+    elif SP_type == 'deltaFSP':
+        n = len(keys)
+        new_count = max(1, int(np.ceil(n * 0.2)))
+        new_keys = keys[-new_count:]
+        old_keys = keys[:-new_count]
+        
+        # 这里的 deltaFSP_epsilon 建议直接作为参数传入或使用全局变量
+        if np.random.rand() < float(deltaFSP_epsilon) or not old_keys:
+            target_keys = new_keys
+        else:
+            target_keys = old_keys
+            
+        probs = np.ones(len(target_keys)) / len(target_keys)
+        return probs, target_keys
+
+    # 4. 处理 SP (最新历史版本)
+    elif SP_type == 'SP':
+        # rein_keys = [k for k in keys if k.startswith('actor_rein') and '_step_' not in k]
+        # 严格匹配 actor_rein + 数字
+        rein_keys = [k for k in keys if re.match(r'^actor_rein\d+$', k)]
+        if not rein_keys: return np.array([]), []
+        
+        def extract_number(k):
+            # try: return int(k.replace('actor_rein', ''))
+            # except: return -1
+            try: return int(re.search(r'actor_rein(\d+)', k).group(1))
+            except: return -1
+            
+        best_key = max(rein_keys, key=extract_number)
+        return np.array([1.0]), [best_key]
+
+    # 5. 兜底逻辑: Rule 均匀采样 (None)
+    else:
+        if not rule_keys: return np.array([]), []
+        probs = np.ones(len(rule_keys)) / len(rule_keys)
+        return probs, rule_keys
+
 
 # 辅助：需要把 create_initial_state 定义在 worker 能访问的地方，或者 copy 进去
 def create_initial_state_worker(randomized=0):
@@ -477,7 +517,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 temperature = 1
                             b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
-                            b_action_label = b_action_exec['cat'][0]
+                            b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
@@ -489,12 +529,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
-                                r_action_exec = {'cat': np.array([r_action_label]), 'bern': np.array([r_fire], dtype=np.float32)}
+                                r_action_exec = {'cat': r_action_label, 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
                                 r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature)
-                                r_action_label = r_action_exec['cat'][0]
+                                r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
@@ -513,7 +553,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
-                     # 采样的时候不适合限制动作次序，会妨碍“试错”
+                     # 采样的时候不适合限制动作次序，会妨碍“试错”  r_action_label  b_action_label
                     b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
                     r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     
@@ -1010,13 +1050,41 @@ def run_MLP_simulation(
                             'device_name': 'cpu',
                             'num_runs': num_runs,
                             'action_cycle_multiplier': action_cycle_multiplier,
-                            'no_out': 0  # 这里可以根据需要设为 1
+                            'no_out': 0,  # 这里可以根据需要设为 1
+                            'deterministic': False,
+                            'restrict_fire': False,
                         }
                     )
                     test_tasks.append(obj)
+                
+                # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
+                test_tasks_no_random = []
+                for r_idx in [0, 1, 2]:
+                    obj = test_pool.apply_async(
+                        test_worker, 
+                        kwds={
+                            'model_state_dict': current_weights,
+                            'rule_num': r_idx,
+                            'env_args': args,
+                            'state_dim': state_dim,
+                            'hidden_dim': hidden_dim,
+                            'action_dims_dict': action_dims_dict,
+                            'dt_maneuver_val': dt_maneuver,
+                            'device_name': 'cpu',
+                            'num_runs': num_runs,
+                            'action_cycle_multiplier': action_cycle_multiplier,
+                            'no_out': 0,
+                            'deterministic': True,     # 机动动作确定化
+                            'restrict_fire': True      # 动作次序限制打开
+                        }
+                    )
+                    test_tasks_no_random.append(obj)
+
                 # 等待所有测试进程结束
                 test_results = [t.get() for t in test_tasks]
+                test_results_no_random = [t.get() for t in test_tasks_no_random]
 
+                # 记录第一种测试结果
                 outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
                 outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
 
@@ -1024,6 +1092,15 @@ def run_MLP_simulation(
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
                     logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
+
+                # 记录第二种测试结果 (test_No_random)
+                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+
+                for r_num, score in outcomes_nr.items():
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
+                    print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score > 0.5 for score in outcomes.values()):
@@ -1051,6 +1128,16 @@ def run_MLP_simulation(
             # 这一步 Master 决定每个 Worker 打谁
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
+            # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
+            if not init_elo_ratings:
+                # 按照 Elo 分数降序排列，排除内部特殊键
+                sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
+                                                key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                                                reverse=True) if not k.startswith("__")]
+                effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
+            else:
+                effective_pool = elite_elo_ratings
+                
             for rank in range(num_workers):
                 # 采样对手
                 probs, opponent_keys = get_opponent_probabilities(
@@ -1058,7 +1145,8 @@ def run_MLP_simulation(
                     elite_win_rates,
                     SP_type=self_play_type,
                     rule_rate=rule_actor_rate,
-                    p_factor=p_factor
+                    p_factor=p_factor,
+                    deltaFSP_epsilon=deltaFSP_epsilon,
                 )
                 selected_opponent_name = np.random.choice(opponent_keys, p=probs)
                 
@@ -1334,6 +1422,10 @@ def run_MLP_simulation(
                 logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
                 logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
+                # [新增] 诊断监控
+                logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
+                logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
+                
                 # IL-PPO信号强度对比
                 # 错误做法，更新强度数量级和样本数无关
                 # if use_sil:
@@ -1442,7 +1534,10 @@ def run_MLP_simulation(
                     logger.add("Elo/Spread", elo_spread, total_steps)
 
                     curr_rank = 0.5 if elo_spread == 0 else (main_agent_elo - min_elo) / elo_spread
-                    logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
+                    
+                    # Elo分数没有稳定不许记录
+                    if total_steps >= WARM_UP_STEPS:
+                        logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
 
                     # # 动态学习率调节

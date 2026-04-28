@@ -1039,9 +1039,9 @@ def run_MLP_simulation(
                             'device_name': 'cpu',
                             'num_runs': num_runs,
                             'action_cycle_multiplier': action_cycle_multiplier,
-                            'no_out': 0,
+                            'no_out': 0,  # 这里可以根据需要设为 1
                             'deterministic': False,
-                            'restrict_fire': False
+                            'restrict_fire': False,
                         }
                     )
                     test_tasks.append(obj)
