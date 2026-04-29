@@ -80,7 +80,7 @@ class UnifiedPolicyWrapper:
 
 
         norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)
-        # aileron, elevetor, rudder, throttle
+        # aileron, elevator, rudder, throttle
         
         # 构造action_exec格式
         action = {

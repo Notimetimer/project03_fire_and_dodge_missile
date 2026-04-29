@@ -157,8 +157,8 @@ def attitudeControl(input, last_outputs, pids, dt=0.02):
     delta_z_angle=np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
     temp = delta_z_angle*180/pi
     temp = temp
-    elevetor = e_last+e_pid.calculate(-delta_z_angle, dt=dt)
-    elevetor=np.clip(elevetor, -1, 1)
+    elevator = e_last+e_pid.calculate(-delta_z_angle, dt=dt)
+    elevator=np.clip(elevator, -1, 1)
 
     # 副翼控制
     L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / norm(x_b_)
@@ -178,7 +178,7 @@ def attitudeControl(input, last_outputs, pids, dt=0.02):
     # 特例：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制'
     pass
 
-    norm_act = np.array([aileron, elevetor, rudder, throttle])
+    norm_act = np.array([aileron, elevator, rudder, throttle])
 
     return norm_act
 

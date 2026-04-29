@@ -217,12 +217,12 @@ class F16PIDController:
         delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
 
         # 重写的位置式pid
-        elevetor = -e_pid.calculate(delta_z_angle, dt=dt)
-        elevetor = np.clip(elevetor, -1, 1)
+        elevator = -e_pid.calculate(delta_z_angle, dt=dt)
+        elevator = np.clip(elevator, -1, 1)
 
         # 特例：大坡度时不允许推杆
         if abs(phi) * 180 / pi > 50: # and v / 300 > 1:
-            elevetor = np.clip(elevetor, -1, 0)
+            elevator = np.clip(elevator, -1, 0)
 
         # 副翼战术机动控制
         # combat flight
@@ -250,7 +250,7 @@ class F16PIDController:
         #     print('delta_x_angle', delta_x_angle * 180 / pi)
         #     aileron = (roll_error / pi * 6 - p / pi * 8) / 4
         #     if 0.9 < abs(delta_x_angle / (pi / 2)) < 1.1:
-        #         elevetor = 0
+        #         elevator = 0
 
         # steady filght
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
@@ -280,7 +280,7 @@ class F16PIDController:
         #     pass
 
         aileron = np.clip(aileron, -1, 1)
-        norm_act = np.array([aileron, elevetor, rudder, throttle])
+        norm_act = np.array([aileron, elevator, rudder, throttle])
         return norm_act
 
 

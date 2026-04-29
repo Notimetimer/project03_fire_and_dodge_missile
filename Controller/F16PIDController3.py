@@ -215,12 +215,12 @@ class F16PIDController:
         tmp_ = np.cross(L_, x_b_)
         ez = np.clip(2 * np.dot(tmp_, z_b_), -1, 1)
         # 重写的位置式pid
-        elevetor = e_pid.calculate(pi * ez, dt=dt)
-        elevetor = np.clip(elevetor, -1, 1)
+        elevator = e_pid.calculate(pi * ez, dt=dt)
+        elevator = np.clip(elevator, -1, 1)
 
         # # 特例：大坡度时不允许推杆
         # if abs(phi) * 180 / pi > 50: # and v / 300 > 1:
-        #     elevetor = np.clip(elevetor, -1, 0)
+        #     elevator = np.clip(elevator, -1, 0)
 
         # # 副翼机动控制
         # 战术部分
@@ -251,7 +251,7 @@ class F16PIDController:
         #     pass
 
         aileron = np.clip(aileron, -1, 1)
-        norm_act = np.array([aileron, elevetor, rudder, throttle])
+        norm_act = np.array([aileron, elevator, rudder, throttle])
         return norm_act
 
 

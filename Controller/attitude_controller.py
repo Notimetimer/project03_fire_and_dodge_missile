@@ -152,8 +152,8 @@ class F16PIDController:
         x_b_2L_xy_b_cos = np.dot(x_b_, L_xy_b_) / norm(L_xy_b_)
         delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
 
-        elevetor = e_last + e_pid.calculate(-delta_z_angle, dt=dt)
-        elevetor = np.clip(elevetor, -1, 1)
+        elevator = e_last + e_pid.calculate(-delta_z_angle, dt=dt)
+        elevator = np.clip(elevator, -1, 1)
 
         # 副翼战术机动控制
         L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / norm(x_b_)
@@ -178,7 +178,7 @@ class F16PIDController:
 
         aileron = np.clip(aileron, -1, 1)
 
-        norm_act = np.array([aileron, elevetor, rudder, throttle])
+        norm_act = np.array([aileron, elevator, rudder, throttle])
 
         return norm_act
 

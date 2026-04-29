@@ -131,7 +131,7 @@ v_req_list = []
 height_req_list = []
 # 控制量
 aileron_list = []
-elevetor_list = []
+elevator_list = []
 rudder_list =[]
 throttle_list = []
 
@@ -297,9 +297,9 @@ for init_h in height_list:
             v_req_list.append(env.v_req)
             height_req_list.append(env.height_req)
 
-            aileron, elevetor, rudder, throttle = action['cont']
+            aileron, elevator, rudder, throttle = action['cont']
             aileron_list.append(aileron)
-            elevetor_list.append(elevetor)
+            elevator_list.append(elevator)
             rudder_list.append(rudder)
             throttle_list.append(throttle)
 
@@ -394,7 +394,7 @@ if save_csv:
                 t_list, theta_list, psi_list, phi_list, v_list, h_list, 
                 alpha_air_list, beta_air_list, Ny_list,
                 theta_req_list, psi_req_list, v_req_list, height_req_list,
-                aileron_list, elevetor_list, rudder_list, throttle_list, round_list
+                aileron_list, elevator_list, rudder_list, throttle_list, round_list
             ))
         print(f"\n[数据导出] 飞行记录已存至: {csv_path} (共 {len(t_list)} 条记录)")
 
