@@ -36,7 +36,7 @@ def test_worker(model_state_dict, rule_num,
     """
     device = torch.device(device_name)
 
-    env_args.R_cage = 71e3 # 45 # np.random.uniform(30e3, 45e3) # 环境大小随机化
+    env_args.R_cage = 69e3 # 45 # np.random.uniform(30e3, 45e3) # 环境大小随机化
     
     # 1. 局部初始化环境 (必须在子进程内创建)
     # 关闭渲染以节省资源

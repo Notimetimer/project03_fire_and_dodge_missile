@@ -569,7 +569,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 71e3, # 45e3 # 55e3,
+    R_cage = 69e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
