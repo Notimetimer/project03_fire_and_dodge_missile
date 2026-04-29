@@ -236,11 +236,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
         enm_threat_dist = enm_states["threat"][3]
         if enm_threat_dist < distance:
-            r_constraint += 0.001 * (1 - ego.dead)
+            r_constraint += 0.0005 * (1 - ego.dead) # 0.001
 
         # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
         if threat_distance < distance:
-            r_constraint -= 0.001 * (1 - ego.dead)
+            r_constraint -= 0.0005 * (1 - ego.dead) # 0.001
 
         # 角度奖励
         # 进攻引导
@@ -277,8 +277,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # else:
             #     r_event -= 5 * shoot
             
-            if len(alive_ally_missiles) > 1:
-                r_event -= 13 * shoot # 10
+            if len(alive_ally_missiles) > 1: # 重复开火惩罚
+                r_event -= 20 * shoot # 13
             
             # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
             if not ego.dead:
