@@ -1,7 +1,3 @@
-# from abc import ABC
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
 import numpy as np
 from math import *
 import sys
@@ -113,9 +109,9 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=0.5 / pi)  # 16, 0.3, 8
-        self.r_pid = None
-        self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
+        self.e_pid = PositionPID(max=1, min=-1, p=0.65, i=0 * 0.08, d=0.16)  # 16, 0.3, 8
+        self.r_pid = PositionPID(max=1, min=-1, p=2.4, i=0*0.015, d=1.5)
+        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -153,44 +149,23 @@ class F16PIDController:
         else:
             Ny = 0
 
-        k_alpha_air = 0
-        # # 迎角限制器 -8~13
-        if alpha<=-1.2:
-            k_alpha_air = 0.5
-        elif alpha>17:
-            k_alpha_air = 0.3 # 0.2
-        else:
-            if alpha>=0:
-                k_alpha_air = 0.01
-            else:
-                k_alpha_air = 0.01
-        if theta * 180 / pi < -70: # 大俯仰机动时降低迎角干预
-            k_alpha_air = 0
-        
-        # 过载限制器 (EMA 融合比例)
-        if Ny >= 7.0: # 正过载死区 7
-            k_Ny = 0.2
-            ny_term = Ny / 7.0
-        elif Ny <= -1.2: # 负过载危险区，加大抑制力度
-            k_Ny = 0.85
-            ny_term = Ny / 1.2 
-        else: # 安全区
-            if Ny>0:
-                k_Ny = 0.01
-            else:
-                k_Ny = 0.6
-        # 非对称过载系数限制
-        if Ny>0:    
-            ny_term = Ny / 9.5
-        else:
-            ny_term = Ny / 3
+        # k_alpha_air = 0
+        # # # 迎角限制器 -8~13
+        # if alpha<=-1.2:
+        #     k_alpha_air = 0.5
+        # elif alpha>17:
+        #     k_alpha_air = 0.3 # 0.2
+        # else:
+        #     if alpha>=0:
+        #         k_alpha_air = 0.01
+        #     else:
+        #         k_alpha_air = 0.01
+        # if theta * 180 / pi < -70: # 大俯仰机动时降低迎角干预
+        #     k_alpha_air = 0
 
-        # 改成级联的指数滑动平均 (EMA) 形式，确保始终保持限制且系数归一化
-        # 1. 先融合迎角限制
-        norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
-        # 2. 再融合过载限制
-        if Ny * norm_act[1] < 0: # 杆位加剧过载的时候加限制，否则不限制
-            norm_act[1] = (1 - k_Ny) * norm_act[1] + k_Ny * ny_term
+        # # 改成级联的指数滑动平均 (EMA) 形式，确保始终保持限制且系数归一化
+        # # 1. 先融合迎角限制
+        # norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
         
         norm_act[1] = np.clip(norm_act[1], -1, 1)
 
@@ -221,96 +196,95 @@ class F16PIDController:
         # throttle = 0.5 + 0.5 * t_pid(v, dt)
 
         v_error = v_req-v
-        throttle = 0.5 + 0.5 * t_pid.calculate(v_error, dt)
+        throttle = t_pid.calculate(v_error, dt)
 
         # # 方向舵控制
         # rudder=0 # abaaba
-        rudder = -beta_air / (5 * pi / 180)
+        rudder = -beta_air / (5 * pi / 180) * 0.5
 
-        # 升降舵控制
-        L_ = 1 * np.array(
-            [np.cos(theta_req) * np.cos(delta_heading_req), np.sin(theta_req),
-             np.cos(theta_req) * np.sin(delta_heading_req)])
-        v_ = 1 * np.array(
-            [np.cos(climb_rad) * np.cos(delta_course_rad), np.sin(climb_rad),
-             np.cos(climb_rad) * np.sin(delta_course_rad)])
-        x_b_ = 1 * np.array(
-            [np.cos(theta) * np.cos(0), np.sin(theta), np.cos(theta) * np.sin(0)])
-
-        # 将期望航向投影到体轴xy平面上，后根据与体轴x夹角设定升降舵量的大小
-        # 体轴系的两个基当做向量转到“转过一个航向角的惯性系”
-        y_b_ = active_rotation(np.array([0, 1, 0]), 0, theta, phi)
-        z_b_ = active_rotation(np.array([0, 0, 1]), 0, theta, phi)
-        L_xy_b_ = L_ - np.dot(L_, z_b_) * z_b_ / (norm(z_b_)+1e-8)
-        x_b_2L_xy_b_ = np.cross(x_b_, L_xy_b_) / (norm(L_xy_b_)+1e-8)
-        x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, z_b_)
-        x_b_2L_xy_b_cos = np.dot(x_b_, L_xy_b_) / (norm(L_xy_b_)+1e-8)
-        delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
-
-        # 重写的位置式pid
-        elevator = -e_pid.calculate(delta_z_angle, dt=dt)
-        elevator = np.clip(elevator, -1, 1)
-
-        # 特例：大坡度时不允许推杆
-        if abs(phi) * 180 / pi > 50: # and v / 300 > 1:
-            elevator = np.clip(elevator, -1, 0)
-
-        # 副翼战术机动控制
-        # combat flight
-        L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / (norm(x_b_)+1e-8)
-        y_b_2L_yz_b_ = np.cross(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
-        y_b_2L_yz_b_sin = np.dot(y_b_2L_yz_b_, x_b_)
-        y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
-        delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
-
-        # # 特例：压机头能够得着的，就不翻转机身
-        # if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
-        #     delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
-        #     # print('push')
-        # # else:
-        # # print('pull')
-
-        # 通用
-        roll_error = delta_x_angle
-        aileron = roll_error / pi * 2 - p / pi * 2 # 1
-        # aileron = roll_error/pi*3 - p/pi * 2
-
-        # # debug
-        # if alpha_air*180/pi<-5:
-        #     print('strange')
-        #     print('delta_x_angle', delta_x_angle * 180 / pi)
-        #     aileron = (roll_error / pi * 6 - p / pi * 8) / 4
-        #     if 0.9 < abs(delta_x_angle / (pi / 2)) < 1.1:
-        #         elevator = 0
-
-        # steady filght
-        # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
-        steady_switch_angle = 20  # 20 15 30
-
-        self.check_switch1 = acos(np.dot(L_, v_) / (norm(L_) * norm(v_) + 1e-8)) * 180 / pi
-        self.check_switch2 = abs(theta_req)*180/pi
-
-        if acos(np.dot(L_, v_) / (norm(L_)*norm(v_)+1e-8)) * 180 / pi < steady_switch_angle and \
-                abs(theta_req) < 60 * pi / 180:
-            k_steady_yaw = 3 / steady_switch_angle
-            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3) #   /2 #debug
-            roll_error = phi_req - phi
-            # aileron = (roll_error / pi * 6 - p / pi * 3) / 2
-            aileron = (roll_error / pi * 6 /2 - p / pi * 3) / 2
-
-            self.type = 0  # steady
+        # 过载量在环内控制率
+        # =========================
+        # geometry vectors
+        # =========================
+        ng_vec_ = np.array([0.,1.,0.])   # “上”，用于重力补偿（按你的惯性系定义）
+        # body axes in inertial frame
+        x_b_ = active_rotation(np.array([1,0,0]),0,theta,phi)
+        y_b_ = active_rotation(np.array([0,1,0]),0,theta,phi)
+        z_b_ = active_rotation(np.array([0,0,1]),0,theta,phi)
+        # -------------------------
+        # desired pointing vector
+        # -------------------------
+        L_ = np.array([
+            np.cos(theta_req)*np.cos(delta_heading_req),
+            np.sin(theta_req),
+            np.cos(theta_req)*np.sin(delta_heading_req)
+        ])
+        L_ /= (norm(L_)+1e-8)
+        # =========================
+        # maneuver normal direction
+        # projection onto normal plane
+        # =========================
+        n_hat_ = L_ - np.dot(L_,x_b_)*x_b_
+        n_norm = norm(n_hat_)
+        if n_norm < 1e-6:
+            n_hat_ = y_b_.copy()
         else:
-            self.type = 1  # fast
-
-        # print(self.check_switch1)
-        # print(self.check_switch2)
-        # input("Press any key to continue...")
+            n_hat_ /= n_norm
+        # =========================
+        # LOS angle for overload scheduling
+        # =========================
+        sigma = np.arccos(
+            np.clip(np.dot(x_b_,L_),-1.0,1.0)
+        )
+        ny_max = 8.5
+        ny_min = -1.5
         
-        # if alpha_air*180/pi<-5:
-        #     print('?')
-        #     pass
+        ny_maneuver_norm = min(sigma/pi * 9, ny_max)
 
-        aileron = np.clip(aileron, -1, 1)
+        g_perp_ = ng_vec_ - np.dot(ng_vec_,x_b_)*x_b_
+        # desired total load vector
+        N_cmd_vec_ = (
+            ny_maneuver_norm*n_hat_
+            + g_perp_
+        )
+        ny_cmd = np.dot(N_cmd_vec_,y_b_)
+        ny_cmd=np.clip(ny_cmd,ny_min,ny_max)
+        # ==================================
+        # elevator: ny loop
+        # need actual ny from env/state
+        # ==================================
+        ny_actual = state_input[14]   # 需你把法向过载塞进状态
+        ny_error = ny_cmd - ny_actual
+        # retain q damping through PID derivative or explicit damping
+        elevator = -e_pid.calculate(ny_error, dt, d_error=-q)
+        # optional extra damping:
+        # elevator -= Kq*q
+
+        elevator=np.clip(elevator,-1,1)
+
+        # ==================================
+        # aileron:
+        # align lift axis y_b_ toward maneuver plane
+        # ==================================
+        N2_ = N_cmd_vec_ + ng_vec_ * 0.1
+
+        N_hat2_ = N2_/(norm(N2_)+1e-8)
+        roll_err_sin = np.dot(
+            np.cross(y_b_, N_hat2_),
+            x_b_
+        )
+        # small-angle approx can use directly
+        roll_error = np.arcsin(
+            np.clip(roll_err_sin,-1,1)
+        )
+        aileron = r_pid.calculate(roll_error, dt, d_error=-p)
+        # aileron = (
+        #     2.4*roll_error
+        #     -1.5*p
+        # )
+
+        aileron=np.clip(aileron,-1,1)
+
         norm_act = np.array([aileron, elevator, rudder, throttle])
         return norm_act
 
