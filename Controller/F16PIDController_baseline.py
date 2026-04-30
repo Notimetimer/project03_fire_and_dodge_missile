@@ -110,7 +110,7 @@ class F16PIDController:
         # 调参
         self.yaw_pid = None
         self.e_pid = PositionPID(max=1, min=-1, p=0.65, i=0 * 0.08, d=0.16)  # 16, 0.3, 8
-        self.r_pid = PositionPID(max=1, min=-1, p=2.4, i=0*0.015, d=1.5)
+        self.r_pid = PositionPID(max=1, min=-1, p=2.4, i=0, d=2.0) # 1.5
         self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
@@ -124,8 +124,6 @@ class F16PIDController:
         gamma_rad = state_input[11]       
 
         error_h = np.clip(target_height_devided - current_height_devided, -1, 1)
-
-        print(error_h)
 
         if error_h >= 0:
             kh = pi / 2 # pi / 3
@@ -202,7 +200,7 @@ class F16PIDController:
 
         # # 方向舵控制
         # rudder=0 # abaaba
-        rudder = -beta_air / (5 * pi / 180) * 0.5
+        rudder = -beta_air / (5 * pi / 180) * 0.5 - r * 0.9
 
         # 过载量在环内控制率
         # =========================
@@ -243,48 +241,29 @@ class F16PIDController:
         
         ny_maneuver_norm = min(sigma/pi * 9, ny_max)
 
-        g_perp_ = ng_vec_ - np.dot(ng_vec_,x_b_)*x_b_
         # desired total load vector
         N_cmd_vec_ = (
             ny_maneuver_norm*n_hat_
-            # + g_perp_
         )
         ny_cmd = np.dot(N_cmd_vec_,y_b_)
         ny_cmd=np.clip(ny_cmd,ny_min,ny_max)
         # ==================================
-        # elevator: ny loop
-        # need actual ny from env/state
+        # elevator:
         # ==================================
         ny_actual = state_input[14]   # 需你把法向过载塞进状态
         ny_error = ny_cmd - ny_actual
-        # retain q damping through PID derivative or explicit damping
         elevator = -e_pid.calculate(ny_error, dt, d_error=-q)
-        # optional extra damping:
-        # elevator -= Kq*q
-
         elevator=np.clip(elevator,-1,1)
 
         # ==================================
         # aileron:
-        # align lift axis y_b_ toward maneuver plane
         # ==================================
-        N2_ = N_cmd_vec_ + ng_vec_ * 0.1
-
+        ng_perp_ = ng_vec_ - np.dot(ng_vec_,x_b_)*x_b_
+        N2_ = N_cmd_vec_ + 0.5 * ng_perp_ /(norm(ng_perp_)+1e-8)  # 需要负过载 <-1g 的统一改为转身再拉杆？
         N_hat2_ = N2_/(norm(N2_)+1e-8)
-        roll_err_sin = np.dot(
-            np.cross(y_b_, N_hat2_),
-            x_b_
-        )
-        # small-angle approx can use directly
-        roll_error = np.arcsin(
-            np.clip(roll_err_sin,-1,1)
-        )
+        roll_error = atan2(np.dot(N_hat2_, z_b_), np.dot(N_hat2_, y_b_))
+        
         aileron = r_pid.calculate(roll_error, dt, d_error=-p)
-        # aileron = (
-        #     2.4*roll_error
-        #     -1.5*p
-        # )
-
         aileron=np.clip(aileron,-1,1)
 
         norm_act = np.array([aileron, elevator, rudder, throttle])
@@ -337,13 +316,13 @@ if __name__ == '__main__':
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 9e3  # m # 测试飞行控制器
+    target_height = 4e3  # m # 测试飞行控制器
     target_heading = 270  # 度 to rad
     target_speed = 340 * 1.13  # m/s
     t_last = 60 * 5
 
     # 设置初始状态（单位：英尺、节、角度）
-    sim["ic/h-sl-ft"] = 4e3 * 3.2808  # 高度：m -> ft
+    sim["ic/h-sl-ft"] = 6e3 * 3.2808  # 高度：m -> ft
     sim["ic/vt-kts"] = 340 * 1.13 * 1.9438  # 空速： m/s-> 节
     sim["ic/psi-true-deg"] = 90  # 航向角: °
     sim["ic/phi-deg"] = 0

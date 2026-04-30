@@ -17,7 +17,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # 1 # 0.01
+k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # 0.008  0.005
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -37,7 +37,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
-R_cage= 71e3 # 55e3 # 场地半径，单位m
+R_cage= 69e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 

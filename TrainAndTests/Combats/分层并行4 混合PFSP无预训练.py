@@ -15,13 +15,13 @@ mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s'
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0
-max_steps = 8 * 165e4
+max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 1 # 0.01也太大了
+k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # 0.008  0.005
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -79,7 +79,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -123,7 +123,7 @@ if __name__=='__main__':
         hist_agent_as_opponent = 1,
         use_sil = 0,
         sigma_elo = 500,  # 200,
-        WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug
+        WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率

@@ -550,7 +550,13 @@ class PPOHybrid:
             self.k_entropy = k_entropy
         else:
             self.k_entropy = {'cont': k_entropy, 'cat': k_entropy, 'bern': k_entropy}
-            
+        
+        # [新增] SAC 风格的可学习 Cat 熵系数 (初始值对应原配置)
+        init_k_cat = k_entropy.get('cat', k_entropy)
+        self.log_k_cat = torch.nn.Parameter(torch.log(torch.tensor(init_k_cat, device=device)))
+        # [新增] 为自适应熵系数配备独立的优化器 (学习率通常与 Actor 保持一致或略大)
+        self.k_cat_optim = torch.optim.Adam([self.log_k_cat], lr=actor_lr)
+        
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
         self.max_std = max_std
@@ -624,7 +630,7 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None):
+                v_trace=None, target_p1=0.65, k_linear=0.53): # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -756,6 +762,20 @@ class PPOHybrid:
                 adv_mean = active_adv.mean()
                 advantage = advantage - adv_mean
 
+        # =====================================================================
+        # [新增] 计算 Cat 分布的动态目标熵 (Target Entropy)
+        # =====================================================================
+        target_entropy_cat_total = 0.0
+        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+            for n_actions in self.actor.action_dims['cat']:
+                if n_actions > 1:
+                    # “一超”概率为 target_p1，其余 (n_actions - 1) 个动作平分剩余概率
+                    p_rest = (1.0 - target_p1) / (n_actions - 1)
+                    # 香农熵: -p1*ln(p1) - (N-1) * p_rest*ln(p_rest)
+                    h_dim = - target_p1 * np.log(target_p1 + 1e-8) - (n_actions - 1) * p_rest * np.log(p_rest + 1e-8)
+                    target_entropy_cat_total += h_dim
+        target_entropy_cat_tensor = torch.tensor(target_entropy_cat_total, device=self.device)
+        
         # 4. PPO Update Loop
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
         actor_grad_list, critic_grad_list = [], []
@@ -854,11 +874,36 @@ class PPOHybrid:
                 loss_ent_cat = (e_cat * mb_active_masks).sum() / (active_sum + mask_eps)
                 loss_ent_bern = (e_bern * mb_active_masks).sum() / (active_sum + mask_eps)
 
+                # =====================================================================
+                # [修改] 使用动态 k_cat 计算 Actor Loss
+                # =====================================================================
                 k_cont = self.k_entropy.get('cont', 0.0)
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
+                
 
-                actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+                # # 当前的 k_cat 是 e^(log_k_cat)
+                # curr_k_cat = torch.exp(self.log_k_cat)
+                # --- 关键修改：跟踪目标熵, 熵过小，加熵。熵过大，减熵 ---
+                # 比平方误差更加平缓的损失函数候选：
+                # 1. pseudo-huber loss:     torch.sqrt(1 + torch.square(target - current)) - 1
+                # 2. log-cosh loss:         torch.log(torch.cosh(target_entropy_cat_tensor - loss_ent_cat))
+
+                # 裁剪klinear的范围，绝不能太小
+                theoretical_ent_cat_max = 0.0
+                for dim in self.actor.action_dims['cat']:
+                    theoretical_ent_cat_max += np.log(float(dim))
+                sigma_temp = (theoretical_ent_cat_max-target_entropy_cat_tensor)/torch.sqrt(1+(theoretical_ent_cat_max-target_entropy_cat_tensor)**2)
+                k_linear_min = 1-1/(1+sigma_temp)
+                k_linear = np.clip(k_linear, k_linear_min, 1) # 不论如何这个 k_linear 不能超过1，也不能引发熵项强制“逆行”
+
+                # 选择伪hubber loss，负反馈控制熵误差
+                cat_constraint_term = k_cat * (-k_linear * loss_ent_cat +(1-k_linear)*(torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat))-1))
+                # cat_constraint_term = curr_k_cat.detach() * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat))-1)
+                actor_loss = actor_loss + cat_constraint_term - (k_cont * loss_ent_cont + k_bern * loss_ent_bern)
+                
+                # 原有非目标熵正则项
+                # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
                 # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
                 if actor_outputs['bern'] is not None:
@@ -887,8 +932,13 @@ class PPOHybrid:
                 
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
+                # if alpha_loss.requires_grad:    # [新增]
+                #     self.k_cat_optim.zero_grad()
+                    
                 actor_loss.backward()
                 critic_loss.backward()
+                # if alpha_loss.requires_grad:    # [新增] 反向传播温度损失
+                #     alpha_loss.backward()
 
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
                 pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
@@ -901,6 +951,8 @@ class PPOHybrid:
 
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
+                # if alpha_loss.requires_grad:    # [新增] 步进自适应熵系数
+                #     self.k_cat_optim.step()
 
                 # Logging
                 actor_grad_list.append(model_grad_norm(self.actor))
@@ -1294,319 +1346,3 @@ class PPOHybrid:
         
         return avg_actor_loss, avg_critic_loss, avg_c
     
-    # --- 新增功能 3: 混合更新 (PPO + MARWIL) ---
-    # --- 修改后的 mixed_update ---
-    # --- 修复后的 mixed_update (包含完整监控项) ---
-    def mixed_update(self, transition_dict, il_transition_dict, init_il_transition_dict=None, eta=0.1,  # [新增] 专家数据与约束系数
-                     # RL 参数
-                     adv_normed=False, clip_vf=False, clip_range=0.2, 
-                     # IL 参数
-                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_updates=1,
-                     sil_only_maneuver=True,
-                     # 公共参数
-                     shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05, v_trace=5):
-        il_batch_size = min(il_batch_size, 1e4) if il_batch_size is not None else None # 模仿学习batch_size 限制，受显存约束
-        # 建议的RL mini-batch：128~1024
-        # 建议IL mini-batch: 越大越好，但是不能爆显存
-        # =====================================================================
-        # Phase 1: PPO 更新 (复用现有方法)
-        # =====================================================================
-        # 这一步会执行 self.epochs 次 PPO 更新，并修改 self.actor_loss 等类属性
-        self.update(transition_dict, adv_normed=adv_normed, clip_vf=clip_vf, 
-                    clip_range=clip_range, shuffled=shuffled, 
-                    mini_batch_size=mini_batch_size, alpha_logit_reg=alpha_logit_reg)
-
-        # --- [Step A] 暂存 PPO 统计指标 & 计算权重 ---
-        # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
-        rl_total_size = len(transition_dict['states'])
-        # 假设 self.batch_size 是 PPO 的 mini_batch_size
-        # 如果 self.update 内部逻辑不同，这里可能需要调整计算方式
-        
-        # ppo_num_batches = max(1, int(rl_total_size / mini_batch_size)) * self.epochs
-        mb = mini_batch_size if mini_batch_size is not None else rl_total_size
-        ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
-        
-        ppo_stats = {
-            'actor_loss': self.actor_loss,
-            'critic_loss': self.critic_loss,
-            'actor_grad': self.actor_grad,
-            'critic_grad': self.critic_grad,
-            'entropy': self.entropy_mean,
-            'ratio': self.ratio_mean,
-            'pre_clip_actor': self.pre_clip_actor_grad,
-            'pre_clip_critic': self.pre_clip_critic_grad,
-            'td_error_var': self.td_error_var,      # [新增]
-            'grad_norm_ratio': self.grad_norm_ratio  # [新增]
-        }
-
-        # =====================================================================
-        # Phase 2: IL 更新 (自模仿 + 专家 MSE)
-        # =====================================================================
-        # 辅助函数：转 Tensor
-        def to_tensor(x, dtype):
-            if isinstance(x, np.ndarray):
-                return torch.tensor(x, dtype=dtype).to(self.device)
-            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
-
-        # --- [Step B] 准备 IL 数据 ---
-        # 1. Self-Imitation Data
-        # 1. 自模仿数据 (保持原样)
-        il_states_all = to_tensor(il_transition_dict['states'], torch.float)
-        il_returns_all = to_tensor(il_transition_dict['returns'], torch.float).view(-1, 1)
-        use_il_obs = False
-        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
-            il_obs_all = to_tensor(il_transition_dict['obs'], torch.float)
-            use_il_obs = True
-        il_actions_raw = il_transition_dict['actions']
-        il_actions_all = {}
-        
-        if isinstance(il_actions_raw, list):
-            if len(il_actions_raw) > 0:
-                keys = il_actions_raw[0].keys()
-                temp_dict = {}
-                for k in keys:
-                    temp_dict[k] = np.stack([d[k] for d in il_actions_raw], axis=0)
-                il_actions_raw = temp_dict
-            else:
-                il_actions_raw = {}
-        if isinstance(il_actions_raw, dict):
-            for k, v in il_actions_raw.items():
-                if k == 'cat':
-                    il_actions_all[k] = to_tensor(v, torch.long)
-                else:
-                    il_actions_all[k] = to_tensor(v, torch.float)
-        il_total_size = il_states_all.size(0)
-        
-        if init_il_transition_dict is not None:
-            # 2. 他模仿数据
-            init_il_states_all = to_tensor(init_il_transition_dict['states'], torch.float)
-            use_init_il_obs = False
-            if 'obs' in init_il_transition_dict and len(init_il_transition_dict['obs']) > 0:
-                init_il_obs_all = to_tensor(init_il_transition_dict['obs'], torch.float)
-                use_init_il_obs = True
-            init_il_actions_raw = init_il_transition_dict['actions']
-            init_il_actions_all = {}  
-            if isinstance(init_il_actions_raw, list):
-                if len(init_il_actions_raw) > 0:
-                    keys = init_il_actions_raw[0].keys()
-                    temp_dict = {}
-                    for k in keys:
-                        temp_dict[k] = np.stack([d[k] for d in init_il_actions_raw], axis=0)
-                    init_il_actions_raw = temp_dict
-                else:
-                    init_il_actions_raw = {}
-            if isinstance(init_il_actions_raw, dict):
-                for k, v in init_il_actions_raw.items():
-                    if k == 'cat':
-                        init_il_actions_all[k] = to_tensor(v, torch.long)
-                    else:
-                        init_il_actions_all[k] = to_tensor(v, torch.float)
-            init_il_returns_all = to_tensor(init_il_transition_dict['returns'], torch.float).view(-1, 1)
-            init_il_total_size = init_il_states_all.size(0)
-        
-        # --- [Step C] 执行 IL 更新 (通常执行 1 次，或者根据 batch_size 循环) ---
-        # 这里为了简单且符合"PPO为主，IL为辅"的逻辑，我们执行一次 IL Update
-        # 如果 IL 数据量很大，这里可以改为循环
-        
-        # [修复] 完整初始化所有监控列表
-        actor_loss_list, critic_loss_list = [], [],
-        actor_grad_list, critic_grad_list = [], []
-        pre_clip_actor_grad, pre_clip_critic_grad = [], []
-        grad_norm_ratio_list = [] # [新增]
-        
-        il_actor_loss_list, il_critic_loss_list = [], [] 
-        
-        il_samples_total = 0
-        il_valid_samples_total = 0
-
-        for _ in range(il_updates):
-            actor_loss_init_il = torch.tensor(0.0, device=self.device) # 显式初始化
-            # 使用全量(或最大batch) IL 数据，不切分 Mini-Batch
-            # 这里也可以稍微 Shuffle 一下 IL 数据，或者直接随机采样 batch_size
-            curr_il_batch_size = il_batch_size if il_batch_size is not None else il_total_size
-            
-            # 简单起见，如果要求全batch，则直接取全部，或者随机取一个大 Batch
-            il_indices = np.random.randint(0, il_total_size, curr_il_batch_size)
-            
-            il_s_batch = il_states_all[il_indices] 
-            il_r_batch = il_returns_all[il_indices]
-            if use_il_obs:
-                il_actor_input_batch = il_obs_all[il_indices]
-            else:
-                il_actor_input_batch = il_s_batch
-
-            il_actions_batch = {}
-            for k, v in il_actions_all.items():
-                il_actions_batch[k] = v[il_indices]
-            
-            if init_il_transition_dict is not None:
-                init_il_idx = np.random.randint(0, init_il_total_size, init_il_total_size)
-                init_il_returns_batch = init_il_returns_all[init_il_idx]
-                if use_init_il_obs:
-                    init_il_actor_input_batch = init_il_obs_all[init_il_idx]
-                else:
-                    init_il_actor_input_batch = init_il_states_all[init_il_idx]
-                init_il_actions_batch = {}
-                for k, v in init_il_actions_all.items():
-                    init_il_actions_batch[k] = v[init_il_idx]
-                
-            with torch.no_grad():
-                il_values = self.critic(il_s_batch)
-                residual = il_r_batch - il_values
-                
-                if not hasattr(self, 'c_sq'): self.c_sq = torch.tensor(1.0, device=self.device)
-                batch_mse = (residual ** 2).mean().item()
-                self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
-                c = torch.sqrt(self.c_sq)
-                
-                il_adv = residual / (c + 1e-8)
-                # 对负 advantage 强烈抑制权重：adv>0 正常放行，否则乘以 1e-6
-                
-                '''
-                exp可能导致梯度爆炸，对此有以下解决方法（最新的梯度爆炸不是这个原因，代码仅做候补）
-                # 1 数值归一化
-                il_adv = (il_adv - il_adv.mean()) / (il_adv.std() + 1e-8)
-                il_raw_weights = torch.exp(beta * il_adv)
-                # 2 减去最大值 (Max-Subtraction Trick)
-                il_adv_max = torch.max(il_adv)
-                il_raw_weights = torch.exp(beta * (il_adv - il_adv_max))
-                # 3 权重截断
-                il_raw_weights = torch.exp(beta * il_adv)
-                il_raw_weights = torch.clamp(il_raw_weights, max=100.0) # 限制单样本权重最大100倍
-                '''
-                
-                il_raw_weights = beta * il_adv  # torch.exp(beta * il_adv)
-                F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
-                il_weights = torch.clamp(il_raw_weights * F_word, min=0, max=max_weight)
-
-                # [新增] 统计 IL 样本强度
-                il_samples_total += curr_il_batch_size
-                il_valid_samples_total += F_word.sum().item()
-
-            # compute_il_loss 接口不变
-            raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=sil_only_maneuver)
-            actor_loss_il = torch.mean(il_weights * raw_il_loss)
-            
-            # --- [new] 对初始轨迹行为克隆 ---
-            if init_il_transition_dict is not None:
-                # 1. 计算初始轨迹的 F 函数 (优势加权)
-                with torch.no_grad():
-                    # [修改] 按照你的要求，Critic 直接接收 init_il_actor_input_batch
-                    v_init = self.critic(init_il_actor_input_batch)
-                    adv_init = (init_il_returns_batch - v_init) / (torch.sqrt(self.c_sq) + 1e-8)
-                    
-                    # F 函数约束：只有比当前表现好的专家数据才学
-                    F_init = torch.where(adv_init > 0, torch.ones_like(adv_init), torch.full_like(adv_init, 1e-6))
-                    F_init = torch.clamp(F_init, max=max_weight)
-
-                # 2. 获取网络当前的原始输出 (保留对 net 的直接调用)
-                init_outputs = self.actor.net(init_il_actor_input_batch)
-                
-                # 【核心修正】：初始化为与 adv_init 形状相同的零张量 [Batch, 1]
-                # 这样可以确保后续的 += 每一项都是 [Batch, 1] 的累加
-                mse_loss_sum = torch.zeros_like(adv_init)
-                # mse_loss_sum = torch.tensor(0.0, device=self.device)
-
-                # --- 连续动作 MSE ---
-                if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
-                    mu_current, _ = init_outputs['cont']
-                    u_expert = init_il_actions_batch['cont']
-                    mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
-
-                # --- 离散动作 MSE ---
-                if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-                    cat_probs_current = init_outputs['cat']
-                    expert_cat = init_il_actions_batch['cat'].long()
-                    for i, probs in enumerate(cat_probs_current):
-                        target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
-                        mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
-
-                # --- 伯努利动作 MSE ---
-                if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-                    bern_logits = init_outputs['bern']
-                    bern_probs = torch.sigmoid(bern_logits)
-                    target_bern = init_il_actions_batch['bern']
-                    mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
-
-                # 3. 应用 F 函数约束并求平均
-                actor_loss_init_mse = torch.mean(F_init * mse_loss_sum)
-                actor_loss_init_il = eta * actor_loss_init_mse
-
-            
-            il_values_grad = self.critic(il_s_batch)
-            critic_loss_il = F.mse_loss(il_values_grad, il_r_batch) * c_v
-            
-            il_actor_loss_list.append(actor_loss_il.item())
-            il_critic_loss_list.append(critic_loss_il.item())
-
-            # 4. 联合反向传播
-
-            il_actor_loss = alpha * (actor_loss_il + actor_loss_init_il)
-            il_critic_loss = alpha * critic_loss_il
-
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            
-            il_actor_loss.backward()
-            il_critic_loss.backward()
-            
-            # [修复] 记录裁剪前梯度
-            pre_clip_actor_grad.append(model_grad_norm(self.actor))
-            pre_clip_critic_grad.append(model_grad_norm(self.critic))
-            grad_norm_ratio_list.append(pre_clip_actor_grad[-1] / (pre_clip_critic_grad[-1] + 1e-8)) # [新增]
-            
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-            
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
-
-            # [修复] 记录步进后梯度和其他监控项
-            actor_grad_list.append(model_grad_norm(self.actor))
-            critic_grad_list.append(model_grad_norm(self.critic))            
-            actor_loss_list.append(il_actor_loss.item()) # 注意：记录的是混合 Loss
-            critic_loss_list.append(il_critic_loss.item())
-        
-
-        # =====================================================================
-        # Phase 3: 统计指标融合 (加权平均)
-        # =====================================================================
-        
-        # 定义权重：PPO 占 epoch * batches 份，IL 占 1 份 (或者你希望 1:1，可以设 il_weight = ppo_num_batches)
-        # 这里按照“梯度更新次数”进行加权是比较科学的
-        def weighted_avg(ppo_val, il_val, 
-                         ppo_num_batches=ppo_num_batches, il_updates=il_updates):
-            total_updates = ppo_num_batches + il_updates
-            return (ppo_val * ppo_num_batches + il_val * il_updates) / total_updates
-
-        # 更新类属性用于 Log
-        self.actor_loss = weighted_avg(ppo_stats['actor_loss'], np.mean(actor_loss_list))
-        self.critic_loss = weighted_avg(ppo_stats['critic_loss'], np.mean(critic_loss_list))
-        
-        self.actor_grad = weighted_avg(ppo_stats['actor_grad'], np.mean(actor_grad_list))
-        self.critic_grad = weighted_avg(ppo_stats['critic_grad'], np.mean(critic_grad_list))
-        
-        self.pre_clip_actor_grad = weighted_avg(ppo_stats['pre_clip_actor'], np.mean(pre_clip_actor_grad))
-        self.pre_clip_critic_grad = weighted_avg(ppo_stats['pre_clip_critic'], np.mean(pre_clip_critic_grad))
-        self.grad_norm_ratio = weighted_avg(ppo_stats['grad_norm_ratio'], np.mean(grad_norm_ratio_list)) # [新增]
-        
-        # TD error var 融合 (简单加权平均)
-        il_td_error_var = np.var((il_r_batch - il_values).cpu().numpy())
-        self.td_error_var = weighted_avg(ppo_stats['td_error_var'], il_td_error_var)
-        
-        # 熵和Ratio只有PPO有，IL没有，所以乘以系数缩放或者直接保持PPO的
-        # 为了避免 Log 里的值看起来突然变小，这里建议直接使用 PPO 的值，因为 IL 不产生 entropy/ratio 概念
-        self.entropy_mean = ppo_stats['entropy']
-        self.ratio_mean = ppo_stats['ratio']
-        
-        # 更新样本计数
-        self.IL_samples = il_samples_total
-        self.IL_valid_samples = il_valid_samples_total
-
-        
-        check_weights_bias_nan(self.actor, "actor", "mixed_update后")
-        check_weights_bias_nan(self.critic, "critic", "mixed_update后")
-        
-        # [新增] 清理显存缓存，避免随着仿真进行越来越大
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
