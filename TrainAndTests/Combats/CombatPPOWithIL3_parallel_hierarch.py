@@ -1005,6 +1005,8 @@ def run_MLP_simulation(
     # 初始化基于胜率的在线 EMA 变量（用于在随后的训练中调整 sigma_elo）
     ema_score = 0.5
     ema_step = 0
+    # prev_ema_score = 0.5
+    target_p1 = 0.65
 
     # =========================================================
     # 主循环 (Master Process)
@@ -1278,13 +1280,23 @@ def run_MLP_simulation(
             # 若第一步则直接初始化，避免前期偏差
             if ema_step == 1:
                 ema_score = batch_score
+                # prev_ema_score = batch_score
             else:
+                # prev_ema_score = ema_score
                 ema_score = (1 - alpha_ema) * ema_score + alpha_ema * batch_score
+                
+            # if ema_score > prev_ema_score:
+            #     target_p1 = min(0.9, target_p1 + 0.01)
+            # else:
+            #     target_p1 = max(0.6, target_p1 - 0.005)
             
+            # max_target_p1 = 0.6 + total_steps / max_steps
+
             # 使用带有偏差修正的滤波值
             filtered_score = ema_score
             logger.add("train_plus/batch_score", batch_score, total_steps)
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
+            logger.add("train_plus/target_p1", target_p1, total_steps)
 
             # 记录导弹发射平均数量或总数
             logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
@@ -1323,64 +1335,64 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
-                if use_sil:
-                    if target_pool_keys:
+                # if use_sil:
+                #     if target_pool_keys:
                         
-                        # # 变化尺度对称型函数
-                        # a_p = -8
-                        # k_p = 0.006
-                        # mid = log10(alpha_il)
-                        # b_p = 2 * mid - a_p
-                        # scale = (b_p - a_p) / 2.0      # 3.0
-                        # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                        # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                        # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                        # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                        # exponent = min(exponent, -2)
+                #         # # 变化尺度对称型函数
+                #         # a_p = -8
+                #         # k_p = 0.006
+                #         # mid = log10(alpha_il)
+                #         # b_p = 2 * mid - a_p
+                #         # scale = (b_p - a_p) / 2.0      # 3.0
+                #         # # 计算指数部分: exponent = mid - scale * tanh(k * x)
+                #         # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
+                #         # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
+                #         # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
+                #         # exponent = min(exponent, -2)
                         
-                        # # 非对称函数
-                        # --- 自定义参数配置 ---
-                        M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                        b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
+                #         # # 非对称函数
+                #         # --- 自定义参数配置 ---
+                #         M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
+                #         b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
                                                 
-                        # 原·根据elo插值缩放指数
-                        # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                        # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-                        # 现·根据训练步数逐渐缩小指数
-                        k_shape = 4/4e6
-                        exponent = np.clip( b - k_shape * total_steps, -20, M )
+                #         # 原·根据elo插值缩放指数
+                #         # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
+                #         # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
+                #         # 现·根据训练步数逐渐缩小指数
+                #         k_shape = 4/4e6
+                #         exponent = np.clip( b - k_shape * total_steps, -20, M )
                         
-                        # 得到最终 alpha_il (10 的 exponent 次方)
-                        dynamic_alpha_il = 10 ** max(exponent, -20)
-                    else:
-                        dynamic_alpha_il = alpha_il
+                #         # 得到最终 alpha_il (10 的 exponent 次方)
+                #         dynamic_alpha_il = 10 ** max(exponent, -20)
+                #     else:
+                #         dynamic_alpha_il = alpha_il
                     
-                    # 记录动态参数到 TensorBoard
-                    logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                    logger.add("train_plus/alpha_exponent", exponent, total_steps)
+                #     # 记录动态参数到 TensorBoard
+                #     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
+                #     logger.add("train_plus/alpha_exponent", exponent, total_steps)
                     
-                    # 读取 IL 数据
-                    il_data = il_transition_buffer.read(il_batch_size2)
-                    logger.add("train_plus/il_data_size", len(il_data['returns']), total_steps)
+                #     # 读取 IL 数据
+                #     il_data = il_transition_buffer.read(il_batch_size2)
+                #     logger.add("train_plus/il_data_size", len(il_data['returns']), total_steps)
                     
-                    # 混合更新
-                    student_agent.mixed_update(
-                        transition_dict,
-                        il_data,
-                        init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                        eta = np.clip(1 - total_steps/5e6, 0.01, 1),  # 3e6
-                        adv_normed=True,
-                        label_smoothing=label_smoothing_mixed,
-                        alpha=dynamic_alpha_il,
-                        beta=beta_mixed,
-                        sil_only_maneuver = sil_only_maneuver,
-                        mini_batch_size = mini_batch_size_mixed
-                    )
-                else:
-                    #====================
-                    # 原有强化学习部分
-                    student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed)
-                    #====================
+                #     # 混合更新
+                #     student_agent.mixed_update(
+                #         transition_dict,
+                #         il_data,
+                #         init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
+                #         eta = np.clip(1 - total_steps/5e6, 0.01, 1),  # 3e6
+                #         adv_normed=True,
+                #         label_smoothing=label_smoothing_mixed,
+                #         alpha=dynamic_alpha_il,
+                #         beta=beta_mixed,
+                #         sil_only_maneuver = sil_only_maneuver,
+                #         mini_batch_size = mini_batch_size_mixed
+                #     )
+                # else:
+                #====================
+                # 原有强化学习部分
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1)
+                #====================
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
