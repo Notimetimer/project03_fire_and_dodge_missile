@@ -125,6 +125,8 @@ class F16PIDController:
 
         error_h = np.clip(target_height_devided - current_height_devided, -1, 1)
 
+        print(error_h)
+
         if error_h >= 0:
             kh = pi / 2 # pi / 3
         else:
@@ -245,7 +247,7 @@ class F16PIDController:
         # desired total load vector
         N_cmd_vec_ = (
             ny_maneuver_norm*n_hat_
-            + g_perp_
+            # + g_perp_
         )
         ny_cmd = np.dot(N_cmd_vec_,y_b_)
         ny_cmd=np.clip(ny_cmd,ny_min,ny_max)
@@ -335,7 +337,7 @@ if __name__ == '__main__':
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 7e3  # m # 测试飞行控制器
+    target_height = 9e3  # m # 测试飞行控制器
     target_heading = 270  # 度 to rad
     target_speed = 340 * 1.13  # m/s
     t_last = 60 * 5
