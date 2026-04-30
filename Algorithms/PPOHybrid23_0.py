@@ -630,7 +630,9 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, k_linear=0.53): # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_linear=0.53): 
+                # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
+                # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -776,6 +778,18 @@ class PPOHybrid:
                     target_entropy_cat_total += h_dim
         target_entropy_cat_tensor = torch.tensor(target_entropy_cat_total, device=self.device)
         
+        # =====================================================================
+        # [新增] 计算 Bernoulli 分布的动态目标熵 (Target Entropy)
+        # =====================================================================
+        target_entropy_bern_total = 0.0
+        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+            # 伯努利熵公式: -p*ln(p) - (1-p)*ln(1-p)
+            p = target_p1_b
+            h_bern_dim = - p * np.log(p + 1e-8) - (1 - p) * np.log(1 - p + 1e-8)
+            # 伯努利熵按动作维度累加
+            target_entropy_bern_total = h_bern_dim * self.actor.action_dims['bern']
+        target_entropy_bern_tensor = torch.tensor(target_entropy_bern_total, device=self.device)
+
         # 4. PPO Update Loop
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
         actor_grad_list, critic_grad_list = [], []
@@ -881,7 +895,6 @@ class PPOHybrid:
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
                 
-
                 # # 当前的 k_cat 是 e^(log_k_cat)
                 # curr_k_cat = torch.exp(self.log_k_cat)
                 # --- 关键修改：跟踪目标熵, 熵过小，加熵。熵过大，减熵 ---
@@ -897,10 +910,18 @@ class PPOHybrid:
                 k_linear_min = 1-1/(1+sigma_temp)
                 k_linear = np.clip(k_linear, k_linear_min, 1) # 不论如何这个 k_linear 不能超过1，也不能引发熵项强制“逆行”
 
-                # 选择伪hubber loss，负反馈控制熵误差
-                cat_constraint_term = k_cat * (-k_linear * loss_ent_cat +(1-k_linear)*(torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat))-1))
-                # cat_constraint_term = curr_k_cat.detach() * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat))-1)
-                actor_loss = actor_loss + cat_constraint_term - (k_cont * loss_ent_cont + k_bern * loss_ent_bern)
+                # 1. Categorical 约束项
+                cat_constraint_term = k_cat * (
+                    -k_linear * loss_ent_cat + 
+                    (1 - k_linear) * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
+                )
+                # 2. Bernoulli 约束项
+                bern_constraint_term = k_bern * (
+                    -k_linear * loss_ent_bern + 
+                    (1 - k_linear) * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
+                )
+                # 3. 组合最终 Actor Loss
+                actor_loss = actor_loss + cat_constraint_term + bern_constraint_term - (k_cont * loss_ent_cont)
                 
                 # 原有非目标熵正则项
                 # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
@@ -1211,9 +1232,9 @@ class PPOHybrid:
     
     
     
-    # --- 修改后的 MARWIL_update ---
+    # --- 修改后的 MARWIL_update， 注意原先是0 ---
     def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
-                      tau=0.8):
+                      tau=0.8, no_bern=1):
         """
         MARWIL 离线更新函数
         输入 actions 结构支持: [{'cat': array([v]), 'bern': array([v])}, ...]
@@ -1308,7 +1329,7 @@ class PPOHybrid:
                 weights = torch.clamp(raw_weights, max=max_weight)
 
             # B. Actor Loss
-            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing)
+            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing, no_bern=no_bern)
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
 
             # C. Critic Loss
