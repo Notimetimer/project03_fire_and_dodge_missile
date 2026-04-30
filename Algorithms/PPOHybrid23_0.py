@@ -906,9 +906,15 @@ class PPOHybrid:
                 theoretical_ent_cat_max = 0.0
                 for dim in self.actor.action_dims['cat']:
                     theoretical_ent_cat_max += np.log(float(dim))
-                sigma_temp = (theoretical_ent_cat_max-target_entropy_cat_tensor)/torch.sqrt(1+(theoretical_ent_cat_max-target_entropy_cat_tensor)**2)
-                k_linear_min = 1-1/(1+sigma_temp)
-                k_linear = np.clip(k_linear, k_linear_min, 1) # 不论如何这个 k_linear 不能超过1，也不能引发熵项强制“逆行”
+                sigma_cat = (theoretical_ent_cat_max-target_entropy_cat_tensor)/ \
+                    torch.sqrt(1+(theoretical_ent_cat_max-target_entropy_cat_tensor)**2)
+                k_linear_min_cat = 1-1/(1+sigma_cat)
+                theoretical_ent_bern_max = -np.log(0.5)*self.actor.action_dims['bern']
+                sigma_bern = (theoretical_ent_bern_max - target_entropy_bern_tensor)/ \
+                    torch.sqrt(1+(theoretical_ent_bern_max-target_entropy_bern_tensor)**2)
+                k_linear_min_bern = 1-1/(1+sigma_bern)
+
+                # k_linear = torch.clamp(k_linear, k_linear_min, 1.0) # 语法错误，待修正
 
                 # 1. Categorical 约束项
                 cat_constraint_term = k_cat * (
