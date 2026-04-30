@@ -53,7 +53,7 @@ if __name__ == "__main__":
     
 
     # 次要
-    experiment_name = 'IL_and_MixedPFSP_挑战_并行_分层_训练不带次序限制'
+    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练不带次序限制'
      # 'IL_and_MixedPFSP_挑战_并行_分层_调奖励', 'IL_and_MixedPFSP_挑战_并行_分层_调动作次序_多重检测'
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
@@ -156,8 +156,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.4
-                            )
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.4
+                            ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]

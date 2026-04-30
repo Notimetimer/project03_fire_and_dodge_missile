@@ -74,7 +74,7 @@ def test_worker(model_state_dict, rule_num,
         while not done and test_env.running:
             # 获取观测
             r_obs, r_check = test_env.obs_1v1('r', pomdp=1)
-            b_obs, _ = test_env.obs_1v1('b', pomdp=1)
+            b_obs, b_check = test_env.obs_1v1('b', pomdp=1)
             
             # 决策点
             if steps % action_cycle == 0:
@@ -86,8 +86,13 @@ def test_worker(model_state_dict, rule_num,
                 # 蓝方 (神经网络)
                 with torch.no_grad():
                     # 如果 deterministic 为 True，则机动(cat)采用确定性决策，开火(bern)仍保持随机(1)
-                    explore_dict = {'cont': 0, 'cat': 0, 'bern': 1} if deterministic else {'cont': 1, 'cat': 1, 'bern': 1}
-                    b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict)
+                    if deterministic:
+                        explore_dict = {'cont': 0, 'cat': 0, 'bern': 1}
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, check_obs=b_check)
+                    else:
+                        explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict)
+
                     b_action_label = b_act_exec['cat'] # [0]
                     if b_act_exec['bern'][0]: 
                         test_env.BUAV.about_to_fire = 1

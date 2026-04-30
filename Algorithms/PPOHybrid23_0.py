@@ -916,15 +916,18 @@ class PPOHybrid:
 
                 # k_linear = torch.clamp(k_linear, k_linear_min, 1.0) # 语法错误，待修正
 
+                k_linear_cat = min(max(k_linear, k_linear_min_cat), 1.0)
+                k_linear_bern = min(max(k_bern, k_linear_min_bern), 1.0)
+
                 # 1. Categorical 约束项
                 cat_constraint_term = k_cat * (
-                    -k_linear * loss_ent_cat + 
-                    (1 - k_linear) * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
+                    k_linear_cat * - loss_ent_cat + 
+                    (1 - k_linear_cat) * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
                 )
                 # 2. Bernoulli 约束项
                 bern_constraint_term = k_bern * (
-                    -k_linear * loss_ent_bern + 
-                    (1 - k_linear) * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
+                    k_linear_bern * - loss_ent_bern + 
+                    (1 - k_linear_bern) * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
                 )
                 # 3. 组合最终 Actor Loss
                 actor_loss = actor_loss + cat_constraint_term + bern_constraint_term - (k_cont * loss_ent_cont)
