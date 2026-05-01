@@ -63,7 +63,7 @@ def show_trajectory(red_pos_list, blue_pos_list, min_east, min_north, min_height
     ax3d.text(endpoint_N[0], endpoint_N[1], endpoint_N[2], 'N', color='red')
     ax3d.text(endpoint_U[0], endpoint_U[1], endpoint_U[2], 'U', color='green')
 
-    # 设置坐标轴等比例
+    # 设置坐标轴等比例 axis equal
     def set_axes(ax):
         """确保3D图的坐标轴单位长度相等。"""
         x_range = abs(max_east - min_east)

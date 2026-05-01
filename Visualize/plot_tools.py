@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# axis equal
 def set_axes_equal(ax):
     """确保3D图的坐标轴单位长度相等。"""
     
@@ -21,6 +22,7 @@ def set_axes_equal(ax):
     # 设置等显示缩放比例
     ax.set_box_aspect([1, 1, 1])
 
+# axis equal
 def set_axes_equal_manual(ax, x_limits=None, y_limits=None, z_limits=None):
     """确保3D图的坐标轴单位长度相等。"""
     if x_limits is None:
