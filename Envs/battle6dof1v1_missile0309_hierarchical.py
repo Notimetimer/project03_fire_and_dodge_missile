@@ -152,7 +152,7 @@ class Battle(object):
     def set_ego_side(self, side='b'):
         self.ego_side = side
         
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, seed=None, options=None, ego_side='b'):  # 重置位置和状态
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=4, blue_init_ammo=4, seed=None, options=None, ego_side='b'):  # 重置位置和状态
         self.R_cage = self.R_cage0
         self.horizontal_center = horizontal_center
         self.set_ego_side(ego_side)

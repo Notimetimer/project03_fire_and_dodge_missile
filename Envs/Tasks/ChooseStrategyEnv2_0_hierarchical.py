@@ -73,7 +73,7 @@ class ChooseStrategyEnv(Battle):
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
         self.last_obs = None
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=1, ego_side='b'):
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=4, blue_init_ammo=4, pomdp=1, ego_side='b'):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
         super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo, ego_side=ego_side)
         # # 初始化红蓝远离速度
@@ -193,6 +193,7 @@ class ChooseStrategyEnv(Battle):
         d_hor, leftright = uav_obs["border"]
         speed = uav_obs["ego_main"][0]
         alt = uav_obs["ego_main"][1]
+        theta = asin(uav_obs["ego_main"][3])
         cos_delta_psi = uav_obs["target_information"][0]
         sin_delta_psi = uav_obs["target_information"][1]
         delta_psi = atan2(sin_delta_psi, cos_delta_psi)
@@ -206,18 +207,37 @@ class ChooseStrategyEnv(Battle):
         speed_cmd = 340
 
         # 垂直方向指令
-        if action_v == 0:
-            delta_height_cmd = min(5000*2/3, self.max_alt_safe-UAV.alt)
-        if action_v == 1:
-            delta_height_cmd = min(5000/3, self.max_alt_safe-UAV.alt)
-        if action_v == 2:
-            delta_height_cmd = 135
-        if action_v == 3:
-            delta_height_cmd = max(-5000/3, self.min_alt_safe-UAV.alt)
-        if action_v == 4:
-            delta_height_cmd = max(-5000/3*2, self.min_alt_safe-UAV.alt)
-        if action_v == 5:
-            delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
+        if action_v == 0: # 比目标高45°
+            theta_desired = np.clip(theta+delta_theta+np.radians(45), -pi/2, pi/2)
+        if action_v == 1: # 比目标高20°
+            theta_desired = np.clip(theta+delta_theta+np.radians(20), -pi/2, pi/2)
+        if action_v == 2: # 纯追踪
+            theta_desired = np.clip(theta+delta_theta+np.radians(0.5), -pi/2, pi/2)
+        if action_v == 3: # 比目标低20°
+            theta_desired = np.clip(theta+delta_theta+np.radians(-20), -pi/2, pi/2)
+        if action_v == 4: # 比目标低45°
+            theta_desired = np.clip(theta+delta_theta+np.radians(-45), -pi/2, pi/2)
+        if action_v == 5: # 急速下降
+            theta_desired = -pi/2
+        
+        # 不能出安全高度范围
+        delta_height_cmd = np.clip(theta_desired/pi*2*5000, 
+                                   self.min_alt_safe-UAV.alt, 
+                                   self.max_alt_safe-UAV.alt)
+
+        # # 垂直方向指令
+        # if action_v == 0:
+        #     delta_height_cmd = min(5000*2/3, self.max_alt_safe-UAV.alt)
+        # if action_v == 1:
+        #     delta_height_cmd = min(5000/3, self.max_alt_safe-UAV.alt)
+        # if action_v == 2:
+        #     delta_height_cmd = 135
+        # if action_v == 3:
+        #     delta_height_cmd = max(-5000/3, self.min_alt_safe-UAV.alt)
+        # if action_v == 4:
+        #     delta_height_cmd = max(-5000/3*2, self.min_alt_safe-UAV.alt)
+        # if action_v == 5:
+        #     delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
 
         # 水平方向指令：
         # 回中心
@@ -366,23 +386,23 @@ class ChooseStrategyEnv(Battle):
                     cos_ATA_r = np.dot(Lrb_, RUAV.vel_) / (dist * RUAV.speed)
                     cos_ATA_b = np.dot(Lbr_, BUAV.vel_) / (dist * BUAV.speed)
                     # 角度优势杀
-                    if cos_ATA_r >= cos(pi / 3) and cos_ATA_b < cos(pi / 3):
+                    if cos_ATA_r >= cos(pi / 6) and cos_ATA_b < cos(pi / 6):
                         BUAV.dead = True
                         BUAV.got_hit = True
                         print('近距单杀')
-                    elif cos_ATA_r < cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+                    elif cos_ATA_r < cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
                         RUAV.got_hit = True
                         print('近距单杀')
-                    elif cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+                    # 都在可攻击角度
+                    elif cos_ATA_r >= cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
                         BUAV.dead = True
                         RUAV.got_hit = True
                         BUAV.got_hit = True
                         print('近距双杀')
 
-                    # # 都在可攻击角度
-                    # elif cos_ATA_r >= cos(pi / 3) and cos_ATA_b >= cos(pi / 3):
+                    # 更复杂，但不一定好用的判定逻辑
                     #     # 看高度
                     #     if BUAV.alt - RUAV.alt > 1500:
                     #         # 低于对面，近距处于劣势

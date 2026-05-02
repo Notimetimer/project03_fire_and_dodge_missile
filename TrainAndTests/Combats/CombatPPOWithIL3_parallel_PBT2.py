@@ -388,7 +388,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 使用从master传来的出生状态
                 red_birth = settings['red_birth']
                 blue_birth = settings['blue_birth']
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=4, blue_init_ammo=4)
                 
                 # 状态变量初始化
                 done = False
@@ -584,7 +584,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 69e3, # 45e3 # 55e3,
+    R_cage = 60.0e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,

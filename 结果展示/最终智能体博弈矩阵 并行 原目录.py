@@ -116,7 +116,7 @@ def get_top_elo_agents(log_dir, top_n=50):
 # --- 保持原样，完全不改动 ---
 def run_battle(env, blue_wrapper, red_wrapper, device):
     """仿真逻辑 (保持与文件 1 一致)"""
-    env.reset(red_init_ammo=6, blue_init_ammo=6, ego_side='b')
+    env.reset(red_init_ammo=4, blue_init_ammo=4, ego_side='b')
     env.shielded = 1 # 测试时开启防撞地
     env.no_out = 0 # 测试时防止出界
 

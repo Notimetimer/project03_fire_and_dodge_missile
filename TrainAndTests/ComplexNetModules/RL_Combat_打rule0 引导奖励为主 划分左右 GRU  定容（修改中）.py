@@ -335,7 +335,7 @@ if __name__ == "__main__":
     
     # --- 初始化环境与重置 ---
     DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
-    env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, red_init_ammo=6, blue_init_ammo=6)
+    env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, red_init_ammo=4, blue_init_ammo=4)
 
     # 回合级变量初始化
     h_actor = torch.zeros(a_h_dim[0], 1, a_h_dim[1]).to(device)
@@ -461,7 +461,7 @@ if __name__ == "__main__":
         DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
 
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                red_init_ammo=6, blue_init_ammo=6)
+                red_init_ammo=4, blue_init_ammo=4)
         
         r_action_label = 0
         b_action_label = 0

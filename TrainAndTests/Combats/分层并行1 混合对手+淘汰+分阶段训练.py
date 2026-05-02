@@ -3,7 +3,7 @@ from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
-resume_target_dir = None # r""
+resume_target_dir = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_MixedPFSP_挑战_并行_分层_训练不带次序限制-run-20260430-205454"
 
 mission_name = 'IL_and_MixedPFSP_挑战_并行_分层_训练不带次序限制'
 
@@ -37,7 +37,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
-R_cage= 69e3 # 55e3 # 场地半径，单位m
+R_cage= 60.0e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 

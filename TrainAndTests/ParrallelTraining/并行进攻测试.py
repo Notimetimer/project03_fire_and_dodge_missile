@@ -184,7 +184,7 @@ try:
                                     'psi': np.random.choice([pi/2, -pi/2])}
         
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                red_init_ammo=6, blue_init_ammo=6)
+                red_init_ammo=4, blue_init_ammo=4)
         env.dt_maneuver = dt_maneuver
         
         done = False

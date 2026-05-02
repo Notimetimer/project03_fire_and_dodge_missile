@@ -61,7 +61,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                 DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state(randomized=1)
 
                 env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=6, blue_init_ammo=6)
+                        red_init_ammo=4, blue_init_ammo=4)
                 r_action_label=0
                 b_action_label=0
                 last_decision_state = None

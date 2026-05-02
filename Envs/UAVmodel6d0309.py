@@ -19,6 +19,24 @@ from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
 
+# 箔条模型
+class chaffModel(object):
+    def __init__(self, pos_, vel_, id, dt=0.02):
+        self.t = 0
+        self.RCS = 0
+        self.max_chaff_RCS = 30
+        self.pos_ = pos_
+        self.vel_ = vel_
+    def fade(self, dt):
+        self.t += dt
+        if self.t < 3:
+            self.RCS = self.max_chaff_RCS
+        else:
+            self.RCS = 0
+        self.vel_ *= 0
+        self.pos_ += self.vel_ * dt
+        return self.RCS, self.pos_
+
 # 无人机模型
 class UAVModel(object):
     def __init__(self, dt=0.02, dt_fire=0.2):
@@ -76,6 +94,12 @@ class UAVModel(object):
         self.missile_optimal_range = 25e3  # 最佳发射距离
         self.missile_max_range = 40e3  # 最大发射距离 50
         self.missile_launch_speed_threshold = 100  # 300  # 最小发射速度要求
+
+        self.RCS = 4
+        self.chaffs = 40
+        self.max_chaff_RCS = 30
+        self.activated_chaffs = []
+        self.chaff_release_count = 0
 
         # 过载量控制
         self.nx_limit = [-1, 1.5]
@@ -149,6 +173,8 @@ class UAVModel(object):
         vu = -self.sim["velocities/v-down-fps"] * 0.3048  # 向上分量（正表示上升）
         self.climb_rate = vu
         self.vn, self.ve, self.vu = vn, ve, vu
+        self.pos_ = np.array([self.x, self.y, self.z])
+        self.vel_ = np.array([vn, vu, ve])
         
         # 过载量
         # JSBsim 的过载量是左手系，前右上顺序。
@@ -177,6 +203,35 @@ class UAVModel(object):
         self.action_memory = np.array([0,0,340]) # 动作记忆
         
         self.missile_launch_time = []
+        self.activated_chaffs = []
+        self.chaff_release_count = 0
+
+    def release_chaffs(self):
+        # 释放一组箔条
+        if self.chaffs > 0:
+            self.chaffs -= 1
+            chaff_id = 401 + self.chaff_release_count if self.red else 501 + self.chaff_release_count
+            self.chaff_release_count += 1
+            new_chaff = chaffModel(self.pos_.copy(), self.vel_.copy(), id=chaff_id, dt=self.dt)
+            self.activated_chaffs.append(new_chaff)
+
+    # 简化模型，只有在不考虑导弹速度滤波窗的时候能够在这里算，否则需要改到环境类中
+    def RCS_center(self):
+        # 使用RCS对所有 activated_chaffs 和飞机本身的位置加权计算一个RCS质心，返回北天东坐标
+        total_RCS = self.RCS
+        weighted_pos = self.pos_ * self.RCS
+        
+        if not hasattr(self, 'activated_chaffs'):
+            return self.pos_
+
+        for chaff in self.activated_chaffs:
+            total_RCS += chaff.RCS
+            weighted_pos += chaff.pos_ * chaff.RCS
+            
+        if total_RCS == 0:
+            return self.pos_
+            
+        return weighted_pos / total_RCS
 
     # # todo 阻力系数：应该是和马赫数和迎角有关的，但是先借用下导弹的阻力系数函数了
     # def Cd(self, mach):
@@ -319,6 +374,13 @@ class UAVModel(object):
 
         # 速度更新位置
         self.pos_ = np.array([self.x, self.y, self.z])
+        
+        # 箔条更新
+        if hasattr(self, 'activated_chaffs'):
+            for i in range(len(self.activated_chaffs) - 1, -1, -1):
+                self.activated_chaffs[i].fade(self.dt)
+                if self.activated_chaffs[i].t > 5:
+                    self.activated_chaffs.pop(i)
     
     def short_range_kill(self, target):
         # 近距杀，不需要导弹的模型

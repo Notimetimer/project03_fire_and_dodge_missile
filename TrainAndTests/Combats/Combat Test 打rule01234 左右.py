@@ -53,7 +53,7 @@ if __name__ == "__main__":
     args = parser.parse_args()    
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=69e3)
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=60.0e3)
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

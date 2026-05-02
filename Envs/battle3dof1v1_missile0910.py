@@ -131,7 +131,7 @@ class Battle(object):
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      b_obs_n]
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6):  # 重置位置和状态
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=4, blue_init_ammo=4):  # 重置位置和状态
         if red_birth_state is None:
             red_birth_state = self.DEFAULT_RED_BIRTH_STATE
         if blue_birth_state is None:

@@ -59,16 +59,16 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if t_fired >= 20 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
             fire_missile = True
 
-    # # 2. 根据目标相对高度选择基础进攻机动
-    if abs(delta_theta) < -30 * pi/180:
-        action_v = 3 # 下降
-        action_h = 1 # 追踪
-    elif delta_theta >= 30 * pi/180:
-        action_v = 1 # 爬升
-        action_h = 1 # 追踪
-    else:
-        action_v = 2 # 平飞
-        action_h = 1 # 追踪
+    # # # 2. 根据目标相对高度选择基础进攻机动
+    # if delta_theta < -15 * pi/180:
+    #     action_v = 3 # 下降
+    #     action_h = 1 # 追踪
+    # elif delta_theta >= 15 * pi/180:
+    #     action_v = 1 # 爬升
+    #     action_h = 1 # 追踪
+    # else:
+    action_v = 2 # 追踪
+    action_h = 1 # 追踪
     action_number = [action_v, action_h] # 默认执行基础进攻
     base_offensive_action = action_number
 
@@ -199,7 +199,7 @@ if __name__=='__main__':
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=69e3,
+    parser.add_argument("--R-cage", type=float, default=60.0e3, # 69
                         help="")
     args = parser.parse_args()
 
@@ -265,7 +265,7 @@ if __name__=='__main__':
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=6, blue_init_ammo=6)
+                    red_init_ammo=4, blue_init_ammo=4)
             r_action_label=0
             b_action_label=0
             last_decision_state = None
