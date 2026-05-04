@@ -656,6 +656,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
 
 def run_MLP_simulation(
+    k_linear=1.0,
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
     mission_name='无名',
     actor_lr=1e-4,
@@ -1392,7 +1393,7 @@ def run_MLP_simulation(
                 # else:
                 #====================
                 # 原有强化学习部分
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1)
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_linear=k_linear)
                 #====================
                 # 记录 Log
 

@@ -460,11 +460,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 blue_birth = settings['blue_birth']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
-                r_min, r_max = settings.get('R_cage_range', (60.0e3, 60.0e3))
+                r_min, r_max = settings.get('R_cage_range', (63.0e3, 63.0e3))
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
                 # 进场瞬间给全信息
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=4, blue_init_ammo=4, pomdp=0)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
                 
                 # 状态变量初始化
                 done = False
@@ -653,6 +653,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
 
 def run_MLP_simulation(
+    k_linear,
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
     mission_name='无名',
     actor_lr=1e-4,
@@ -683,7 +684,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 60.0e3, # 45e3 # 55e3,
+    R_cage = 63.0e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
@@ -711,7 +712,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
-    R_cage_range = (60.0e3, 60.0e3), # 新增：环境随机化范围
+    R_cage_range = (63.0e3, 63.0e3), # 新增：环境随机化范围
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     POMDP = 0, # 0全信息，1部分信息
@@ -1410,7 +1411,7 @@ def run_MLP_simulation(
                 # else:
                 #====================
                 # 原有强化学习部分
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1)
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_linear=k_linear)
                 #====================
                 # 记录 Log
 
