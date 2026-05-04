@@ -137,7 +137,7 @@ class missile_class:
         self.stage2_start = self.stage1_start + self.stage1_time  # s
         self.stage2_end = self.stage1_start + self.stage1_time + self.stage2_time  # s
         # 杀伤半径
-        self.kill_range = 100 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
+        self.kill_range = 80 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
         # 最大过载
         self.max_g0 = 40
         self.max_g = self.max_g0
@@ -318,6 +318,11 @@ class missile_class:
         else:
             k_y = 3
         nyt1 = k_y * max(vmt, np.linalg.norm(vrt_)) * q_epsilon_dot / g + cos(theta_mt1)  # test
+
+        # 初制导阶段根据距离判断是否需要靠导弹来高抛
+        if self.t < self.stage2_end:
+            if distance > 50e3:
+                nyt1 += (pi/3-self.theta) * 2 
 
         # 时间过半以后如果目标低于当前飞行高度，不能还在爬升
         delta_height = self.delta_height
