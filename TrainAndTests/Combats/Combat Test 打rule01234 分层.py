@@ -64,7 +64,7 @@ if __name__ == "__main__":
     args.agent_id = None # 172 # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=60.0e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=63.0e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -129,7 +129,7 @@ if __name__ == "__main__":
             # 重置环境
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r', 
-                      red_init_ammo=4, blue_init_ammo=4)
+                      red_init_ammo=6, blue_init_ammo=6)
 
             done = False
             last_r_action_label = 0

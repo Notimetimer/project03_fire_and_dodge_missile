@@ -69,7 +69,7 @@ if __name__ == "__main__":
     args.agent_id = 0 # 强制加载模仿学习完毕后的第一个参数 (actor_rein0.pt)
     
     # # --- 环境和模型参数 (必须与训练时一致) ---
-    # env_args = argparse.Namespace(max_episode_len=15*60, R_cage=60.0e3) # 训练时默认是 45e3
+    # env_args = argparse.Namespace(max_episode_len=15*60, R_cage=63.0e3) # 训练时默认是 45e3
     args.max_episode_len = 12*60
     args.R_cage=45e3
 

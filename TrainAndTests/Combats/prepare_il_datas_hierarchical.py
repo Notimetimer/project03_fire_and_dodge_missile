@@ -11,7 +11,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=60.0e3,
+    parser.add_argument("--R-cage", type=float, default=63.0e3,
                         help="")
     args = parser.parse_args()
 
@@ -59,7 +59,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                 DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state(randomized=1)
 
                 env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                        red_init_ammo=4, blue_init_ammo=4)
+                        red_init_ammo=6, blue_init_ammo=6)
                 r_action_label=0
                 b_action_label=0
                 last_decision_state = None

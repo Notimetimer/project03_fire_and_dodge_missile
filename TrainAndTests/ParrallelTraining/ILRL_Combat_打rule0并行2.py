@@ -141,7 +141,7 @@ def worker(remote, parent_remote, env_fn_wrapper):
                     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, 9000, blue_E]), 'psi': blue_psi}
                     
                     env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                             red_init_ammo=4, blue_init_ammo=4)
+                             red_init_ammo=6, blue_init_ammo=6)
                     
                     # Reset 后重新获取初始 Obs
                     b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
@@ -164,7 +164,7 @@ def worker(remote, parent_remote, env_fn_wrapper):
 
             elif cmd == 'reset':
                 # 初始化 Reset
-                env.reset(red_init_ammo=4, blue_init_ammo=4)
+                env.reset(red_init_ammo=6, blue_init_ammo=6)
                 
                 b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
                 b_state_global, _ = env.obs_1v1('b', reward_fn=1)

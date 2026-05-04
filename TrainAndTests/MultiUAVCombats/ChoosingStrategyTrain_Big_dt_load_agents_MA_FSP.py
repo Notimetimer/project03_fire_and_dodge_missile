@@ -157,7 +157,7 @@ if __name__=="__main__":
     # 提前reset一次以获取id列表
     DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
     env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=4, blue_init_ammo=4)
+                    red_init_ammo=6, blue_init_ammo=6)
     
     uav_ids = env.UAV_ids # list
     uav_sides = {}
@@ -246,7 +246,7 @@ if __name__=="__main__":
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=4, blue_init_ammo=4)
+                    red_init_ammo=6, blue_init_ammo=6)
             
             last_b_dec_obs = None
             last_global_state = None

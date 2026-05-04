@@ -55,7 +55,7 @@ class ChooseStrategyEnv(Battle):
     def __init__(self, args, tacview_show=0):
         super().__init__(args, tacview_show)
 
-    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=4, blue_init_ammo=4, pomdp=0):
+    def reset(self, red_birth_state=None, blue_birth_state=None, red_init_ammo=6, blue_init_ammo=6, pomdp=0):
         # 1. 调用父类 Battle 的 reset 方法，执行所有通用初始化
         super().reset(red_birth_state, blue_birth_state, red_init_ammo, blue_init_ammo)
         # # 初始化红蓝远离速度

@@ -199,7 +199,7 @@ if __name__=='__main__':
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=60.0e3, # 69
+    parser.add_argument("--R-cage", type=float, default=63.0e3, # 69
                         help="")
     args = parser.parse_args()
 
@@ -265,7 +265,7 @@ if __name__=='__main__':
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                    red_init_ammo=4, blue_init_ammo=4)
+                    red_init_ammo=6, blue_init_ammo=6)
             r_action_label=0
             b_action_label=0
             last_decision_state = None

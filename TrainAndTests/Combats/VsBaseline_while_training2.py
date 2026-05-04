@@ -54,7 +54,7 @@ def test_worker(model_state_dict, rule_num,
     result = 0
     result2 = 0
     for _ in range(num_runs):
-        test_env.reset(red_init_ammo=4, blue_init_ammo=4)
+        test_env.reset(red_init_ammo=6, blue_init_ammo=6)
         
         steps = 0
         done = False

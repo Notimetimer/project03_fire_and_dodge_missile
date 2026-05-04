@@ -302,7 +302,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage= 60.0e3, # 55e3,
+    R_cage= 63.0e3, # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
@@ -677,7 +677,7 @@ def run_MLP_simulation(
         DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
 
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
-                red_init_ammo=4, blue_init_ammo=4)
+                red_init_ammo=6, blue_init_ammo=6)
         
         r_action_label = 0
         b_action_label = 0

@@ -52,7 +52,7 @@ def get_agent_teams(log_dir):
 
 def run_battle(env, blue_wrapper, red_wrapper, device):
     """单场仿真逻辑"""
-    env.reset(red_init_ammo=4, blue_init_ammo=4) # 此处可加入固定初始位置逻辑
+    env.reset(red_init_ammo=6, blue_init_ammo=6) # 此处可加入固定初始位置逻辑
     done = False
     
     # [修复] 初始化动作标签，防止第一次循环未定义
