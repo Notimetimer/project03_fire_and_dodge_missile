@@ -75,7 +75,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        k_linear=0.0, # 不可能是0，会被目标熵计算出来的熵系数clip掉
+        k_nonlinear=100.0, # 不可能是100，会被目标熵计算出来的熵系数clip掉
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,

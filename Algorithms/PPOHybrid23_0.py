@@ -630,7 +630,7 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_linear=0.53): 
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -902,32 +902,37 @@ class PPOHybrid:
                 # 1. pseudo-huber loss:     torch.sqrt(1 + torch.square(target - current)) - 1
                 # 2. log-cosh loss:         torch.log(torch.cosh(target_entropy_cat_tensor - loss_ent_cat))
 
-                # 裁剪klinear的范围，绝不能太小
+                # 裁剪的范围，绝不能太小
                 theoretical_ent_cat_max = 0.0
                 for dim in self.actor.action_dims['cat']:
                     theoretical_ent_cat_max += np.log(float(dim))
-                sigma_cat = (theoretical_ent_cat_max-target_entropy_cat_tensor)/ \
-                    torch.sqrt(1+(theoretical_ent_cat_max-target_entropy_cat_tensor)**2)
-                k_linear_min_cat = 1-1/(1+sigma_cat)
+                diff_cat0 = theoretical_ent_cat_max - target_entropy_cat_tensor
+                # sigma_cat = diff_cat/ \
+                #     torch.sqrt(1+diff_cat**2)
+                k_nonlinear_max_cat = torch.sqrt(1+diff_cat0**2)/(diff_cat0+1e-8)
+
                 theoretical_ent_bern_max = -np.log(0.5)*self.actor.action_dims['bern']
-                sigma_bern = (theoretical_ent_bern_max - target_entropy_bern_tensor)/ \
-                    torch.sqrt(1+(theoretical_ent_bern_max-target_entropy_bern_tensor)**2)
-                k_linear_min_bern = 1-1/(1+sigma_bern)
+                diff_bern0 = theoretical_ent_bern_max - target_entropy_bern_tensor
+                # sigma_bern = diff_bern/ \
+                #     torch.sqrt(1+diff_bern**2)
+                k_nonlinear_max_bern = torch.sqrt(1+diff_bern0**2)/(diff_bern0+1e-8)
 
-                # k_linear = torch.clamp(k_linear, k_linear_min, 1.0) # 语法错误，待修正
-
-                k_linear_cat = min(max(k_linear, k_linear_min_cat), 1.0)
-                k_linear_bern = min(max(k_bern, k_linear_min_bern), 1.0)
+                k_nonlinear_cat = max(min(k_nonlinear, k_nonlinear_max_cat), 0.0)
+                k_nonlinear_bern = max(min(k_nonlinear, k_nonlinear_max_bern), 0.0)
 
                 # 1. Categorical 约束项
                 cat_constraint_term = k_cat * (
-                    k_linear_cat * - loss_ent_cat + 
-                    (1 - k_linear_cat) * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
+                    - loss_ent_cat + 
+                    torch.where(loss_ent_cat > target_entropy_cat_tensor, 
+                    k_nonlinear_cat * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
+                    , 0.0)
                 )
                 # 2. Bernoulli 约束项
                 bern_constraint_term = k_bern * (
-                    k_linear_bern * - loss_ent_bern + 
-                    (1 - k_linear_bern) * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
+                    - loss_ent_bern + 
+                    torch.where(loss_ent_bern > target_entropy_bern_tensor,
+                    k_nonlinear_bern * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
+                    , 0.0)
                 )
                 # 3. 组合最终 Actor Loss
                 actor_loss = actor_loss + cat_constraint_term + bern_constraint_term - (k_cont * loss_ent_cont)

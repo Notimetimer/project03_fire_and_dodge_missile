@@ -75,7 +75,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        k_linear=1.0,
+        k_nonlinear=0.0,
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
