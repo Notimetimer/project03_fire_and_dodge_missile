@@ -25,7 +25,7 @@ sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybridSAC import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
@@ -654,6 +654,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
 
 def run_MLP_simulation(
+    k_cat_rates,
     k_nonlinear,
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
     mission_name='无名',
@@ -1412,7 +1413,8 @@ def run_MLP_simulation(
                 # else:
                 #====================
                 # 原有强化学习部分
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear)
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear,
+                    k_cat_rates = k_cat_rates)
                 #====================
                 # 记录 Log
 

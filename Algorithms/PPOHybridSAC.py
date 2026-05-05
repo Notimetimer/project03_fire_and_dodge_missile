@@ -553,7 +553,9 @@ class PPOHybrid:
         
         # [新增] SAC 风格的可学习 Cat 熵系数 (初始值对应原配置)
         init_k_cat = k_entropy.get('cat', k_entropy)
-        self.log_k_cat = torch.nn.Parameter(torch.log(torch.tensor(init_k_cat, device=device)))
+        self.init_k_cat = init_k_cat  # [新增] 保存基准值
+        self.log_k_cat = torch.nn.Parameter(torch.log(torch.tensor(init_k_cat, device=device, dtype=torch.float32)))
+
         # [新增] 为自适应熵系数配备独立的优化器 (学习率通常与 Actor 保持一致或略大)
         self.k_cat_optim = torch.optim.Adam([self.log_k_cat], lr=actor_lr)
         
@@ -630,7 +632,8 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89): 
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89,
+                k_cat_rates = [0.01, 2.0]): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -895,35 +898,23 @@ class PPOHybrid:
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
                 
-                # # 当前的 k_cat 是 e^(log_k_cat)
-                # curr_k_cat = torch.exp(self.log_k_cat)
-                # --- 关键修改：跟踪目标熵, 熵过小，加熵。熵过大，减熵 ---
-                # 比平方误差更加平缓的损失函数候选：
-                # 1. pseudo-huber loss:     torch.sqrt(1 + torch.square(target - current)) - 1
-                # 2. log-cosh loss:         torch.log(torch.cosh(target_entropy_cat_tensor - loss_ent_cat))
+                # [新增] 动态 k_cat (即 SAC 里的 alpha)
+                dynamic_k_cat = torch.exp(self.log_k_cat)
 
-                # 裁剪的范围，绝不能太小
-                theoretical_ent_cat_max = 0.0
-                for dim in self.actor.action_dims['cat']:
-                    theoretical_ent_cat_max += np.log(float(dim))
-                diff_cat0 = theoretical_ent_cat_max - target_entropy_cat_tensor
-                k_nonlinear_max_cat = torch.sqrt(1+diff_cat0**2)/(diff_cat0+1e-8)
+                # [新增] SAC 风格的自适应熵温度损失
+                # gradient 方向：如果 当前熵 < 目标熵，(loss_ent_cat - target) 为负，log_k_cat 的梯度为负，优化器步进后 alpha 会增大，促进探索。
+                alpha_loss = dynamic_k_cat * (loss_ent_cat - target_entropy_cat_tensor).detach()
+                
+                # [新增] 用标准的熵正则项直接替换原手写逻辑 (务必 detach alpha 防止梯度串扰 Actor)
+                cat_constraint_term = - dynamic_k_cat.detach() * loss_ent_cat
 
+                # 保留 Bernoulli 约束项
                 theoretical_ent_bern_max = -np.log(0.5)*self.actor.action_dims['bern']
                 diff_bern0 = theoretical_ent_bern_max - target_entropy_bern_tensor
                 k_nonlinear_max_bern = torch.sqrt(1+diff_bern0**2)/(diff_bern0+1e-8)
-
-                k_nonlinear_cat = max(min(k_nonlinear, k_nonlinear_max_cat), 0.0)
                 k_nonlinear_bern = max(min(k_nonlinear, k_nonlinear_max_bern), 0.0)
 
-                # 1. Categorical 约束项
-                cat_constraint_term = k_cat * (
-                    - loss_ent_cat + 
-                    torch.where(loss_ent_cat > target_entropy_cat_tensor, 
-                    k_nonlinear_cat * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
-                    , 0.0)
-                )
-                # 2. Bernoulli 约束项
+                # Bernoulli 约束项
                 bern_constraint_term = k_bern * (
                     - loss_ent_bern + 
                     torch.where(loss_ent_bern > target_entropy_bern_tensor,
@@ -963,13 +954,13 @@ class PPOHybrid:
                 
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
-                # if alpha_loss.requires_grad:    # [新增]
-                #     self.k_cat_optim.zero_grad()
+                if alpha_loss.requires_grad:    # [恢复]
+                    self.k_cat_optim.zero_grad()
                     
                 actor_loss.backward()
                 critic_loss.backward()
-                # if alpha_loss.requires_grad:    # [新增] 反向传播温度损失
-                #     alpha_loss.backward()
+                if alpha_loss.requires_grad:    # [恢复] 反向传播温度损失
+                    alpha_loss.backward()
 
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
                 pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
@@ -982,8 +973,16 @@ class PPOHybrid:
 
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
-                # if alpha_loss.requires_grad:    # [新增] 步进自适应熵系数
-                #     self.k_cat_optim.step()
+                if alpha_loss.requires_grad:    # [恢复] 步进自适应熵系数
+                    self.k_cat_optim.step()
+
+                # [新增] 核心倍数限制逻辑：将 alpha 与初始 k_cat 的比例严格锁定在 [0.01, 2]
+                k_cat_rate_min, k_cat_rate_max = k_cat_rates
+                with torch.no_grad():
+                    self.log_k_cat.clamp_(
+                        np.log(k_cat_rate_min * self.init_k_cat + 1e-8), 
+                        np.log(k_cat_rate_max * self.init_k_cat + 1e-8)
+                    )
 
                 # Logging
                 actor_grad_list.append(model_grad_norm(self.actor))

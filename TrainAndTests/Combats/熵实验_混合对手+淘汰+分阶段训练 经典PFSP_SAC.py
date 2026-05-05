@@ -1,11 +1,11 @@
-from CombatPPOWithIL3_parallel_hierarch_Classic import *
+from CombatPPOWithIL3_parallel_hierarch_ClassicSAC import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_训练不带次序限制-run-20260430-205459"
 
-mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练带熵变化'
+mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_SAC'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -75,7 +75,8 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        k_nonlinear=0.89,
+        k_cat_rates = [0.01, 2.0],
+        k_nonlinear=0.0,
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
