@@ -109,9 +109,9 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=0.65, i=0 * 0.08, d=0.16)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=0.7, i=0.001, d=0.2)  # 0.65, 0.001, 0.16
         self.r_pid = PositionPID(max=1, min=-1, p=2.4, i=0, d=2.0) # 1.5
-        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.2)
+        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.5) # d=0.2
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -149,23 +149,23 @@ class F16PIDController:
         else:
             Ny = 0
 
-        # k_alpha_air = 0
-        # # # 迎角限制器 -8~13
-        # if alpha<=-1.2:
-        #     k_alpha_air = 0.5
-        # elif alpha>17:
-        #     k_alpha_air = 0.3 # 0.2
-        # else:
-        #     if alpha>=0:
-        #         k_alpha_air = 0.01
-        #     else:
-        #         k_alpha_air = 0.01
-        # if theta * 180 / pi < -70: # 大俯仰机动时降低迎角干预
-        #     k_alpha_air = 0
+        k_alpha_air = 0
+        # # 迎角限制器 -8~13
+        if alpha<=-1.2:
+            k_alpha_air = 0.5
+        elif alpha>17:
+            k_alpha_air = 0.3 # 0.2
+        else:
+            if alpha>=0:
+                k_alpha_air = 0.01
+            else:
+                k_alpha_air = 0.01
+        if theta * 180 / pi < -70: # 大俯仰机动时降低迎角干预
+            k_alpha_air = 0
 
-        # # 改成级联的指数滑动平均 (EMA) 形式，确保始终保持限制且系数归一化
-        # # 1. 先融合迎角限制
-        # norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
+        # 改成级联的指数滑动平均 (EMA) 形式，确保始终保持限制且系数归一化
+        # 1. 先融合迎角限制
+        norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
         
         norm_act[1] = np.clip(norm_act[1], -1, 1)
 
@@ -358,22 +358,22 @@ if __name__ == '__main__':
 
         # target_heading = np.random.rand()*10
 
-        # # 舞狮
-        # if current_t < 15:
-        #     target_height = 5000  # m
-        #     target_heading = 90  # 度 to rad
-        #     target_speed = 300
-        # elif current_t < 1 * 60:
-        #     target_height = 10000  # m
-        #     target_heading = -120  # 度 to rad
-        # elif current_t < 1 * 60 + 27:
-        #     target_height = 7000  # m
-        #     target_heading = 0  # 度 to rad
-        # elif current_t < 2 * 60 + 10:
-        #     target_height = 8000  # m
-        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
-        # else:
-        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
+        # 舞狮
+        if current_t < 15:
+            target_height = 5000  # m
+            target_heading = 90  # 度 to rad
+            target_speed = 300
+        elif current_t < 1 * 60:
+            target_height = 10000  # m
+            target_heading = -120  # 度 to rad
+        elif current_t < 1 * 60 + 27:
+            target_height = 7000  # m
+            target_heading = 0  # 度 to rad
+        elif current_t < 2 * 60 + 10:
+            target_height = 8000  # m
+            target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
+        else:
+            target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
 
         sim.run()
         current_time = step * dt

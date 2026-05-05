@@ -555,7 +555,6 @@ class PPOHybrid:
         init_k_cat = k_entropy.get('cat', k_entropy)
         self.init_k_cat = init_k_cat  # [新增] 保存基准值
         self.log_k_cat = torch.nn.Parameter(torch.log(torch.tensor(init_k_cat, device=device, dtype=torch.float32)))
-
         # [新增] 为自适应熵系数配备独立的优化器 (学习率通常与 Actor 保持一致或略大)
         self.k_cat_optim = torch.optim.Adam([self.log_k_cat], lr=actor_lr)
         
@@ -912,7 +911,7 @@ class PPOHybrid:
                 theoretical_ent_bern_max = -np.log(0.5)*self.actor.action_dims['bern']
                 diff_bern0 = theoretical_ent_bern_max - target_entropy_bern_tensor
                 k_nonlinear_max_bern = torch.sqrt(1+diff_bern0**2)/(diff_bern0+1e-8)
-                k_nonlinear_bern = max(min(k_nonlinear, k_nonlinear_max_bern), 0.0)
+                k_nonlinear_bern = min(max(k_nonlinear, 0.0), k_nonlinear_max_bern)
 
                 # Bernoulli 约束项
                 bern_constraint_term = k_bern * (

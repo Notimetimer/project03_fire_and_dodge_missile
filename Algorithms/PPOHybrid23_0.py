@@ -913,8 +913,8 @@ class PPOHybrid:
                 diff_bern0 = theoretical_ent_bern_max - target_entropy_bern_tensor
                 k_nonlinear_max_bern = torch.sqrt(1+diff_bern0**2)/(diff_bern0+1e-8)
 
-                k_nonlinear_cat = max(min(k_nonlinear, k_nonlinear_max_cat), 0.0)
-                k_nonlinear_bern = max(min(k_nonlinear, k_nonlinear_max_bern), 0.0)
+                k_nonlinear_cat = min(max(k_nonlinear, 0.0), k_nonlinear_max_cat)
+                k_nonlinear_bern = min(max(k_nonlinear, 0.0), k_nonlinear_max_bern)
 
                 # 1. Categorical 约束项
                 cat_constraint_term = k_cat * (
