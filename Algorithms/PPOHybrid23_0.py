@@ -24,7 +24,7 @@ class PolicyNetHybrid(torch.nn.Module):
     支持混合动作空间的策略网络 (纯 MLP)。
     引入了可学习的温度参数来控制离散和伯努利动作的熵。
     """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
         
@@ -41,16 +41,34 @@ class PolicyNetHybrid(torch.nn.Module):
         # 参数: log_std (控制高斯分布宽度)
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             cont_dim = self.action_dims['cont']
-            self.fc_mu = nn.Linear(prev_size, cont_dim)
-            # 这里的 log_std 依然是状态无关的，对应 PPO 的标准做法
             self.log_std_cont = nn.Parameter(torch.log(torch.ones(cont_dim) * init_std))
+
+            # # # 原·单层动作头
+            # self.fc_mu = nn.Linear(prev_size, cont_dim)
+            
+            # 现·多层动作头
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, cont_dim))
+            self.fc_mu = nn.Sequential(*layers)
+            
 
         # 2. 离散动作头 (Categorical)
         # 参数: log_temp_cat (控制 Softmax 温度)
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             self.cat_dims = self.action_dims['cat']  # list, e.g., [4, 10]
             total_cat_dim = sum(self.cat_dims)
-            self.fc_cat = nn.Linear(prev_size, total_cat_dim)
+            # # 原·单层输出
+            # self.fc_cat = nn.Linear(prev_size, total_cat_dim)
+            # 现·多层动作头
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, total_cat_dim))
+            self.fc_cat = nn.Sequential(*layers)
             
             # 为每一个独立的离散头 (Head) 创建一个温度参数
             # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
@@ -61,20 +79,20 @@ class PolicyNetHybrid(torch.nn.Module):
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
-            # 原·单层输出
-            self.fc_bern = nn.Linear(prev_size, bern_dim)
-            # # 现·多层输出
-            # layers = []
-            # for _ in range(1):
-            #     layers.append(nn.Linear(prev_size, 64))
-            #     layers.append(nn.ReLU())
-            #     prev_size = 64
-            # layers.append(nn.Linear(prev_size, bern_dim))
-            # self.fc_bern = nn.Sequential(*layers)
-
+            # # 原·单层输出
+            # self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            nn.init.constant_(self.fc_bern.bias, -2.0) # 原·单层输出
-            # nn.init.constant_(self.fc_bern[-1].bias, -2.0) # 现·多层输出
+            # nn.init.constant_(self.fc_bern.bias, -2.0)
+
+            # 现·多层输出
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, bern_dim))
+            self.fc_bern = nn.Sequential(*layers)
+            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
+            nn.init.constant_(self.fc_bern[-1].bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temp=1.0)
