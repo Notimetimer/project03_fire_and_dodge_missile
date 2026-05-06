@@ -211,32 +211,37 @@ class CircularDiscretizedDistribution:
     圆周空间离散化分布 (星形分布)。
     通过输入向量 (x, y) 与预设的 n 个方向向量做点积，构建 Categorical 分布。
     接口对齐 SquashedNormal。
+    强制归一化输入向量，使得 std (等效 sigma) 成为控制分布宽度的唯一变量。
     """
-
-    def __init__(self, vec_h, temp, n=12, eps=1e-8):
+    def __init__(self, vec_h, std, n=12, eps=1e-8):
         """
         Args:
-            vec_h: (batch_size, 2) 神经网络输出的原始向量 [hx, hy]
-            temp:  (batch_size, 1) 或 标量，控制分布的熵 (等效于方差)
-            n:     离散采样精度 (如 12 个时钟位)
-            eps:   数值稳定性小量
+            vec_h: (batch_size, 2) 神经网络输出。我们只取其方向。
+            std:   (batch_size, 1) 或 标量。等效标准差 (单位: 弧度)。
+                   std 越大，分布越扁平；std 越小，分布越尖锐。
+            n:     采样精度。
         """
         self.device = vec_h.device
-        self.batch_size = vec_h.size(0)
         self.n = n
-        self.temp = torch.as_tensor(temp, device=self.device) + eps
-        self.vec_h = vec_h
-
-        # 1. 预设 n 个离散方向向量 (单位圆上均匀分布)
-        # 0弧度对应 (1, 0)，即 3 点钟方向，逆时针排列
-        angles = torch.linspace(0, 2 * np.pi, n + 1, device=self.device)[:-1]
-        self.v_matrix = torch.stack([torch.cos(angles), torch.sin(angles)], dim=-1) # (n, 2)
-
-        # 2. 计算点积 Logits: (batch, 2) @ (2, n) -> (batch, n)
-        # 这里的 vec_h 模长 rho 和 temp 共同决定了分布的“尖锐”程度
-        self.logits = torch.matmul(vec_h, self.v_matrix.t()) / self.temp
+        self.eps = eps
         
-        # 3. 构建内部离散分布
+        # 1. 强制归一化神经网络的输出向量，消除模长对熵的影响
+        # 此时 vec_h 仅代表“意图方向”
+        self.direction = F.normalize(vec_h, p=2, dim=-1, eps=eps)
+
+        # 2. 将输入的 std 转化为集中度参数 kappa (1/sigma^2)
+        # 为了数值稳定性，限制 std 的最小值
+        self.std = torch.as_tensor(std, device=self.device).clamp(min=1e-3)
+        self.kappa = 1.0 / (self.std.pow(2) + eps)
+
+        # 3. 预设 n 个离散方向向量
+        angles = torch.linspace(0, 2 * np.pi, n + 1, device=self.device)[:-1]
+        self.v_matrix = torch.stack([torch.cos(angles), torch.sin(angles)], dim=-1)
+
+        # 4. 计算 Logits: kappa * (direction · v)
+        # 这里的 1/sigma^2 起到了原本 Boltzmann 温度倒数的作用
+        self.logits = torch.matmul(self.direction, self.v_matrix.t()) * self.kappa
+        
         self.probs = F.softmax(self.logits, dim=-1)
         self.dist = torch.distributions.Categorical(probs=self.probs)
 
@@ -261,14 +266,13 @@ class CircularDiscretizedDistribution:
         return self.dist.log_prob(a)
 
     def entropy(self):
-        """
-        计算精确的离散香农熵。
-        """
+        # 注意：这是离散熵。当 n 很大时，它会趋近于连续分布的熵减去 log(n)
         return self.dist.entropy()
 
     @property
-    def mean(self):
+    def mean_idx(self):
         """
         返回概率最大的方向索引 (等效于高斯分布的均值)
         """
         return torch.argmax(self.probs, dim=-1)
+
