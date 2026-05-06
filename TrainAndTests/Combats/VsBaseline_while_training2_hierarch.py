@@ -100,13 +100,13 @@ def test_worker(model_state_dict, rule_num,
             # 尝试发射
             if getattr(test_env.RUAV, 'about_to_fire', 0):
                 # 如果 restrict_fire 为 True，则限制动作次序（传入 r_action_label）
-                r_act_label_to_pass = r_action_label if restrict_fire else None
+                r_act_label_to_pass = None # r_action_label if restrict_fire else None
                 tabu_fire = 1 if restrict_fire else 0
                 launch_missile_immediately(test_env, 'r', action_label=r_act_label_to_pass, tabu=tabu_fire)
             b_m_id = None
             if getattr(test_env.BUAV, 'about_to_fire', 0):
                 # 如果 restrict_fire 为 True，则限制动作次序（传入 b_action_label）
-                b_act_label_to_pass = b_action_label if restrict_fire else None
+                b_act_label_to_pass = None # b_action_label if restrict_fire else None
                 tabu_fire = 1 if restrict_fire else 0
                 b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_act_label_to_pass, tabu=tabu_fire)
 
