@@ -93,7 +93,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             # 优先俯冲回转至5000m以下
             if alt > 5000:
-                action_v = 4 # -60度俯冲
+                action_v = 4 # 快速下高
             else:
                 action_v = 2 # 平飞
             # 置尾机动
@@ -120,7 +120,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     elif rules_num in [2, 4]:
         # 规则2: Loft爬升射击序列
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
-            action_v = 5
+            action_v = 4 # 下降高度
             action_h = 6 # 置尾机动
             action_number = [action_v, action_h]
             # action_number = 8 # 立刻 split-S
@@ -167,7 +167,8 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     #     fire_missile_affirmative = fire_missile
         
     if np.random.rand() <= p_random:
-        v_action = np.random.randint(0, 6)
+        # 再出现动作数值越界改这里
+        v_action = np.random.randint(0, 5)
         h_action = np.random.randint(0, 7)
         action_number = [v_action, h_action]
         # action_number = np.random.randint(0, 13+1)

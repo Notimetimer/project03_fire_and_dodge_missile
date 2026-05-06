@@ -67,7 +67,7 @@ class ChooseStrategyEnv(Battle):
             "border",  # 2
         ]
         self.obs_dim = 1*6+8+7+1+4+2
-        self.fly_act_dim = [6, 7] # 14
+        self.fly_act_dim = [5, 7] # 14
         self.fire_dim = 1
         
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
@@ -215,9 +215,7 @@ class ChooseStrategyEnv(Battle):
             theta_desired = np.clip(theta+delta_theta+np.radians(0.5), -pi/2, pi/2)
         if action_v == 3: # 比目标低20°
             theta_desired = np.clip(theta+delta_theta+np.radians(-20), -pi/2, pi/2)
-        if action_v == 4: # 比目标低45°
-            theta_desired = np.clip(theta+delta_theta+np.radians(-45), -pi/2, pi/2)
-        if action_v == 5: # 急速下降
+        if action_v == 4: # 急速下降
             theta_desired = -pi/2
         
         # 不能出安全高度范围
@@ -225,19 +223,6 @@ class ChooseStrategyEnv(Battle):
                                    self.min_alt_safe-UAV.alt, 
                                    self.max_alt_safe-UAV.alt)
 
-        # # 垂直方向指令
-        # if action_v == 0:
-        #     delta_height_cmd = min(5000*2/3, self.max_alt_safe-UAV.alt)
-        # if action_v == 1:
-        #     delta_height_cmd = min(5000/3, self.max_alt_safe-UAV.alt)
-        # if action_v == 2:
-        #     delta_height_cmd = 135
-        # if action_v == 3:
-        #     delta_height_cmd = max(-5000/3, self.min_alt_safe-UAV.alt)
-        # if action_v == 4:
-        #     delta_height_cmd = max(-5000/3*2, self.min_alt_safe-UAV.alt)
-        # if action_v == 5:
-        #     delta_height_cmd = max(-2000, self.min_alt_safe-UAV.alt)
 
         # 水平方向指令：
         # 回中心

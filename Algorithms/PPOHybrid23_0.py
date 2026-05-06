@@ -550,7 +550,7 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
+                 k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
@@ -938,14 +938,18 @@ class PPOHybrid:
                 cat_constraint_term = k_cat * (
                     - loss_ent_cat + 
                     torch.where(loss_ent_cat > target_entropy_cat_tensor, 
-                    k_nonlinear_cat * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
+                    min(max(k_nonlinear_cat, 0.0), 1.0)/(2 * diff_cat0) * \
+                        torch.square(loss_ent_cat - target_entropy_cat_tensor)
+                    # k_nonlinear_cat * (torch.sqrt(1 + torch.square(target_entropy_cat_tensor - loss_ent_cat)) - 1)
                     , 0.0)
                 )
                 # 2. Bernoulli 约束项
                 bern_constraint_term = k_bern * (
                     - loss_ent_bern + 
                     torch.where(loss_ent_bern > target_entropy_bern_tensor,
-                    k_nonlinear_bern * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
+                    min(max(k_nonlinear_bern, 0.0), 1.0)/(2 * diff_bern0) * \
+                        torch.square(loss_ent_bern - target_entropy_bern_tensor)
+                    # k_nonlinear_bern * (torch.sqrt(1 + torch.square(target_entropy_bern_tensor - loss_ent_bern)) - 1)
                     , 0.0)
                 )
                 # 3. 组合最终 Actor Loss

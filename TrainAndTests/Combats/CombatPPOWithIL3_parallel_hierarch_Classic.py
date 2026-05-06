@@ -562,6 +562,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         m_fired += 1
                     if r_m_id:
                         pass
+                    
+                    # debug
+                    if r_action_label[0] > 4:
+                        print("数值超出范围", r_action_label[0], r_action_label[1])
 
                     r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                     b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)

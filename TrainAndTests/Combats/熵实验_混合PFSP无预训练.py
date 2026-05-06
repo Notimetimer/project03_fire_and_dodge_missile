@@ -5,7 +5,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练带熵变化'
+mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练低熵'
 
 # NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s
 # NoILPFSP_分阶段_挑战_并行_分层2s
@@ -21,7 +21,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # 0.008  0.005
+k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.001} # 0.008  0.005
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -79,7 +79,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        k_nonlinear=0.89,
+        k_nonlinear=1.0,
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,

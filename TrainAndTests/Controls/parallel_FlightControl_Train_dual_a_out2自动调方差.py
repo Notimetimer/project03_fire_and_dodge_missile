@@ -46,7 +46,7 @@ import traceback
 import time
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, \
-    device_worker, seed, dt_decide, dt_move, beta_ao, k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.05}):
+    device_worker, seed, dt_decide, dt_move, beta_ao, k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.05}):
     try:
         worker_seed = seed + rank * 1000
         random.seed(worker_seed)

@@ -15,7 +15,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                         help="")
     args = parser.parse_args()
 
-    env = ChooseStrategyEnv(args, tacview_show=1)
+    env = ChooseStrategyEnv(args, tacview_show=0)
     env.dt_move = 0.04 # 0.025 0.02
     env.shielded = shielded
 
@@ -115,9 +115,9 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
                         current_action = {'cat': np.array(b_action_label), 'bern': np.array([b_fire])}
 
                     if getattr(env.RUAV, 'about_to_fire', 0):
-                        launch_missile_immediately(env, 'r', action_label=r_action_label, tabu=1) # r_action_label)
+                        launch_missile_immediately(env, 'r', action_label=None, tabu=1) # r_action_label)
                     if getattr(env.BUAV, 'about_to_fire', 0):
-                        launch_missile_immediately(env, 'b', action_label=b_action_label, tabu=1) # b_action_label)
+                        launch_missile_immediately(env, 'b', action_label=None, tabu=1) # b_action_label)
 
                     r_action = env.maneuver14LR(env.RUAV, r_action_label)
                     b_action = env.maneuver14LR(env.BUAV, b_action_label)

@@ -17,7 +17,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 # IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260504-151707 决不能删掉!!!!!
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
