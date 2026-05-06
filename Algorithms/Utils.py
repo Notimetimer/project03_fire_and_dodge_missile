@@ -203,3 +203,72 @@ class SquashedNormal:
         # 这在实践中通常足够，若需精确熵可用采样估计
         ent = self.normal.entropy().sum(-1)
         return ent
+
+
+# 圆周空间下随机概率分布
+class CircularDiscretizedDistribution:
+    """
+    圆周空间离散化分布 (星形分布)。
+    通过输入向量 (x, y) 与预设的 n 个方向向量做点积，构建 Categorical 分布。
+    接口对齐 SquashedNormal。
+    """
+
+    def __init__(self, vec_h, temp, n=12, eps=1e-8):
+        """
+        Args:
+            vec_h: (batch_size, 2) 神经网络输出的原始向量 [hx, hy]
+            temp:  (batch_size, 1) 或 标量，控制分布的熵 (等效于方差)
+            n:     离散采样精度 (如 12 个时钟位)
+            eps:   数值稳定性小量
+        """
+        self.device = vec_h.device
+        self.batch_size = vec_h.size(0)
+        self.n = n
+        self.temp = torch.as_tensor(temp, device=self.device) + eps
+        self.vec_h = vec_h
+
+        # 1. 预设 n 个离散方向向量 (单位圆上均匀分布)
+        # 0弧度对应 (1, 0)，即 3 点钟方向，逆时针排列
+        angles = torch.linspace(0, 2 * np.pi, n + 1, device=self.device)[:-1]
+        self.v_matrix = torch.stack([torch.cos(angles), torch.sin(angles)], dim=-1) # (n, 2)
+
+        # 2. 计算点积 Logits: (batch, 2) @ (2, n) -> (batch, n)
+        # 这里的 vec_h 模长 rho 和 temp 共同决定了分布的“尖锐”程度
+        self.logits = torch.matmul(vec_h, self.v_matrix.t()) / self.temp
+        
+        # 3. 构建内部离散分布
+        self.probs = F.softmax(self.logits, dim=-1)
+        self.dist = torch.distributions.Categorical(probs=self.probs)
+
+    def sample(self):
+        """
+        采样：从离散分布中抽取索引。
+        Returns:
+            a: 抽取的动作索引 (0 到 n-1)
+            logits: 该样本对应的全部 logits (用于兼容接口或辅助计算)
+        """
+        a = self.dist.sample()
+        return a, self.logits
+
+    def log_prob(self, a, logits_unused=None):
+        """
+        计算动作 a 的对数概率。
+        Args:
+            a: 动作索引 (batch_size,)
+            logits_unused: 仅为了兼容 SquashedNormal 接口
+        """
+        # 直接使用 Categorical 的 log_prob
+        return self.dist.log_prob(a)
+
+    def entropy(self):
+        """
+        计算精确的离散香农熵。
+        """
+        return self.dist.entropy()
+
+    @property
+    def mean(self):
+        """
+        返回概率最大的方向索引 (等效于高斯分布的均值)
+        """
+        return torch.argmax(self.probs, dim=-1)
