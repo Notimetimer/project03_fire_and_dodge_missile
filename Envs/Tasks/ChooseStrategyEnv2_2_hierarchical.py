@@ -249,6 +249,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # crank引导
         if enm_threat_dist < distance:
             r_constraint -= 4 * abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead) # 引导太弱
+        
+        if len(alive_ally_missiles) > 1:
+            # 开火后下高
+            r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] # 开火后高度越低越好，如果还抬头必有惩罚
 
         # 速度惩罚
         slow_mach = 0.7
