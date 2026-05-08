@@ -271,8 +271,8 @@ class HybridActorWrapper(nn.Module):
         注意： 仅在推理时传入check_obs, 训练时禁止传入!!!
         1、目前 get action 中的 mask 生成只处理单个 check_obs（推理时），
             并把同一 mask 广播到整个 batch；如果要对 batch 内每个样本分别判断需扩展生成逻辑。
-        2、evaluate_actions（训练/计算 log_prob）默认未把 action_masks 传给 net ,
-            若希望训练时也应用 mask，需要在 evaluate_actions 调用 net 时传入 action_masks。
+        2、evaluate_action（训练/计算 log_prob）默认未把 action_masks 传给 net ,
+            若希望训练时也应用 mask，需要在 evaluate_action 调用 net 时传入 action_masks。
         """
         #  增强的 Batch 检测逻辑
         is_batch = False
