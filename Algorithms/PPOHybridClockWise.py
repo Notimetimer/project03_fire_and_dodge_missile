@@ -1261,7 +1261,7 @@ class PPOHybrid:
                         cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
                         
                         # 严厉惩罚系数：这个值可以设得比 alpha_sparsity 高一个数量级
-                        alpha_cooldown = 0.05 
+                        alpha_cooldown = 0.15 # 优势度归一化之后，均值为0，标准差为1，必须优势很大才能够跨过重复开火惩罚 
                         
                         # 冷却损失：权重 * 开火概率。当刚开过火时，梯度会强制把 bern_logits 往负无穷推。
                         cooldown_loss = (cooldown_weight * bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
