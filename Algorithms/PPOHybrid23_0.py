@@ -1345,28 +1345,22 @@ class PPOHybrid:
         输入 actions 结构支持: [{'cat': array([v]), 'bern': array([v])}, ...]
         tau: 非对称损失权重 (Expectile Regression). tau=0.5 为 MSE; tau>0.5 (如0.9) 倾向于高估 Value (拟合好样本)
         """
-        # 可能的局部观测
+        # 1. 数据准备
         if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
             obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
             use_obs = True
         else:
             use_obs = False
             
-        # 冻结分布参数，只训练均值/Logits
+        # 预训练阶段通常不训练探索 std
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = False
-        # if hasattr(self.actor.net, 'log_temp_cat'):
-        #     self.actor.net.log_temp_cat.requires_grad = False
-        # if hasattr(self.actor.net, 'log_temp_bern'):
-        #     self.actor.net.log_temp_bern.requires_grad = False
 
         # 1. 提取全量数据并转为 Tensor
         states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
         returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        # ============================================================
-        # [修改] 统一处理 Actions：List of Dicts -> Dict of Tensors
-        # ============================================================
+        # 统一处理 Actions：List of Dicts -> Dict of Tensors
         raw_actions = il_transition_dict['actions']
         actions_all = {}
         
@@ -1443,13 +1437,7 @@ class PPOHybrid:
             # 原有
             critic_loss = F.mse_loss(v_pred, r_batch) * c_v
             
-            # # # [修改] 使用非对称损失 (Expectile Regression)
-            # # # 如果回报高于预估值（好样本），给予极大的权重（tau > 0.5）
-            # # # 如果回报低于预估值（差样本），给予较小的权重
-            # diff = r_batch - v_pred
-            # tau_t = torch.tensor(tau, device=self.device)
-            # weight = torch.where(diff > 0, tau_t, 1.0 - tau_t) # 条件，True取值，False取值
-            # critic_loss = (weight * (diff**2)).mean() * c_v
+
 
             # D. Optimize
             self.actor_optimizer.zero_grad()

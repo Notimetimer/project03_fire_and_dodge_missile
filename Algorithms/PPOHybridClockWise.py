@@ -867,7 +867,7 @@ class PPOHybrid:
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89,
-                time_since_shoot_location=21): 
+                alpha_tutor=0.0): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1256,7 +1256,7 @@ class PPOHybrid:
 
                     # if time_since_shoot_location is not None:
                     #     # 3. [核心新增] 冷却时间强制压制 (方案 A 版)
-                    #     t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
+                    #     t_since_launch = mb_actor_inputs[:, 21:22] 
                         
                     #     # 构建惩罚权重: t < 0.333 时生效
                     #     cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
@@ -1336,11 +1336,10 @@ class PPOHybrid:
                     entropy_lin_list.append(entropy_details['lin'].mean().item())
 
         # =====================================================================
-        # 第二阶段：规则强制修正 (Post-PPO Rule Enforcement)
-        # 移出 Epoch 循环，只执行 1 次或独立的少数次数，避免干扰 PPO 的 clip 指标
+        # 第二阶段：开火本能补习 (Firing Instinct Tutoring) - BVR 修正版
+        # 移出 PPO 循环，直接通过对数梯度建立 (Obs -> Fire_Logits) 的常识映射
         # =====================================================================
-        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-            # 重新打乱索引，进行一次专门针对开火规则的微调
+        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0 and alpha_tutor > 0:
             rule_idx = torch.randperm(num_samples, device=self.device)
             for start in range(0, num_samples, mini_batch_size):
                 end = min(start + mini_batch_size, num_samples)
@@ -1349,33 +1348,67 @@ class PPOHybrid:
                 mb_actor_inputs = actor_inputs[batch_idx]
                 mb_active_masks = active_masks[batch_idx]
                 
-                # 重新前向传播获取当前 logits
                 actor_outputs = self.actor.net(mb_actor_inputs, min_std=self.min_std, max_std=self.max_std)
                 bern_logits = actor_outputs['bern']
                 bern_probs = torch.sigmoid(bern_logits)
-                
-                # --- 方案 A 对数惩罚项 ---
                 eps = 1e-7
-                rule_loss = 0
 
-                # 基础稀疏性惩罚
-                sparsity_log_penalty = -torch.log(1.0 - bern_probs + eps)
-                rule_loss += (0.001 * sparsity_log_penalty * mb_active_masks).sum() / (active_sum + mask_eps)
+                # 提取观测位 (i:i+1 保持 Tensor 维度为 [Batch, 1])
+                o_6  = mb_actor_inputs[:, 6:7]   # cos(delta_psi)
+                o_8  = mb_actor_inputs[:, 8:9]   # delta_theta (rad)
+                o_9  = mb_actor_inputs[:, 9:10]  # dist_scale
+                o_12 = mb_actor_inputs[:, 12:13] # AA_hor (rad): 0为尾追, pi为对头
+                o_21 = mb_actor_inputs[:, 21:22] # time_since_shoot
 
-                # 冷却时间强制压制 (方案 A 版)
-                if time_since_shoot_location is not None:
-                    t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1]
-                    cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
-                    
-                    # 方案 A：梯度 w.r.t logits = alpha * p (单调不消失)
-                    cooldown_log_penalty = -torch.log(1.0 - bern_probs + eps)
-                    rule_loss += (0.4 * cooldown_log_penalty * cooldown_weight * mb_active_masks).sum() / (active_sum + mask_eps)
+                # --- 1. 计算各项权重 (正数为奖励，负值为惩罚) ---
+                
+                # A. 冷却与不瞄准 (强惩罚项)
+                # 冷却惩罚 (Hard Constraint): 设为 -2.0，足以压制所有潜在奖励之和(约0.6)
+                w_cool = -1.0 * torch.clamp(1.0 - o_21 * 3.0, min=0.0) 
+                # 不瞄准惩罚 (瞄准基础)
+                w_psi  = -1.0 * torch.clamp(np.pi/6 - np.arccos(o_6), min=0.0) / (np.pi/6)
+                
+                # # B. 俯仰 (混合项): >0 奖励, <0 惩罚
+                # w_theta = torch.clamp(o_8 / (np.pi/3), min=0.0, max=1.0) * 0.2 - \
+                #           torch.clamp(-o_8 / (np.pi/2), min=0.0) * 0.2
+                
+                # # C. 距离 (混合项): <5 奖励, >5 惩罚 (实现距离豁免距离惩罚)
+                # w_dist = torch.clamp(1.0 - o_9 / 5.0, min=0.0) * 0.2 - \
+                #          torch.clamp((o_9 - 5.0) / 7.0, min=0.0, max=1.0) * 0.2
+                
+                # # D. 进入角 (BVR修正): 对头(|AA|->pi)奖励, 尾追(|AA|->0)惩罚
+                # # 当 |o12| 接近 pi 时，w_aa 为正(奖励)；当 |o12| 接近 0 时，w_aa 为负(惩罚)
+                # w_aa = torch.clamp((torch.abs(o_12) - np.pi/2) / (np.pi/2), min=0.0, max=1.0) * 0.2 - \
+                #        torch.clamp(1.0 - torch.abs(o_12) / (np.pi/2), min=0.0) * 0.2
 
-                # 独立执行规则更新
-                self.actor_optimizer.zero_grad()
-                rule_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
-                self.actor_optimizer.step()
+                # 汇总总权重
+                net_weight = w_cool + w_psi # + w_theta + w_dist + w_aa
+
+                # --- 2. 构造“推-拉”损失函数 ---
+                
+                # # 奖励项: 目标 p -> 1, 当权重为正时生效
+                # # 使用 -log(p)，当 p 越小时，向上推力越大
+                # loss_reward  = -torch.log(bern_probs + eps) * torch.clamp(net_weight, min=0.0)
+                
+                # 惩罚项: 目标 p -> 0, 当权重为负时生效
+                # 使用 -log(1-p)，当 p 越大时，向下压力越大
+                loss_penalty = -torch.log(1.0 - bern_probs + eps) * torch.clamp(-net_weight, min=0.0)
+
+                # --- 3. 中断机制与执行 ---
+                
+                p_mean = bern_probs.mean()
+                if p_mean < 0.1:
+                    # [修正] 开火概率低于 0.1 时，彻底关掉补习信号，防止过度压制
+                    tutor_loss = torch.tensor(0.0, device=self.device)
+                else:
+                    tutor_loss = ((loss_penalty) * mb_active_masks).sum() / (active_sum + eps)
+
+                # 梯度回传
+                if tutor_loss.requires_grad:
+                    self.actor_optimizer.zero_grad()
+                    (tutor_loss * alpha_tutor).backward()
+                    nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
+                    self.actor_optimizer.step()
                 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -1644,35 +1677,29 @@ class PPOHybrid:
     
     
     # --- 修改后的 MARWIL_update， 注意原先是0 ---
-    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
-                      tau=0.8, no_bern=1):
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, 
+                      shuffled=1, label_smoothing=0.1, max_weight=100.0,
+                      tau=0.8, no_bern=1, alpha_tutor=10.0):
         """
-        MARWIL 离线更新函数
-        输入 actions 结构支持: [{'cat': array([v]), 'bern': array([v])}, ...]
-        tau: 非对称损失权重 (Expectile Regression). tau=0.5 为 MSE; tau>0.5 (如0.9) 倾向于高估 Value (拟合好样本)
+        MARWIL 离线更新函数，集成 BVR 开火本能补习。
+        alpha_tutor: 补习信号强度，建议预训练阶段设为 0.1 ~ 0.2。
         """
-        # 可能的局部观测
+        # 1. 数据准备
         if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
             obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
             use_obs = True
         else:
             use_obs = False
             
-        # 冻结分布参数，只训练均值/Logits
+        # 预训练阶段通常不训练探索 std
         if hasattr(self.actor.net, 'log_std_cont'):
             self.actor.net.log_std_cont.requires_grad = False
-        # if hasattr(self.actor.net, 'log_temp_cat'):
-        #     self.actor.net.log_temp_cat.requires_grad = False
-        # if hasattr(self.actor.net, 'log_temp_bern'):
-        #     self.actor.net.log_temp_bern.requires_grad = False
 
         # 1. 提取全量数据并转为 Tensor
         states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
         returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
         
-        # ============================================================
-        # [修改] 统一处理 Actions：List of Dicts -> Dict of Tensors
-        # ============================================================
+        # 统一处理 Actions：List of Dicts -> Dict of Tensors
         raw_actions = il_transition_dict['actions']
         actions_all = {}
         
@@ -1688,13 +1715,9 @@ class PPOHybrid:
         # 2. Dict of Arrays -> Dict of Tensors
         if isinstance(raw_actions, dict):
             for k, v in raw_actions.items():
-                if k in ['cat', 'circ', 'lin']:
-                    actions_all[k] = torch.tensor(v, dtype=torch.long).to(self.device)
-                else:
-                    actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
-        # ============================================================
+                dtype = torch.long if k in ['cat', 'circ', 'lin'] else torch.float
+                actions_all[k] = torch.tensor(v, dtype=dtype).to(self.device)
 
-        # 2. 准备 Batch 索引
         total_size = states_all.size(0)
         indices = np.arange(total_size)
         if shuffled:
@@ -1739,9 +1762,63 @@ class PPOHybrid:
                 raw_weights = torch.exp(beta * advantage)
                 weights = torch.clamp(raw_weights, max=max_weight)
 
-            # B. Actor Loss
-            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing, no_bern=no_bern, max_std=self.max_std)
+            # B. 计算基础模仿损失 (Actor Loss)
+            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, 
+                                                    label_smoothing, no_bern=no_bern, max_std=self.max_std)
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
+
+            # =====================================================================
+            # [新增] 伯努利开火本能补习 (BVR 修正版)
+            # =====================================================================
+            if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0 and alpha_tutor > 0:
+                # 获取网络原始输出（用于补习项梯度）
+                actor_outputs = self.actor.net(actor_input_batch, max_std=self.max_std)
+                bern_logits = actor_outputs['bern']
+                bern_probs = torch.sigmoid(bern_logits)
+                eps = 1e-7
+
+                # 提取补习观测位
+                o_6  = actor_input_batch[:, 6:7]   # cos(delta_psi)
+                o_8  = actor_input_batch[:, 8:9]   # delta_theta
+                o_9  = actor_input_batch[:, 9:10]  # dist_scale
+                o_12 = actor_input_batch[:, 12:13] # AA_hor: 0尾追, pi对头
+                o_21 = actor_input_batch[:, 21:22]
+
+                # --- 构建符号权重 (正奖励，负惩罚) ---
+                # 1. 核心判定：是否瞄准 (Yaw Error < 30 deg)
+                # 只有瞄准了，才允许获得正向的“补习奖励”权重
+                # is_aimed = (o_6 >= np.cos(np.pi/3)).float()
+
+                # 2. 冷却惩罚 (Hard Constraint): 设为 -2.0，足以压制所有潜在奖励之和(约0.6)
+                w_cool = -1.0 * torch.clamp(1.0 - o_21 * 3.0, min=0.0) 
+                
+                # 3. 不瞄准惩罚 (瞄准基础)
+                w_psi  = -1.0 * torch.clamp(np.pi/6 - np.arccos(o_6), min=0.0) / (np.pi/6)
+                
+                # # 4. 俯仰奖励/惩罚: >0奖励(需瞄准), <0惩罚
+                # w_theta = torch.clamp(o_8 / (np.pi/3), min=0.0, max=1.0) * 0.2 * is_aimed - \
+                #           torch.clamp(-o_8 / (np.pi/2), min=0.0) * 0.2
+                
+                # # 5. 距离奖励/惩罚: <5奖励(需瞄准), >5惩罚
+                # w_dist = torch.clamp(1.0 - o_9 / 5.0, min=0.0) * 0.2 * is_aimed - \
+                #          torch.clamp((o_9 - 5.0) / 7.0, min=0.0, max=1.0) * 0.2
+                
+                # # 6. 进入角 (BVR修正): 对头奖励(|AA|->pi, 需瞄准), 尾追惩罚(|AA|->0)
+                # w_aa = torch.clamp((torch.abs(o_12) - np.pi/2) / (np.pi/2), min=0.0, max=1.0) * 0.2 * is_aimed - \
+                #        torch.clamp(1.0 - torch.abs(o_12) / (np.pi/2), min=0.0) * 0.2
+
+                # 汇总总权重：由 w_cool 统治，奖励由 is_aimed 开启
+                net_weight = w_cool + w_psi #  + w_theta + w_dist + w_aa
+
+                # 分支对数引导 (方案 A)
+                loss_reward = 0
+                # loss_reward  = -torch.log(bern_probs + eps) * torch.clamp(net_weight, min=0.0)
+                loss_penalty = -torch.log(1.0 - bern_probs + eps) * torch.clamp(-net_weight, min=0.0)
+
+                # 全停开关: 低于 0.1 彻底关掉补习信号
+                if bern_probs.mean() >= 0.1:
+                    tutor_loss = torch.mean(loss_reward + loss_penalty)
+                    actor_loss = actor_loss + tutor_loss * alpha_tutor
 
             # C. Critic Loss
             v_pred = self.critic(s_batch)
@@ -1749,13 +1826,6 @@ class PPOHybrid:
             # 原有
             critic_loss = F.mse_loss(v_pred, r_batch) * c_v
             
-            # # # [修改] 使用非对称损失 (Expectile Regression)
-            # # # 如果回报高于预估值（好样本），给予极大的权重（tau > 0.5）
-            # # # 如果回报低于预估值（差样本），给予较小的权重
-            # diff = r_batch - v_pred
-            # tau_t = torch.tensor(tau, device=self.device)
-            # weight = torch.where(diff > 0, tau_t, 1.0 - tau_t) # 条件，True取值，False取值
-            # critic_loss = (weight * (diff**2)).mean() * c_v
 
             # D. Optimize
             self.actor_optimizer.zero_grad()

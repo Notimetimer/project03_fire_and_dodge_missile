@@ -553,7 +553,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
                                 explore_dict_r = {'cont':0, 'lin':adv_explore, 'circ':adv_explore, 'bern':1}
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore=explore_dict_r, temperature=temperature)
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore=explore_dict_r, temperature=temperature, max_std=0.8)
                                 r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
                                 r_action_h = r_action_exec['circ'][0] if isinstance(r_action_exec['circ'], (list, np.ndarray)) else r_action_exec['circ']
                                 r_action_label = [r_action_v, r_action_h]
@@ -1396,73 +1396,36 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
-                # if use_sil:
-                #     if target_pool_keys:
-                        
-                #         # # 变化尺度对称型函数
-                #         # a_p = -8
-                #         # k_p = 0.006
-                #         # mid = log10(alpha_il)
-                #         # b_p = 2 * mid - a_p
-                #         # scale = (b_p - a_p) / 2.0      # 3.0
-                #         # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                #         # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                #         # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                #         # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                #         # exponent = min(exponent, -2)
-                        
-                #         # # 非对称函数
-                #         # --- 自定义参数配置 ---
-                #         M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                #         b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
-                                                
-                #         # 原·根据elo插值缩放指数
-                #         # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                #         # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-                #         # 现·根据训练步数逐渐缩小指数
-                #         k_shape = 4/4e6
-                #         exponent = np.clip( b - k_shape * total_steps, -20, M )
-                        
-                #         # 得到最终 alpha_il (10 的 exponent 次方)
-                #         dynamic_alpha_il = 10 ** max(exponent, -20)
-                #     else:
-                #         dynamic_alpha_il = alpha_il
-                    
-                #     # 记录动态参数到 TensorBoard
-                #     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                #     logger.add("train_plus/alpha_exponent", exponent, total_steps)
-                    
-                #     # 读取 IL 数据
-                #     il_data = il_transition_buffer.read(il_batch_size2)
-                #     logger.add("train_plus/il_data_size", len(il_data['returns']), total_steps)
-                    
-                #     # 混合更新
-                #     student_agent.mixed_update(
-                #         transition_dict,
-                #         il_data,
-                #         init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                #         eta = np.clip(1 - total_steps/5e6, 0.01, 1),  # 3e6
-                #         adv_normed=True,
-                #         label_smoothing=label_smoothing_mixed,
-                #         alpha=dynamic_alpha_il,
-                #         beta=beta_mixed,
-                #         sil_only_maneuver = sil_only_maneuver,
-                #         mini_batch_size = mini_batch_size_mixed
-                #     )
-                # else:
+
                 #====================
-                # 动态调节 max_std (从 1.2 线性衰减到 0.6 @ 10M steps)
+                # 动态调节 std 约束范围 (线性退火)
                 #====================
+                # max_std: 限制探索的上限，从 1.1 降到 0.8，防止训练后期动作过于离谱
                 current_max_std = 1.1 - (1.1 - 0.8) * np.clip(total_steps / 10e6, 0.0, 1.0)
+
+                # min_std: 限制探索的下限，核心是强迫机动策略保持探索。
+                # 初始设定为一个较大的值 (如 0.7)，直到 10M steps 时才允许其降到 0.2 左右
+                # 这样在训练前期，机动策略永远不会变成确定性策略，必须给开火头留出尝试空间
+                current_min_std = 0.7 - (0.7 - 0.2) * np.clip(total_steps / 10e6, 0.0, 1.0)
+
                 student_agent.max_std = current_max_std
-                
-                # 强制将底层网络参数限制在 max_std 以下
+                student_agent.min_std = current_min_std # 假设你在 agent 类中定义了这个变量
+
+                #====================
+                # 强制将底层网络参数限制在 [min, max] 区间
+                #====================
                 with torch.no_grad():
+                    # 对数空间的限制：std = exp(log_std) -> log_std = ln(std)
+                    log_max = np.log(current_max_std)
+                    log_min = np.log(current_min_std)
+                    
+                    # 针对共享 std 和连续动作 std 进行双向截断
                     if hasattr(student_agent.actor.net, 'log_std_shared'):
-                        student_agent.actor.net.log_std_shared.clamp_(max=np.log(current_max_std))
-                    if hasattr(student_agent.actor.net, 'log_std_cont'):
-                        student_agent.actor.net.log_std_cont.clamp_(max=np.log(current_max_std))
+                        student_agent.actor.net.log_std_shared.clamp_(min=log_min, max=log_max)
                         
+                    if hasattr(student_agent.actor.net, 'log_std_cont'):
+                        student_agent.actor.net.log_std_cont.clamp_(min=log_min, max=log_max)
+                
                 logger.add("train_plus/max_std", current_max_std, total_steps)
 
                 #====================
@@ -1471,8 +1434,15 @@ def run_MLP_simulation(
                 actor_lr = min(actor_lr0, actor_lr0 * total_steps/1e6)
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+                
+                # 初始设定 alpha_tutor 为 0.4 (与 alpha_max_std 对齐)
+                # 在 5M 步线性退火到 0
+                alpha_tutor_now = 0.4 * max(0, 1 - total_steps / 5e6)
 
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear)
+                # 调用 update
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, 
+                    target_p1=target_p1, k_nonlinear=k_nonlinear,
+                    alpha_tutor=alpha_tutor_now)
                 #====================
                 # 记录 Log
 
