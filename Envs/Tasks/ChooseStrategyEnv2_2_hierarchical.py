@@ -51,7 +51,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'alt_limit_penalty': 1.0,
             'border_penalty_scale': 0.2,
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
-            'angle_advantage': 0.007, # 0.03
+            'angle_advantage': 0.01, # 0.007, # 0.03
             'height_advantage': 0.1,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
