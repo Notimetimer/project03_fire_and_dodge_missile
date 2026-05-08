@@ -648,7 +648,8 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89): 
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89,
+                time_since_shoot_location=None): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -958,14 +959,41 @@ class PPOHybrid:
                 # 原有非目标熵正则项
                 # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
-                # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
+                # =====================================================================
+                # [修改/重构] Bernoulli 开火头的专属正则化、稀疏惩罚与冷却约束
+                # =====================================================================
                 if actor_outputs['bern'] is not None:
                     bern_logits = actor_outputs['bern']
-                    # 仅对绝对值超出阈值的部分施加平缓增加的惩罚：
-                    # over = max(|logit| - 4, 0)，惩罚 (over)^2 的均值
+                    bern_probs = torch.sigmoid(bern_logits)
+                    
+                    # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
                     over = F.relu(torch.abs(bern_logits) - 4.0)
                     logit_loss = (over ** 2).mean()
                     actor_loss = actor_loss + alpha_logit_reg * logit_loss
+
+                    # 2. 基础稀疏惩罚 (Sparsity Prior) - 让模型默认不开火
+                    alpha_sparsity = 0.001
+                    sparsity_loss = (bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
+                    actor_loss = actor_loss + alpha_sparsity * sparsity_loss
+
+                    if time_since_shoot_location is not None:
+                        # 3. [核心新增] 冷却时间强制压制 (Temporal Cooldown Penalty)
+                        # 观测位 21: [0, 1] 对应 [0, 120]s。1/3 对应 40s 冷却。
+                        # 提取冷却时间状态
+                        t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
+                        
+                        # 构建惩罚权重: 
+                        # 只有当 t < 0.333 时权重才大于 0，且越接近 0 惩罚越严厉
+                        # 使用线性陡峭下降：f(t) = max(0, 1 - t * 3)
+                        cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
+                        
+                        # 严厉惩罚系数：这个值可以设得比 alpha_sparsity 高一个数量级
+                        alpha_cooldown = 0.05 
+                        
+                        # 冷却损失：权重 * 开火概率。当刚开过火时，梯度会强制把 bern_logits 往负无穷推。
+                        cooldown_loss = (cooldown_weight * bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
+                        actor_loss = actor_loss + alpha_cooldown * cooldown_loss
+                # =====================================================================
 
                 # Critic Loss
                 # Critic 使用 critic_inputs

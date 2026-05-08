@@ -40,7 +40,7 @@ class PolicyNetHybrid(torch.nn.Module):
         total_shared_std_dim = self.cont_dim + self.circ_dim + self.lin_dim
 
         if total_shared_std_dim > 0:
-            # 这里的 log_std 是状态无关的，由 cont 和 circ 共享
+            # 这里的 log_std 是状态无关的，由 cont 和 circ 和 lin 共享
             self.log_std_shared = nn.Parameter(torch.log(torch.ones(total_shared_std_dim) * init_std))
 
         # 1. 连续动作头 (Continuous)
@@ -127,6 +127,11 @@ class PolicyNetHybrid(torch.nn.Module):
             self.fc_lin = nn.Linear(prev_size, self.lin_dim)
     
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0):
+        if min_std is None:
+            min_std = 0.01
+        if max_std is None:
+            max_std = 10
+
         if isinstance(temp, dict):
             temp_cat = temp.get('cat', 1.0)
             temp_bern = temp.get('bern', 1.0)
@@ -139,7 +144,7 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # --- 处理共享 Std ---
         std_all = None
-        if (self.cont_dim + self.circ_dim) > 0:
+        if (self.cont_dim + self.circ_dim + self.lin_dim) > 0:
             std_all = torch.exp(self.log_std_shared).clamp(min=min_std, max=max_std)
             if shared_features.dim() > 1:
                 std_all = std_all.unsqueeze(0).expand(shared_features.size(0), -1)
@@ -255,7 +260,7 @@ class HybridActorWrapper(nn.Module):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
     # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temp 参数
-    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temp=1.0):
+    def get_action(self, state, h=None, explore=True, min_std=None, max_std=None, check_obs=None, bern_threshold=0.5, temp=1.0):
         """
         推理接口。
         Args:
@@ -352,10 +357,10 @@ class HybridActorWrapper(nn.Module):
         # =====================================================================
 
         # [修改] 调用网络时传入 action_masks 和 temp
-        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks, temp=temp)
+        actor_outputs = self.net(state, min_std=min_std, max_std=max_std, action_masks=action_masks, temp=temp)
         
         # # [原有] 调用网络
-        # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
+        # actor_outputs = self.net(state, min_std=min_std, max_std=max_std)  # 如果需要gru，改动这一行
         
         actions_exec = {}
         actions_raw = {}
@@ -471,7 +476,7 @@ class HybridActorWrapper(nn.Module):
 
         return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
-    def evaluate_actions(self, states, actions_raw, h=None, max_std=None):
+    def evaluate_actions(self, states, actions_raw, h=None, min_std=None, max_std=None):
         """
         训练接口。计算 log_probs 和 entropy。
         Args:
@@ -483,7 +488,7 @@ class HybridActorWrapper(nn.Module):
             next_h: None
             actor_outputs: dict (raw outputs from net) [新增]
         """
-        actor_outputs = self.net(states, max_std=max_std)
+        actor_outputs = self.net(states, min_std=min_std, max_std=max_std)
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
         entropy = torch.zeros(states.size(0), 1).to(self.device)
         
@@ -738,7 +743,7 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
+                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, min_std=0.01, max_std=0.7):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
@@ -781,6 +786,7 @@ class PPOHybrid:
         
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
+        self.min_std = min_std
         self.max_std = max_std
         
         # 记录指标
@@ -845,13 +851,14 @@ class PPOHybrid:
         self.critic_optimizer.zero_grad()
     
     
-    def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None, temperature=1.0):
+    def take_action(self, state, h0=None, explore=True, min_std=None, max_std=None, check_obs=None, temperature=1.0):
         # 委托给 Actor Wrapper
+        min_s = min_std if min_std is not None else self.min_std
         max_s = max_std if max_std is not None else self.max_std
         
         # [修改] 透传 check_obs
         actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(
-            state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs, temp=temperature
+            state, h=h0, explore=explore, min_std=min_s, max_std=max_s, check_obs=check_obs, temp=temperature
         )
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
@@ -859,7 +866,8 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89): 
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89,
+                time_since_shoot_location=21): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -968,7 +976,7 @@ class PPOHybrid:
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)
             # [修改] 接收 5 个返回值
-            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, max_std=self.max_std)
+            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, min_std=self.min_std, max_std=self.max_std)
             # Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
@@ -1097,7 +1105,7 @@ class PPOHybrid:
 
                 # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
                 #  接收 entropy_details 和 actor_outputs
-                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, max_std=self.max_std)
+                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, min_std=self.min_std, max_std=self.max_std)
                 
                 #  计算 log_ratio 用于更精准的 KL 计算
                 log_ratio = log_probs - mb_old_log_probs
@@ -1224,14 +1232,41 @@ class PPOHybrid:
                 # 原有非目标熵正则项
                 # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
-                # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
+                # =====================================================================
+                # [修改/重构] Bernoulli 开火头的专属正则化、稀疏惩罚与冷却约束
+                # =====================================================================
                 if actor_outputs['bern'] is not None:
                     bern_logits = actor_outputs['bern']
-                    # 仅对绝对值超出阈值的部分施加平缓增加的惩罚：
-                    # over = max(|logit| - 4, 0)，惩罚 (over)^2 的均值
+                    bern_probs = torch.sigmoid(bern_logits)
+                    
+                    # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
                     over = F.relu(torch.abs(bern_logits) - 4.0)
                     logit_loss = (over ** 2).mean()
                     actor_loss = actor_loss + alpha_logit_reg * logit_loss
+
+                    # 2. 基础稀疏惩罚 (Sparsity Prior) - 让模型默认不开火
+                    alpha_sparsity = 0.001
+                    sparsity_loss = (bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
+                    actor_loss = actor_loss + alpha_sparsity * sparsity_loss
+
+                    if time_since_shoot_location is not None:
+                        # 3. [核心新增] 冷却时间强制压制 (Temporal Cooldown Penalty)
+                        # 观测位 21: [0, 1] 对应 [0, 120]s。1/3 对应 40s 冷却。
+                        # 提取冷却时间状态
+                        t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
+                        
+                        # 构建惩罚权重: 
+                        # 只有当 t < 0.333 时权重才大于 0，且越接近 0 惩罚越严厉
+                        # 使用线性陡峭下降：f(t) = max(0, 1 - t * 3)
+                        cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
+                        
+                        # 严厉惩罚系数：这个值可以设得比 alpha_sparsity 高一个数量级
+                        alpha_cooldown = 0.05 
+                        
+                        # 冷却损失：权重 * 开火概率。当刚开过火时，梯度会强制把 bern_logits 往负无穷推。
+                        cooldown_loss = (cooldown_weight * bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
+                        actor_loss = actor_loss + alpha_cooldown * cooldown_loss
+                # =====================================================================
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
@@ -1391,7 +1426,7 @@ class PPOHybrid:
                 F_mask = torch.ones_like(adv)
 
         # 2. 获取网络原始输出
-        outputs = self.actor.net(actor_input_batch, max_std=self.max_std)
+        outputs = self.actor.net(actor_input_batch, min_std=self.min_std, max_std=self.max_std)
         
         # 初始化 Loss Sum (Batch, 1)
         mse_loss_sum = torch.zeros_like(adv)
