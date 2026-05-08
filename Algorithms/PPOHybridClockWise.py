@@ -1233,7 +1233,7 @@ class PPOHybrid:
                 # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
                 # =====================================================================
-                # [修改/重构] Bernoulli 开火头的专属正则化、稀疏惩罚与冷却约束
+                # [修改/重构] Bernoulli 开火头的专属正则化、稀疏惩罚与冷却约束 (方案 A: Log-Penalty)
                 # =====================================================================
                 if actor_outputs['bern'] is not None:
                     bern_logits = actor_outputs['bern']
@@ -1244,28 +1244,32 @@ class PPOHybrid:
                     logit_loss = (over ** 2).mean()
                     actor_loss = actor_loss + alpha_logit_reg * logit_loss
 
-                    # 2. 基础稀疏惩罚 (Sparsity Prior) - 让模型默认不开火
-                    alpha_sparsity = 0.001
-                    sparsity_loss = (bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
-                    actor_loss = actor_loss + alpha_sparsity * sparsity_loss
+                    # # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效)
+                    # # 惩罚项 = -log(1 - p)。其梯度为 alpha * p
+                    # alpha_sparsity = 0.001
+                    # eps = 1e-7
+                    # # 这里的 -log(1-p) 在数学上等于 softplus(logits)，更数值稳定
+                    # # 但为了直观对应方案 A，我们写成对数形式
+                    # sparsity_loss_term = -torch.log(1.0 - bern_probs + eps)
+                    # sparsity_loss = (sparsity_loss_term * mb_active_masks).sum() / (active_sum + mask_eps)
+                    # actor_loss = actor_loss + alpha_sparsity * sparsity_loss
 
-                    if time_since_shoot_location is not None:
-                        # 3. [核心新增] 冷却时间强制压制 (Temporal Cooldown Penalty)
-                        # 观测位 21: [0, 1] 对应 [0, 120]s。1/3 对应 40s 冷却。
-                        # 提取冷却时间状态
-                        t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
+                    # if time_since_shoot_location is not None:
+                    #     # 3. [核心新增] 冷却时间强制压制 (方案 A 版)
+                    #     t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
                         
-                        # 构建惩罚权重: 
-                        # 只有当 t < 0.333 时权重才大于 0，且越接近 0 惩罚越严厉
-                        # 使用线性陡峭下降：f(t) = max(0, 1 - t * 3)
-                        cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
+                    #     # 构建惩罚权重: t < 0.333 时生效
+                    #     cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
                         
-                        # 严厉惩罚系数：这个值可以设得比 alpha_sparsity 高一个数量级
-                        alpha_cooldown = 0.15 # 优势度归一化之后，均值为0，标准差为1，必须优势很大才能够跨过重复开火惩罚 
+                    #     # 严厉惩罚系数：由于梯度不再消失，0.4 的力度已经非常有震慑力
+                    #     alpha_cooldown = 0.4 
                         
-                        # 冷却损失：权重 * 开火概率。当刚开过火时，梯度会强制把 bern_logits 往负无穷推。
-                        cooldown_loss = (cooldown_weight * bern_probs * mb_active_masks).sum() / (active_sum + mask_eps)
-                        actor_loss = actor_loss + alpha_cooldown * cooldown_loss
+                    #     # 核心修改：将原来的 bern_probs 替换为 -log(1 - p)
+                    #     # 这样当网络“极度想开火”(p->1) 时，惩罚项的梯度达到峰值 alpha_cooldown
+                    #     cooldown_log_penalty = -torch.log(1.0 - bern_probs + eps)
+                        
+                    #     cooldown_loss = (cooldown_weight * cooldown_log_penalty * mb_active_masks).sum() / (active_sum + mask_eps)
+                    #     actor_loss = actor_loss + alpha_cooldown * cooldown_loss
                 # =====================================================================
 
                 # Critic Loss
@@ -1331,6 +1335,48 @@ class PPOHybrid:
                 if entropy_details['lin'] is not None:
                     entropy_lin_list.append(entropy_details['lin'].mean().item())
 
+        # =====================================================================
+        # 第二阶段：规则强制修正 (Post-PPO Rule Enforcement)
+        # 移出 Epoch 循环，只执行 1 次或独立的少数次数，避免干扰 PPO 的 clip 指标
+        # =====================================================================
+        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+            # 重新打乱索引，进行一次专门针对开火规则的微调
+            rule_idx = torch.randperm(num_samples, device=self.device)
+            for start in range(0, num_samples, mini_batch_size):
+                end = min(start + mini_batch_size, num_samples)
+                batch_idx = rule_idx[start:end]
+                
+                mb_actor_inputs = actor_inputs[batch_idx]
+                mb_active_masks = active_masks[batch_idx]
+                
+                # 重新前向传播获取当前 logits
+                actor_outputs = self.actor.net(mb_actor_inputs, min_std=self.min_std, max_std=self.max_std)
+                bern_logits = actor_outputs['bern']
+                bern_probs = torch.sigmoid(bern_logits)
+                
+                # --- 方案 A 对数惩罚项 ---
+                eps = 1e-7
+                rule_loss = 0
+
+                # 基础稀疏性惩罚
+                sparsity_log_penalty = -torch.log(1.0 - bern_probs + eps)
+                rule_loss += (0.001 * sparsity_log_penalty * mb_active_masks).sum() / (active_sum + mask_eps)
+
+                # 冷却时间强制压制 (方案 A 版)
+                if time_since_shoot_location is not None:
+                    t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1]
+                    cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
+                    
+                    # 方案 A：梯度 w.r.t logits = alpha * p (单调不消失)
+                    cooldown_log_penalty = -torch.log(1.0 - bern_probs + eps)
+                    rule_loss += (0.4 * cooldown_log_penalty * cooldown_weight * mb_active_masks).sum() / (active_sum + mask_eps)
+
+                # 独立执行规则更新
+                self.actor_optimizer.zero_grad()
+                rule_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
+                self.actor_optimizer.step()
+                
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
         self.critic_loss = np.mean(critic_loss_list)
