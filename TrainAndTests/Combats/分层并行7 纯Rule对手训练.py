@@ -8,7 +8,7 @@ mission_name = '纯Rule对手训练_分层_挑战'
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
+IL_epoches= 70 # 180
 max_steps = 8 * 165e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995

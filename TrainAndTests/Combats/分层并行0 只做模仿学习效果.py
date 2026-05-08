@@ -12,7 +12,7 @@ mission_name = '只模仿学习'
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 180
+IL_epoches= 70 # 180
 max_steps = 0
 hidden_dim = [128, 128, 128]
 gamma = 0.995
