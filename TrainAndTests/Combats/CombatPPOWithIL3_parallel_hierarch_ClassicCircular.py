@@ -25,11 +25,11 @@ sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
-from Algorithms.PPOHybridSAC import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybridClockWise import PPOHybrid as ClockwisePPO, PolicyNetHybrid as ClockwisePolicyNet, HybridActorWrapper as ClockwiseActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training_hierarch import test_worker
+from VsBaseline_while_training_hierarch2 import test_worker
 
 dt_move = 0.04
 
@@ -63,7 +63,7 @@ def load_il_and_transitions(folder, il_name, rl_name):
 def restructure_actions(actions_data):
     """
     将 list of dicts [{'fly': 1, 'fire': 0}, ...] 
-    转换为 dict of arrays {'cat': array([[1],...]), 'bern': array([[0],...])}
+    转换为 dict of arrays {'lin': array([[1],...]), 'bern': array([[0],...])}
     并确保维度是 (N, 1) 以适配 PPOHybrid2 的索引操作
     """
     # 如果已经是字典格式，直接返回
@@ -75,7 +75,7 @@ def restructure_actions(actions_data):
         # print("Restructuring actions from List[Dict] to Dict[Array]...") # 频繁调用可注释掉以减少刷屏
         
         # 初始化容器
-        new_actions = {'cat': [], 'bern': []}
+        new_actions = {'lin': [], 'circ': [], 'bern': []}
         
         for item in actions_data:
             # 兼容处理：item 可能是 dict，也可能是包含 dict 的 numpy array
@@ -83,31 +83,45 @@ def restructure_actions(actions_data):
             if isinstance(item, np.ndarray) and item.dtype == object:
                 act = item.item() # 提取 numpy 里的 dict
             
-            # 映射 'fly' -> 'cat' (离散机动)
+            # 映射 'fly' -> 'lin' (离散垂直机动)
             # 映射 'fire' -> 'bern' (开关开火)
             if isinstance(act, dict):
-                # 优先找 'fly'，找不到找 'cat'
-                val_cat = act.get('fly', act.get('cat'))
-                if val_cat is not None:
-                    new_actions['cat'].append(val_cat)
-                
-                # 优先找 'fire'，找不到找 'bern'
+                # 优先找 'fly'，找不到找 'lin'，最后兼容 'cat'
+                val_lin = act.get('fly', act.get('lin', act.get('cat')))
+                val_circ = act.get('circ')
                 val_bern = act.get('fire', act.get('bern'))
+                
+                if val_lin is not None:
+                    if isinstance(val_lin, (list, np.ndarray)) and len(val_lin) == 2 and val_circ is None:
+                        new_actions['lin'].append([val_lin[0]])
+                        new_actions['circ'].append([val_lin[1]])
+                    else:
+                        new_actions['lin'].append(val_lin)
+                
+                if val_circ is not None:
+                    new_actions['circ'].append(val_circ)
+                    
                 if val_bern is not None:
                     new_actions['bern'].append(val_bern)
 
             # 备用：如果数据意外变成了 list/tuple
             elif isinstance(act, (list, np.ndarray, tuple)) and len(act) >= 2:
-                 new_actions['cat'].append(act[0])
-                 new_actions['bern'].append(act[1])
+                if isinstance(act[0], (list, np.ndarray)) and len(act[0]) == 2:
+                    new_actions['lin'].append([act[0][0]])
+                    new_actions['circ'].append([act[0][1]])
+                else:
+                    new_actions['lin'].append(act[0])
+                new_actions['bern'].append(act[1])
 
         # 转换为 Numpy Array 并调整形状为 (Batch, 1)
-        # 这一点至关重要：PPOHybrid2 里的 expert_cat[:, i] 需要 expert_cat 是二维的
-        
-        # 1. 'cat': 离散动作，转为 int64，Reshape 为 (N, 1)
-        cat_arr = np.array(new_actions['cat'], dtype=np.int64)
-        if cat_arr.ndim == 1:
-            cat_arr = cat_arr.reshape(-1, 1)
+        # 1. 'lin': 离散垂直动作，转为 int64，Reshape 为 (N, 1)
+        lin_arr = np.array(new_actions['lin'], dtype=np.int64)
+        if lin_arr.ndim == 1:
+            lin_arr = lin_arr.reshape(-1, 1)
+            
+        circ_arr = np.array(new_actions['circ'], dtype=np.int64)
+        if circ_arr.ndim == 1 and circ_arr.size > 0:
+            circ_arr = circ_arr.reshape(-1, 1)
         
         # 2. 'bern': 伯努利动作，转为 float32 (BCE Loss需要)，Reshape 为 (N, 1)
         bern_arr = np.array(new_actions['bern'], dtype=np.float32)
@@ -115,11 +129,13 @@ def restructure_actions(actions_data):
             bern_arr = bern_arr.reshape(-1, 1)
 
         result = {
-            'cat': cat_arr,
+            'lin': lin_arr,
             'bern': bern_arr
         }
+        if circ_arr.size > 0:
+            result['circ'] = circ_arr
         
-        print(f"Structure fixed: 'cat' shape={cat_arr.shape}, 'bern' shape={bern_arr.shape}")
+        print(f"Structure fixed: 'lin' shape={lin_arr.shape}, 'bern' shape={bern_arr.shape}")
         return result
 
     return actions_data
@@ -395,11 +411,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
-        local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        local_actor = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict).to(device_worker)
         # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
         local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        local_agent = PPOHybrid(
-            actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
+        local_agent = ClockwisePPO(
+            actor=ClockwiseActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
             critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
             actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
             lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
@@ -407,11 +423,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         )
         
         # 初始化对手网络
-        adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        adv_actor = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict).to(device_worker)
         # 【修改 2】同样为对手创建一个 dummy critic
         adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        adv_agent = PPOHybrid(
-            actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
+        adv_agent = ClockwisePPO(
+            actor=ClockwiseActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
             critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
             actor_lr=0, critic_lr=0, 
             lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
@@ -518,7 +534,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 temperature = 1
                             b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
-                            b_action_label = b_action_exec['cat'] # [0]
+                            b_action_v = b_action_exec['lin'][0] if isinstance(b_action_exec['lin'], (list, np.ndarray)) else b_action_exec['lin']
+                            b_action_h = b_action_exec['circ'][0] if isinstance(b_action_exec['circ'], (list, np.ndarray)) else b_action_exec['circ']
+                            b_action_label = [b_action_v, b_action_h]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
@@ -530,12 +548,15 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
-                                r_action_exec = {'cat': r_action_label, 'bern': np.array([r_fire], dtype=np.float32)}
+                                r_action_exec = {'lin': [r_action_label[0]], 'circ': [r_action_label[1]], 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature)
-                                r_action_label = r_action_exec['cat'] #[0]
+                                explore_dict_r = {'cont':0, 'lin':adv_explore, 'circ':adv_explore, 'bern':1}
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore=explore_dict_r, temperature=temperature)
+                                r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
+                                r_action_h = r_action_exec['circ'][0] if isinstance(r_action_exec['circ'], (list, np.ndarray)) else r_action_exec['circ']
+                                r_action_label = [r_action_v, r_action_h]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
@@ -549,9 +570,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             r_is_firing = env.has_ammo_to_fire('r')
                         
                         # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
-                        current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
-                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
+                        current_action = {'lin': b_action_exec['lin'], 'circ': b_action_exec['circ'], 'bern': b_action_exec['bern']}
+                        current_action_exec = {'lin': b_action_exec['lin'], 'circ': b_action_exec['circ'], 'bern': np.array([b_is_firing])}
+                        current_enm_action_exec = {'lin': r_action_exec['lin'], 'circ': r_action_exec.get('circ', [r_action_label[1]]), 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候不适合限制动作次序，会妨碍“试错”  r_action_label  b_action_label
@@ -562,6 +583,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         m_fired += 1
                     if r_m_id:
                         pass
+                    
+                    # debug
+                    if r_action_label[0] > 4:
+                        print("数值超出范围", r_action_label[0], r_action_label[1])
 
                     r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                     b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
@@ -654,7 +679,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
 
 def run_MLP_simulation(
-    k_cat_rates,
     k_nonlinear,
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
     mission_name='无名',
@@ -720,6 +744,8 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
 ):
 
+    actor_lr0 = actor_lr
+    critic_lr0 = critic_lr
     # 1. 设置随机数种子 (Master)
     seed = 42
     import random
@@ -762,18 +788,18 @@ def run_MLP_simulation(
     # 创建一个 dummy env 获取维度
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
-    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
+    action_dims_dict = {'cont': 0, 'lin': 1, 'circ': 1, 'bern': dummy_env.fire_dim}
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
 
     # 3. 创建神经网络
-    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    actor_net = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict, init_std=1.5).to(device)
     critic_net = ValueNet(state_dim, hidden_dim).to(device)
-    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
+    actor_wrapper = ClockwiseActorWrapper(actor_net, action_dims_dict, None, device).to(device)
 
-    student_agent = PPOHybrid(
+    student_agent = ClockwisePPO(
         actor=actor_wrapper, 
         critic=critic_net, 
         actor_lr=actor_lr, 
@@ -784,7 +810,7 @@ def run_MLP_simulation(
         gamma=gamma, 
         device=device, 
         k_entropy=k_entropy, 
-        max_std=label_smoothing
+        max_std=2.0   # <--- 设置为 >= init_std 的值（例如 2.0 或更大），允许网络在这个空间内探索
     )
     
     
@@ -907,6 +933,19 @@ def run_MLP_simulation(
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
 
     print("IL Training Finished.")
+    
+    # --- 新增：重置分布的标准差 ---
+    # 模仿学习往往会把 std 压得很低，导致进入强化学习时丧失探索能力。
+    # 这里强行把动作分布的 std 推回初始值 (1.5)
+    init_std_val = 1.2 # 1.5
+    with torch.no_grad():
+        if hasattr(student_agent.actor.net, 'log_std_shared'):
+            student_agent.actor.net.log_std_shared.fill_(np.log(init_std_val))
+            student_agent.actor.net.log_std_shared.requires_grad = True # 解除冻结（如果之前被冻结）
+        if hasattr(student_agent.actor.net, 'log_std_cont'):
+            student_agent.actor.net.log_std_cont.fill_(np.log(init_std_val))
+            student_agent.actor.net.log_std_cont.requires_grad = True
+    print(f"Action standard deviations have been reset to {init_std_val} for RL exploration.")
     
     # --- 新增：实例化混合缓冲区 ---
     il_transition_buffer = None
@@ -1412,9 +1451,28 @@ def run_MLP_simulation(
                 #     )
                 # else:
                 #====================
+                # 动态调节 max_std (从 1.2 线性衰减到 0.6 @ 10M steps)
+                #====================
+                current_max_std = 1.1 - (1.1 - 0.8) * np.clip(total_steps / 10e6, 0.0, 1.0)
+                student_agent.max_std = current_max_std
+                
+                # 强制将底层网络参数限制在 max_std 以下
+                with torch.no_grad():
+                    if hasattr(student_agent.actor.net, 'log_std_shared'):
+                        student_agent.actor.net.log_std_shared.clamp_(max=np.log(current_max_std))
+                    if hasattr(student_agent.actor.net, 'log_std_cont'):
+                        student_agent.actor.net.log_std_cont.clamp_(max=np.log(current_max_std))
+                        
+                logger.add("train_plus/max_std", current_max_std, total_steps)
+
+                #====================
                 # 原有强化学习部分
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear,
-                    k_cat_rates = k_cat_rates)
+                # 学习率warm_up
+                actor_lr = min(actor_lr0, actor_lr0 * total_steps/1e6)
+                critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
+                student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear)
                 #====================
                 # 记录 Log
 

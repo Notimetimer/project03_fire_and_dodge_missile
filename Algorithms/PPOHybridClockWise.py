@@ -1,5 +1,5 @@
 '''
-用策略蒸馏代替在线模仿学习
+新增离散版Von Mises分布，处理圆周上的动作空间
 '''
 
 import numpy as np
@@ -12,7 +12,7 @@ import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
+from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, CircularDiscretizedDistribution, CircularDiscretizedDistribution_NL
 from Algorithms.MLP_heads import ValueNet
 
 # =============================================================================
@@ -20,11 +20,7 @@ from Algorithms.MLP_heads import ValueNet
 # =============================================================================
 
 class PolicyNetHybrid(torch.nn.Module):
-    """
-    支持混合动作空间的策略网络 (纯 MLP)。
-    引入了可学习的温度参数来控制离散和伯努利动作的熵。
-    """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=1.5, head_hidden_layer_num=1):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
         
@@ -37,20 +33,50 @@ class PolicyNetHybrid(torch.nn.Module):
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
 
+        # 计算共享 std 的总维度 (Continuous + Circular + Linear)
+        self.cont_dim = self.action_dims.get('cont', 0)
+        self.circ_dim = self.action_dims.get('circ', 0)
+        self.lin_dim = self.action_dims.get('lin', 0)
+        total_shared_std_dim = self.cont_dim + self.circ_dim + self.lin_dim
+
+        if total_shared_std_dim > 0:
+            # 这里的 log_std 是状态无关的，由 cont 和 circ 共享
+            self.log_std_shared = nn.Parameter(torch.log(torch.ones(total_shared_std_dim) * init_std))
+
         # 1. 连续动作头 (Continuous)
         # 参数: log_std (控制高斯分布宽度)
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             cont_dim = self.action_dims['cont']
-            self.fc_mu = nn.Linear(prev_size, cont_dim)
-            # 这里的 log_std 依然是状态无关的，对应 PPO 的标准做法
             self.log_std_cont = nn.Parameter(torch.log(torch.ones(cont_dim) * init_std))
+
+            # # # 原·单层动作头
+            # self.fc_mu = nn.Linear(prev_size, cont_dim)
+            
+            # 现·多层动作头
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, cont_dim))
+            self.fc_mu = nn.Sequential(*layers)
+            
 
         # 2. 离散动作头 (Categorical)
         # 参数: log_temp_cat (控制 Softmax 温度)
+        if 'cat' not in self.action_dims:
+            self.action_dims['cat'] = []
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             self.cat_dims = self.action_dims['cat']  # list, e.g., [4, 10]
             total_cat_dim = sum(self.cat_dims)
-            self.fc_cat = nn.Linear(prev_size, total_cat_dim)
+            # # 原·单层输出
+            # self.fc_cat = nn.Linear(prev_size, total_cat_dim)
+            # 现·多层动作头
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, total_cat_dim))
+            self.fc_cat = nn.Sequential(*layers)
             
             # 为每一个独立的离散头 (Head) 创建一个温度参数
             # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
@@ -61,18 +87,62 @@ class PolicyNetHybrid(torch.nn.Module):
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
-            self.fc_bern = nn.Linear(prev_size, bern_dim)
+            # # 原·单层输出
+            # self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            nn.init.constant_(self.fc_bern.bias, -2.0)
+            # nn.init.constant_(self.fc_bern.bias, -2.0)
+
+            # 现·多层输出
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, bern_dim))
+            self.fc_bern = nn.Sequential(*layers)
+            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
+            nn.init.constant_(self.fc_bern[-1].bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temp=1.0)
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
+
+        # 4. 圆周动作头 (Circular) - 每个维度 2 个输出 (x, y)
+        if self.circ_dim > 0:
+            # 现·多层输出
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, self.circ_dim))
+            self.fc_circ = nn.Linear(prev_size, self.circ_dim * 2)
+
+        # 5. 线性离散动作头 (Linear) - 每个维度1个输出
+        if self.lin_dim > 0:
+            # 现·多层输出
+            layers = []
+            for _ in range(head_hidden_layer_num):
+                layers.append(nn.Linear(prev_size, prev_size))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(prev_size, self.lin_dim))
+            self.fc_lin = nn.Linear(prev_size, self.lin_dim)
     
-    # [修改] 增加 action_masks 参数, [新增] 增加 temp 参数
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0):
+        if isinstance(temp, dict):
+            temp_cat = temp.get('cat', 1.0)
+            temp_bern = temp.get('bern', 1.0)
+        else:
+            temp_cat = temp
+            temp_bern = temp
+
         shared_features = self.net(x)
-        outputs = {'cont': None, 'cat': None, 'bern': None}
+        outputs = {'cont': None, 'cat': None, 'bern': None, 'circ': None, 'lin': None}
+
+        # --- 处理共享 Std ---
+        std_all = None
+        if (self.cont_dim + self.circ_dim) > 0:
+            std_all = torch.exp(self.log_std_shared).clamp(min=min_std, max=max_std)
+            if shared_features.dim() > 1:
+                std_all = std_all.unsqueeze(0).expand(shared_features.size(0), -1)
 
         # --- Continuous ---
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -95,6 +165,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
             # temps = 1.0  # [修改] 使用传入的 temp
+            # >2 强随机，<0.1 强确定性
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
             # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
@@ -102,9 +173,8 @@ class PolicyNetHybrid(torch.nn.Module):
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
                 # 对应的温度: temps[i]
-                # scaled_logits = logits / (temps[i] + 1e-8)
-                # 使用传入的 temp 进行缩放, 防止除0
-                scaled_logits = logits / (temp + 1e-8)
+                # 使用 temp_cat 进行缩放, 防止除0
+                scaled_logits = logits / (temp_cat + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
             
             outputs['cat'] = final_probs_list
@@ -120,11 +190,26 @@ class PolicyNetHybrid(torch.nn.Module):
                 # mask == 0 代表禁止开火，设为极小值
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
-            # [修改] 使用传入的 temp
+            # [修改] 使用我们提取的 temp_bern
             # temps = 1.0 
-            scaled_bern_logits = bern_logits / (temp + 1e-8)
+            scaled_bern_logits = bern_logits / (temp_bern + 1e-8)
             outputs['bern'] = scaled_bern_logits
-            
+        
+        # --- Liniear ---
+        if self.lin_dim > 0:
+            vec_lin = self.fc_lin(shared_features)
+            # 重塑为 (Batch, lin_dim)
+            vec_lin = vec_lin.view(-1, self.lin_dim)
+            std_lin = std_all[:, self.cont_dim:self.cont_dim+self.lin_dim]
+            outputs['lin'] = (vec_lin, std_lin)
+
+        # --- Circular ---
+        if self.circ_dim > 0:
+            vec_circ = self.fc_circ(shared_features)
+            # 重塑为 (Batch, circ_dim, 2)
+            vec_circ = vec_circ.view(-1, self.circ_dim, 2)
+            std_circ = std_all[:, self.cont_dim+self.lin_dim : self.cont_dim+self.lin_dim+self.circ_dim]
+            outputs['circ'] = (vec_circ, std_circ)
         return outputs
 
 # =============================================================================
@@ -137,11 +222,24 @@ class HybridActorWrapper(nn.Module):
     将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get action 和 evaluate actions 接口。
     未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
     """
-    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu'):
+    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu', n_circle=6, n_linear=5):
         super(HybridActorWrapper, self).__init__()
         self.net = policy_net
         self.action_dims = action_dims_dict
+        if 'cat' not in self.action_dims:
+            self.action_dims['cat'] = []
+        if 'lin' not in self.action_dims:
+            self.action_dims['lin'] = 0
+        if 'circ' not in self.action_dims:
+            self.action_dims['circ'] = 0
+        if 'bern' not in self.action_dims:
+            self.action_dims['bern'] = 0
+        if 'cont' not in self.action_dims:
+            self.action_dims['cont'] = 0
+        
         self.device = device
+        self.n_circle = n_circle
+        self.n_linear = n_linear
         
         # 处理 Action Bounds
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -190,14 +288,15 @@ class HybridActorWrapper(nn.Module):
         
         # [修改] 处理 explore 参数，使其支持字典
         if isinstance(explore, bool):
-            explore_opts = {'cont': explore, 'cat': explore, 'bern': explore}
+            explore_opts = {'cont': explore, 'cat': explore, 'bern': explore, 'circ': explore}
         elif isinstance(explore, dict):
             # 如果传入字典，使用字典的值，对缺失的键默认为 True
             explore_opts = {
                 'cont': explore.get('cont', True),
                 'cat': explore.get('cat', True),
-                'bern': explore.get('bern', True)
+                'bern': explore.get('bern', True),
             }
+            explore_opts['circ'] = explore.get('circ', explore_opts['cat'])
         else:
             # 对于其他意外的输入类型，默认全部探索
             explore_opts = {'cont': True, 'cat': True, 'bern': True}
@@ -330,6 +429,46 @@ class HybridActorWrapper(nn.Module):
                 actions_raw['bern'] = actions_exec['bern']
                 actions_dist_check['bern'] = dist.probs[0].cpu().detach().numpy().flatten()
 
+        # --- Circ [新增] ---
+        if actor_outputs['circ'] is not None:
+            vec_circ, std_all = actor_outputs['circ']
+            circ_indices = []
+            circ_probs = []
+            for i in range(self.action_dims['circ']):
+                vec_h = vec_circ[:, i, :] # (Batch, 2)
+                std_h = std_all[:, i:i+1] # (Batch, 1)
+                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                
+                idx = dist.sample()[0] if explore_opts.get('circ', True) else dist.mean_idx
+                circ_indices.append(idx)
+                circ_probs.append(dist.probs.cpu().detach().numpy())
+            
+            idx_stack = torch.stack(circ_indices, dim=-1).cpu().detach().numpy()
+            actions_exec['circ'] = idx_stack if is_batch else idx_stack[0]
+            actions_raw['circ'] = actions_exec['circ']
+            actions_dist_check['circ'] = circ_probs
+
+        # --- Lin [新增] ---
+        if actor_outputs['lin'] is not None:
+            vec_lin, std_all = actor_outputs['lin']
+            lin_indices = []
+            lin_probs = []
+            for i in range(self.action_dims['lin']):
+                vec_v = vec_lin[:, i:i+1] # (Batch, 1)
+                std_v = std_all[:, i:i+1] # (Batch, 1)
+                dist = LinearDiscretizedDistribution(vec_v, std_v, n=self.n_linear)
+                
+                idx = dist.sample()[0] if explore_opts.get('lin', True) else dist.mean_idx
+                lin_indices.append(idx)
+                lin_probs.append(dist.probs.cpu().detach().numpy())
+            
+            idx_stack = torch.stack(lin_indices, dim=-1).cpu().detach().numpy()
+            actions_exec['lin'] = idx_stack if is_batch else idx_stack[0]
+            actions_raw['lin'] = actions_exec['lin']
+            actions_dist_check['lin'] = lin_probs
+
+
         return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
     def evaluate_actions(self, states, actions_raw, h=None, max_std=None):
@@ -349,7 +488,7 @@ class HybridActorWrapper(nn.Module):
         entropy = torch.zeros(states.size(0), 1).to(self.device)
         
         #  用于记录分项 Entropy 的字典
-        entropy_details = {'cont': None, 'cat': None, 'bern': None}
+        entropy_details = {'cont': None, 'cat': None, 'bern': None, 'circ': None, 'lin': None}
 
         # --- Cont ---
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -396,11 +535,54 @@ class HybridActorWrapper(nn.Module):
             e_bern = dist.entropy().sum(-1, keepdim=True)
             entropy += e_bern
             entropy_details['bern'] = e_bern # [修改] 保持 Tensor 用于 Loss 计算
+            
+        # --- Circ [新增] ---
+        if 'circ' in self.action_dims and self.action_dims['circ'] > 0:
+            vec_circ, std_all = actor_outputs['circ']
+            circ_actions = actions_raw['circ']
+            if not isinstance(circ_actions, torch.Tensor):
+                circ_actions = torch.tensor(circ_actions, dtype=torch.long, device=self.device)
+            
+            e_circ_sum = torch.zeros_like(entropy)
+            for i in range(self.action_dims['circ']):
+                vec_h = vec_circ[:, i, :]
+                std_h = std_all[:, i:i+1]
+                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                
+                act_i = circ_actions[:, i]
+                log_probs += dist.log_prob(act_i).unsqueeze(-1)
+                
+                e_head = dist.entropy().unsqueeze(-1)
+                entropy += e_head
+                e_circ_sum += e_head
+            entropy_details['circ'] = e_circ_sum
+
+        # --- Lin [新增] ---
+        if 'lin' in self.action_dims and self.action_dims['lin'] > 0:
+            vec_lin, std_all = actor_outputs['lin']
+            lin_actions = actions_raw['lin']
+            if not isinstance(lin_actions, torch.Tensor):
+                lin_actions = torch.tensor(lin_actions, dtype=torch.long, device=self.device)
+            
+            e_lin_sum = torch.zeros_like(entropy)
+            for i in range(self.action_dims['lin']):
+                vec_v = vec_lin[:, i:i+1]
+                std_v = std_all[:, i:i+1]
+                dist = LinearDiscretizedDistribution(vec_v, std_v, n=self.n_linear)
+                
+                act_i = lin_actions[:, i]
+                log_probs += dist.log_prob(act_i).unsqueeze(-1)
+                
+                e_head = dist.entropy().unsqueeze(-1)
+                entropy += e_head
+                e_lin_sum += e_head
+            entropy_details['lin'] = e_lin_sum
 
         # [修改] 返回 actor_outputs 以便外部访问 logits
         return log_probs, entropy, entropy_details, actor_outputs, None
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1, no_bern=False):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1, no_bern=False, max_std=1.3):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         
@@ -417,7 +599,7 @@ class HybridActorWrapper(nn.Module):
         '''
         会增加复杂度的可选改进：模仿学习的时候alpha 传入向量，从而区分密集和稀疏动作的学习强度（密集应该高一些）
         '''
-        actor_outputs = self.net(states) # 获取 raw output (mu/std, logits)
+        actor_outputs = self.net(states, max_std=max_std) # 获取 raw output (mu/std, logits)
         
         # 初始化一个全 0 的 loss tensor，形状 (Batch, )
         total_loss_per_sample = torch.zeros(states.size(0), device=self.device)
@@ -433,7 +615,49 @@ class HybridActorWrapper(nn.Module):
             # Loss = - log_prob
             cont_loss = -dist.log_prob(0, u_expert).sum(dim=-1)
             total_loss_per_sample += cont_loss
-
+        # --- 1.5 环形连续动作离散化 ---
+        if 'circ' in self.action_dims and self.action_dims['circ'] > 0:
+            vec_circ, std_all = actor_outputs['circ']
+            expert_circ = expert_actions['circ'].long()
+            for i in range(self.action_dims['circ']):
+                vec_h = vec_circ[:, i, :]
+                std_h = std_all[:, i:i+1]
+                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                expert_idx = expert_circ[:, i]
+                
+                log_probs = F.log_softmax(dist.logits, dim=-1)
+                
+                if label_smoothing > 0:
+                    n_classes = dist.n
+                    one_hot = torch.zeros_like(log_probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
+                    smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / n_classes)
+                    ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
+                else:
+                    ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                
+                total_loss_per_sample += ce_loss        
+        # --- 1.6 线性离散动作 ---
+        if 'lin' in self.action_dims and self.action_dims['lin'] > 0:
+            vec_lin, std_all = actor_outputs['lin']
+            expert_lin = expert_actions['lin'].long()
+            for i in range(self.action_dims['lin']):
+                vec_h = vec_lin[:, i:i+1]
+                std_h = std_all[:, i:i+1]
+                dist = LinearDiscretizedDistribution(vec_h, std_h, n=self.n_linear)
+                expert_idx = expert_lin[:, i]
+                
+                log_probs = F.log_softmax(dist.logits, dim=-1)
+                
+                if label_smoothing > 0:
+                    n_classes = dist.n
+                    one_hot = torch.zeros_like(log_probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
+                    smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / n_classes)
+                    ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
+                else:
+                    ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                
+                total_loss_per_sample += ce_loss        
         # --- 2. 离散/多离散动作 (Categorical) ---
         # 依据提供的 Multi-Discrete 代码，使用 CrossEntropy
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
@@ -461,6 +685,15 @@ class HybridActorWrapper(nn.Module):
                     # 标准 CE: - log_p[target]
                     # gather 需要 index 维度为 (Batch, 1)
                     ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                    '''
+                    log_probs.gather()
+                    从所有动作的概率分布 log_probs 中，精准地抽取出“实际执行了的那个动作” expert_idx 对应的概率值。
+                    - 1 (第一个参数)：表示在第 1 维（列维度）进行选取。
+                    - expert_idx.unsqueeze(1)：将原来形状为(Batch,)的索引变成(Batch, 1)。
+                     这是因为 gather 要求索引的维度必须和原张量一致。
+                    - .squeeze(1)：取完值后，形状还是(Batch, 1)用 squeeze 把那个多余的维度删掉，
+                    变成平铺的 (Batch,)，方便后续算 Loss。
+                    '''
                 
                 total_loss_per_sample += ce_loss
 
@@ -509,7 +742,19 @@ class PPOHybrid:
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        # 分离 std 参数和其他网络参数
+        std_params = []
+        net_params = []
+        for name, param in self.actor.named_parameters():
+            if 'log_std' in name:
+                std_params.append(param)
+            else:
+                net_params.append(param)
+        
+        self.actor_optimizer = torch.optim.Adam([
+            {'params': net_params, 'lr': actor_lr},
+            {'params': std_params, 'lr': actor_lr * 0.1}
+        ])
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
 
         self.gamma = gamma
@@ -521,9 +766,19 @@ class PPOHybrid:
         # [修改] 解析 k_entropy，支持字典输入
         if isinstance(k_entropy, dict):
             self.k_entropy = k_entropy
+            if 'circ' not in self.k_entropy and 'cat' in self.k_entropy:
+                self.k_entropy['circ'] = self.k_entropy['cat']
+            if 'lin' not in self.k_entropy and 'cat' in self.k_entropy:
+                self.k_entropy['lin'] = self.k_entropy['cat']
         else:
-            self.k_entropy = {'cont': k_entropy, 'cat': k_entropy, 'bern': k_entropy}
-            
+            self.k_entropy = {'cont': k_entropy, 'cat': k_entropy, 'bern': k_entropy, 'circ': k_entropy, 'lin': k_entropy}
+        
+        # # [新增] SAC 风格的可学习 Cat 熵系数 (初始值对应原配置)
+        # init_k_cat = k_entropy.get('cat', k_entropy)
+        # self.log_k_cat = torch.nn.Parameter(torch.log(torch.tensor(init_k_cat, device=device)))
+        # # [新增] 为自适应熵系数配备独立的优化器 (学习率通常与 Actor 保持一致或略大)
+        # self.k_cat_optim = torch.optim.Adam([self.log_k_cat], lr=actor_lr)
+        
         self.critic_max_grad = critic_max_grad
         self.actor_max_grad = actor_max_grad
         self.max_std = max_std
@@ -546,21 +801,17 @@ class PPOHybrid:
         self.entropy_cat = 0
         self.entropy_bern = 0
         self.entropy_cont = 0
-
-        # [新增] 独立记录模仿学习与策略蒸馏的指标
-        self.il_actor_loss = 0
-        self.il_critic_loss = 0
-
-        self.il_actor_grad = 0
-        self.il_critic_grad = 0
+        self.entropy_circ = 0
         
-        self.dis_actor_loss = 0
-        self.dis_actor_grad = 0
+        # [新增] 监控指标
+        self.td_error_var = 0     # TD error 的分布方差
+        self.grad_norm_ratio = 0  # actor 梯度与 critic 梯度的范数比
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
-            for param_group in self.actor_optimizer.param_groups:
-                param_group['lr'] = actor_lr
+            self.actor_optimizer.param_groups[0]['lr'] = actor_lr
+            if len(self.actor_optimizer.param_groups) > 1:
+                self.actor_optimizer.param_groups[1]['lr'] = actor_lr * 0.1
         if critic_lr is not None:
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr  
@@ -572,17 +823,22 @@ class PPOHybrid:
         清除 optimizer 的动量等 state，但保留当前学习率/其他 param_group 设置。
         通过重建 optimizer（保留 param_group 的 lr/betas/eps/weight_decay）来达到清空 state 的目的。
         """
-        def _recreate_from(old_optim, params):
-            pg = old_optim.param_groups[0]
-            lr = pg.get('lr', 1e-3)
-            betas = pg.get('betas', (0.9, 0.999))
-            eps = pg.get('eps', 1e-8)
-            weight_decay = pg.get('weight_decay', 0.0)
-            return torch.optim.Adam(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        def _recreate_from(old_optim):
+            param_groups = []
+            for pg in old_optim.param_groups:
+                new_pg = {
+                    'params': pg['params'],
+                    'lr': pg.get('lr', 1e-3),
+                    'betas': pg.get('betas', (0.9, 0.999)),
+                    'eps': pg.get('eps', 1e-8),
+                    'weight_decay': pg.get('weight_decay', 0.0)
+                }
+                param_groups.append(new_pg)
+            return torch.optim.Adam(param_groups)
 
         # 重新创建 optim（以清除内部 state），但使用当前的 lr/betas/eps/weight_decay
-        self.actor_optimizer = _recreate_from(self.actor_optimizer, self.actor.parameters())
-        self.critic_optimizer = _recreate_from(self.critic_optimizer, self.critic.parameters())
+        self.actor_optimizer = _recreate_from(self.actor_optimizer)
+        self.critic_optimizer = _recreate_from(self.critic_optimizer)
 
         # 清除可能残留的梯度
         self.actor_optimizer.zero_grad()
@@ -600,7 +856,12 @@ class PPOHybrid:
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
 
-    def update(self, transition_dict, adv_normed=False, clip_vf=False, clip_range=0.2, shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):
+    def update(self, transition_dict, adv_normed=False, 
+                clip_vf=False, clip_range=0.2, shuffled=1, 
+                mini_batch_size=None, alpha_logit_reg=0.05,
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89): 
+                # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
+                # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -652,7 +913,7 @@ class PPOHybrid:
         # Buffer 传来的 actions 已经是 dict of arrays
         if isinstance(actions_from_buffer, dict):
             for key, val in actions_from_buffer.items():
-                if key == 'cat':
+                if key in ['cat', 'lin', 'circ']:
                     actions_on_device[key] = to_tensor(val, torch.long)
                 else:
                     actions_on_device[key] = to_tensor(val, torch.float)
@@ -662,7 +923,7 @@ class PPOHybrid:
             all_keys = actions_from_buffer[0].keys()
             for key in all_keys:
                 vals = [d[key] for d in actions_from_buffer]
-                if key == 'cat':
+                if key in ['cat', 'lin', 'circ']:
                     actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
                 else:
                     actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.float).to(self.device)
@@ -732,6 +993,54 @@ class PPOHybrid:
                 adv_mean = active_adv.mean()
                 advantage = advantage - adv_mean
 
+        # =====================================================================
+        # [新增] 计算 Cat 分布的动态目标熵 (Target Entropy)
+        # =====================================================================
+        target_entropy_cat_total = 0.0
+        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+            for n_actions in self.actor.action_dims['cat']:
+                if n_actions > 1:
+                    # “一超”概率为 target_p1，其余 (n_actions - 1) 个动作平分剩余概率
+                    p_rest = (1.0 - target_p1) / (n_actions - 1)
+                    # 香农熵: -p1*ln(p1) - (N-1) * p_rest*ln(p_rest)
+                    h_dim = - target_p1 * np.log(target_p1 + 1e-8) - (n_actions - 1) * p_rest * np.log(p_rest + 1e-8)
+                    target_entropy_cat_total += h_dim
+        target_entropy_cat_tensor = torch.tensor(target_entropy_cat_total, device=self.device)
+        
+        # =====================================================================
+        # [新增] 计算 Bernoulli 分布的动态目标熵 (Target Entropy)
+        # =====================================================================
+        target_entropy_bern_total = 0.0
+        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+            # 伯努利熵公式: -p*ln(p) - (1-p)*ln(1-p)
+            p = target_p1_b
+            h_bern_dim = - p * np.log(p + 1e-8) - (1 - p) * np.log(1 - p + 1e-8)
+            # 伯努利熵按动作维度累加
+            target_entropy_bern_total = h_bern_dim * self.actor.action_dims['bern']
+        target_entropy_bern_tensor = torch.tensor(target_entropy_bern_total, device=self.device)
+
+        # =====================================================================
+        # [新增] 计算 Circular 分布的动态目标熵(公式有误)
+        # =====================================================================
+        target_entropy_circ_total = 0.0
+        if 'circ' in self.actor.action_dims and self.actor.action_dims['circ'] > 0:
+            n_actions = self.actor.n_circle
+            p_rest = (1.0 - target_p1) / (n_actions - 1)
+            h_dim = - target_p1 * np.log(target_p1 + 1e-8) - (n_actions - 1) * p_rest * np.log(p_rest + 1e-8)
+            target_entropy_circ_total = h_dim * self.actor.action_dims['circ']
+        target_entropy_circ_tensor = torch.tensor(target_entropy_circ_total, device=self.device)
+
+        # =====================================================================
+        # [新增] 计算 Linear 分布的动态目标熵
+        # =====================================================================
+        target_entropy_lin_total = 0.0
+        if 'lin' in self.actor.action_dims and self.actor.action_dims['lin'] > 0:
+            n_actions = self.actor.n_linear
+            p_rest = (1.0 - target_p1) / (n_actions - 1)
+            h_dim = - target_p1 * np.log(target_p1 + 1e-8) - (n_actions - 1) * p_rest * np.log(p_rest + 1e-8)
+            target_entropy_lin_total = h_dim * self.actor.action_dims['lin']
+        target_entropy_lin_tensor = torch.tensor(target_entropy_lin_total, device=self.device)
+
         # 4. PPO Update Loop
         actor_loss_list, critic_loss_list, entropy_list, ratio_list = [], [], [], []
         actor_grad_list, critic_grad_list = [], []
@@ -744,6 +1053,9 @@ class PPOHybrid:
         entropy_cat_list = []
         entropy_bern_list = []
         entropy_cont_list = []
+        entropy_circ_list = []
+        entropy_lin_list = []
+        grad_norm_ratio_list = [] # [新增] 范数比列表
         
         # [新增] 初始化样本统计计数器 (包含重复更新累加)
         ppo_samples_total = 0
@@ -802,6 +1114,11 @@ class PPOHybrid:
                     clip_fracs = (((ratio - 1.0).abs() > self.eps).float() * mb_active_masks).sum() / (active_sum + mask_eps)
                     clip_frac_list.append(clip_fracs.item())
                 
+                # 借用一点IMPALA的经验，防止ratio过大导致梯度被炸飞
+                # 建议设置数值：2.0~5.0
+                if v_trace is not None:
+                    ratio = torch.clamp(ratio, max=v_trace)
+
                 surr1 = ratio * mb_advantage
                 surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * mb_advantage
                 
@@ -819,16 +1136,93 @@ class PPOHybrid:
                 e_cont = entropy_details['cont'] if entropy_details['cont'] is not None else torch.tensor(0., device=self.device)
                 e_cat = entropy_details['cat'] if entropy_details['cat'] is not None else torch.tensor(0., device=self.device)
                 e_bern = entropy_details['bern'] if entropy_details['bern'] is not None else torch.tensor(0., device=self.device)
+                e_circ = entropy_details['circ'] if entropy_details['circ'] is not None else torch.tensor(0., device=self.device)
+                e_lin = entropy_details['lin'] if entropy_details['lin'] is not None else torch.tensor(0., device=self.device)
 
                 loss_ent_cont = (e_cont * mb_active_masks).sum() / (active_sum + mask_eps)
                 loss_ent_cat = (e_cat * mb_active_masks).sum() / (active_sum + mask_eps)
                 loss_ent_bern = (e_bern * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_circ = (e_circ * mb_active_masks).sum() / (active_sum + mask_eps)
+                loss_ent_lin = (e_lin * mb_active_masks).sum() / (active_sum + mask_eps)
 
+                # =====================================================================
+                # [修改] 使用动态 k_cat 计算 Actor Loss
+                # =====================================================================
                 k_cont = self.k_entropy.get('cont', 0.0)
                 k_cat = self.k_entropy.get('cat', 0.0)
                 k_bern = self.k_entropy.get('bern', 0.0)
+                k_circ = self.k_entropy.get('circ', 0.0)
+                k_lin = self.k_entropy.get('lin', 0.0)
+                
+                # # 当前的 k_cat 是 e^(log_k_cat)
+                # curr_k_cat = torch.exp(self.log_k_cat)
+                # --- 关键修改：跟踪目标熵, 熵过小，加熵。熵过大，减熵 ---
+                # 比平方误差更加平缓的损失函数候选：
+                # 1. pseudo-huber loss:     torch.sqrt(1 + torch.square(target - current)) - 1
+                # 2. log-cosh loss:         torch.log(torch.cosh(target_entropy_cat_tensor - loss_ent_cat))
 
-                actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
+                # 裁剪的范围，绝不能太小
+                theoretical_ent_cat_max = 0.0
+                for dim in self.actor.action_dims['cat']:
+                    theoretical_ent_cat_max += np.log(float(dim))
+                diff_cat0 = theoretical_ent_cat_max - target_entropy_cat_tensor
+                k_nonlinear_max_cat = torch.sqrt(1+diff_cat0**2)/(diff_cat0+1e-8)
+
+                theoretical_ent_bern_max = -np.log(0.5)*self.actor.action_dims['bern']
+                diff_bern0 = theoretical_ent_bern_max - target_entropy_bern_tensor
+                k_nonlinear_max_bern = torch.sqrt(1+diff_bern0**2)/(diff_bern0+1e-8)
+                
+                # 公式有误，格式先放上去
+                theoretical_ent_circ_max = np.log(self.actor.n_circle) * self.actor.action_dims['circ']
+                diff_circ0 = theoretical_ent_circ_max - target_entropy_circ_tensor
+                k_nonlinear_max_circ = torch.sqrt(1+diff_circ0**2)/(diff_circ0+1e-8)
+
+                theoretical_ent_lin_max = np.log(self.actor.n_linear) * self.actor.action_dims['lin']
+                diff_lin0 = theoretical_ent_lin_max - target_entropy_lin_tensor
+                k_nonlinear_max_lin = torch.sqrt(1+diff_lin0**2)/(diff_lin0+1e-8)
+
+                k_nonlinear_cat = min(max(k_nonlinear, 0.0), k_nonlinear_max_cat)
+                k_nonlinear_bern = min(max(k_nonlinear, 0.0), k_nonlinear_max_bern)
+                k_nonlinear_circ = min(max(k_nonlinear, 0.0), k_nonlinear_max_circ)
+                k_nonlinear_lin = min(max(k_nonlinear, 0.0), k_nonlinear_max_lin)
+
+                # 1. Categorical 约束项
+                cat_constraint_term = k_cat * (
+                    - loss_ent_cat # + 
+                    # torch.where(loss_ent_cat > target_entropy_cat_tensor, 
+                    # min(max(k_nonlinear_cat, 0.0), 1.0)/(2 * diff_cat0) * \
+                    #     torch.square(loss_ent_cat - target_entropy_cat_tensor)
+                    # , 0.0)
+                )
+                # 2. Bernoulli 约束项
+                bern_constraint_term = k_bern * (
+                    - loss_ent_bern # + 
+                    # torch.where(loss_ent_bern > target_entropy_bern_tensor,
+                    # min(max(k_nonlinear_bern, 0.0), 1.0)/(2 * diff_bern0) * \
+                    #     torch.square(loss_ent_bern - target_entropy_bern_tensor)
+                    # , 0.0)
+                )
+                # 3. Circular 约束项
+                circ_constraint_term = k_circ * (
+                    - loss_ent_circ # + 
+                    # torch.where(loss_ent_circ > target_entropy_circ_tensor,
+                    # min(max(k_nonlinear_circ, 0.0), 1.0)/(2 * diff_circ0) * \
+                    #     torch.square(loss_ent_circ - target_entropy_circ_tensor)
+                    # , 0.0)
+                )
+                # 4. Linear 约束项
+                lin_constraint_term = k_lin * (
+                    - loss_ent_lin # + 
+                    # torch.where(loss_ent_lin > target_entropy_lin_tensor,
+                    # min(max(k_nonlinear_lin, 0.0), 1.0)/(2 * diff_lin0) * \
+                    #     torch.square(loss_ent_lin - target_entropy_lin_tensor)
+                    # , 0.0)
+                )
+                # 5. 组合最终 Actor Loss
+                actor_loss = actor_loss + cat_constraint_term + bern_constraint_term + circ_constraint_term + lin_constraint_term - (k_cont * loss_ent_cont)
+                
+                # 原有非目标熵正则项
+                # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
                 # [新增] Logit Regularization (防止发射概率锁死在 1.0 或 0.0)
                 if actor_outputs['bern'] is not None:
@@ -857,16 +1251,27 @@ class PPOHybrid:
                 
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
+                # if alpha_loss.requires_grad:    # [新增]
+                #     self.k_cat_optim.zero_grad()
+                    
                 actor_loss.backward()
                 critic_loss.backward()
+                # if alpha_loss.requires_grad:    # [新增] 反向传播温度损失
+                #     alpha_loss.backward()
 
                 pre_clip_actor_grad.append(model_grad_norm(self.actor))
                 pre_clip_critic_grad.append(model_grad_norm(self.critic)) 
+                
+                # [新增] 计算范数比 (Pre-clip)
+                grad_norm_ratio_list.append(pre_clip_actor_grad[-1] / (pre_clip_critic_grad[-1] + 1e-8))
+
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
 
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
+                # if alpha_loss.requires_grad:    # [新增] 步进自适应熵系数
+                #     self.k_cat_optim.step()
 
                 # Logging
                 actor_grad_list.append(model_grad_norm(self.actor))
@@ -886,6 +1291,10 @@ class PPOHybrid:
                     entropy_cat_list.append(entropy_details['cat'].mean().item())
                 if entropy_details['bern'] is not None:
                     entropy_bern_list.append(entropy_details['bern'].mean().item())
+                if entropy_details['circ'] is not None:
+                    entropy_circ_list.append(entropy_details['circ'].mean().item())
+                if entropy_details['lin'] is not None:
+                    entropy_lin_list.append(entropy_details['lin'].mean().item())
 
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
@@ -910,6 +1319,12 @@ class PPOHybrid:
         self.entropy_cont = np.mean(entropy_cont_list) if len(entropy_cont_list) > 0 else 0
         self.entropy_cat = np.mean(entropy_cat_list) if len(entropy_cat_list) > 0 else 0
         self.entropy_bern = np.mean(entropy_bern_list) if len(entropy_bern_list) > 0 else 0
+        # 为了便于监控，把circ的熵也加到cat上面去
+        self.entropy_cat += np.mean(entropy_circ_list) if len(entropy_circ_list) > 0 else 0
+        self.entropy_cat += np.mean(entropy_lin_list) if len(entropy_lin_list) > 0 else 0
+        
+        # [新增] 汇总监控项
+        self.grad_norm_ratio = np.mean(grad_norm_ratio_list) if len(grad_norm_ratio_list) > 0 else 0
         
         # [新增] 赋值有效样本监控项
         self.PPO_samples = ppo_samples_total
@@ -934,22 +1349,222 @@ class PPOHybrid:
 
         if len(y_true) > 1:
             var_y = np.var(y_true)
+            self.td_error_var = np.var(y_true - y_pred) # [新增] TD error 方差
             if var_y < 1e-8:
                 self.explained_var = 0.0
             else:
-                self.explained_var = 1 - np.var(y_true - y_pred) / var_y
+                self.explained_var = 1 - self.td_error_var / var_y
         else:
+            self.td_error_var = 0.0
             self.explained_var = 0.0
 
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
 
+    # =========================================================================
+    #  [New Helper] 提取出的 MSE 计算逻辑 (供 mixed_update 和 BC_update 复用)
+    # =========================================================================
+    def _compute_mse_loss_with_f(self, actor_input_batch, actions_batch, returns_batch, 
+                                 critic_s_batch, # 用于计算 V
+                                 max_weight=100.0, use_F=True):
+        """
+        计算基于 F 函数 (Advantage > 0) 门控的 MSE Loss。
+        """
+        # 1. 计算 F 函数 (优势加权门控)
+        with torch.no_grad():
+            # Critic 计算 V 值
+            # 注意：如果 actor_input 和 critic_input 不一样 (如 obs vs state)，这里需要传入正确的 tensor
+            # 在本类中，通常传入的是用于 Actor 的输入，如果 Actor 用 Obs，Critic 用 State，
+            # 外部调用时需确保 critic_s_batch 是正确的全局 State 或与 Actor 输入一致(视具体配置)
+            # 这里为了通用性，假设 critic_s_batch 是正确的 Critic 输入
+            v_pred = self.critic(critic_s_batch)
+            
+            # 计算优势
+            # 确保 returns_batch 是 (Batch, 1)
+            adv = (returns_batch - v_pred) / (torch.sqrt(self.c_sq) + 1e-8)
+
+            if use_F:
+                # F 函数：只有 Adv > 0 的样本权重为 1，否则为极小值
+                F_mask = torch.where(adv > 0, torch.ones_like(adv), torch.full_like(adv, 1e-6))
+                F_mask = torch.clamp(F_mask, max=max_weight)
+            else:
+                F_mask = torch.ones_like(adv)
+
+        # 2. 获取网络原始输出
+        outputs = self.actor.net(actor_input_batch, max_std=self.max_std)
+        
+        # 初始化 Loss Sum (Batch, 1)
+        mse_loss_sum = torch.zeros_like(adv)
+
+        # --- Continuous MSE ---
+        if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+            mu_current, _ = outputs['cont']
+            u_expert = actions_batch['cont']
+            mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
+
+        # --- Categorical MSE ---
+        if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+            cat_probs_current = outputs['cat']
+            expert_cat = actions_batch['cat'].long()
+            for i, probs in enumerate(cat_probs_current):
+                target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
+                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
+
+        # --- Bernoulli MSE ---
+        if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+            bern_logits = outputs['bern']
+            bern_probs = torch.sigmoid(bern_logits)
+            target_bern = actions_batch['bern']
+            mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
+
+        # --- Circular MSE ---
+        if 'circ' in self.actor.action_dims and self.actor.action_dims['circ'] > 0:
+            vec_circ, std_all = outputs['circ']
+            expert_circ = actions_batch['circ'].long()
+            for i in range(self.actor.action_dims['circ']):
+                vec_h = vec_circ[:, i, :]
+                std_h = std_all[:, i:i+1]
+                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.actor.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                probs = dist.probs
+                target_one_hot = F.one_hot(expert_circ[:, i], num_classes=probs.size(-1)).float().to(self.device)
+                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
+
+        # --- Linear MSE ---
+        if 'lin' in self.actor.action_dims and self.actor.action_dims['lin'] > 0:
+            vec_lin, std_all = outputs['lin']
+            expert_lin = actions_batch['lin'].long()
+            for i in range(self.actor.action_dims['lin']):
+                vec_v = vec_lin[:, i:i+1]
+                std_v = std_all[:, i:i+1]
+                dist = LinearDiscretizedDistribution(vec_v, std_v, n=self.actor.n_linear)
+                probs = dist.probs
+                target_one_hot = F.one_hot(expert_lin[:, i], num_classes=probs.size(-1)).float().to(self.device)
+                mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
+
+        # 3. 应用 FMask 并求平均
+        # F_mask: [Batch, 1], mse_loss_sum: [Batch, 1]
+        if use_F:
+            final_loss = torch.mean(F_mask * mse_loss_sum)
+        else:
+            final_loss = torch.mean(mse_loss_sum)
+        
+        return final_loss, F_mask
 
     
+    # =========================================================================
+    #  [New Method] BC_update (Critic 同 MARWIL, Actor 用 MSE+F)
+    # =========================================================================
+    def BC_update(self, il_transition_dict, batch_size=64, c_v=1.0, shuffled=1, max_weight=100.0):
+        """
+        行为克隆更新 (Behavior Cloning with F-function Constraint)。
+        Critic: 使用 MARWIL 风格的回归更新 (拟合 R)。
+        Actor: 使用 MSE 回归，但仅在 Advantage > 0 时通过 F 函数生效。
+        """
+        # 1. 数据准备
+        # 可能的局部观测
+        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
+            obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
+            use_obs = True
+        else:
+            use_obs = False
+            
+        # 冻结分布参数，只训练均值/Logits
+        if hasattr(self.actor.net, 'log_std_cont'):
+            self.actor.net.log_std_cont.requires_grad = False
+
+        states_all = torch.tensor(np.array(il_transition_dict['states']), dtype=torch.float).to(self.device)
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']), dtype=torch.float).view(-1, 1).to(self.device)
+        
+        # 处理 Actions
+        raw_actions = il_transition_dict['actions']
+        actions_all = {}
+        if isinstance(raw_actions, list):
+            keys = raw_actions[0].keys()
+            temp_dict = {}
+            for k in keys:
+                temp_dict[k] = np.stack([d[k] for d in raw_actions], axis=0)
+            raw_actions = temp_dict
+        if isinstance(raw_actions, dict):
+            for k, v in raw_actions.items():
+                if k in ['cat', 'circ', 'lin']:
+                    actions_all[k] = torch.tensor(v, dtype=torch.long).to(self.device)
+                else:
+                    actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
+
+        # 2. 索引准备
+        total_size = states_all.size(0)
+        indices = np.arange(total_size)
+        if shuffled:
+            np.random.shuffle(indices)
+
+        total_actor_loss = 0
+        total_critic_loss = 0
+        total_valid_samples = 0
+        batch_count = 0
+
+        # 初始化 c_sq 用于 Advantage 归一化 (如果不存在)
+        if not hasattr(self, 'c_sq'): 
+            self.c_sq = torch.tensor(1.0, device=self.device)
+
+        # 3. Mini-batch 循环
+        for start in range(0, total_size, batch_size):
+            end = min(start + batch_size, total_size)
+            batch_indices = indices[start:end]
+            
+            s_batch = states_all[batch_indices] 
+            r_batch = returns_all[batch_indices]
+            
+            if use_obs:
+                actor_input_batch = obs_all[batch_indices]
+            else:
+                actor_input_batch = s_batch
+            
+            # Critic input (通常 state)
+            critic_input_batch = s_batch
+
+            actions_batch = {}
+            for k, v in actions_all.items():
+                actions_batch[k] = v[batch_indices]
+
+            # --- A. Actor Loss (MSE + F) ---
+            # 使用 helper 函数计算
+            actor_loss, F_mask = self._compute_mse_loss_with_f(
+                actor_input_batch, actions_batch, r_batch, critic_input_batch, max_weight, use_F=0
+            )
+
+            # --- B. Critic Loss (同 MARWIL) ---
+            v_pred = self.critic(critic_input_batch)
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+            
+            # --- C. Optimize ---
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            
+            actor_loss.backward()
+            critic_loss.backward()
+            
+            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            total_actor_loss += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            total_valid_samples += F_mask.sum().item()
+            batch_count += 1
+
+        avg_actor_loss = total_actor_loss / batch_count if batch_count > 0 else 0
+        avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0
+        
+        return avg_actor_loss, avg_critic_loss, total_valid_samples
     
-    # --- 修改后的 MARWIL_update ---
+    
+    
+    # --- 修改后的 MARWIL_update， 注意原先是0 ---
     def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
-                      tau=0.8):
+                      tau=0.8, no_bern=1):
         """
         MARWIL 离线更新函数
         输入 actions 结构支持: [{'cat': array([v]), 'bern': array([v])}, ...]
@@ -992,7 +1607,7 @@ class PPOHybrid:
         # 2. Dict of Arrays -> Dict of Tensors
         if isinstance(raw_actions, dict):
             for k, v in raw_actions.items():
-                if k == 'cat':
+                if k in ['cat', 'circ', 'lin']:
                     actions_all[k] = torch.tensor(v, dtype=torch.long).to(self.device)
                 else:
                     actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
@@ -1044,8 +1659,7 @@ class PPOHybrid:
                 weights = torch.clamp(raw_weights, max=max_weight)
 
             # B. Actor Loss
-            # compute_il_loss 不需要修改，因为它接收的是已经处理好的 Dict of Tensors
-            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing)
+            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing, no_bern=no_bern, max_std=self.max_std)
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
 
             # C. Critic Loss
@@ -1083,481 +1697,3 @@ class PPOHybrid:
         
         return avg_actor_loss, avg_critic_loss, avg_c
     
-    # --- 新增功能 3: 混合更新 (PPO + MARWIL) ---
-    # --- 修改后的 mixed_update ---
-    # --- 修复后的 mixed_update (包含完整监控项) ---
-    def IL_update(self, transition_dict, il_transition_dict, init_il_transition_dict=None, eta=0.1,  # [新增] 专家数据与约束系数
-                     # IL 参数
-                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_epochs=1,
-                     sil_only_maneuver=True, mini_batch_size=None,):
-        
-
-        # 我们需要知道 PPO 到底更新了多少个 Batch，用于后续和 IL 做加权平均
-        rl_total_size = len(transition_dict['states'])
-        
-        # ppo_num_batches = max(1, int(rl_total_size / mini_batch_size)) * self.epochs
-        mb = mini_batch_size if mini_batch_size is not None else rl_total_size
-        ppo_num_batches = max(1, (rl_total_size + mb - 1) // mb) * self.epochs
-        
-
-        # =====================================================================
-        # Phase 2: IL 更新 (自模仿 + 专家 MSE)
-        # =====================================================================
-        # 辅助函数：转 Tensor
-        def to_tensor(x, dtype):
-            if isinstance(x, np.ndarray):
-                return torch.tensor(x, dtype=dtype).to(self.device)
-            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
-
-        # --- [Step B] 准备 IL 数据 ---
-        # 1. Self-Imitation Data
-        # 1. 自模仿数据 (保持原样)
-        il_states_all = to_tensor(il_transition_dict['states'], torch.float)
-        il_returns_all = to_tensor(il_transition_dict['returns'], torch.float).view(-1, 1)
-        use_il_obs = False
-        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
-            il_obs_all = to_tensor(il_transition_dict['obs'], torch.float)
-            use_il_obs = True
-        il_actions_raw = il_transition_dict['actions']
-        il_actions_all = {}
-        
-        if isinstance(il_actions_raw, list):
-            if len(il_actions_raw) > 0:
-                keys = il_actions_raw[0].keys()
-                temp_dict = {}
-                for k in keys:
-                    temp_dict[k] = np.stack([d[k] for d in il_actions_raw], axis=0)
-                il_actions_raw = temp_dict
-            else:
-                il_actions_raw = {}
-        if isinstance(il_actions_raw, dict):
-            for k, v in il_actions_raw.items():
-                if k == 'cat':
-                    il_actions_all[k] = to_tensor(v, torch.long)
-                else:
-                    il_actions_all[k] = to_tensor(v, torch.float)
-        il_total_size = il_states_all.size(0)
-        
-        if init_il_transition_dict is not None:
-            # 2. 他模仿数据
-            init_il_states_all = to_tensor(init_il_transition_dict['states'], torch.float)
-            use_init_il_obs = False
-            if 'obs' in init_il_transition_dict and len(init_il_transition_dict['obs']) > 0:
-                init_il_obs_all = to_tensor(init_il_transition_dict['obs'], torch.float)
-                use_init_il_obs = True
-            init_il_actions_raw = init_il_transition_dict['actions']
-            init_il_actions_all = {}  
-            if isinstance(init_il_actions_raw, list):
-                if len(init_il_actions_raw) > 0:
-                    keys = init_il_actions_raw[0].keys()
-                    temp_dict = {}
-                    for k in keys:
-                        temp_dict[k] = np.stack([d[k] for d in init_il_actions_raw], axis=0)
-                    init_il_actions_raw = temp_dict
-                else:
-                    init_il_actions_raw = {}
-            if isinstance(init_il_actions_raw, dict):
-                for k, v in init_il_actions_raw.items():
-                    if k == 'cat':
-                        init_il_actions_all[k] = to_tensor(v, torch.long)
-                    else:
-                        init_il_actions_all[k] = to_tensor(v, torch.float)
-            init_il_returns_all = to_tensor(init_il_transition_dict['returns'], torch.float).view(-1, 1)
-            init_il_total_size = init_il_states_all.size(0)
-        
-        # --- [Step C] 执行 IL 更新 (通常执行 1 次，或者根据 batch_size 循环) ---
-        # 这里为了简单且符合"PPO为主，IL为辅"的逻辑，我们执行一次 IL Update
-        # 如果 IL 数据量很大，这里可以改为循环
-        
-        # [修复] 完整初始化所有监控列表
-        actor_loss_list, critic_loss_list = [], [],
-        actor_grad_list, critic_grad_list = [], []
-        pre_clip_actor_grad, pre_clip_critic_grad = [], []
-        
-        il_actor_loss_list, il_critic_loss_list = [], [] 
-        
-        il_samples_total = 0
-        il_valid_samples_total = 0
-
-        for _ in range(il_epochs):
-            actor_loss_init_il = torch.tensor(0.0, device=self.device) # 显式初始化
-            # 使用全量(或最大batch) IL 数据，不切分 Mini-Batch
-            # 这里也可以稍微 Shuffle 一下 IL 数据，或者直接随机采样 batch_size
-            curr_il_batch_size = min(il_batch_size, il_total_size) if il_batch_size is not None else il_total_size
-            
-            # 简单起见，如果要求全batch，则直接取全部，或者随机取一个大 Batch
-            il_indices = np.random.randint(0, il_total_size, curr_il_batch_size)
-            
-            il_s_batch = il_states_all[il_indices] 
-            il_r_batch = il_returns_all[il_indices]
-            if use_il_obs:
-                il_actor_input_batch = il_obs_all[il_indices]
-            else:
-                il_actor_input_batch = il_s_batch
-
-            il_actions_batch = {}
-            for k, v in il_actions_all.items():
-                il_actions_batch[k] = v[il_indices]
-            
-            if init_il_transition_dict is not None:
-                init_il_idx = np.random.randint(0, init_il_total_size, init_il_total_size)
-                init_il_returns_batch = init_il_returns_all[init_il_idx]
-                if use_init_il_obs:
-                    init_il_actor_input_batch = init_il_obs_all[init_il_idx]
-                else:
-                    init_il_actor_input_batch = init_il_states_all[init_il_idx]
-                init_il_actions_batch = {}
-                for k, v in init_il_actions_all.items():
-                    init_il_actions_batch[k] = v[init_il_idx]
-                
-            with torch.no_grad():
-                il_values = self.critic(il_s_batch)
-                residual = il_r_batch - il_values
-                
-                if not hasattr(self, 'c_sq'): self.c_sq = torch.tensor(1.0, device=self.device)
-                batch_mse = (residual ** 2).mean().item()
-                # self.c_sq = self.c_sq + 1e-8 * (batch_mse - self.c_sq)
-                self.c_sq = torch.tensor(1.0, device=self.device)  # 不要再让缩放系数浮动了
-                c = torch.sqrt(self.c_sq)
-                
-                il_adv = residual / (c + 1e-8)
-                # 对负 advantage 强烈抑制权重：adv>0 正常放行，否则乘以 1e-6
-                
-                '''
-                exp可能导致梯度爆炸，对此有以下解决方法（最新的梯度爆炸不是这个原因，代码仅做候补）
-                # 1 数值归一化
-                il_adv = (il_adv - il_adv.mean()) / (il_adv.std() + 1e-8)
-                il_raw_weights = torch.exp(beta * il_adv)
-                # 2 减去最大值 (Max-Subtraction Trick)
-                il_adv_max = torch.max(il_adv)
-                il_raw_weights = torch.exp(beta * (il_adv - il_adv_max))
-                # 3 权重截断
-                il_raw_weights = torch.exp(beta * il_adv)
-                il_raw_weights = torch.clamp(il_raw_weights, max=100.0) # 限制单样本权重最大100倍
-                '''
-                
-                il_raw_weights = beta * il_adv  # torch.exp(beta * il_adv)
-                F_word = torch.where(il_adv > 0, torch.ones_like(il_adv), torch.full_like(il_adv, 1e-6))
-                il_weights = torch.clamp(il_raw_weights * F_word, min=0, max=max_weight)
-
-                # [新增] 统计 IL 样本强度
-                il_samples_total += curr_il_batch_size
-                il_valid_samples_total += F_word.sum().item()
-
-            # compute_il_loss 接口不变
-            raw_il_loss = self.actor.compute_il_loss(il_actor_input_batch, il_actions_batch, label_smoothing, no_bern=sil_only_maneuver)
-            actor_loss_il = torch.mean(il_weights * raw_il_loss)
-            
-            # --- [new] 对初始轨迹行为克隆 ---
-            if init_il_transition_dict is not None:
-                # 1. 计算初始轨迹的 F 函数 (优势加权)
-                with torch.no_grad():
-                    # [修改] 按照你的要求，Critic 直接接收 init_il_actor_input_batch
-                    v_init = self.critic(init_il_actor_input_batch)
-                    adv_init = (init_il_returns_batch - v_init) / (torch.sqrt(self.c_sq) + 1e-8)
-                    
-                    # F 函数约束：只有比当前表现好的专家数据才学
-                    F_init = torch.where(adv_init > 0, torch.ones_like(adv_init), torch.full_like(adv_init, 1e-6))
-                    F_init = torch.clamp(F_init, max=max_weight)
-
-                # 2. 获取网络当前的原始输出 (保留对 net 的直接调用)
-                init_outputs = self.actor.net(init_il_actor_input_batch)
-                
-                # 【核心修正】：初始化为与 adv_init 形状相同的零张量 [Batch, 1]
-                # 这样可以确保后续的 += 每一项都是 [Batch, 1] 的累加
-                mse_loss_sum = torch.zeros_like(adv_init)
-                # mse_loss_sum = torch.tensor(0.0, device=self.device)
-
-                # --- 连续动作 MSE ---
-                if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
-                    mu_current, _ = init_outputs['cont']
-                    u_expert = init_il_actions_batch['cont']
-                    mse_loss_sum += F.mse_loss(mu_current, u_expert, reduction='none').sum(dim=-1, keepdim=True)
-
-                # --- 离散动作 MSE ---
-                if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-                    cat_probs_current = init_outputs['cat']
-                    expert_cat = init_il_actions_batch['cat'].long()
-                    for i, probs in enumerate(cat_probs_current):
-                        target_one_hot = F.one_hot(expert_cat[:, i], num_classes=probs.size(-1)).float()
-                        mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)
-
-                # --- 伯努利动作 MSE ---
-                if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-                    bern_logits = init_outputs['bern']
-                    bern_probs = torch.sigmoid(bern_logits)
-                    target_bern = init_il_actions_batch['bern']
-                    mse_loss_sum += F.mse_loss(bern_probs, target_bern, reduction='none').sum(dim=-1, keepdim=True)
-
-                # 3. 应用 F 函数约束并求平均
-                actor_loss_init_mse = torch.mean(F_init * mse_loss_sum)
-                actor_loss_init_il = eta * actor_loss_init_mse
-
-            
-            il_values_grad = self.critic(il_s_batch)
-            critic_loss_il = F.mse_loss(il_values_grad, il_r_batch) * c_v
-            
-            il_actor_loss_list.append(actor_loss_il.item())
-            il_critic_loss_list.append(critic_loss_il.item())
-
-            # 4. 联合反向传播
-
-            il_actor_loss = alpha * (actor_loss_il + actor_loss_init_il)
-            il_critic_loss = alpha * critic_loss_il
-
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            
-            il_actor_loss.backward()
-            il_critic_loss.backward()
-            
-            # [修复] 记录裁剪前梯度
-            pre_clip_actor_grad.append(model_grad_norm(self.actor))
-            pre_clip_critic_grad.append(model_grad_norm(self.critic))
-            
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-            
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
-
-            # [修复] 记录步进后梯度和其他监控项
-            actor_grad_list.append(model_grad_norm(self.actor))
-            critic_grad_list.append(model_grad_norm(self.critic))            
-            actor_loss_list.append(il_actor_loss.item()) # 注意：记录的是混合 Loss
-            critic_loss_list.append(il_critic_loss.item())
-        
-
-        # =====================================================================
-        # Phase 3: 统计指标融合 (加权平均)
-        # =====================================================================
-        
-        # 定义权重：PPO 占 epoch * batches 份，IL 占 1 份 (或者你希望 1:1，可以设 il_weight = ppo_num_batches)
-        # 这里按照“梯度更新次数”进行加权是比较科学的
-        def weighted_avg(ppo_val, il_val, 
-                         ppo_num_batches=ppo_num_batches, il_epochs=il_epochs):
-            total_updates = ppo_num_batches + il_epochs
-            return (ppo_val * ppo_num_batches + il_val * il_epochs) / total_updates
-
-        # 更新类属性用于 Log
-        self.il_actor_loss = np.mean(actor_loss_list)
-        self.il_critic_loss = np.mean(critic_loss_list)
-        
-        self.il_actor_grad = np.mean(pre_clip_actor_grad)  # weighted_avg(ppo_stats['actor_grad'], np.mean(actor_grad_list))
-        self.il_critic_grad = np.mean(pre_clip_critic_grad)  # weighted_avg(ppo_stats['critic_grad'], np.mean(critic_grad_list))
-        
-        # 更新样本计数
-        self.IL_samples = il_samples_total
-        self.IL_valid_samples = il_valid_samples_total
-
-        # [新增] 记录 IL 指标到类属性
-        if len(actor_loss_list) > 0:
-            self.il_actor_loss = np.mean(actor_loss_list)
-            self.il_critic_loss = np.mean(critic_loss_list)
-            self.il_actor_grad = np.mean(pre_clip_actor_grad)
-            self.il_critic_grad = np.mean(pre_clip_critic_grad)
-
-        
-        check_weights_bias_nan(self.actor, "actor", "mixed_update后")
-        check_weights_bias_nan(self.critic, "critic", "mixed_update后")
-
-
-    def distil(self, transition_dict, teacher_agent=None, 
-                                # 公共参数
-                                shuffled=1, mini_batch_size=None,
-                                # 策略蒸馏参数  
-                                alpha=1.0, distil_only_maneuver=True, reverse_kl=1):
-        
-        # [Step A] 准备工作
-        if teacher_agent is None:
-            return
-
-        # 辅助函数：转 Tensor
-        def to_tensor(x, dtype):
-            if isinstance(x, np.ndarray):
-                return torch.tensor(x, dtype=dtype).to(self.device)
-            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
-
-        # 1. 准备输入数据 (Full Batch)
-        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
-            student_inputs_tensor = to_tensor(transition_dict['obs'], torch.float)
-            teacher_inputs_np = np.array(transition_dict['obs']) 
-        else:
-            student_inputs_tensor = to_tensor(transition_dict['states'], torch.float)
-            teacher_inputs_np = np.array(transition_dict['states'])
-
-        dones = to_tensor(transition_dict['dones'], torch.float).view(-1, 1)
-
-        # 动作数据准备 (用于 log_prob 计算)
-        student_actions_raw = transition_dict['actions']
-        student_actions_tensor = {}
-        if isinstance(student_actions_raw, list):
-            keys = student_actions_raw[0].keys()
-            temp_dict = {}
-            for k in keys:
-                temp_dict[k] = np.stack([d[k] for d in student_actions_raw], axis=0)
-            student_actions_raw = temp_dict
-            
-        for k, v in student_actions_raw.items():
-            if k == 'cat':
-                student_actions_tensor[k] = to_tensor(v, torch.long)
-            else:
-                student_actions_tensor[k] = to_tensor(v, torch.float)
-
-        num_samples = student_inputs_tensor.size(0)
-
-        # 2. 预计算 Teacher 的动作分布 (Soft Targets)
-        # ---------------------------------------------------------------------
-        cat_dim = teacher_agent.env.fly_act_dim[0]
-        target_probs_cat_np = np.zeros((num_samples, cat_dim), dtype=np.float32)
-        target_probs_bern_np = np.zeros((num_samples, 1), dtype=np.float32)
-        target_vals_np = np.zeros((num_samples, 1), dtype=np.float32)
-        
-        for i in range(num_samples):
-            s_obs = teacher_inputs_np[i]
-            _, t_out_check = teacher_agent.get_action(s_obs)
-            t_out_val = teacher_agent.get_value(s_obs)
-            
-            target_probs_cat_np[i] = t_out_check['cat'][0] if type(t_out_check['cat']) is list else t_out_check['cat']
-            target_probs_bern_np[i] = t_out_check['bern']
-            target_vals_np[i] = t_out_val
-        
-        # 转 Tensor
-        target_probs_cat = to_tensor(target_probs_cat_np, torch.float)
-        target_vals = to_tensor(target_vals_np, torch.float)
-        if not distil_only_maneuver:
-            target_probs_bern = to_tensor(target_probs_bern_np, torch.float)
-        else:
-            target_probs_bern = None
-
-        # 3. 蒸馏训练循环 (Multi-Epoch)
-        # ---------------------------------------------------------------------
-        distil_actor_loss_list = []
-        distil_grad_list = []
-        
-        valid_range_len = num_samples - 1
-        base_indices = np.arange(valid_range_len)
-
-        for _ in range(self.epochs):
-            
-            if shuffled:
-                np.random.shuffle(base_indices)
-            
-            # 构造 Tensor 索引
-            curr_idx = to_tensor(base_indices, torch.long)     # t
-            next_idx = to_tensor(base_indices + 1, torch.long) # t+1
-            
-            # Forward Student 获取当前分布
-            student_outputs = self.actor.net(student_inputs_tensor)
-            student_vals = self.critic(student_inputs_tensor)
-            
-            # -----------------------------------------------------------------
-            # [Change 1] 计算 Reverse KL (Exp Loss Term)
-            # -----------------------------------------------------------------
-            # Loss = Sum( Student * (Log_Student - Log_Teacher) )
-            kl_loss_per_epoch = torch.zeros((num_samples, 1), device=self.device)
-            distil_mask = (target_vals > student_vals).float()
-
-            # A. Categorical Reverse KL
-            if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
-                s_probs = student_outputs['cat'][0]
-                s_probs = torch.clamp(s_probs, 1e-8, 1.0) # 确保不会出现极小值
-                t_probs = target_probs_cat
-                
-                log_s_probs = torch.log(s_probs + 1e-10)
-                log_t_probs = torch.log(t_probs + 1e-10)
-                
-                # 手动计算 Reverse KL: sum(p_student * (log_p_student - log_p_teacher))
-                kl_reverse = (s_probs * (log_s_probs - log_t_probs)).sum(dim=-1, keepdim=True)
-                kl_loss_per_epoch += kl_reverse
-
-            # B. Bernoulli Reverse KL
-            if (not distil_only_maneuver) and (target_probs_bern is not None):
-                s_logits = student_outputs['bern']
-                s_probs_bern = torch.sigmoid(s_logits)
-                t_probs_bern = target_probs_bern
-                
-                # BCEWithLogits 其实是 - [y * log(x) + (1-y) * log(1-x)]
-                # Reverse KL 需要把 s_probs 当作分布 P，t_probs 当作 Q
-                # P log P - P log Q
-                # 为了数值稳定，这里简化使用 BCE，或者严格实现 Bernoulli KL
-                # 简单起见，这里仍沿用 BCE 近似，或者严格写：
-                s_p = s_probs_bern
-                t_p = t_probs_bern + 1e-10
-                kl_bern = s_p * (torch.log(s_p + 1e-10) - torch.log(t_p)) + \
-                          (1 - s_p) * (torch.log(1 - s_p + 1e-10) - torch.log(1 - t_p))
-                kl_loss_per_epoch += kl_bern
-
-            # 应用门控
-            kl_loss_per_epoch = kl_loss_per_epoch * distil_mask
-            
-            # 提取当前时刻的监督损失
-            kl_curr = kl_loss_per_epoch[curr_idx]
-
-            # -----------------------------------------------------------------
-            # [Change 2] 计算 Exp 补偿项 (Reward = Teacher LogProb of Next Action)
-            # -----------------------------------------------------------------
-            
-            # 1. 计算 Student 当前的 log_prob (用于梯度)
-            log_probs_all, _, _, _, _ = self.actor.evaluate_actions(
-                student_inputs_tensor, student_actions_tensor, max_std=self.max_std
-            )
-            log_prob_curr = log_probs_all[curr_idx]
-
-            # 2. 获取下一时刻 Student 实际采取的动作
-            # 这里的动作是 buffer 里的，即 student 采样产生的 a_{t+1}
-            # 我们需要计算 teacher 对这个动作的 log_prob
-            
-            # 处理 Categorical 动作的 Gather
-            # 假设只有 'cat' 动作参与这个 Reward 计算
-            if 'cat' in student_actions_tensor:
-                s_action_next = student_actions_tensor['cat'][next_idx] # (Batch, 1)
-                t_probs_next = target_probs_cat[next_idx]               # (Batch, Dim)
-                
-                # Gather teacher's prob for student's action
-                # log( pi_teacher(a_{t+1}) )
-                t_prob_selected = t_probs_next.gather(1, s_action_next)
-                r_exp_next = torch.log(t_prob_selected + 1e-8).clamp(min=-10.0).detach() # 这是一个标量 Reward
-            else:
-                r_exp_next = torch.zeros_like(log_prob_curr)
-
-            # 处理 Done
-            valid_mask = (1.0 - dones[curr_idx])
-
-            # -----------------------------------------------------------------
-            # [Change 3] 构建 Exp RL Loss
-            # -----------------------------------------------------------------
-            # 标准 PG Loss: - Reward * log_pi
-            # 这里 Reward = r_exp_next (通常是负数，log概率)
-            # 我们希望 Maximize Reward => Minimize -Reward
-            # Loss = - (r_exp_next * log_prob_curr)
-            # 
-            # 分析梯度:
-            # 如果 r_exp_next 很小 (比如 -10, 老师觉得这个动作很烂), Loss = 10 * log_pi
-            # Min Loss -> Min log_pi -> 降低该动作概率 (Correct)
-            # 如果 r_exp_next 很大 (比如 -0.1, 老师觉得很棒), Loss = 0.1 * log_pi
-            # Min Loss -> 相对惩罚较小 (Softmax 会自然增加其概率)
-            
-            loss_rl = - (r_exp_next * log_prob_curr) * valid_mask
-
-            # 总 Loss
-            total_loss = alpha * (kl_curr + loss_rl).mean()
-
-            if torch.isnan(total_loss):
-                print(f"Detect nan in loss! kl_curr: {kl_curr.mean().item()}, loss_rl: {loss_rl.mean().item()}")
-                # 可以在这里断点调试
-
-            # 优化更新
-            self.actor_optimizer.zero_grad()
-            total_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            self.actor_optimizer.step()
-
-            distil_actor_loss_list.append(total_loss.item())
-            distil_grad_list.append(model_grad_norm(self.actor))
-
-        if len(distil_actor_loss_list) > 0:
-            self.dis_actor_loss = np.mean(distil_actor_loss_list)
-            self.dis_actor_grad = np.mean(distil_grad_list)
-            self.IL_samples = num_samples * self.epochs
-            check_weights_bias_nan(self.actor, "actor", "distil后")

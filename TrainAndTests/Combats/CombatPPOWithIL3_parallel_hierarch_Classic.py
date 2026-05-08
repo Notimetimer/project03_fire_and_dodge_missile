@@ -29,7 +29,7 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training2_hierarch import test_worker
+from VsBaseline_while_training_hierarch import test_worker
 
 dt_move = 0.04
 
@@ -723,6 +723,8 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
 ):
 
+    actor_lr0 = actor_lr
+    critic_lr0 = critic_lr
     # 1. 设置随机数种子 (Master)
     seed = 42
     import random
@@ -1416,6 +1418,11 @@ def run_MLP_simulation(
                 # else:
                 #====================
                 # 原有强化学习部分
+                # 学习率warm_up
+                actor_lr = min(actor_lr0, actor_lr0 * total_steps/1e6)
+                critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
+                student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear)
                 #====================
                 # 记录 Log

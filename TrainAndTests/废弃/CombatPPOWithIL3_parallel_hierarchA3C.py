@@ -28,7 +28,7 @@ from Algorithms.A3CHybrid23_0 import A3CHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training2_hierarch import test_worker
+from VsBaseline_while_training_hierarch import test_worker
 
 dt_move = 0.04
 

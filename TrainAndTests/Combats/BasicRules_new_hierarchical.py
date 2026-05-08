@@ -62,13 +62,13 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     # # # 2. 根据目标相对高度选择基础进攻机动
     # if delta_theta < -15 * pi/180:
     #     action_v = 3 # 下降
-    #     action_h = 1 # 追踪
+    #     action_h = 0 # 追踪
     # elif delta_theta >= 15 * pi/180:
     #     action_v = 1 # 爬升
-    #     action_h = 1 # 追踪
+    #     action_h = 0 # 追踪
     # else:
     action_v = 2 # 追踪
-    action_h = 1 # 追踪
+    action_h = 0 # 追踪
     action_number = [action_v, action_h] # 默认执行基础进攻
     base_offensive_action = action_number
 
@@ -97,7 +97,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             else:
                 action_v = 2 # 平飞
             # 置尾机动
-            action_h = 6 # 水平方向背离
+            action_h = 3 # 水平方向背离
             # # 优先俯冲回转至5000m以下
             # if alt > 5000:
             #     action_number = 12 # 俯冲回转
@@ -107,10 +107,10 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         elif on_guiding: # 如果本回合决定发射导弹
             if delta_psi < 0:
                 action_v = 2 # 平飞
-                action_h = 3 # Rcrank
+                action_h = 5 # Rcrank
             else:
                 action_v = 2 # 平飞
-                action_h = 2 # Lcrank
+                action_h = 1 # Lcrank
             # action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         else:
             action_number = base_offensive_action
@@ -121,26 +121,26 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         # 规则2: Loft爬升射击序列
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_v = 4 # 下降高度
-            action_h = 6 # 置尾机动
+            action_h = 3 # 置尾机动
             action_number = [action_v, action_h]
             # action_number = 8 # 立刻 split-S
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
             if delta_psi < 0:
                 action_v = 2 # 平飞
-                action_h = 3 # Rcrank
+                action_h = 5 # Rcrank
                 action_number = [action_v, action_h]
                 # action_number = 6 # 右crank
             else:
                 action_v = 2 # 平飞
-                action_h = 2 # Lcrank
+                action_h = 1 # Lcrank
                 action_number = [action_v, action_h]
                 # action_number = 5 # 左crank
             # action_number = 6 if delta_psi < 0 else 5 # random.choice([5,6]) # 立刻crank
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
             if sin_theta < sin(30*pi/180) and alt < 9500:  # last_action != 2: # 如果上一动作为非爬升
                 action_v = 0 # 爬升
-                action_h = 1 # 追踪
+                action_h = 0 # 追踪
                 # action_number = 2 # 则本回合执行爬升
                 fire_missile = False
                 action_number = [action_v, action_h]
@@ -169,7 +169,8 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     if np.random.rand() <= p_random:
         # 再出现动作数值越界改这里
         v_action = np.random.randint(0, 5)
-        h_action = np.random.randint(0, 7)
+        h_action = np.random.randint(0, 6) # 7
+
         action_number = [v_action, h_action]
         # action_number = np.random.randint(0, 13+1)
         # action_number = np.clip(action_number, 0, 13)

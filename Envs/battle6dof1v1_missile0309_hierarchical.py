@@ -36,6 +36,12 @@ from TrainAndTests.Controls.UPolicyWrapper import *
 from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import *
 from Envs.UAVmodel6d0309 import UAVModel
 
+# 调用黑名单：删除 PPOHybrid，防止污染命名空间导致外层调用时 IDE 混淆
+try:
+    del PPOHybrid
+except NameError:
+    pass
+
 g = 9.81
 dt_maneuver = 0.2  # 0.02 0.8 0.2
 dt_move = 0.02

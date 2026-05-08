@@ -22,7 +22,7 @@ from BasicRules_new_hierarchical import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
-from VsBaseline_while_training2_hierarch import test_worker
+from VsBaseline_while_training_hierarch import test_worker
 
 # --- 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10

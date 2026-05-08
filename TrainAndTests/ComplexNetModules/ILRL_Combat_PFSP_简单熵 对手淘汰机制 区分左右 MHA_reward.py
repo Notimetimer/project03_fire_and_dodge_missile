@@ -172,7 +172,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 # k_entropy={'cont':0.01, 'cat':0.1, 'bern':0.3} # 1 # 0.05 # 给MSE用，这个项需要大一些来把熵压在目标熵附近
-k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
+k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.01} # 1 # 0.05 12.15 17:58分备份 0.8太大了
 
 
 env = ChooseStrategyEnv(args)

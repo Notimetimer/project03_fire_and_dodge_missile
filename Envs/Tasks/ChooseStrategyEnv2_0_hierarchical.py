@@ -67,7 +67,8 @@ class ChooseStrategyEnv(Battle):
             "border",  # 2
         ]
         self.obs_dim = 1*6+8+7+1+4+2
-        self.fly_act_dim = [5, 7] # 14
+        self.fly_act_dim = [5, 7] # [5,7] 14
+        self.fly_act_dim_circ = [5, 6]
         self.fire_dim = 1
         
         # [新增] 初始化 last_obs 属性，用于记录上一帧状态以计算瞬时奖励
@@ -185,7 +186,7 @@ class ChooseStrategyEnv(Battle):
         return obs_dict
     
     # 新动作空间（区分左右）
-    def maneuver14LR(self, UAV, action):        
+    def maneuver14LR(self, UAV, action, type='primitive'):        
         # 输入动作与动力运动学状态
         uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
         delta_theta = uav_obs["target_information"][2]
@@ -203,6 +204,18 @@ class ChooseStrategyEnv(Battle):
 
         # 动作空间正交化
         action_v, action_h = action
+
+        # # 针对环形动作分布改键位
+        # if type == "circular":
+        #     mapping = {
+        #         0: 0, 
+        #         1: 1, 
+        #         2: 3, 
+        #         3: 5, 
+        #         4: 4, 
+        #         5: 2}
+        #     action_h = mapping.get(int(action_h), action_h)
+
         # 速度指令，锁定340
         speed_cmd = 340
 
@@ -225,33 +238,34 @@ class ChooseStrategyEnv(Battle):
 
 
         # 水平方向指令：
-        # 回中心
+        # 追踪
         if action_h == 0:
+            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
+        # 左crank
+        if action_h == 1:
+            delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
+        # 右crank
+        if action_h == 5:
+            delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
+        # 3线
+        if action_h == 2:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi_temp - pi/2, 0)
+        # 9线
+        if action_h == 4:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = sub_of_radian(delta_psi_temp + pi/2, 0)
+        # 置尾机动
+        if action_h == 3:
+            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
+
+        # 回中心(连续动作空间离散化禁止使用)
+        if action_h == 6:
             line2center = np.array([self.horizontal_center[0]-UAV.pos_[0], self.horizontal_center[1]-UAV.pos_[2]])
             psi2center = np.arctan2(line2center[1], line2center[0])
             dist2center = norm(line2center)
             delta_psi_cmd = sub_of_radian(psi2center, UAV.psi) * dist2center/self.R_cage
-        # 追踪
-        if action_h == 1:
-            delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
-        # 左crank
-        if action_h == 2:
-            delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
-        # 右crank
-        if action_h == 3:
-            delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
-        # 3线
-        if action_h == 4:
-            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = sub_of_radian(delta_psi_temp - pi/2, 0)
-        # 9线
-        if action_h == 5:
-            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = sub_of_radian(delta_psi_temp + pi/2, 0)
-        # 置尾机动
-        if action_h == 6:
-            delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-            delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
 
         # # 水平跟踪
         # if action == 0:

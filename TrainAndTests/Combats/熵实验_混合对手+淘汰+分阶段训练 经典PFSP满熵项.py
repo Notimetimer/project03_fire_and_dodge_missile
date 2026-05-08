@@ -3,7 +3,8 @@ from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
-resume_target_dir = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_训练不带次序限制-run-20260430-205459"
+resume_target_dir = None 
+# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260507-113011"
 
 mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
 
@@ -17,7 +18,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 # IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260504-151707 决不能删掉!!!!!
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小

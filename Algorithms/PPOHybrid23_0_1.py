@@ -586,7 +586,7 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.008, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
+                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
