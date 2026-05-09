@@ -1403,13 +1403,13 @@ def run_MLP_simulation(
                 # max_std: 限制探索的上限，从 1.1 降到 0.8，防止训练后期动作过于离谱
                 current_max_std = 1.1 - (1.1 - 0.8) * np.clip(total_steps / 10e6, 0.0, 1.0)
 
-                # min_std: 限制探索的下限，核心是强迫机动策略保持探索。
-                # 初始设定为一个较大的值 (如 0.7)，直到 10M steps 时才允许其降到 0.2 左右
-                # 这样在训练前期，机动策略永远不会变成确定性策略，必须给开火头留出尝试空间
-                current_min_std = 0.7 - (0.7 - 0.2) * np.clip(total_steps / 10e6, 0.0, 1.0)
+                # # min_std: 限制探索的下限，核心是强迫机动策略保持探索。
+                # # 初始设定为一个较大的值 (如 0.7)，直到 10M steps 时才允许其降到 0.2 左右
+                # # 这样在训练前期，机动策略永远不会变成确定性策略，必须给开火头留出尝试空间
+                # current_min_std = 0.7 - (0.7 - 0.2) * np.clip(total_steps / 10e6, 0.0, 1.0)
 
                 student_agent.max_std = current_max_std
-                student_agent.min_std = current_min_std # 假设你在 agent 类中定义了这个变量
+                # student_agent.min_std = current_min_std # 假设你在 agent 类中定义了这个变量
 
                 #====================
                 # 强制将底层网络参数限制在 [min, max] 区间
@@ -1417,7 +1417,7 @@ def run_MLP_simulation(
                 with torch.no_grad():
                     # 对数空间的限制：std = exp(log_std) -> log_std = ln(std)
                     log_max = np.log(current_max_std)
-                    log_min = np.log(current_min_std)
+                    log_min = 0 # np.log(current_min_std)
                     
                     # 针对共享 std 和连续动作 std 进行双向截断
                     if hasattr(student_agent.actor.net, 'log_std_shared'):

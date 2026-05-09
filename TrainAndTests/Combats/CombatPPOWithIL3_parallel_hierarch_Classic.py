@@ -279,7 +279,8 @@ def get_opponent_probabilities(win_rates, elite_win_rates=None,
         return probs, rule_keys
 
     # 2. 经典 PFSP 采样核心
-    if SP_type == 'PFSP_classic' or 'PFSP_challenge':
+    # 正确判断不同 SP_type，PFSP 核心在 SP_type 为这两者之一时生效
+    if SP_type == 'PFSP_classic' or SP_type == 'PFSP_challenge':
         # 获取所有候选对手的胜率 P
         ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
         
@@ -1158,9 +1159,9 @@ def run_MLP_simulation(
                 
             for rank in range(num_workers):
                 # 采样对手
+                # 注意：采样始终基于 win_rates（elite_win_rates 仅为记录用）
                 probs, opponent_keys = get_opponent_probabilities(
                     win_rates,
-                    elite_win_rates,
                     SP_type=self_play_type,
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
@@ -1482,14 +1483,38 @@ def run_MLP_simulation(
                 if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
                     # 1. 产生新 Checkpoint 时，初始化其在胜率表中的地位
                     win_rates[actor_key] = 0.5  # 经典做法：Learner 的镜像初始胜率为 0.5
-                    
+
                     # 2. 筛选精英池：挑选“最难对付”的 MAX_HISTORY_SIZE 个对手
-                    # 本质上对于 PFSP，胜率最低的对手是需要被优先学习的强敌
+                    # 新增硬性门槛：只有当该 NN 策略击败 Learner 的概率高于
+                    # 最差 Rule 对手（即 rule 中被我打败最多）的概率时
+                    # 才有资格进入 elite_win_rates。换算成 win_rate（Learner 胜率）为：
+                    # win_rates[agent] < max_rule_win_rate
+                    # 如果没有 Rule 则维持原有按最小 win_rate 选取逻辑。
+                    # 本段先收集 agent 列表并按 win_rate 升序排列（越小越难打）
                     agent_keys = [k for k in win_rates.keys() if k.startswith("actor_rein")]
                     sorted_agents = sorted(agent_keys, key=lambda k: win_rates[k])
-                    toughest_agents = sorted_agents[:MAX_HISTORY_SIZE]
-                    
-                    # 3. 更新 Elite 表格
+
+                    # 计算 rule 的最大 win_rate（即 Learner 对规则对手中赢得最多的那个值）
+                    # 新的门槛规则：候选 NN 必须比最弱的 Rule（对 Learner 来说最容易打的 Rule）更难
+                    # 换句话说：要求 win_rates[agent] < max_rule_win
+                    rule_keys_present = [k for k in win_rates.keys() if k.startswith('Rule')]
+                    max_rule_win = None
+                    if rule_keys_present:
+                        max_rule_win = max([win_rates[k] for k in rule_keys_present])
+
+                    # 过滤出满足硬性门槛的 agents（如果有 rule 则必须使 Learner 胜率小于 rules 中的最高值）
+                    qualified_agents = []
+                    for a in sorted_agents:
+                        if max_rule_win is None:
+                            qualified_agents.append(a)
+                        else:
+                            # 要求：Learner 对 agent 的胜率 < rules 中的最高 Learner 胜率
+                            if win_rates.get(a, 1.0) < float(max_rule_win):
+                                qualified_agents.append(a)
+
+                    toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
+
+                    # 3. 更新 Elite 表格（仅包含通过硬性门槛的 NN），并保证 init_elo_ratings 中的 Rule 被保留
                     elite_win_rates = {k: win_rates[k] for k in toughest_agents}
                     # 根据传入的 init_elo_ratings 决定加入的 Rule（保证按需包含）
                     for rk in [k for k in init_elo_ratings.keys() if k.startswith("Rule")]:
