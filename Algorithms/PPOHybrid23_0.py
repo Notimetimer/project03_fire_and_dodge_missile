@@ -167,7 +167,7 @@ class PolicyNetHybrid(torch.nn.Module):
             ata_cond = (ata <= (60.0 * pi_val / 180.0)) & (ata_hor <= (30.0 * pi_val / 180.0))
             locked_cond = (locked >= 0.5)
             ammo_cond = (ammo > 0.0)
-            timd_cond = (t_since_launch >= 60)
+            timd_cond = (t_since_launch >= 40)
 
             can_fire = ata_cond & locked_cond & ammo_cond & timd_cond
 
