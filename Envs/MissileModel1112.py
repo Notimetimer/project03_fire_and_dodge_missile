@@ -128,7 +128,7 @@ class missile_class:
         self.stage1_weight = 20.28  # kg
         self.stage2_weight = 44.9  # kg
         self.stage1_time = 2.3  # 2.3 s
-        self.stage2_time = 10 # 10.5 11  # s
+        self.stage2_time = 10.5 # 10.5 11  # s
         self.stage1_burn_rate = self.stage1_weight / self.stage1_time  # 一级燃烧率kg/s
         self.stage2_burn_rate = self.stage2_weight / self.stage2_time  # 二级燃烧率kg/s
         self.stage1_thrust = 20393  # N
@@ -144,7 +144,7 @@ class missile_class:
         # 最大马赫数
         self.max_mach = 4.0
         # 特征面积
-        self.area = 0.425 # 425 435 0.405  # m2
+        self.area = 0.41 # 425 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
         self.speed_min = 0.65 * 340  # m/s
@@ -158,7 +158,7 @@ class missile_class:
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
         self.t = 0  # 导弹初始计时
-        self.t_max = 120  # 最大运行时间
+        self.t_max = 90  # 最大运行时间
         self.t_go = 120
         self.trajectory = np.empty((0, 7))  # 导弹轨迹, 结构为时间、位置（3）、速度（3）
         self.guidance_stage = 2  # 2为中制导，3为末制导
