@@ -1289,10 +1289,10 @@ class PPOHybrid:
                     bern_logits = actor_outputs['bern']
                     bern_probs = torch.sigmoid(bern_logits)
                     
-                    # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
-                    over = F.relu(torch.abs(bern_logits) - 4.0)
-                    logit_loss = (over ** 2).mean()
-                    actor_loss = actor_loss + alpha_logit_reg * logit_loss
+                    # # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
+                    # over = F.relu(torch.abs(bern_logits) - 4.0)
+                    # logit_loss = (over ** 2).mean()
+                    # actor_loss = actor_loss + alpha_logit_reg * logit_loss
 
                     # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效)
                     # 惩罚项 = -log(1 - p)。其梯度为 alpha * p
