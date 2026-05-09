@@ -159,7 +159,7 @@ class PolicyNetHybrid(torch.nn.Module):
             ata = xb[:, 10]
             locked = xb[:, 2]
             ammo = xb[:, 20]
-            # dist = xb[:, 9] * 10e3
+            dist = xb[:, 9] * 10e3
             t_since_launch = xb[:, 21] * 120
 
             ata_hor = torch.acos(cos_ata_hor)
@@ -167,9 +167,10 @@ class PolicyNetHybrid(torch.nn.Module):
             ata_cond = (ata <= (60.0 * pi_val / 180.0)) & (ata_hor <= (30.0 * pi_val / 180.0))
             locked_cond = (locked >= 0.5)
             ammo_cond = (ammo > 0.0)
-            timd_cond = (t_since_launch >= 40)
+            timd_cond = (t_since_launch >= 60) and dist > 30e3
+            dist_cond = (dist < 95e3)
 
-            can_fire = ata_cond & locked_cond & ammo_cond & timd_cond
+            can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond
 
             # build mask for bern dims and apply to first bern dimension only
             bern_dim = self.action_dims.get('bern', 0)
@@ -1012,7 +1013,7 @@ class PPOHybrid:
                     # # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
                     # over = F.relu(torch.abs(bern_logits) - 4.0)
                     # 只惩罚允许开火的位置
-                    # fire_mask = (bern_logits > -1e6).float()
+                    # fire_mask = (bern_logits > -1e4).float()
                     # logit_loss = ((over ** 2) * fire_mask).mean()
                     # actor_loss = actor_loss + alpha_logit_reg * logit_loss
 
