@@ -252,7 +252,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         if len(alive_ally_missiles) > 1:
             # 开火后下高
-            r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] # 开火后高度越低越好，如果还抬头必有惩罚
+            r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] * (1-ego.dead) # 开火后高度越低越好，如果还抬头必有惩罚
 
         # 速度惩罚
         slow_mach = 0.7
