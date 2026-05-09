@@ -246,13 +246,17 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 进攻引导
         if len(alive_enm_missiles) == 0:
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
-        # crank引导
-        if enm_threat_dist < distance:
-            r_constraint -= 4 * abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead) # 引导太弱
+
+        # # crank引导
+        # if enm_threat_dist < distance:
+        #     r_constraint -= 4 * abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead) # 引导太弱
         
         if len(alive_ally_missiles) > 1:
-            # 开火后下高
-            r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] * (1-ego.dead) # 开火后高度越低越好，如果还抬头必有惩罚
+            # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
+            r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
+            r_constraint += 3 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
+
+            # r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] * (1-ego.dead) # 开火后高度越低越好，如果还抬头必有惩罚
 
         # 速度惩罚
         slow_mach = 0.7
