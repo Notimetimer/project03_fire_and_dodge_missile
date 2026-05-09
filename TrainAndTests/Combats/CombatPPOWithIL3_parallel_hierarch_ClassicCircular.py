@@ -1435,14 +1435,13 @@ def run_MLP_simulation(
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
                 
-                # 初始设定 alpha_tutor 为 0.4 (与 alpha_max_std 对齐)
-                # 在 5M 步线性退火到 0
-                alpha_tutor_now = 0.4 * max(0, 1 - total_steps / 5e6)
+                # # 初始设定 alpha_tutor 为 0.4 (与 alpha_max_std 对齐)
+                # # 在 5M 步线性退火到 0
+                # alpha_tutor_now = 0.4 * max(0, 1 - total_steps / 5e6)
 
                 # 调用 update
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, 
-                    target_p1=target_p1, k_nonlinear=k_nonlinear,
-                    alpha_tutor=alpha_tutor_now)
+                    target_p1=target_p1, k_nonlinear=k_nonlinear)
                 #====================
                 # 记录 Log
 
