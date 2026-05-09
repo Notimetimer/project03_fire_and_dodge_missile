@@ -153,7 +153,7 @@ class missile_class:
         # 最大跟踪视角速度
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
-        self.detect_range = 23e3  # 23e3 25e3 20e3  # m todo 计算截获距离
+        self.detect_range = 18.5e3  # 23e3 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
