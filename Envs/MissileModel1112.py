@@ -137,14 +137,14 @@ class missile_class:
         self.stage2_start = self.stage1_start + self.stage1_time  # s
         self.stage2_end = self.stage1_start + self.stage1_time + self.stage2_time  # s
         # 杀伤半径
-        self.kill_range = 80 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
+        self.kill_range = 40 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
         # 最大过载
         self.max_g0 = 40
         self.max_g = self.max_g0
         # 最大马赫数
         self.max_mach = 4.0
         # 特征面积
-        self.area = 0.41 # 425 435 0.405  # m2
+        self.area = 0.46 # 425 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
         self.speed_min = 0.65 * 340  # m/s
@@ -153,12 +153,12 @@ class missile_class:
         # 最大跟踪视角速度
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
-        self.detect_range = 18.5e3  # 23e3 25e3 20e3  # m todo 计算截获距离
+        self.detect_range = 20e3  # 23e3 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
         self.t = 0  # 导弹初始计时
-        self.t_max = 90  # 最大运行时间
+        self.t_max = 100  # 最大运行时间
         self.t_go = 120
         self.trajectory = np.empty((0, 7))  # 导弹轨迹, 结构为时间、位置（3）、速度（3）
         self.guidance_stage = 2  # 2为中制导，3为末制导
@@ -322,7 +322,7 @@ class missile_class:
         # 初制导阶段根据距离判断是否需要靠导弹来高抛
         if self.t < self.stage2_end:
             if distance > 50e3:
-                nyt1 += (pi/3-self.theta) * 2 
+                nyt1 += (pi/3-self.theta) * 5 # 2
 
         # 时间过半以后如果目标低于当前飞行高度，不能还在爬升
         delta_height = self.delta_height

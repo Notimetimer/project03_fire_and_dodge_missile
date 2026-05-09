@@ -184,7 +184,44 @@ class ChooseStrategyEnv(Battle):
         # unscale_state 函数中有 `if "ego_control" in s` 的检查，所以这是安全的。
             
         return obs_dict
-    
+
+
+    def ManeuverContinuous(self, UAV, action):
+        # 输入动作与动力运动学状态
+        uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
+        delta_theta = uav_obs["target_information"][2]
+        distance = uav_obs["target_information"][3] * 10e3
+        d_hor, leftright = uav_obs["border"]
+        speed = uav_obs["ego_main"][0]
+        alt = uav_obs["ego_main"][1]
+        theta = asin(uav_obs["ego_main"][3])
+        cos_delta_psi = uav_obs["target_information"][0]
+        sin_delta_psi = uav_obs["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        delta_psi_threat = atan2(uav_obs["threat"][1], uav_obs["threat"][0])
+
+        move_action = np.zeros(3)
+
+        # 动作空间正交化
+        action_v, action_h = action
+
+        # 速度指令，锁定340
+        speed_cmd = 340
+
+        # 垂直
+        theta_desired = np.clip(theta+delta_theta + pi/2 * np.clip(action_v, -1, 1), -pi/2, pi/2)
+        # 不能出安全高度范围
+        delta_height_cmd = np.clip(theta_desired/pi*2*5000, 
+                                   self.min_alt_safe-UAV.alt, 
+                                   self.max_alt_safe-UAV.alt)
+
+        # 水平
+        delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
+        delta_psi_cmd = sub_of_radian(delta_psi_temp + pi * np.clip(action_h, -1, 1), 0)
+
+        return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
+
+
     # 新动作空间（区分左右）
     def maneuver14LR(self, UAV, action, type='primitive'):        
         # 输入动作与动力运动学状态

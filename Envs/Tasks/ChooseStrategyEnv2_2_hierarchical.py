@@ -264,12 +264,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
         # # 防御引导
-        # if warning:
-        #     # delta_psi_threat 给惩罚，越大越好
-        #     if abs(delta_psi_threat) < pi/2:
-        #         r_shaping -= (1-abs(delta_psi_threat)/(pi/2)) * reward_weights['angle_advantage']
-        #     else:
-        #         r_shaping += 0
+        if warning and threat_distance <= 20e3:
+            # 受到威胁应该置尾和下高
+            if abs(delta_psi_threat) < pi/2:
+                r_constraint += min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_constraint += (-theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
 
         # r_constraint *= (1-ego.dead) # 密集奖励只有在
 
