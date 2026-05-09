@@ -349,8 +349,9 @@ def get_opponent_probabilities(win_rates, elite_win_rates=None,
 # 辅助：需要把 create_initial_state 定义在 worker 能访问的地方，或者 copy 进去
 def create_initial_state_worker(randomized=0):
     # (复制原本的 create_initial_state 逻辑)
-    blue_height = 9000
-    red_height = 9000
+    blue_height = np.random.uniform(6000.0, 9000.0) * int(randomized) + \
+                9000.0 * (1-int(randomized))
+    red_height = blue_height
     # 初始航向随机化
     red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
     blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi/3, pi/3))
@@ -462,6 +463,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
                 r_min, r_max = settings.get('R_cage_range', (63.0e3, 63.0e3))
+                fire_mask = settings.get('fire_mask', 1)
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
                 # 进场瞬间给全信息
@@ -517,7 +519,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                 temperature = 1 # 0.3
                             else:
                                 temperature = 1
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature, mask_on=fire_mask)
                             b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -534,7 +536,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature)
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature, mask_on=fire_mask)
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -1033,6 +1035,11 @@ def run_MLP_simulation(
     # =========================================================
     while True:
         while total_steps < current_max_steps:
+            # 先尝尝乱开或的后果，再mask掉错误开火
+            if total_steps < 5e3:
+                fire_mask = 0
+            else:
+                fire_mask = 1
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
             # --- 1. 并行测试触发逻辑 (Async) ---
@@ -1190,7 +1197,8 @@ def run_MLP_simulation(
                     'weight_reward': weight_reward_0,
                     'red_birth': rb,
                     'blue_birth': bb,
-                    'R_cage_range': R_cage_range # 将范围传给Worker
+                    'R_cage_range': R_cage_range, # 将范围传给Worker
+                    'fire_mask': fire_mask,
                 }
                 
                 # 发送指令 pipe.send
@@ -1423,7 +1431,8 @@ def run_MLP_simulation(
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, k_nonlinear=k_nonlinear)
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
+                                     k_nonlinear=k_nonlinear, mask_on=fire_mask)
                 #====================
                 # 记录 Log
 

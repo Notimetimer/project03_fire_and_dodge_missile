@@ -161,9 +161,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_shaping = 0.0    # 战术引导
 
         # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
-        # 高度限制奖励/惩罚
-        r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
-                        (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
+        # # 高度限制奖励/惩罚
+        # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+        #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
         # 靠近边界惩罚
         o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
@@ -187,11 +187,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         (1 - abs(delta_psi_to_center)/pi) * \
                         reward_weights['to_center_reward']
         
-        # 迎角惩罚
-        r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
-                                                         (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
-        # 俯仰角惩罚
-        r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
+        # # 迎角惩罚
+        # r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
+        #                                                  (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
+        # # 俯仰角惩罚
+        # r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
         r_constraint *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
