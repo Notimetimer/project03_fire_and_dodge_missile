@@ -1011,7 +1011,9 @@ class PPOHybrid:
                     
                     # # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
                     # over = F.relu(torch.abs(bern_logits) - 4.0)
-                    # logit_loss = (over ** 2).mean()
+                    # 只惩罚允许开火的位置
+                    # fire_mask = (bern_logits > -1e6).float()
+                    # logit_loss = ((over ** 2) * fire_mask).mean()
                     # actor_loss = actor_loss + alpha_logit_reg * logit_loss
 
                     # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效)
