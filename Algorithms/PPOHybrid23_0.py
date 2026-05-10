@@ -57,6 +57,8 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # 2. 离散动作头 (Categorical)
         # 参数: log_temp_cat (控制 Softmax 温度)
+        if 'cat' not in self.action_dims:
+            self.action_dims['cat'] = []
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             self.cat_dims = self.action_dims['cat']  # list, e.g., [4, 10]
             total_cat_dim = sum(self.cat_dims)
@@ -281,7 +283,7 @@ class HybridActorWrapper(nn.Module):
             explore_opts = {
                 'cont': explore.get('cont', True),
                 'cat': explore.get('cat', True),
-                'bern': explore.get('bern', True)
+                'bern': explore.get('bern', True),
             }
         else:
             # 对于其他意外的输入类型，默认全部探索

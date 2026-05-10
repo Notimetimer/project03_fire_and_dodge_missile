@@ -12,7 +12,7 @@ import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, CircularDiscretizedDistribution, CircularDiscretizedDistribution_NL
+from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, CircularDiscretizedDistribution
 from Algorithms.MLP_heads import ValueNet
 
 # =============================================================================
@@ -52,12 +52,12 @@ class PolicyNetHybrid(torch.nn.Module):
             # # # 原·单层动作头
             # self.fc_mu = nn.Linear(prev_size, cont_dim)
             
-            # 现·多层动作头
+            # 现·2层动作头
             layers = []
-            for _ in range(head_hidden_layer_num):
-                layers.append(nn.Linear(prev_size, prev_size))
-                layers.append(nn.ReLU())
-            layers.append(nn.Linear(prev_size, cont_dim))
+            # for _ in range(head_hidden_layer_num):
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), cont_dim))
             self.fc_mu = nn.Sequential(*layers)
             
 
@@ -70,12 +70,12 @@ class PolicyNetHybrid(torch.nn.Module):
             total_cat_dim = sum(self.cat_dims)
             # # 原·单层输出
             # self.fc_cat = nn.Linear(prev_size, total_cat_dim)
-            # 现·多层动作头
+            # 现·2层动作头
             layers = []
-            for _ in range(head_hidden_layer_num):
-                layers.append(nn.Linear(prev_size, prev_size))
-                layers.append(nn.ReLU())
-            layers.append(nn.Linear(prev_size, total_cat_dim))
+            # for _ in range(head_hidden_layer_num):
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), total_cat_dim))
             self.fc_cat = nn.Sequential(*layers)
             
             # 为每一个独立的离散头 (Head) 创建一个温度参数
@@ -92,12 +92,12 @@ class PolicyNetHybrid(torch.nn.Module):
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
             # nn.init.constant_(self.fc_bern.bias, -2.0)
 
-            # 现·多层输出
+            # 现·2层输出
             layers = []
-            for _ in range(head_hidden_layer_num):
-                layers.append(nn.Linear(prev_size, prev_size))
-                layers.append(nn.ReLU())
-            layers.append(nn.Linear(prev_size, bern_dim))
+            # for _ in range(head_hidden_layer_num):
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), bern_dim))
             self.fc_bern = nn.Sequential(*layers)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
             nn.init.constant_(self.fc_bern[-1].bias, -2.0)
@@ -110,23 +110,23 @@ class PolicyNetHybrid(torch.nn.Module):
         if self.circ_dim > 0:
             # 现·多层输出
             layers = []
-            for _ in range(head_hidden_layer_num):
-                layers.append(nn.Linear(prev_size, prev_size))
-                layers.append(nn.ReLU())
-            layers.append(nn.Linear(prev_size, self.circ_dim))
+            # for _ in range(head_hidden_layer_num):
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), self.circ_dim))
             self.fc_circ = nn.Linear(prev_size, self.circ_dim * 2)
 
         # 5. 线性离散动作头 (Linear) - 每个维度1个输出
         if self.lin_dim > 0:
             # 现·多层输出
             layers = []
-            for _ in range(head_hidden_layer_num):
-                layers.append(nn.Linear(prev_size, prev_size))
-                layers.append(nn.ReLU())
-            layers.append(nn.Linear(prev_size, self.lin_dim))
+            # for _ in range(head_hidden_layer_num):
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), self.lin_dim))
             self.fc_lin = nn.Linear(prev_size, self.lin_dim)
     
-    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0):
+    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0, mask_on=1):
         if min_std is None:
             min_std = 0.01
         if max_std is None:
@@ -195,6 +195,7 @@ class PolicyNetHybrid(torch.nn.Module):
 
             # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
             cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
+            delta_theta = xb[:, 8]
             ata = xb[:, 10]
             locked = xb[:, 2]
             ammo = xb[:, 20]
@@ -206,10 +207,15 @@ class PolicyNetHybrid(torch.nn.Module):
             ata_cond = (ata <= (60.0 * pi_val / 180.0)) & (ata_hor <= (30.0 * pi_val / 180.0))
             locked_cond = (locked >= 0.5)
             ammo_cond = (ammo > 0.0)
-            timd_cond = (t_since_launch >= 60) and dist > 30e3
+            # Use elementwise logical ops so this works on tensors
+            timd_cond = (t_since_launch >= 60) | ((dist < 30e3) & (t_since_launch >= 10))
             dist_cond = (dist < 95e3)
+            delta_theta_cond = (delta_theta > pi_val*(-30)/180)
 
-            can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond
+            if mask_on:
+                can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
+            else:
+                can_fire = ammo_cond
 
             # build mask for bern dims and apply to first bern dimension only
             bern_dim = self.action_dims.get('bern', 0)
@@ -269,7 +275,7 @@ class HybridActorWrapper(nn.Module):
     将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get action 和 evaluate actions 接口。
     未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
     """
-    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu', n_circle=6, n_linear=5):
+    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu', n_circle=24, n_linear=12):
         super(HybridActorWrapper, self).__init__()
         self.net = policy_net
         self.action_dims = action_dims_dict
@@ -302,7 +308,7 @@ class HybridActorWrapper(nn.Module):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
     # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temp 参数
-    def get_action(self, state, h=None, explore=True, min_std=None, max_std=None, check_obs=None, bern_threshold=0.5, temp=1.0):
+    def get_action(self, state, h=None, explore=True, min_std=None, max_std=None, check_obs=None, bern_threshold=0.5, temp=1.0, mask_on=1):
         """
         推理接口。
         Args:
@@ -399,7 +405,7 @@ class HybridActorWrapper(nn.Module):
         # # =====================================================================
 
         # [修改] 调用网络时传入 action_masks 和 temp
-        actor_outputs = self.net(state, min_std=min_std, max_std=max_std, temp=temp)
+        actor_outputs = self.net(state, min_std=min_std, max_std=max_std, temp=temp, mask_on=mask_on)
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, min_std=min_std, max_std=max_std)  # 如果需要gru，改动这一行
@@ -484,16 +490,17 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['circ']):
                 vec_h = vec_circ[:, i, :] # (Batch, 2)
                 std_h = std_all[:, i:i+1] # (Batch, 1)
-                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
-                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
                 
                 idx = dist.sample()[0] if explore_opts.get('circ', True) else dist.mean_idx
                 circ_indices.append(idx)
                 circ_probs.append(dist.probs.cpu().detach().numpy())
             
             idx_stack = torch.stack(circ_indices, dim=-1).cpu().detach().numpy()
-            actions_exec['circ'] = idx_stack if is_batch else idx_stack[0]
-            actions_raw['circ'] = actions_exec['circ']
+            # convert discrete indices to radians: 2*pi*index/(n-1)
+            circ_angles = 2.0 * np.pi * idx_stack / float(self.n_circle - 1)
+            actions_exec['circ'] = circ_angles if is_batch else circ_angles[0]
+            actions_raw['circ'] = idx_stack
             actions_dist_check['circ'] = circ_probs
 
         # --- Lin [新增] ---
@@ -505,20 +512,22 @@ class HybridActorWrapper(nn.Module):
                 vec_v = vec_lin[:, i:i+1] # (Batch, 1)
                 std_v = std_all[:, i:i+1] # (Batch, 1)
                 dist = LinearDiscretizedDistribution(vec_v, std_v, n=self.n_linear)
-                
+
                 idx = dist.sample()[0] if explore_opts.get('lin', True) else dist.mean_idx
                 lin_indices.append(idx)
                 lin_probs.append(dist.probs.cpu().detach().numpy())
             
             idx_stack = torch.stack(lin_indices, dim=-1).cpu().detach().numpy()
-            actions_exec['lin'] = idx_stack if is_batch else idx_stack[0]
-            actions_raw['lin'] = actions_exec['lin']
+            # convert discrete indices to radians for linear head: pi/2 - pi*index/(n-1)
+            lin_angles = np.pi/2.0 - np.pi * idx_stack / float(self.n_linear - 1)
+            actions_exec['lin'] = lin_angles if is_batch else lin_angles[0]
+            actions_raw['lin'] = idx_stack
             actions_dist_check['lin'] = lin_probs
 
 
         return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
-    def evaluate_actions(self, states, actions_raw, h=None, min_std=None, max_std=None):
+    def evaluate_actions(self, states, actions_raw, h=None, min_std=None, max_std=None, mask_on=1):
         """
         训练接口。计算 log_probs 和 entropy。
         Args:
@@ -530,7 +539,7 @@ class HybridActorWrapper(nn.Module):
             next_h: None
             actor_outputs: dict (raw outputs from net) [新增]
         """
-        actor_outputs = self.net(states, min_std=min_std, max_std=max_std)
+        actor_outputs = self.net(states, min_std=min_std, max_std=max_std, mask_on=mask_on)
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
         entropy = torch.zeros(states.size(0), 1).to(self.device)
         
@@ -596,8 +605,7 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['circ']):
                 vec_h = vec_circ[:, i, :]
                 std_h = std_all[:, i:i+1]
-                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
-                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
                 
                 act_i = circ_actions[:, i]
                 log_probs += dist.log_prob(act_i).unsqueeze(-1)
@@ -631,7 +639,7 @@ class HybridActorWrapper(nn.Module):
         # [修改] 返回 actor_outputs 以便外部访问 logits
         return log_probs, entropy, entropy_details, actor_outputs, None
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1, no_bern=False, max_std=1.3):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1, no_bern=False, max_std=1.3, mask_on=0):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         
@@ -648,7 +656,7 @@ class HybridActorWrapper(nn.Module):
         '''
         会增加复杂度的可选改进：模仿学习的时候alpha 传入向量，从而区分密集和稀疏动作的学习强度（密集应该高一些）
         '''
-        actor_outputs = self.net(states, max_std=max_std) # 获取 raw output (mu/std, logits)
+        actor_outputs = self.net(states, max_std=max_std, mask_on=mask_on) # 获取 raw output (mu/std, logits)
         
         # 初始化一个全 0 的 loss tensor，形状 (Batch, )
         total_loss_per_sample = torch.zeros(states.size(0), device=self.device)
@@ -671,8 +679,7 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['circ']):
                 vec_h = vec_circ[:, i, :]
                 std_h = std_all[:, i:i+1]
-                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
-                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
                 expert_idx = expert_circ[:, i]
                 
                 log_probs = F.log_softmax(dist.logits, dim=-1)
@@ -897,14 +904,14 @@ class PPOHybrid:
         self.critic_optimizer.zero_grad()
     
     
-    def take_action(self, state, h0=None, explore=True, min_std=None, max_std=None, check_obs=None, temperature=1.0):
+    def take_action(self, state, h0=None, explore=True, min_std=None, max_std=None, check_obs=None, temperature=1.0, mask_on=1):
         # 委托给 Actor Wrapper
         min_s = min_std if min_std is not None else self.min_std
         max_s = max_std if max_std is not None else self.max_std
         
         # [修改] 透传 check_obs
         actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(
-            state, h=h0, explore=explore, min_std=min_s, max_std=max_s, check_obs=check_obs, temp=temperature
+            state, h=h0, explore=explore, min_std=min_s, max_std=max_s, check_obs=check_obs, temp=temperature, mask_on=mask_on
         )
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check
@@ -912,7 +919,7 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89,): 
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89, mask_on=1): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1021,7 +1028,7 @@ class PPOHybrid:
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)
             # [修改] 接收 5 个返回值
-            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, min_std=self.min_std, max_std=self.max_std)
+            old_log_probs, _, _, _ ,_ = self.actor.evaluate_actions(actor_inputs, actions_on_device, h=None, min_std=self.min_std, max_std=self.max_std, mask_on=mask_on)
             # Critic 使用 critic_inputs (全局 states)
             v_pred_old = self.critic(critic_inputs)
             
@@ -1150,7 +1157,7 @@ class PPOHybrid:
 
                 # 计算当前策略的 log_probs 和 entropy (使用 Wrapper)
                 #  接收 entropy_details 和 actor_outputs
-                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, min_std=self.min_std, max_std=self.max_std)
+                log_probs, entropy, entropy_details, actor_outputs, _ = self.actor.evaluate_actions(mb_actor_inputs, mb_actions, h=None, min_std=self.min_std, max_std=self.max_std, mask_on=mask_on)
                 
                 #  计算 log_ratio 用于更精准的 KL 计算
                 # 清理可能的 -inf / NaN 并对 log_ratio 做截断，防止极端 ratio 导致梯度爆炸
@@ -1591,8 +1598,7 @@ class PPOHybrid:
             for i in range(self.actor.action_dims['circ']):
                 vec_h = vec_circ[:, i, :]
                 std_h = std_all[:, i:i+1]
-                # dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.actor.n_circle)
-                dist = CircularDiscretizedDistribution_NL(vec_h, std_h)
+                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.actor.n_circle)
                 probs = dist.probs
                 target_one_hot = F.one_hot(expert_circ[:, i], num_classes=probs.size(-1)).float().to(self.device)
                 mse_loss_sum += F.mse_loss(probs, target_one_hot, reduction='none').sum(dim=-1, keepdim=True)

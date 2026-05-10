@@ -68,7 +68,7 @@ def test_worker(model_state_dict, rule_num,
         steps = 0
         done = False
         
-        b_action_label = 0
+        b_action_radians = [0.0, 0.0]
         episode_return = 0
 
         while not done and test_env.running:
@@ -95,7 +95,7 @@ def test_worker(model_state_dict, rule_num,
 
                     b_action_v = b_act_exec['lin'][0] if isinstance(b_act_exec['lin'], (list, np.ndarray)) else b_act_exec['lin']
                     b_action_h = b_act_exec['circ'][0] if isinstance(b_act_exec['circ'], (list, np.ndarray)) else b_act_exec['circ']
-                    b_action_label = [b_action_v, b_action_h]
+                    b_action_radians = [b_action_v, b_action_h]
                     if b_act_exec['bern'][0]: 
                         test_env.BUAV.about_to_fire = 1
 
@@ -107,18 +107,19 @@ def test_worker(model_state_dict, rule_num,
                 launch_missile_immediately(test_env, 'r', action_label=r_act_label_to_pass, tabu=tabu_fire)
             b_m_id = None
             if getattr(test_env.BUAV, 'about_to_fire', 0):
-                # 如果 restrict_fire 为 True，则限制动作次序（传入 b_action_label）
-                b_act_label_to_pass = None # b_action_label if restrict_fire else None
+                # 如果 restrict_fire 为 True，则限制动作次序（传入 b_action_radians）
+                b_act_label_to_pass = None # b_action_radians if restrict_fire else None
                 tabu_fire = 1 if restrict_fire else 0
                 b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_act_label_to_pass, tabu=tabu_fire)
 
             # 物理步
             r_maneuver = test_env.maneuver14LR(test_env.RUAV, r_action_label)
-            b_maneuver = test_env.maneuver14LR(test_env.BUAV, b_action_label)
+            # 蓝方使用 learned agent 的连续/高分辨率动作执行接口
+            b_maneuver = test_env.maneuverContinuous(test_env.BUAV, b_action_radians)
             test_env.step(r_maneuver, b_maneuver)
             
             # 判定
-            done, b_rew_event, b_rew_constraint, b_rew_shaping = test_env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle)
+            done, b_rew_event, b_rew_constraint, b_rew_shaping = test_env.combat_terminate_and_reward('b', b_action_radians, b_m_id is not None, action_cycle)
             steps += 1
 
             if steps % action_cycle == 0:

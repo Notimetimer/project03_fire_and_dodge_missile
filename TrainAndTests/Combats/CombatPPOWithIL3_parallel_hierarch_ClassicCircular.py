@@ -140,6 +140,101 @@ def restructure_actions(actions_data):
 
     return actions_data
 
+
+# --- IL action conversion helpers (moved here from VsBaseline) -----------------
+def old_lin_idx2radian(idx):
+    mapping = {0: np.pi/4.0, 1: np.pi/8.0, 2: 0.0, 3: -np.pi/8.0, 4: -np.pi/2.0}
+    return mapping.get(int(idx), 0.0)
+
+
+def old_circ_idx2radian(idx):
+    mapping = {0: 0.0, 1: np.pi/3.0, 2: np.pi/2.0, 3: np.pi, 4: -np.pi/2.0, 5: -np.pi/3.0}
+    return mapping.get(int(idx), 0.0)
+
+
+def new_lin_radians_grid(n_linear):
+    idxs = np.arange(n_linear)
+    return np.pi/2.0 - np.pi * idxs / float(n_linear - 1)
+
+def new_circ_radians_grid(n_circle):
+    idxs = np.arange(n_circle)
+    return 2.0 * np.pi * idxs / float(n_circle - 1)
+
+# def new_lin_idx2radian(idx, n_linear=12):
+#     lin_grid = new_lin_radians_grid(n_linear)
+#     try:
+#         # coerce possible array-like / tensor to scalar int
+#         if isinstance(idx, (list, tuple)):
+#             idx0 = int(np.array(idx).reshape(-1)[0])
+#         else:
+#             arr = np.asarray(idx)
+#             if arr.shape == ():
+#                 idx0 = int(arr)
+#             else:
+#                 idx0 = int(arr.reshape(-1)[0])
+#     except Exception:
+#         idx0 = int(idx)
+#     # clamp
+#     idx0 = max(0, min(int(n_linear) - 1, idx0))
+#     return lin_grid[idx0]
+    
+# def new_circ_idx2radian(idx, n_circle=24):
+#     circ_grid = new_circ_radians_grid(n_circle)
+#     try:
+#         if isinstance(idx, (list, tuple)):
+#             idx0 = int(np.array(idx).reshape(-1)[0])
+#         else:
+#             arr = np.asarray(idx)
+#             if arr.shape == ():
+#                 idx0 = int(arr)
+#             else:
+#                 idx0 = int(arr.reshape(-1)[0])
+#     except Exception:
+#         idx0 = int(idx)
+#     idx0 = max(0, min(int(n_circle) - 1, idx0))
+#     return circ_grid[idx0]
+
+def convert_il_actions(actions, n_linear=12, n_circle=24):
+    """
+    Convert imitation-learning actions from old discrete scheme to new discrete indices.
+    Accepts dict-of-arrays or list-of-dicts and returns the remapped structure.
+    """
+    lin_grid = new_lin_radians_grid(n_linear)
+    circ_grid = new_circ_radians_grid(n_circle)
+
+    def map_lin(old_idx):
+        rad = old_lin_idx2radian(old_idx)
+        return int(np.argmin(np.abs(lin_grid - rad)))
+
+    def map_circ(old_idx):
+        rad = old_circ_idx2radian(old_idx)
+        rad_norm = np.mod(rad, 2.0 * np.pi)
+        return int(np.argmin(np.abs(circ_grid - rad_norm)))
+
+    if isinstance(actions, dict):
+        new_actions = actions.copy()
+        if 'lin' in actions and actions['lin'] is not None:
+            a = np.array(actions['lin']).reshape(-1)
+            new_actions['lin'] = np.array([map_lin(x) for x in a], dtype=np.int64).reshape(-1, 1)
+        if 'circ' in actions and actions['circ'] is not None:
+            a = np.array(actions['circ']).reshape(-1)
+            new_actions['circ'] = np.array([map_circ(x) for x in a], dtype=np.int64).reshape(-1, 1)
+        return new_actions
+
+    if isinstance(actions, list):
+        new_list = []
+        for item in actions:
+            it = item.copy()
+            if 'lin' in item:
+                it['lin'] = map_lin(item['lin'])
+            if 'circ' in item:
+                it['circ'] = map_circ(item['circ'])
+            new_list.append(it)
+        return new_list
+
+    return actions
+
+
 def save_meta_once(path, state_dict):
     if os.path.exists(path):
         return
@@ -460,11 +555,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     adv_agent.actor.load_state_dict(opp_data)
 
                 # C. 准备本回合容器
-                # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
                 # local_trans 用于 PPO 更新 (只包含 Blue 视角)
                 local_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-                ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-                enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
 
                 # D. 环境重置
                 # randomized_birth = settings['randomized_birth']  # 改在外面随机，里面不需要
@@ -487,7 +579,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 done = False
                 last_decision_obs, last_decision_state = None, None
                 last_enm_decision_obs, last_enm_decision_state = None, None
-                current_action, current_action_exec, current_enm_action_exec = None, None, None
+                current_action = None
                 
                 steps_run = 0
                 episode_return = 0 # 仅用于统计显示
@@ -513,10 +605,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.1 存储【上一个】周期的经验
                         if steps_run > 0:
                             # 注意：这里调用你原文件里的 append_experience 辅助函数
-                            # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
+                            # 仅保存 local_trans（SIL 已关闭）
                             append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
                         # 2.2 更新上一帧记录
                         last_decision_obs = b_obs
@@ -533,10 +623,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                 temperature = 1 # 0.3
                             else:
                                 temperature = 1
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
+                            b_action_exec, b_action_raw, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
                             b_action_v = b_action_exec['lin'][0] if isinstance(b_action_exec['lin'], (list, np.ndarray)) else b_action_exec['lin']
                             b_action_h = b_action_exec['circ'][0] if isinstance(b_action_exec['circ'], (list, np.ndarray)) else b_action_exec['circ']
-                            b_action_label = [b_action_v, b_action_h]
+                            # actions_exec already contains execution radians — pass through directly
+                            b_action_radians = [float(b_action_v), float(b_action_h)]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
@@ -548,15 +639,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
-                                r_action_exec = {'lin': [r_action_label[0]], 'circ': [r_action_label[1]], 'bern': np.array([r_fire], dtype=np.float32)}
+                                # r_action_exec = {'lin': [r_action_label[0]], 'circ': [r_action_label[1]], 'bern': np.array([r_fire], dtype=np.float32)}
+                                # r_action_raw = {'lin': [r_action_label[0]], 'circ': [r_action_label[1]], 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
                                 explore_dict_r = {'cont':0, 'lin':adv_explore, 'circ':adv_explore, 'bern':1}
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore=explore_dict_r, temperature=temperature, max_std=0.8)
+                                r_action_exec, r_action_raw, _, _ = adv_agent.take_action(r_obs, explore=explore_dict_r, temperature=temperature, max_std=0.8)
                                 r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
                                 r_action_h = r_action_exec['circ'][0] if isinstance(r_action_exec['circ'], (list, np.ndarray)) else r_action_exec['circ']
-                                r_action_label = [r_action_v, r_action_h]
+                                r_action_label = [float(r_action_v), float(r_action_h)]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
@@ -569,10 +661,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             env.RUAV.about_to_fire = 1
                             r_is_firing = env.has_ammo_to_fire('r')
                         
-                        # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
-                        current_action = {'lin': b_action_exec['lin'], 'circ': b_action_exec['circ'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'lin': b_action_exec['lin'], 'circ': b_action_exec['circ'], 'bern': np.array([b_is_firing])}
-                        current_enm_action_exec = {'lin': r_action_exec['lin'], 'circ': r_action_exec.get('circ', [r_action_label[1]]), 'bern': np.array([r_is_firing])}
+                        # 2.5 记录当前动作供下一帧存储（记录 raw 索引，用于 RL 存储/分析）
+                        current_action = {'lin': b_action_raw['lin'][0], 'circ': b_action_raw['circ'][0], 'bern': b_action_raw['bern']}
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候不适合限制动作次序，会妨碍“试错”  r_action_label  b_action_label
@@ -584,17 +674,21 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     if r_m_id:
                         pass
                     
-                    # debug
-                    if r_action_label[0] > 4:
-                        print("数值超出范围", r_action_label[0], r_action_label[1])
+                    # # debug
+                    # if r_action_label[0] > 4:
+                    #     print("数值超出范围", r_action_label[0], r_action_label[1])
 
-                    r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
-                    b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
+                    # Use continuous maneuver API for non-rule agents (actions in radians)
+                    if adv_is_rule:
+                        r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
+                    else:
+                        r_maneuver = env.maneuverContinuous(env.RUAV, r_action_label)
+                    b_maneuver = env.maneuverContinuous(env.BUAV, b_action_radians)
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
                     
                     # 4. 奖励计算
-                    done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+                    done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_radians, b_m_id is not None, action_cycle_multiplier)
                     _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
                     
                     reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * reward_weight)
@@ -612,12 +706,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 # 6. 存储最后一步经验 (Terminal State)
                 # 强制做一次终局判定
-                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier)
+                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_radians, False, action_cycle_multiplier)
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
 
                 # --- 序列时空修正 (Credit Assignment Fix) ---死后时间压缩
                 # 由于代理死亡后 active_mask 变为 False，回合结束时的同归于尽补偿等延迟奖励
@@ -646,15 +738,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     return td
                 
                 local_trans = truncate_and_shift(local_trans)
-                ego_trans = truncate_and_shift(ego_trans)
-                enm_trans = truncate_and_shift(enm_trans)
                 # ----------------------------------------------
 
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
-                    'ego_trans': ego_trans, # 用于 SIL (win)
-                    'enm_trans': enm_trans, # 用于 SIL (lose)
+                    # SIL disabled: ego_trans/enm_trans removed
                     'metrics': {
                         'return': episode_return,
                         'steps': steps_run,
@@ -771,6 +860,9 @@ def run_MLP_simulation(
     
     # 对加载/传入的数据进行必要的重构
     if original_il_transition_dict is not None:
+        # convert legacy IL action indices to the new discretization, then restructure
+        if 'actions' in original_il_transition_dict and original_il_transition_dict['actions'] is not None:
+            original_il_transition_dict['actions'] = convert_il_actions(original_il_transition_dict['actions'], n_linear=12, n_circle=24)
         original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict['actions'])
         # 顺便确保 states 和 returns 也是标准的 float32 numpy array
         if 'states' in original_il_transition_dict:
@@ -963,6 +1055,23 @@ def run_MLP_simulation(
     # ----------------------------------------------------
     
     # 7. 强化学习准备
+    # debug test_worker有问题
+    current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
+    test_worker(
+                model_state_dict=current_weights,
+                rule_num=2,
+                env_args=args,
+                state_dim=state_dim,
+                hidden_dim=hidden_dim,
+                action_dims_dict=action_dims_dict,
+                dt_maneuver_val=dt_maneuver,
+                device_name='cpu',
+                num_runs=num_runs,
+                action_cycle_multiplier=action_cycle_multiplier,
+                no_out=0,  # 这里可以根据需要设为 1
+                deterministic=False,
+                restrict_fire=False,
+                )
     
     
     # 进程通信设置
@@ -980,7 +1089,7 @@ def run_MLP_simulation(
     worker_device = torch.device('cpu') # Worker 使用 CPU 推理
     
     args.max_episode_len = max_episode_duration
-    args.R_cage = 45e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
+    # # args.R_cage = 45e3 # np.random.uniform(30e3, 45e3) # 环境大小随机化
     print(f"Initializing {num_workers} training workers...")
     for i in range(num_workers):
         parent_conn, child_conn = mp.Pipe()
@@ -1259,10 +1368,8 @@ def run_MLP_simulation(
             batch_total_m_fired = 0   # 新增统计
             
             for res in batch_results:
-                # res 结构: {'trans':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
+                # res 结构: {'trans':..., 'metrics':..., 'opp_name':...}
                 l_tr = res['trans'] # PPO 训练数据 (含探索)
-                ego_tr = res['ego_trans'] # SIL 蓝方数据
-                enm_tr = res['enm_trans'] # SIL 红方数据
                 metrics = res['metrics']
                 opp_name = res['opp_name']
                 
@@ -1282,19 +1389,7 @@ def run_MLP_simulation(
                 for k in transition_dict:
                     transition_dict[k].extend(l_tr[k])
                 
-                # 3.2 SIL 数据收集 (需计算 return)
-                if use_sil:
-                    ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
-
-                    # if not metrics['lose']: # 赢或平，学自己
-                    #     # 计算回报 (Master 端计算)
-                    #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    #     il_transition_buffer.add(ego_tr)
-                    
-                    # if not metrics['win']: # 输或平，学对手
-                    #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                    #     il_transition_buffer.add(enm_tr)
+                # SIL disabled: no il_transition_buffer updates
                 
                 # 3.3 ELO 与 胜率 更新 (实时更新)
                 actual_score = 0.5

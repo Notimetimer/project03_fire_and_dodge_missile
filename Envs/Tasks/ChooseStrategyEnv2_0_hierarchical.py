@@ -186,8 +186,8 @@ class ChooseStrategyEnv(Battle):
         return obs_dict
 
 
-    def ManeuverContinuous(self, UAV, action):
-        # 输入动作与动力运动学状态
+    def maneuverContinuous(self, UAV, action):
+        # 输入动作与动力运动学状态, action直接给弧度
         uav_obs = self.base_obs(UAV.side, pomdp=self.pomdp)  ### test 部分观测的话用1
         delta_theta = uav_obs["target_information"][2]
         distance = uav_obs["target_information"][3] * 10e3
@@ -209,7 +209,7 @@ class ChooseStrategyEnv(Battle):
         speed_cmd = 340
 
         # 垂直
-        theta_desired = np.clip(theta+delta_theta + pi/2 * np.clip(action_v, -1, 1), -pi/2, pi/2)
+        theta_desired = np.clip(theta+delta_theta + np.clip(action_v, -pi/2, pi/2), -pi/2, pi/2)
         # 不能出安全高度范围
         delta_height_cmd = np.clip(theta_desired/pi*2*5000, 
                                    self.min_alt_safe-UAV.alt, 
@@ -217,7 +217,7 @@ class ChooseStrategyEnv(Battle):
 
         # 水平
         delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
-        delta_psi_cmd = sub_of_radian(delta_psi_temp + pi * np.clip(action_h, -1, 1), 0)
+        delta_psi_cmd = sub_of_radian(delta_psi_temp + action_h, 0)
 
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
 
