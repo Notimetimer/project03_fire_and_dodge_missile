@@ -254,7 +254,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if len(alive_ally_missiles) > 1:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
             r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
-            r_constraint += 3 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
+            r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
 
             # r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] * (1-ego.dead) # 开火后高度越低越好，如果还抬头必有惩罚
 
