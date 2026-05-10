@@ -45,7 +45,7 @@ def calc_mach(v, height):
     return v / sound_speed, sound_speed
 
 # 计算命中情况
-def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=0.02, kill_range=20):
+def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=0.02, kill_range=85):
     # # 计算点与点距离
     # distance1 = np.linalg.norm(pmt_ - ptt_)
     # return distance1 <= kill_range, pmt_
@@ -64,38 +64,43 @@ def hit_target(pmt_1, vmt_1, ptt_1, vtt_1, dt=0.02, kill_range=20):
     M1M2_ = M2 - M1
     M1T1_ = T1 - M1
     M2T2_ = T2 - M2
-    
-    # 超出5km跳过计算
-    if np.linalg.norm(M1-T1) > 5e3:
-        return False, M1, T1
 
-    if np.linalg.norm(T1T2_ - M1M2_) < 1e-3:
-        # 平行移动了，另一套公式
-        d_min = np.linalg.norm(M1T1_)
-        posm_ = M1
-        post_ = T1
+    # 调大杀伤半径后直接根据两点距离取最小判别
+    d1 = norm(M1-T1)
+    d2 = norm(M2-T2)
+    if d1 <= kill_range:
+        return 1, M1, T1
+    elif d2 <= kill_range:
+        return 1, M2, T2
     else:
-        # 至少运动的方向和大小中有一项是不一样的
-        t_min = t1 - (np.dot(M1T1_, T1T2_) - np.dot(M1T1_, M1M2_)) / np.linalg.norm(
-            T1T2_ - M1M2_) ** 2 * delta_t
-        if t_min < t1:
-            t_min = t1
-        elif t_min > t1 + delta_t:
-            t_min = t1 + delta_t
-        posm_ = M1 + (t_min - t1) / delta_t * (M2 - M1)
-        post_ = T1 + (t_min - t1) / delta_t * (T2 - T1)
-        d_min = np.linalg.norm(M1T1_ + (t_min - t1) / delta_t * (T1T2_ - M1M2_))
-        # if t_min < t1 or t_min > t1 + delta_t:
-        #     # 没办法用这个结果了，此时最近点要么是开头，要么就是结尾
-        #     d_min = min(np.linalg.norm(M1T1_), np.linalg.norm(M2T2_))
-        # else:
-        #     # 最近点取得的时间在t1~t2之间
-        #     d_min = np.linalg.norm(M1T1_ + (t_min - t1) / delta_t * (T1T2_ - M1M2_))
-        # posm_=pmt_
-    if d_min <= kill_range:
-        # print(d_min)
-        killed = True
-    return killed, posm_, post_
+        return 0, M1, T1
+    
+    # # 解析计算命中情况
+    # # 超出5km跳过计算
+    # if np.linalg.norm(M1-T1) > 5e3:
+    #     return False, M1, T1
+
+    # if np.linalg.norm(T1T2_ - M1M2_) < 1e-3:
+    #     # 平行移动了，另一套公式
+    #     d_min = np.linalg.norm(M1T1_)
+    #     posm_ = M1
+    #     post_ = T1
+    # else:
+    #     # 至少运动的方向和大小中有一项是不一样的
+    #     t_min = t1 - (np.dot(M1T1_, T1T2_) - np.dot(M1T1_, M1M2_)) / np.linalg.norm(
+    #         T1T2_ - M1M2_) ** 2 * delta_t
+    #     if t_min < t1:
+    #         t_min = t1
+    #     elif t_min > t1 + delta_t:
+    #         t_min = t1 + delta_t
+    #     posm_ = M1 + (t_min - t1) / delta_t * (M2 - M1)
+    #     post_ = T1 + (t_min - t1) / delta_t * (T2 - T1)
+    #     d_min = np.linalg.norm(M1T1_ + (t_min - t1) / delta_t * (T1T2_ - M1M2_))
+        
+    # if d_min <= kill_range:
+    #     # print(d_min)
+    #     killed = True
+    # return killed, posm_, post_
 
 def sub_of_radian(input1, input2):
     # 计算两个弧度的差值，范围为[-pi, pi]
@@ -137,7 +142,7 @@ class missile_class:
         self.stage2_start = self.stage1_start + self.stage1_time  # s
         self.stage2_end = self.stage1_start + self.stage1_time + self.stage2_time  # s
         # 杀伤半径
-        self.kill_range = 40 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
+        self.kill_range = 85 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
         # 最大过载
         self.max_g0 = 40
         self.max_g = self.max_g0
