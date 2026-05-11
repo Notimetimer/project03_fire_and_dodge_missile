@@ -258,16 +258,16 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
     return player_elo + K_FACTOR * (score - expected)
 
 
-def get_opponent_probabilities(win_rates, elite_win_rates=None, 
+def get_opponent_probabilities(WinRates, Elite_WinRates=None, 
                                SP_type='PFSP_classic', 
                                rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
     """
     经典 PFSP 采样逻辑：
-    win_rates: dict, 记录 Learner 对阵各对手的胜率 P
+    WinRates: dict, 记录 Learner 对阵各对手的胜率 P
     p_factor: 经典公式 (1-P)^p 中的指数，通常取 1.0~3.0，越高越针对强敌
     """
     # 合并池子以便查询
-    candidate_pool = elite_win_rates if elite_win_rates else win_rates
+    candidate_pool = Elite_WinRates if Elite_WinRates else WinRates
     keys = list(candidate_pool.keys())
     
     if not keys: return np.array([]), []
@@ -886,14 +886,11 @@ def run_MLP_simulation(
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
     # 5. 模仿学习预训练 (Serial Execution on Master)
-    print("Start MARWIL Training...")
+    if IL_epoches > 0:
+        print("Start IL Training...")
 
     student_agent.set_learning_rate(actor_lr=actor_lr_init_il, critic_lr=critic_lr_init_il)
     
-    # 存储无学习情况下的网络参数
-    init_opponent_name = "actor_rein0"
-    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
-
     # === 模仿训练循环 ===
     # 现在 original_il_transition_dict['actions'] 已经是 {'cat': tensor, 'bern': tensor} 格式了
     # 能够被 MARWIL_update 里的 items() 正常遍历
@@ -913,9 +910,17 @@ def run_MLP_simulation(
             # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
-
-    print("IL Training Finished.")
     
+    if IL_epoches > 0:
+        print("IL Training Finished.")
+    else:
+        print("No IL")
+    
+    # 存储在线训练前的网络参数
+    int_agent_name = "actor_rein0"
+    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{int_agent_name}.pt"))
+
+
     # --- 新增：实例化混合缓冲区 ---
     il_transition_buffer = None
     if IL_epoches + use_sil > 0:  # 只要出现模仿学习就得准备好初始的模仿池
@@ -975,7 +980,7 @@ def run_MLP_simulation(
 
     # ELO 初始化
     elo_ratings = copy.deepcopy(init_elo_ratings)
-    elite_elo_ratings = copy.deepcopy(elo_ratings)
+    elite_elo_ratings = {} # {copy.deepcopy(elo_ratings)}
     hall_of_fame = {}
     
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
@@ -983,12 +988,12 @@ def run_MLP_simulation(
     hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
     # 新增：胜率表文件路径
     win_rates_path = os.path.join(log_dir, "WinRates.json")
-    elite_win_rates_path = os.path.join(log_dir, "Elite_WinRates.json")
+    Elite_WinRates_path = os.path.join(log_dir, "Elite_WinRates.json")
     # 初始化胜率字典
-    win_rates = {}
-    elite_win_rates = {}
+    WinRates = {}
+    Elite_WinRates = {}
 
-    # 尝试加载历史
+    # 尝试加载历史 # 中断续训
     if os.path.exists(full_json_path):
         with open(full_json_path, 'r', encoding='utf-8') as f: elo_ratings = json.load(f)
     if os.path.exists(elite_json_path):
@@ -996,23 +1001,41 @@ def run_MLP_simulation(
     if os.path.exists(hof_json_path):
         with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
     if os.path.exists(win_rates_path):
-        with open(win_rates_path, 'r') as f: win_rates = json.load(f)
-    if os.path.exists(elite_win_rates_path):
-        with open(elite_win_rates_path, 'r') as f: elite_win_rates = json.load(f)
+        with open(win_rates_path, 'r') as f: WinRates = json.load(f)
+    if os.path.exists(Elite_WinRates_path):
+        with open(Elite_WinRates_path, 'r') as f: Elite_WinRates = json.load(f)
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
-    # 初始对手(存储IL后的网络参数)
-    if (not elo_ratings) or IL_epoches > 0:
-        init_opponent_name = "actor_rein0"
-        torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{init_opponent_name}.pt"))
-        if self_play_type != 'None': elo_ratings[init_opponent_name] = 1200
-        
-    # 初始化 init_elo_ratings 里面的元素胜率 以及 actor_rein0
-    if not win_rates:
+    
+    # 不论如何，记录在线训练前的网络参数
+    if (not elite_elo_ratings): # 如果是从零开始训练的
+        # 初始对手胜率一律当做0.5
         for k in init_elo_ratings.keys():
-            win_rates[k] = 0.5
-        win_rates["actor_rein0"] = 0.5
+            WinRates[k] = 0.5
+        # 初始对手Elo一律当1200
+        for k in init_elo_ratings.keys():
+            elo_ratings[k] = main_agent_elo    
+
+        # 自博弈开启时的初始分值填充
+        if hist_agent_as_opponent:
+            elo_ratings[int_agent_name] = main_agent_elo
+            WinRates[int_agent_name] = 0.5
+        
+        # 从零开始不论对手有多烂都要加入Elite池            
+        Elite_WinRates = copy.deepcopy(WinRates)
+        elite_elo_ratings = copy.deepcopy(elo_ratings)
+
+    
+    # # 初始对手(存储IL后的网络参数)
+    # if (not elo_ratings) and hist_agent_as_opponent: # or IL_epoches > 0: # 没有模仿学习也要存
+    #     elo_ratings[int_agent_name] = 1200
+        
+    # # 初始化 init_elo_ratings 里面的元素胜率 以及 actor_rein0
+    # if not WinRates:
+    #     for k in init_elo_ratings.keys():
+    #         WinRates[k] = 0.5
+    #     WinRates["actor_rein0"] = 0.5
 
     # 训练循环变量
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
@@ -1028,7 +1051,6 @@ def run_MLP_simulation(
     # 初始化基于胜率的在线 EMA 变量
     ema_score = 0.5
     ema_step = 0
-    # prev_ema_score = 0.5
     target_p1 = 0.65
 
     # =========================================================
@@ -1147,21 +1169,22 @@ def run_MLP_simulation(
             # 这一步 Master 决定每个 Worker 打谁
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
-            # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
-            if not init_elo_ratings:
-                # 按照 Elo 分数降序排列，排除内部特殊键
-                sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
-                                                key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
-                                                reverse=True) if not k.startswith("__")]
-                effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
-            else:
-                effective_pool = elite_elo_ratings
+            # # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
+            # if not init_elo_ratings:
+            #     # 按照 Elo 分数降序排列，排除内部特殊键
+            #     sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
+            #                                     key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+            #                                     reverse=True) if not k.startswith("__")]
+            #     effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
+            # else:
+            #     effective_pool = elite_elo_ratings
                 
             for rank in range(num_workers):
                 # 采样对手
-                # 注意：采样始终基于 win_rates（elite_win_rates 仅为记录用）
+                # 注意：采样始终基于 win_rates（Elite_WinRates 仅为记录用）
                 probs, opponent_keys = get_opponent_probabilities(
-                    win_rates,
+                    WinRates,
+                    Elite_WinRates,
                     SP_type=self_play_type,
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
@@ -1278,12 +1301,15 @@ def run_MLP_simulation(
                 
                 # --- 胜率更新 (经典滑动平均) ---
                 alpha_win = 0.1
+                # 全记录
                 # 需要记录的是我对这个对手的胜率，数值越高表示对手相对我越弱
-                if opp_name in win_rates:
-                    old_p = win_rates[opp_name]
-                    win_rates[opp_name] = (1 - alpha_win) * old_p + alpha_win * actual_score
+                if opp_name in WinRates:
+                    old_p = WinRates[opp_name]
+                    WinRates[opp_name] = (1 - alpha_win) * old_p + alpha_win * actual_score
+                    if opp_name in Elite_WinRates:
+                        Elite_WinRates[opp_name] = WinRates[opp_name]
                 else:
-                    win_rates[opp_name] = 0.5
+                    WinRates[opp_name] = 0.5
                 
                 if opp_name in elo_ratings:
                     prev_main_elo = main_agent_elo
@@ -1298,6 +1324,7 @@ def run_MLP_simulation(
                     if opp_name in elite_elo_ratings:
                         elite_elo_ratings[opp_name] = new_adv_elo
                 else:
+                    elo_ratings[opp_name] = main_agent_elo
                     print('警告，elo_ratings没有全部收录!!!')
             
             # [新增] 在 PPO 更新前打印本轮详细战况
@@ -1316,17 +1343,9 @@ def run_MLP_simulation(
             # 若第一步则直接初始化，避免前期偏差
             if ema_step == 1:
                 ema_score = batch_score
-                # prev_ema_score = batch_score
             else:
-                # prev_ema_score = ema_score
                 ema_score = (1 - alpha_ema) * ema_score + alpha_ema * batch_score
                 
-            # if ema_score > prev_ema_score:
-            #     target_p1 = min(0.9, target_p1 + 0.01)
-            # else:
-            #     target_p1 = max(0.6, target_p1 - 0.005)
-            
-            # max_target_p1 = 0.6 + total_steps / max_steps
 
             # 使用带有偏差修正的滤波值
             filtered_score = ema_score
@@ -1371,62 +1390,6 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
-                # if use_sil:
-                #     if target_pool_keys:
-                        
-                #         # # 变化尺度对称型函数
-                #         # a_p = -8
-                #         # k_p = 0.006
-                #         # mid = log10(alpha_il)
-                #         # b_p = 2 * mid - a_p
-                #         # scale = (b_p - a_p) / 2.0      # 3.0
-                #         # # 计算指数部分: exponent = mid - scale * tanh(k * x)
-                #         # # 当 x 很大时 (领跑)，tanh->1, exponent -> -8
-                #         # # 当 x 很小时 (落后)，tanh->-1, exponent -> -2
-                #         # exponent = mid - scale * np.tanh(k_p * x_elo_diff)
-                #         # exponent = min(exponent, -2)
-                        
-                #         # # 非对称函数
-                #         # --- 自定义参数配置 ---
-                #         M = max_il_exponent      # 指数的硬上限 (例如 -2 表示 alpha_il 最大为 0.01)
-                #         b = min(M, log10(alpha_il + 1e-8))      # 截距：势均力敌(x=0)时的指数 (alpha_il = 10^-5)
-                                                
-                #         # 原·根据elo插值缩放指数
-                #         # exponent = np.clip( b - k_shape * x_elo_diff, -20, M )
-                #         # k_shape = k_shape_il  # 形状参数：越大则领跑时关闭自模仿的速度越快
-                #         # 现·根据训练步数逐渐缩小指数
-                #         k_shape = 4/4e6
-                #         exponent = np.clip( b - k_shape * total_steps, -20, M )
-                        
-                #         # 得到最终 alpha_il (10 的 exponent 次方)
-                #         dynamic_alpha_il = 10 ** max(exponent, -20)
-                #     else:
-                #         dynamic_alpha_il = alpha_il
-                    
-                #     # 记录动态参数到 TensorBoard
-                #     logger.add("train_plus/dynamic_alpha_il", dynamic_alpha_il, total_steps)
-                #     logger.add("train_plus/alpha_exponent", exponent, total_steps)
-                    
-                #     # 读取 IL 数据
-                #     il_data = il_transition_buffer.read(il_batch_size2)
-                #     logger.add("train_plus/il_data_size", len(il_data['returns']), total_steps)
-                    
-                #     # 混合更新
-                #     student_agent.mixed_update(
-                #         transition_dict,
-                #         il_data,
-                #         init_il_transition_dict = original_il_transition_dict0 if use_init_data else None,
-                #         eta = np.clip(1 - total_steps/5e6, 0.01, 1),  # 3e6
-                #         adv_normed=True,
-                #         label_smoothing=label_smoothing_mixed,
-                #         alpha=dynamic_alpha_il,
-                #         beta=beta_mixed,
-                #         sil_only_maneuver = sil_only_maneuver,
-                #         mini_batch_size = mini_batch_size_mixed
-                #     )
-                # else:
-                #====================
-                # 原有强化学习部分
                 # 学习率warm_up
                 actor_lr = min(actor_lr0, actor_lr0 * total_steps/1e6)
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
@@ -1480,27 +1443,75 @@ def run_MLP_simulation(
                 print(f"Saved Checkpoint: {actor_key}")
 
                 # B. 经典胜率精英池维护
-                if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
+                # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
+                if total_steps >= WARM_UP_STEPS:
                     # 1. 产生新 Checkpoint 时，初始化其在胜率表中的地位
-                    win_rates[actor_key] = 0.5  # 经典做法：Learner 的镜像初始胜率为 0.5
+                    WinRates[actor_key] = 0.5  # Learner 的镜像初始胜率为 0.5
+                    elo_ratings[opp_name] = main_agent_elo
+
+                    if hist_agent_as_opponent:
+                        agent_keys = [k for k in WinRates.keys() if k.startswith("actor_rein")]
+                        sorted_agents = sorted(agent_keys, key=lambda k: WinRates[k])
+                        # 计算 rule 的最大 win_rate（即 Learner 对规则对手中赢得最多的那个值）
+                        # 新的门槛规则：候选 NN 必须比最弱的 Rule（对 Learner 来说最容易打的 Rule）更难
+                        # 换句话说：要求 WinRates[agent] < max_rule_win
+                        rule_keys_present = [k for k in WinRates.keys() if k.startswith('Rule')]
+                        max_rule_win = None
+                        if rule_keys_present:
+                            max_rule_win = max([WinRates[k] for k in rule_keys_present])
+
+                        # 过滤出满足硬性门槛的 agents（如果有 rule 则必须使 Learner 胜率小于 rules 中的最高值）
+                        qualified_agents = []
+                        for a in sorted_agents:
+                            if max_rule_win is None:
+                                qualified_agents.append(a)
+                            else:
+                                # 要求：Learner 对 agent 的胜率 < rules 中的最高 Learner 胜率
+                                if WinRates.get(a, 1.0) < float(max_rule_win):
+                                    qualified_agents.append(a)
+
+                        toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
+
+                        # --- 新增逻辑：同步移除数值过高的“过期”Agent ---
+                        if max_rule_win is not None:
+                            purge_threshold = float(max_rule_win) + 0.1
+                            # 仅保留胜率没超过阈值的 NN 智能体
+                            toughest_agents = [a for a in toughest_agents if WinRates.get(a, 1.0) <= purge_threshold]
+                        # ----------------------------------------------
+
+                        # 3. 更新 Elite 表格（仅包含通过硬性门槛的 NN），并保证 init_elo_ratings 中的 Rule 被保留
+                        Elite_WinRates = {k: WinRates[k] for k in toughest_agents}
+                        # 根据传入的 init_elo_ratings 决定加入的 Rule（保证按需包含）
+                        for rk in [k for k in init_elo_ratings.keys() if k.startswith("Rule")]:
+                            if rk in WinRates:
+                                Elite_WinRates[rk] = WinRates[rk]
+                            
+                        # 4. 让 Elite_Elo_ratings 从属于 Elite_WinRates (用于对比记录)
+                        elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in Elite_WinRates.keys()}
+                        print(f"Accepted {actor_key}. Elite pool size: {len(Elite_WinRates)} (NN: {len(toughest_agents)})")
+                
+                if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
+                    # 更新胜率表
+                    # 1. 产生新 Checkpoint 时，初始化其在胜率表中的地位
+                    WinRates[actor_key] = 0.5  # 经典做法：Learner 的镜像初始胜率为 0.5
 
                     # 2. 筛选精英池：挑选“最难对付”的 MAX_HISTORY_SIZE 个对手
                     # 新增硬性门槛：只有当该 NN 策略击败 Learner 的概率高于
                     # 最差 Rule 对手（即 rule 中被我打败最多）的概率时
-                    # 才有资格进入 elite_win_rates。换算成 win_rate（Learner 胜率）为：
-                    # win_rates[agent] < max_rule_win_rate
+                    # 才有资格进入 Elite_WinRates。换算成 win_rate（Learner 胜率）为：
+                    # WinRates[agent] < max_rule_win_rate
                     # 如果没有 Rule 则维持原有按最小 win_rate 选取逻辑。
                     # 本段先收集 agent 列表并按 win_rate 升序排列（越小越难打）
-                    agent_keys = [k for k in win_rates.keys() if k.startswith("actor_rein")]
-                    sorted_agents = sorted(agent_keys, key=lambda k: win_rates[k])
+                    agent_keys = [k for k in WinRates.keys() if k.startswith("actor_rein")]
+                    sorted_agents = sorted(agent_keys, key=lambda k: WinRates[k])
 
                     # 计算 rule 的最大 win_rate（即 Learner 对规则对手中赢得最多的那个值）
                     # 新的门槛规则：候选 NN 必须比最弱的 Rule（对 Learner 来说最容易打的 Rule）更难
-                    # 换句话说：要求 win_rates[agent] < max_rule_win
-                    rule_keys_present = [k for k in win_rates.keys() if k.startswith('Rule')]
+                    # 换句话说：要求 WinRates[agent] < max_rule_win
+                    rule_keys_present = [k for k in WinRates.keys() if k.startswith('Rule')]
                     max_rule_win = None
                     if rule_keys_present:
-                        max_rule_win = max([win_rates[k] for k in rule_keys_present])
+                        max_rule_win = max([WinRates[k] for k in rule_keys_present])
 
                     # 过滤出满足硬性门槛的 agents（如果有 rule 则必须使 Learner 胜率小于 rules 中的最高值）
                     qualified_agents = []
@@ -1509,21 +1520,22 @@ def run_MLP_simulation(
                             qualified_agents.append(a)
                         else:
                             # 要求：Learner 对 agent 的胜率 < rules 中的最高 Learner 胜率
-                            if win_rates.get(a, 1.0) < float(max_rule_win):
+                            if WinRates.get(a, 1.0) < float(max_rule_win):
                                 qualified_agents.append(a)
 
                     toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
 
                     # 3. 更新 Elite 表格（仅包含通过硬性门槛的 NN），并保证 init_elo_ratings 中的 Rule 被保留
-                    elite_win_rates = {k: win_rates[k] for k in toughest_agents}
+                    Elite_WinRates = {k: WinRates[k] for k in toughest_agents}
                     # 根据传入的 init_elo_ratings 决定加入的 Rule（保证按需包含）
                     for rk in [k for k in init_elo_ratings.keys() if k.startswith("Rule")]:
-                        if rk in win_rates:
-                            elite_win_rates[rk] = win_rates[rk]
+                        if rk in WinRates:
+                            Elite_WinRates[rk] = WinRates[rk]
                         
                     # 4. 让 Elite_Elo_ratings 从属于 Elite_WinRates (用于对比记录)
-                    elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in elite_win_rates.keys()}
-                    print(f"Accepted {actor_key}. Elite pool size: {len(elite_win_rates)}")
+                    elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in Elite_WinRates.keys()}
+                    print(f"Accepted {actor_key}. Elite pool size: {len(Elite_WinRates)}")
+                    
                 # -----------------------------------------------------------
                 # 逻辑分支 B: 维护“全量历史记录” (Full JSON)
                 # -----------------------------------------------------------
@@ -1556,9 +1568,9 @@ def run_MLP_simulation(
                 # 逻辑分支 E: 保存胜率表 (用于核心更新与选择)
                 # -----------------------------------------------------------
                 with open(win_rates_path, "w", encoding="utf-8") as f:
-                    json.dump(win_rates, f, ensure_ascii=False, indent=2)
-                with open(elite_win_rates_path, "w", encoding="utf-8") as f:
-                    json.dump(elite_win_rates, f, ensure_ascii=False, indent=2)
+                    json.dump(WinRates, f, ensure_ascii=False, indent=2)
+                with open(Elite_WinRates_path, "w", encoding="utf-8") as f:
+                    json.dump(Elite_WinRates, f, ensure_ascii=False, indent=2)
 
                 # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
                 valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
