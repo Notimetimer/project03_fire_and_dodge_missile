@@ -1038,7 +1038,7 @@ def run_MLP_simulation(
         while total_steps < current_max_steps:
             # 先尝尝乱开或的后果，再mask掉错误开火
             if total_steps < 5e3:
-                fire_mask = 0
+                fire_mask = 1 # 0 # 全程开启开火mask
             else:
                 fire_mask = 1
             # --- 【修改】同步并行测试阶段 ---
