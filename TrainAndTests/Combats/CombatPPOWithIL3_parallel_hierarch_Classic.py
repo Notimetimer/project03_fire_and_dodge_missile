@@ -987,7 +987,7 @@ def run_MLP_simulation(
     elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
     hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
     # 新增：胜率表文件路径
-    win_rates_path = os.path.join(log_dir, "WinRates.json")
+    WinRates_path = os.path.join(log_dir, "WinRates.json")
     Elite_WinRates_path = os.path.join(log_dir, "Elite_WinRates.json")
     # 初始化胜率字典
     WinRates = {}
@@ -1000,8 +1000,8 @@ def run_MLP_simulation(
         with open(elite_json_path, 'r', encoding='utf-8') as f: elite_elo_ratings = json.load(f)
     if os.path.exists(hof_json_path):
         with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
-    if os.path.exists(win_rates_path):
-        with open(win_rates_path, 'r') as f: WinRates = json.load(f)
+    if os.path.exists(WinRates_path):
+        with open(WinRates_path, 'r') as f: WinRates = json.load(f)
     if os.path.exists(Elite_WinRates_path):
         with open(Elite_WinRates_path, 'r') as f: Elite_WinRates = json.load(f)
 
@@ -1567,7 +1567,7 @@ def run_MLP_simulation(
                 # -----------------------------------------------------------
                 # 逻辑分支 E: 保存胜率表 (用于核心更新与选择)
                 # -----------------------------------------------------------
-                with open(win_rates_path, "w", encoding="utf-8") as f:
+                with open(WinRates_path, "w", encoding="utf-8") as f:
                     json.dump(WinRates, f, ensure_ascii=False, indent=2)
                 with open(Elite_WinRates_path, "w", encoding="utf-8") as f:
                     json.dump(Elite_WinRates, f, ensure_ascii=False, indent=2)

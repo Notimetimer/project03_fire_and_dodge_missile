@@ -3,6 +3,7 @@
 '''
 
 import numpy as np
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -203,19 +204,35 @@ class PolicyNetHybrid(torch.nn.Module):
             t_since_launch = xb[:, 21] * 120
 
             ata_hor = torch.acos(cos_ata_hor)
-            pi_val = torch.tensor(np.pi, device=shared_features.device)
-            ata_cond = (ata <= (60.0 * pi_val / 180.0)) & (ata_hor <= (30.0 * pi_val / 180.0))
+            # 新代码1 Use Python/math pi (float) to avoid creating a constant tensor via numpy
+            pi = math.pi
+            ata_cond = (ata <= (60.0 * pi / 180.0)) & (ata_hor <= (30.0 * pi / 180.0))
+            # 旧代码1
+            # pi_val = torch.tensor(np.pi, device=shared_features.device)
+            # ata_cond = (ata <= (60.0 * pi_val / 180.0)) & (ata_hor <= (30.0 * pi_val / 180.0))
             locked_cond = (locked >= 0.5)
             ammo_cond = (ammo > 0.0)
             # Use elementwise logical ops so this works on tensors
             timd_cond = (t_since_launch >= 60) | ((dist < 30e3) & (t_since_launch >= 10))
             dist_cond = (dist < 95e3)
-            delta_theta_cond = (delta_theta > pi_val*(-30)/180)
+            delta_theta_cond = (delta_theta > pi * (-30) / 180.0)
 
-            if mask_on:
-                can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
+            # 新代码2 Avoid Python branching on tensor-like `mask_on` (which breaks torch.jit.trace).
+            # Create a scalar boolean tensor and select between the two candidate masks.
+            if torch.is_tensor(mask_on):
+                mask_on_tensor = mask_on.to(device=shared_features.device)
             else:
-                can_fire = ammo_cond
+                mask_on_tensor = torch.tensor(bool(mask_on), device=shared_features.device)
+            mask_on_bool = mask_on_tensor.to(dtype=torch.bool)
+
+            can_fire_full = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
+            can_fire = torch.where(mask_on_bool, can_fire_full, ammo_cond)
+
+            # # 旧代码2
+            # if mask_on:
+            #     can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
+            # else:
+            #     can_fire = ammo_cond
 
             # build mask for bern dims and apply to first bern dimension only
             bern_dim = self.action_dims.get('bern', 0)
