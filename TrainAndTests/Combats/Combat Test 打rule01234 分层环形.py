@@ -127,9 +127,9 @@ if __name__ == "__main__":
                       red_init_ammo=6, blue_init_ammo=6)
 
             done = False
-            last_r_action_label = 0
+            last_r_action_radians = 0
             last_b_action_label = 0
-            r_action_label = 0
+            r_action_radians = 0
             b_action_label = 0
 
             # --- 初始化数据记录 ---
@@ -152,16 +152,16 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         # 超控标准差，检查熵
-                        actor_wrapper.net.log_std_shared.fill_(np.log(0.8))
+                        actor_wrapper.net.log_std_shared.fill_(np.log(0.2)) # 0.8
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'lin':1, 'circ':1, 'bern':1}, check_obs=None, bern_threshold=0.4
                             ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
                     r_action_h = r_action_exec['circ'][0] if isinstance(r_action_exec['circ'], (list, np.ndarray)) else r_action_exec['circ']
-                    r_action_label = [r_action_v, r_action_h]
+                    r_action_radians = [r_action_v, r_action_h]
                     r_fire = r_action_exec['bern'][0]
-                    last_r_action_label = r_action_label
+                    last_r_action_radians = r_action_radians
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
@@ -175,18 +175,18 @@ if __name__ == "__main__":
                         env.BUAV.about_to_fire = 1
 
                 # 执行机动并步进
-                r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
+                r_maneuver = env.maneuverContinuous(env.RUAV, r_action_radians)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                 
                 # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', tabu=0, action_label=None) # r_action_label)
+                    launch_missile_immediately(env, 'r', tabu=0, action_label=None) # r_action_radians)
                 if getattr(env.BUAV, 'about_to_fire', 0):
                     launch_missile_immediately(env, 'b', tabu=0, action_label=None) # b_action_label)
                     
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
-                done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
+                done, _, _, _ = env.combat_terminate_and_reward('r', r_action_radians, r_fire, action_cycle_multiplier)
 
                 # --- 记录数据 ---
                 history['time'].append(count * action_cycle_multiplier * dt_maneuver)

@@ -52,7 +52,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'border_penalty_scale': 0.2,
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
             'angle_advantage': 0.01, # 0.007, # 0.03
-            'height_advantage': 0.1,
+            'height_advantage': 0.01,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
             'to_center_reward' : 0.005, # 0.02 占领中心点的价值
@@ -210,28 +210,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             wasted = 0
 
 
-
-        # # --- 5. 引导奖励计算 (r_shaping) - 外部随步数衰减 ---
-        # # 为导弹提供制导
-        # if missile_in_mid_term:
-        #     r_shaping += reward_weights['missile_guidance']
-
-        # # 锁定目标
-        # if ego_states["target_locked"]:
-        #     r_shaping += reward_weights['target_locked']
-
-        # # 被目标锁定
-        # if strict_locked_by_target:
-        #     r_shaping -= reward_weights['locked_by_target']
-
-        # # 被导弹导引头锁住
-        # if warning and threat_distance <= 20e3:
-        #     r_shaping -= reward_weights['missile_warning']
-
-        # # 导弹锁定目标
-        # if enm_states["warning"] and enm_states["threat"][3] <= 20e3:
-        #     r_shaping += reward_weights['enemy_gets_warning']
-
         # --- 态势辅助奖励 (千分位级别) ---
         # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
         enm_threat_dist = enm_states["threat"][3]
@@ -244,19 +222,17 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 角度奖励
         # 进攻引导
-        if len(alive_enm_missiles) == 0:
+        if len(alive_enm_missiles) == 0 and not warning:
+            # 瞄准奖励
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # 爬高奖励
+            r_constraint += (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead)
+            r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
 
-        # # crank引导
-        # if enm_threat_dist < distance:
-        #     r_constraint -= 4 * abs(abs(delta_psi)-pi/3)*3/pi * reward_weights['angle_advantage'] * (1-ego.dead) # 引导太弱
-        
         if len(alive_ally_missiles) > 1:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
             r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
             r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
-
-            # r_constraint += np.clip(-ego.theta/(pi/2), -1, 1/3) * 3 * reward_weights['angle_advantage'] * (1-ego.dead) # 开火后高度越低越好，如果还抬头必有惩罚
 
         # 速度惩罚
         slow_mach = 0.7
@@ -268,22 +244,16 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 受到威胁应该置尾和下高
             if abs(delta_psi_threat) < pi/2:
                 r_constraint += min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-                r_constraint += (-theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-
-        # r_constraint *= (1-ego.dead) # 密集奖励只有在
-
-        r_shaping *= (1-ego.dead)
+            r_constraint += (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+        
+        # 密集奖励只有在agent活着的时候有意义
+        # r_constraint *= (1-ego.dead)
+        # r_shaping *= (1-ego.dead)
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
             r_event -= 5 * shoot
 
-            # # 正当防卫豁免
-            # if shoot == 1 and threat_distance < 25e3 and ego_states["target_locked"]:
-            #     r_event += - 1 * shoot
-            # else:
-            #     r_event -= 5 * shoot
-            
             if len(alive_ally_missiles) > 1: # 重复开火惩罚
                 r_event -= 20 * shoot * max(1-missile_time_since_shoot/60, 0) # 13
             
@@ -294,9 +264,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 r_event += 1.3 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
                 r_event -= 0.7 * max(1.0-ego.speed/340, 0)  # 开火时候的速度不能太低
                 
-                # # 发射距离惩罚
-                # if distance > 60e3:
-                #     r_constraint += -5 * (distance - 60e3)/20e3
 
         # 逃脱导弹
         if ego.escape_once:
