@@ -426,48 +426,23 @@ class CircularDiscretizedDistribution_NL:
 
 # 圆周空间下随机概率分布
 class CircularContDist4OnPolciy:
-    """
-    Continuous circular distribution wrapper (von Mises) parameterized by
-    mean angle `mu` (radians) and an "equivalent std" `std` such that
-        kappa = 1.0 / (std**2 + eps)
-
-    Interface:
-      - __init__(mu, std, eps=1e-8)
-      - log_prob(theta): returns (batch, 1) log-probability for given angle(s)
-      - sample(n=None): CPU-side sampling via numpy.random.vonmises, returns tensor
-      - entropy(): approximate entropy if i1 available, else returns None
-      - mean(): returns mu tensor
-    """
-    def __init__(self, mu, std, eps=1e-8):
-        # mu: tensor (B,1) or (B,) in radians
-        # std: tensor or scalar, interpreted as equivalent standard deviation
+    def __init__(self, mu_vec, std, eps=1e-8):
+        # mu_vec: (B, 2) 单位向量
         self.eps = float(eps)
-        if not torch.is_tensor(mu):
-            mu = torch.as_tensor(mu)
-        if not torch.is_tensor(std):
-            std = torch.as_tensor(std, dtype=mu.dtype)
-
-        # keep device for later
-        self.device = mu.device if hasattr(mu, 'device') else torch.device('cpu')
-
-        # normalize shapes to (B, 1)
-        self.mu = mu.view(-1, 1).to(self.device)
+        self.device = mu_vec.device
+        self.mu_vec = mu_vec.view(-1, 2)
         self.std = std.to(self.device).view(-1, 1)
 
         # kappa from equivalent std
         self.kappa = 1.0 / (self.std.pow(2) + self.eps)
 
-    def log_prob(self, theta):
-        """Compute von-Mises log pdf for `theta` (radians).
-        theta: tensor broadcastable to mu/kappa shapes
-        returns tensor shaped (batch, 1)
-        """
-        if not torch.is_tensor(theta):
-            theta = torch.as_tensor(theta, device=self.device)
-        # ensure same shape
-        theta = theta.view(-1, 1).to(self.device)
-
-        # Use scaled i0 if available for better stability
+    def log_prob(self, action_vec):
+        # action_vec: (B, 2) 经验池中的动作向量
+        action_vec = action_vec.view(-1, 2).to(self.device)
+        
+        # 使用点积代替 cos(theta - mu)
+        dot_product = torch.sum(action_vec * self.mu_vec, dim=-1, keepdim=True)
+        
         if hasattr(torch.special, 'i0e'):
             # log I0 = log(i0e(kappa)) + kappa
             log_i0 = torch.log(torch.special.i0e(self.kappa).clamp(min=self.eps)) + self.kappa
@@ -475,47 +450,42 @@ class CircularContDist4OnPolciy:
             log_i0 = torch.log(torch.special.i0(self.kappa).clamp(min=self.eps))
 
         log_norm = torch.log(torch.tensor(2.0 * np.pi, device=self.device)) + log_i0
+        return (self.kappa * dot_product) - log_norm
 
-        # von Mises log pdf: kappa * cos(theta - mu) - log(2π I0(kappa))
-        return (self.kappa * torch.cos(theta - self.mu)) - log_norm
-
-    def sample(self, n=None):
-        """CPU sampling via numpy.random.vonmises.
-        n: number of samples to draw; if None, draws one per mu in batch.
-        Returns tensor on self.device with shape (n, 1) or (batch, 1).
-        Note: sampling is non-differentiable (intended for env collection).
-        """
-        mu_np = self.mu.detach().cpu().numpy().reshape(-1)
+    def sample(self):
+        # 采样依然基于 Von Mises 标量，随后转为向量存储
+        mu_rad = torch.atan2(self.mu_vec[:, 1], self.mu_vec[:, 0]).detach().cpu().numpy()
         kappa_np = self.kappa.detach().cpu().numpy().reshape(-1)
-
-        if n is None:
-            n_draw = mu_np.shape[0]
-        else:
-            n_draw = int(n)
-
-        samples = np.zeros((n_draw,), dtype=float)
-        # if batch provided and n_draw equals batch, sample per-element; else cycle over params
-        for i in range(n_draw):
-            idx = i % mu_np.shape[0]
-            samples[i] = np.random.vonmises(mu_np[idx], kappa_np[idx])
-
-        out = torch.as_tensor(samples, dtype=self.mu.dtype, device=self.device).view(n_draw, 1)
-        return out
+        
+        samples = np.array([np.random.vonmises(m, k) for m, k in zip(mu_rad, kappa_np)])
+        # 转回向量 (B, 2)
+        samples_vec = np.stack([np.cos(samples), np.sin(samples)], axis=1)
+        return torch.as_tensor(samples_vec, dtype=torch.float, device=self.device)
 
     def entropy(self):
-        """Return approximate entropy H = -kappa * I1(kappa)/I0(kappa) + log(2π I0(kappa)).
-        If torch.special.i1 is unavailable, return None.
-        """
-        if hasattr(torch.special, 'i1'):
-            i0 = torch.special.i0(self.kappa).clamp(min=self.eps)
-            i1 = torch.special.i1(self.kappa)
-            # compute term safely
-            ratio = (i1 / i0)
-            log_i0 = torch.log(i0)
-            ent = - self.kappa * ratio + torch.log(torch.tensor(2.0 * np.pi, device=self.device)) + log_i0
+        """使用指数缩放贝塞尔函数计算熵，提高数值稳定性"""
+        if hasattr(torch.special, 'i1e'):
+            # 使用缩放版本: In(k) = Ine(k) * exp(k)
+            i0e = torch.special.i0e(self.kappa).clamp(min=self.eps)
+            i1e = torch.special.i1e(self.kappa)
+            
+            # ratio = I1/I0 = I1e/I0e
+            ratio = i1e / i0e
+            
+            # log(I0) = log(i0e) + kappa
+            log_i0 = torch.log(i0e) + self.kappa
+            
+            # H = -kappa * (I1/I0) + log(2π) + log(I0)
+            # 带入缩放项后整理得：
+            ent = self.kappa * (1.0 - ratio) + torch.log(torch.tensor(2.0 * np.pi, device=self.device)) + torch.log(i0e)
             return ent
         else:
-            return None
+            # 回退到标准版本（易溢出）
+            i0 = torch.special.i0(self.kappa).clamp(min=self.eps)
+            i1 = torch.special.i1(self.kappa)
+            return -self.kappa * (i1 / i0) + torch.log(torch.tensor(2.0 * np.pi, device=self.device)) + torch.log(i0)
 
     def mean(self):
-        return self.mu
+        # 返回 (batch, 2) 的均值向量
+        return self.mu_vec
+

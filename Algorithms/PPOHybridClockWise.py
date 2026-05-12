@@ -114,8 +114,9 @@ class PolicyNetHybrid(torch.nn.Module):
             # for _ in range(head_hidden_layer_num):
             layers.append(nn.Linear(prev_size, int(prev_size/2)))
             layers.append(nn.ReLU())
-            layers.append(nn.Linear(int(prev_size/2), self.circ_dim))
-            self.fc_circ = nn.Linear(prev_size, self.circ_dim * 2)
+            layers.append(nn.Linear(int(prev_size/2), self.circ_dim * 2))
+            layers.append(nn.Tanh())
+            self.fc_circ = nn.Sequential(*layers)
 
         # 5. 线性离散动作头 (Linear) - 每个维度1个输出
         if self.lin_dim > 0:
@@ -125,7 +126,8 @@ class PolicyNetHybrid(torch.nn.Module):
             layers.append(nn.Linear(prev_size, int(prev_size/2)))
             layers.append(nn.ReLU())
             layers.append(nn.Linear(int(prev_size/2), self.lin_dim))
-            self.fc_lin = nn.Linear(prev_size, self.lin_dim)
+            layers.append(nn.Tanh())
+            self.fc_lin = nn.Sequential(*layers)
     
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0, mask_on=1):
         if min_std is None:
