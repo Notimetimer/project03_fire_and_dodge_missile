@@ -126,9 +126,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # ego_states = self.get_state(side)
         # enm_states = self.get_state(enm.side)
-        # --- 3. 基础变量计算 ---
-        ego_states = ego.current_state
-        enm_states = enm.current_state
+        # --- 3. 基础变量计算 --- pomdp会导致观测污染奖励函数，必须重新获取一次状态变量
+        ego_states = copy.deepcopy(self.get_state(side))
+        enm_states = copy.deepcopy(self.get_state(enm.side))
+        # ego_states = ego.current_state
+        # enm_states = enm.current_state
         dist_enm2ego = norm(ego.pos_ - enm.pos_)
         
         cos_ATA_enm = np.dot(enm.vel_, (ego.pos_ - enm.pos_)) / (norm(enm.vel_) * dist_enm2ego + 1e-3)
