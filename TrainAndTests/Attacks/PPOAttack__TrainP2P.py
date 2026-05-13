@@ -22,7 +22,7 @@ import sys
 import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-from Envs.Tasks.AttackManeuverEnv_p2p import *
+from Envs.Tasks.AttackManeuverEnv_e2e import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
@@ -90,7 +90,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.05 # 0.25 # 0.25
 k_entropy = 0.01  # 熵系数
-mission_name = 'AttackP2P'
+mission_name = 'Attacke2e'
 
 env = AttackTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
@@ -184,11 +184,11 @@ if __name__ == "__main__":
 
             DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                        'psi': red_psi,
-                                       'p2p': False
+                                       'e2e': False
                                        }
             DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
                                         'psi': pi,
-                                        'p2p': True
+                                        'e2e': True
                                         }
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                       red_init_ammo=0, blue_init_ammo=0)

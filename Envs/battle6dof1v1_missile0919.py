@@ -70,7 +70,7 @@ def sigmoid(x):
 class Battle(object):
     def __init__(self, args, tacview_show=0):
         # super(Battle, self).__init__() 
-        # self.p2p_control = False
+        # self.e2e_control = False
         self.ego_side = None  # 我到底在哪一边
         self.shielded = False
         self.no_out = False
@@ -122,11 +122,11 @@ class Battle(object):
 
         self.RED_BIRTH_STATE = {'position': np.array([-R_birth * cos(0), 8000.0, -R_birth * sin(0)]),
                                         'psi': 0,
-                                        'p2p': False
+                                        'e2e': False
                                         }
         self.BLUE_BIRTH_STATE = {'position': np.array([-R_birth * cos(pi), 8000.0, -R_birth * sin(pi)]),
                                          'psi': pi,
-                                         'p2p': False
+                                         'e2e': False
                                          }
         self.tacview_show = tacview_show
         if tacview_show:
@@ -335,28 +335,28 @@ class Battle(object):
                 # print('target_height',target_height)
 
                 if UAV.blue:
-                    # 如果 BLUE_BIRTH_STATE 包含 p2p 则使用其值，否则为 False
-                    p2p = self.BLUE_BIRTH_STATE.get('p2p', False)
+                    # 如果 BLUE_BIRTH_STATE 包含 e2e 则使用其值，否则为 False
+                    e2e = self.BLUE_BIRTH_STATE.get('e2e', False)
                 if UAV.red:
-                    # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 p2p 字段
-                    p2p = self.RED_BIRTH_STATE.get('p2p', False)
+                    # 对红方同样兼容 RED_BIRTH_STATE 中可能存在的 e2e 字段
+                    e2e = self.RED_BIRTH_STATE.get('e2e', False)
 
                 # 防撞地系统
                 if self.shielded:
                     # 临近撞地强制拉起
                     if UAV.alt < self.min_alt_safe + 1e3:
                         target_height = max(self.min_alt_safe + 1e3 - UAV.alt, target_height)
-                        p2p = False
+                        e2e = False
                         delta_heading = np.clip(delta_heading, -pi/3, pi/3)
 
                     # 不许超过限高
                     if UAV.alt > self.max_alt_safe:
                         target_height = min(self.max_alt_safe - UAV.alt, target_height)
-                        p2p = False
+                        e2e = False
 
                     # 速度过低强制加油门
                     if UAV.speed/340 < 0.5:
-                        if p2p:
+                        if e2e:
                             UAV.target_speed = 1
                         else:
                             UAV.target_speed = max(340, target_speed)
@@ -377,9 +377,9 @@ class Battle(object):
                     # delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
                     # target_speed = 340
                     # # target_height = 0
-                    # p2p = False # 只能用PID来按回
+                    # e2e = False # 只能用PID来按回
 
-                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, p2p=p2p, rudder=rudder)
+                UAV.move(target_height, delta_heading, target_speed, relevant_height=True, e2e=e2e, rudder=rudder)
                 # 上一步动作
                 # UAV.action_memory = np.array([action[0],action[1],action[2]])
 

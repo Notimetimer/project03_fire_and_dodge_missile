@@ -3,7 +3,7 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from TrainAndTests.Escapes.PPOEscape__Train_p2p import *
+from TrainAndTests.Escapes.PPOEscape__Train_e2e import *
 
 import re
 
@@ -74,11 +74,11 @@ def creat_initial_state():
     blue_E = 0
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                'psi': red_psi,
-                               'p2p': False
+                               'e2e': False
                                }
     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                 'psi': blue_psi,
-                                'p2p': True
+                                'e2e': True
                                 }
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE, line_number
 
@@ -158,7 +158,7 @@ try:
                 # print()
 
             if not battle_control_on_line:
-                env.BLUE_BIRTH_STATE['p2p']=False
+                env.BLUE_BIRTH_STATE['e2e']=False
                 L_ = env.RUAV.pos_ - env.BUAV.pos_
                 q_beta = atan2(L_[2], L_[0])
                 L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
@@ -172,7 +172,7 @@ try:
                 # print("prepare")
                 # print(env.t)
             else:
-                env.BLUE_BIRTH_STATE['p2p']=True
+                env.BLUE_BIRTH_STATE['e2e']=True
                 # print("escape")
                 # print(env.t)
                 # 每10个回合测试一次，测试回合不统计步数，不采集经验，不更新智能体，训练回合不回报胜负

@@ -3,7 +3,7 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 
-from TrainAndTests.Attacks.PPOAttack__TrainP2P import *
+from TrainAndTests.Attacks.PPOAttack__Traine2e import *
 import re
 import glob
 
@@ -49,11 +49,11 @@ try:
 
         DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                 'psi': red_psi,
-                                'p2p': False
+                                'e2e': False
                                 }
         DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([0.0, blue_height, 0.0]),
                                     'psi': pi,
-                                    'p2p': True
+                                    'e2e': True
                                     }
         env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                 red_init_ammo=0, blue_init_ammo=0)

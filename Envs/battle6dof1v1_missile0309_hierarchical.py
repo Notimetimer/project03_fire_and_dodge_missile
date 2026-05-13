@@ -69,7 +69,7 @@ def sigmoid(x):
 class Battle(object):
     def __init__(self, args, tacview_show=0):
         # super(Battle, self).__init__() 
-        # self.p2p_control = False
+        # self.e2e_control = False
         self.horizontal_center = horizontal_center
         # 加载训练好的模型
         import torch
@@ -143,11 +143,11 @@ class Battle(object):
 
         self.RED_BIRTH_STATE = {'position': np.array([-R_birth * cos(0), 8000.0, -R_birth * sin(0)]),
                                         'psi': 0,
-                                        'p2p': False
+                                        'e2e': False
                                         }
         self.BLUE_BIRTH_STATE = {'position': np.array([-R_birth * cos(pi), 8000.0, -R_birth * sin(pi)]),
                                          'psi': pi,
-                                         'p2p': False
+                                         'e2e': False
                                          }
         self.tacview_show = tacview_show
         if tacview_show:
@@ -323,28 +323,28 @@ class Battle(object):
             target_height = action[0]
             target_speed = action[2]
 
-            p2p = False
+            e2e = False
             if UAV.blue:
-                p2p = self.BLUE_BIRTH_STATE.get('p2p', False)
+                e2e = self.BLUE_BIRTH_STATE.get('e2e', False)
             if UAV.red:
-                p2p = self.RED_BIRTH_STATE.get('p2p', False)
+                e2e = self.RED_BIRTH_STATE.get('e2e', False)
 
             # 防撞地系统
             if self.shielded:
                 # 临近撞地强制拉起
                 if UAV.alt < self.min_alt_safe + 1e3:
                     target_height = max(self.min_alt_safe + 1e3 - UAV.alt, target_height)
-                    p2p = False
+                    e2e = False
                     delta_heading = np.clip(delta_heading, -pi/3, pi/3)
 
                 # 不许超过限高
                 if UAV.alt > self.max_alt_safe:
                     target_height = min(self.max_alt_safe - UAV.alt, target_height)
-                    p2p = False
+                    e2e = False
 
                 # 速度过低强制加油门
                 if UAV.speed/340 < 0.5:
-                    if p2p:
+                    if e2e:
                         UAV.target_speed = 1
                     else:
                         target_speed = max(340, target_speed)
@@ -386,28 +386,6 @@ class Battle(object):
                 delta_heading = action[1]
                 target_height = action[0]  # 3000 + (action[0] + 1) / 2 * (10000 - 3000)  # 高度使用绝对数值
                 target_speed = action[2]  # 170 + (action[2] + 1) / 2 * (544 - 170)  # 速度使用绝对数值
-
-                # # 动作平滑，用一阶惯性环节
-                # target_height_changing_limit = 5000/(pi/2) * pi / 180 * 60 if UAV.alt>self.min_alt_safe else np.inf # 每秒限制改变俯仰角度数
-                # target_psi_changing_limit = pi / 180 * 90 # 每秒限制航向误差改变度数
-                # target_speed_changing_limit = np.inf
-                # action[0] = np.clip(action[0], 
-                #     UAV.action_memory[0]-target_height_changing_limit*self.dt_move,
-                #     UAV.action_memory[0]+target_height_changing_limit*self.dt_move,
-                #     )
-                # action[1] = np.clip(action[1], 
-                #     UAV.action_memory[1]-target_psi_changing_limit*self.dt_move,
-                #     UAV.action_memory[1]+target_psi_changing_limit*self.dt_move,
-                #     )
-                # action[2] = np.clip(action[2], 
-                #     UAV.action_memory[2]-target_speed_changing_limit*self.dt_move,
-                #     UAV.action_memory[2]+target_speed_changing_limit*self.dt_move,
-                #     )
-                # UAV.action_memory = np.array([
-                #     action[0],
-                #     action[1],
-                #     action[2],
-                # ])
 
                 # 计算当前子步下，实际机头指向与固定目标点之间的动态差角
                 dynamic_delta_psi = sub_of_radian(UAV.target_heading, UAV.psi)
@@ -469,9 +447,8 @@ class Battle(object):
                 control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                 aileron, elevator, rudder, throttle = control_action['cont']
 
-                UAV.move(elevator, aileron, throttle, relevant_height=True, p2p=True, rudder=rudder, dt=self.dt_move)
-                # 上一步动作
-                # UAV.action_memory = np.array([action[0],action[1],action[2]])
+                UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=self.dt_move)
+                
 
             # 导弹移动
             self.update_missile_state() # 先把存活的导弹找出来
@@ -715,13 +692,14 @@ class Battle(object):
                     if 1:
                         threat_distance = min(threat_distance, missile.distance)
                 else:
-                    if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
-                        # 进入告警距离前用敌机方位作为导弹告警方位
-                        warning = 1 # 敌机为导弹提供中制导也会触发我机告警信号
-                        # 如果没有受到导弹的直接锁定，才报告敌机的方位
-                        if direct_threat == 0:
-                            threat_delta_psi = delta_psi
-                            threat_delta_theta = delta_theta + ego.theta
+                    pass
+                    # if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
+                    #     # 进入告警距离前用敌机方位作为导弹告警方位
+                    #     warning = 1 # 敌机为导弹提供中制导也会触发我机告警信号
+                    #     # 如果没有受到导弹的直接锁定，才报告敌机的方位
+                    #     if direct_threat == 0:
+                    #         threat_delta_psi = delta_psi
+                    #         threat_delta_theta = delta_theta + ego.theta
 
 
         p = ego.p

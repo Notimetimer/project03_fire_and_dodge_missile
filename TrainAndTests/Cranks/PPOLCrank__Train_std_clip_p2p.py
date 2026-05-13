@@ -8,7 +8,7 @@ import sys
 import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
-from Envs.Tasks.CrankManeuverEnv_p2p import *
+from Envs.Tasks.CrankManeuverEnv_e2e import *
 # from Envs.battle6dof1v1_missile0919 import *
 #   battle3dof1v1_proportion battle3dof1v1_missile0812 battle3dof1v1_missile0901
 from math import pi
@@ -73,7 +73,7 @@ epochs = 10  # 10
 eps = 0.2
 pre_train_rate = 0  # 0.25 # 0.25
 k_entropy = 0.01 # 熵系数
-mission_name = 'LCrank_with_std_clipping_p2p'
+mission_name = 'LCrank_with_std_clipping_e2e'
 
 env = CrankTrainEnv(args, tacview_show=use_tacview)
 # env = Battle(args, tacview_show=use_tacview)
@@ -201,10 +201,10 @@ if __name__=="__main__":
 
             DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
                                     'psi': red_psi,
-                                    'p2p': False}
+                                    'e2e': False}
             DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
                                         'psi': blue_psi,
-                                        'p2p': True}
+                                        'e2e': True}
             
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=0, blue_init_ammo=0) # 1
