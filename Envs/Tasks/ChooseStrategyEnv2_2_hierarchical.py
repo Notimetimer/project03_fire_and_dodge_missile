@@ -222,14 +222,14 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 角度奖励
         # 进攻引导
-        if len(alive_enm_missiles) == 0 and threat_distance > 30e3: # and not warning
+        if len(alive_enm_missiles) == 0 and not warning:
             # 瞄准奖励
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
             # 爬高奖励
             r_constraint += 0.5 * (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead)
             r_constraint += 0.5 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
 
-        if len(alive_ally_missiles) > 0 and threat_distance > 30e3: # and not warning
+        if len(alive_ally_missiles) > 0 and not warning:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
             r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
             r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
@@ -240,7 +240,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
         # # 防御引导
-        if warning and threat_distance < 30e3:
+        if warning and threat_distance <= 30e3:
             # 受到威胁应该置尾和下高
             if abs(delta_psi_threat) < pi/2:
                 r_constraint += min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
