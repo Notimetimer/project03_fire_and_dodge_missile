@@ -14,7 +14,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from controller.Controller_function import *
 # from Envs.MissileModel1 import *  # test
 
-from Controller.F16PIDController2 import *
+from Controller.F16PIDController2_1 import *
+# from Controller.F16PIDController_baseline import * # 调参没调好，不能用
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
@@ -64,9 +65,9 @@ class UAVModel(object):
         self.psi = None  # 航向角
         self.theta = None  # 俯仰角
         self.gamma = None  # 滚转角
-        self.nx = None
-        self.ny = None
-        self.nz = None
+        self.Nx = None
+        self.Ny = None
+        self.Nz = None
         # 无人机飞行约束
         self.speed_max = 2 * 340
         self.speed_min = 120
@@ -102,8 +103,8 @@ class UAVModel(object):
         self.chaff_release_count = 0
 
         # 过载量控制
-        self.nx_limit = [-1, 1.5]
-        self.ny_limit = [-1.5, 6]
+        self.Nx_limit = [-1, 1.5]
+        self.Ny_limit = [-1.5, 6]
         self.gamma_max = 170 * pi / 180
 
         # 无人机对抗相关
@@ -245,7 +246,7 @@ class UAVModel(object):
     #         cd = 0.2
     #     return cd / 10
 
-    def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, p2p=True, rudder=None, dt=None):
+    def move(self, target_height, delta_heading, target_speed, relevant_height=True, relevant_speed=False, with_theta_req=False, e2e=True, rudder=None, dt=None):
         if dt is not None:
             self.dt = dt
             self.sim.set_dt(self.dt)
@@ -320,7 +321,7 @@ class UAVModel(object):
         # # norm_act, self.rnn_states, self.hist_act = F16control(obs_jsbsim, self.rnn_states, self.hist_act)
         # # print(self.side, norm_act)
 
-        # if p2p==False: # 通过控制器间接控制
+        # if e2e==False: # 通过控制器间接控制
         #     if with_theta_req == False:
         #         norm_act = self.PIDController.flight_output(obs_jsbsim, dt=self.dt)  # # 测试飞行控制器
         #     else:
@@ -513,7 +514,7 @@ class UAVModel(object):
         # 如果分母有效，继续计算
         angle = np.arccos(np.dot(L_ego_m_, self.vel_) / (dist * norm(self.vel_)))
 
-        if angle * 180 / pi < 90: # and dist <= 50e3:  # 假设飞机雷达和导弹的通信距离在50km
+        if np.radians(angle) < 65: # and dist <= 50e3:  # 假设飞机雷达和导弹的通信距离在50km
             target_uav = None
             # 根据导弹目标id查找目标
             for uav in UAVs:

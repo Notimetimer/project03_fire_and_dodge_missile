@@ -27,7 +27,7 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
 from Envs.battle6dof1v1_missile0309_hierarchical import *
-
+from Math_calculates.coord_rotations import RodRot
 
 # 通过继承构建观测空间、奖励函数和终止条件
 # 通过类的组合获取各子策略的观测量裁剪
@@ -268,12 +268,6 @@ class ChooseStrategyEnv(Battle):
         if action_v == 4: # 急速下降
             theta_desired = -pi/2
         
-        # 不能出安全高度范围
-        delta_height_cmd = np.clip(theta_desired/pi*2*5000, 
-                                   self.min_alt_safe-UAV.alt, 
-                                   self.max_alt_safe-UAV.alt)
-
-
         # 水平方向指令：
         # 追踪
         if action_h == 0:
@@ -304,6 +298,31 @@ class ChooseStrategyEnv(Battle):
             dist2center = norm(line2center)
             delta_psi_cmd = sub_of_radian(psi2center, UAV.psi) * dist2center/self.R_cage
 
+        
+        # 处理指令，让crank的时候依然能够保持锁定
+        target_delta_point_ = np.array([
+            cos(theta + delta_theta) * cos(delta_psi),
+            sin(theta + delta_theta),
+            cos(theta + delta_theta) * sin(delta_psi)
+        ])
+        desired_point_ = np.array([
+            cos(theta_desired) * cos(delta_psi_cmd),
+            sin(theta_desired),
+            cos(theta_desired) * sin(delta_psi_cmd)
+        ])
+        
+        ATA_estimated = np.arccos(np.dot(desired_point_, target_delta_point_)*0.999)
+        if ATA_estimated > pi/3:
+            axis_ = np.cross(target_delta_point_, desired_point_)
+            axis_ = axis_ / (norm(axis_) + 1e-6)
+            target_delta_point_ = RodRot(target_delta_point_, axis_, pi/3)
+            
+            if action_h in[1,5]:
+                theta_desired = np.arcsin(target_delta_point_[1])
+                delta_psi_cmd = np.arctan2(target_delta_point_[2], target_delta_point_[0])
+
+        
+        
         # # 水平跟踪
         # if action == 0:
         #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)
@@ -402,6 +421,12 @@ class ChooseStrategyEnv(Battle):
         #     delta_psi_cmd = np.clip(sub_of_radian(delta_psi_temp, pi), -pi/2, pi/2)
         #     delta_height_cmd = -5000/3*2
         #     speed_cmd = 340
+        
+        # 不能出安全高度范围
+        delta_height_cmd = np.clip(theta_desired/pi*2*5000, 
+                                   self.min_alt_safe-UAV.alt, 
+                                   self.max_alt_safe-UAV.alt)
+        
         return np.array([delta_height_cmd, delta_psi_cmd, speed_cmd])
 
     # 重写近距杀方法（加了print）

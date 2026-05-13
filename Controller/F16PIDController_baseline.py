@@ -109,9 +109,9 @@ class F16PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=0.7, i=0.001, d=0.2)  # 0.65, 0.001, 0.16
-        self.r_pid = PositionPID(max=1, min=-1, p=2.4, i=0, d=2.0) # 1.5
-        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.5) # d=0.2
+        self.e_pid = PositionPID(max=1, min=-1, p=0.9, i=0.001, d=0.8)  # p=0.7, i=0.001, d=0.2
+        self.r_pid = PositionPID(max=1, min=-1, p=2.0, i=0, d=2.0) # p=2.4, i=0, d=2.0
+        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.5)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -218,8 +218,19 @@ class F16PIDController:
             np.cos(theta_req)*np.cos(delta_heading_req),
             np.sin(theta_req),
             np.cos(theta_req)*np.sin(delta_heading_req)
-        ])
+            ])
         L_ /= (norm(L_)+1e-8)
+        v_ = 1 * np.array([
+            np.cos(climb_rad) * np.cos(delta_course_rad), 
+            np.sin(climb_rad),
+            np.cos(climb_rad) * np.sin(delta_course_rad)
+            ])
+        x_b_ = 1 * np.array([
+            np.cos(theta) * np.cos(0), 
+            np.sin(theta), 
+            np.cos(theta) * np.sin(0)
+            ])
+        
         # =========================
         # maneuver normal direction
         # projection onto normal plane
@@ -264,8 +275,22 @@ class F16PIDController:
         roll_error = atan2(np.dot(N_hat2_, z_b_), np.dot(N_hat2_, y_b_))
         
         aileron = r_pid.calculate(roll_error, dt, d_error=-p)
-        aileron=np.clip(aileron,-1,1)
-
+        
+        
+        # 平稳飞行
+        steady_switch_angle = 5
+        if acos(np.dot(L_, v_) / (norm(L_)*norm(v_)+1e-8)) < np.radians(steady_switch_angle) and \
+                abs(theta_req) < 60 * pi / 180:
+            k_steady_yaw = 3 / steady_switch_angle
+            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3) #   /2 #debug
+            roll_error = phi_req - phi
+            aileron = (roll_error / pi * 3 - p / pi * 4) / 2
+            
+            # pitch_error = theta_req - theta
+            # elevator = -e_pid.calculate(ny_error, dt, d_error=-0.7*q)
+            
+        aileron = np.clip(aileron,-1,1)
+        elevator = np.clip(elevator,-1,1)
         norm_act = np.array([aileron, elevator, rudder, throttle])
         return norm_act
 
@@ -358,22 +383,22 @@ if __name__ == '__main__':
 
         # target_heading = np.random.rand()*10
 
-        # 舞狮
-        if current_t < 15:
-            target_height = 5000  # m
-            target_heading = 90  # 度 to rad
-            target_speed = 300
-        elif current_t < 1 * 60:
-            target_height = 10000  # m
-            target_heading = -120  # 度 to rad
-        elif current_t < 1 * 60 + 27:
-            target_height = 7000  # m
-            target_heading = 0  # 度 to rad
-        elif current_t < 2 * 60 + 10:
-            target_height = 8000  # m
-            target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
-        else:
-            target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
+        # # 舞狮
+        # if current_t < 15:
+        #     target_height = 5000  # m
+        #     target_heading = 90  # 度 to rad
+        #     target_speed = 300
+        # elif current_t < 1 * 60:
+        #     target_height = 10000  # m
+        #     target_heading = -120  # 度 to rad
+        # elif current_t < 1 * 60 + 27:
+        #     target_height = 7000  # m
+        #     target_heading = 0  # 度 to rad
+        # elif current_t < 2 * 60 + 10:
+        #     target_height = 8000  # m
+        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], 60)  # 度 to rad
+        # else:
+        #     target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
 
         sim.run()
         current_time = step * dt

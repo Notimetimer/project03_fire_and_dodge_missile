@@ -127,17 +127,17 @@ class missile_class:
 
         # 最高和最低高度
         self.maxH_m = 25000
-        self.minH_m = 500
+        self.minH_m = 100 # 500
         # 重量参数和燃烧时间参数
-        self.empty_weight = 96.82  # kg
-        self.stage1_weight = 20.28  # kg
-        self.stage2_weight = 44.9  # kg
-        self.stage1_time = 2.3  # 2.3 s
-        self.stage2_time = 10.5 # 10.5 11  # s
-        self.stage1_burn_rate = self.stage1_weight / self.stage1_time  # 一级燃烧率kg/s
-        self.stage2_burn_rate = self.stage2_weight / self.stage2_time  # 二级燃烧率kg/s
-        self.stage1_thrust = 20393  # N
-        self.stage2_thrust = 9360.5  # N
+        self.empty_weight = 157-51.01 # 96.82  # kg
+        self.stage1_weight = 51.01 # 20.28  # kg
+        self.stage2_weight = 1e-8 # 44.9  # kg
+        self.stage1_time = 8 # 7.75  # 2.3 s
+        self.stage2_time = 1e-8 # 10.5 # 10.5 11  # s
+        # self.stage1_burn_rate = self.stage1_weight / self.stage1_time  # 一级燃烧率kg/s
+        # self.stage2_burn_rate = self.stage2_weight / self.stage2_time  # 二级燃烧率kg/s
+        self.stage1_thrust = 16771.9 # 20393  # N
+        self.stage2_thrust = 0 # 9360.5  # N
         self.stage1_start = 0.5  # s
         self.stage2_start = self.stage1_start + self.stage1_time  # s
         self.stage2_end = self.stage1_start + self.stage1_time + self.stage2_time  # s
@@ -149,16 +149,16 @@ class missile_class:
         # 最大马赫数
         self.max_mach = 4.0
         # 特征面积
-        self.area = 0.46 # 425 435 0.405  # m2
+        self.area = 0.4 # 425 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
-        self.speed_min = 0.65 * 340  # m/s
+        self.speed_min = 1.2 * 340  # m/s
         # 最大视角
-        self.sight_angle_max = pi / 2  # rad
+        self.sight_angle_max = np.radians(40) # 极限离轴可能接近40度，也有用53度的，稳定跟踪区在正负25度以内
         # 最大跟踪视角速度
         self.sight_angle_rate_max = 0.7  # rad/s
         # 截获距离
-        self.detect_range = 21e3  # 23e3 25e3 20e3  # m todo 计算截获距离
+        self.detect_range = 14e3  # 23e3 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
@@ -279,7 +279,7 @@ class missile_class:
                 vtt_predict = self.vt0_
                 ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
             else:
-                vtt_predict = self.last_target_v  * 0.5 #  0.8
+                vtt_predict = self.last_target_v  # * 0.5 #  0.8
                 ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
 
             if norm(ptt_predict-p_missile_) < self.detect_range:
@@ -327,7 +327,7 @@ class missile_class:
         # 初制导阶段根据距离判断是否需要靠导弹来高抛
         if self.t < self.stage2_end:
             if distance > 50e3:
-                nyt1 += (pi/3-self.theta) * 5 # 2
+                nyt1 += (pi/6-self.theta) * 4 # 2
 
         # 时间过半以后如果目标低于当前飞行高度，不能还在爬升
         delta_height = self.delta_height
