@@ -121,11 +121,9 @@ if __name__ == '__main__':
 
     # 计算距离
     d_hor, left_or_right = calc_intern_dist2circle(R,pos_,psi)
-    d, dh, left_or_right = calc_intern_dist2cylinder(R, pos_, psi, theta)
     
     # 可视化
-    print(f"水平距离: {dh:.2f}")
-    print(f"斜距离: {d:.2f}")
+    print(f"水平距离: {d_hor:.2f}")
     print(left_or_right)
     
     # 绘制图形
@@ -141,8 +139,8 @@ if __name__ == '__main__':
     plt.plot([0, pos_[2]], [0, pos_[0]], 'g-', label='圆心到飞机')
     
     # 计算速度向量终点
-    vx = pos_[0] + dh * cos(psi)
-    vz = pos_[2] + dh * sin(psi)
+    vx = pos_[0] + d_hor * cos(psi)
+    vz = pos_[2] + d_hor * sin(psi)
     
     # 绘制飞机位置到速度向量终点的线段
     plt.plot([pos_[2], vz], [pos_[0], vx], 'r-', label='速度向量')
