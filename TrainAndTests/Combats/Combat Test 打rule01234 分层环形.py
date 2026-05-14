@@ -154,7 +154,7 @@ if __name__ == "__main__":
                         # 超控标准差，检查熵
                         actor_wrapper.net.log_std_shared.fill_(np.log(0.2)) # 0.8
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'lin':1, 'circ':1, 'bern':1}, check_obs=None, bern_threshold=0.4
+                            r_obs, explore={'lin':0, 'circ':0, 'bern':1}, check_obs=None, bern_threshold=0.4
                             ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
