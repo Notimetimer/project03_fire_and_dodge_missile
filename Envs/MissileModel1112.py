@@ -152,7 +152,7 @@ class missile_class:
         self.area = 0.4 # 425 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
-        self.speed_min = 1.2 * 340  # m/s
+        self.speed_min = 0.9 * 340  # m/s
         # 最大视角
         self.sight_angle_max = np.radians(40) # 极限离轴可能接近40度，也有用53度的，稳定跟踪区在正负25度以内
         # 最大跟踪视角速度
@@ -327,7 +327,7 @@ class missile_class:
         # 初制导阶段根据距离判断是否需要靠导弹来高抛
         if self.t < self.stage2_end:
             if distance > 50e3:
-                nyt1 += (pi/6-self.theta) * 4 # 2
+                nyt1 += max(0, (pi/6-self.theta)) * 4 # 2
 
         # 时间过半以后如果目标低于当前飞行高度，不能还在爬升
         delta_height = self.delta_height

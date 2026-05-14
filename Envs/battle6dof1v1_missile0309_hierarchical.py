@@ -395,7 +395,7 @@ class Battle(object):
                 rudder = None
 
                 # 出界就炸
-                if self.out_range(UAV):
+                if self.out_cage(UAV):
                     UAV.dead = 1
 
                 e2e=0
@@ -547,7 +547,7 @@ class Battle(object):
         # terminate = self.get_terminate()
 
         for UAV in self.UAVs:
-            if UAV.got_hit or self.crash(UAV):  # or self.out_range(UAV): ###
+            if UAV.got_hit or self.crash(UAV):  # or self.out_cage(UAV): ###
                 UAV.dead = True
                 # self.running = False
 
@@ -1064,7 +1064,7 @@ class Battle(object):
         else:
             return False
 
-    def out_range(self, UAV):
+    def out_cage(self, UAV):
         position = UAV.pos_
         pos_h = np.array([position[0], position[2]])
         R_uav = norm(pos_h - self.horizontal_center)
@@ -1128,7 +1128,7 @@ class Battle(object):
                         data_to_send += (
                             f"{UAV.id+1000},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f}|"
                             f"0|{q_epsilon * 180 / pi:.6f}|{q_beta * 180 / pi:.6f},"
-                            f"Type=Beam, Color={color},Visible=0.7,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=5, RadarVerticalBeamwidth=5\n"
+                            f"Type=Beam, Color={color},Visible=0.7,Radius=0.0,RadarMode=1,RadarRange={dist:.1f}, RadarHorizontalBeamwidth=3, RadarVerticalBeamwidth=3\n"
                         )
                     
 

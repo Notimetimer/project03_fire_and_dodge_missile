@@ -463,7 +463,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 blue_birth = settings['blue_birth']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
-                r_min, r_max = settings.get('R_cage_range', (63.0e3, 63.0e3))
+                r_min, r_max = settings.get('R_cage_range', (55.00e3, 55.00e3))
                 fire_mask = settings.get('fire_mask', 1)
                 env.R_cage = np.random.uniform(r_min, r_max)
                 
@@ -692,7 +692,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 63.0e3, # 45e3 # 55e3,
+    R_cage = 55.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
@@ -720,7 +720,7 @@ def run_MLP_simulation(
     device = torch.device("cpu"),
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
-    R_cage_range = (63.0e3, 63.0e3), # 新增：环境随机化范围
+    R_cage_range = (55.00e3, 55.00e3), # 新增：环境随机化范围
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     POMDP = 0, # 0全信息，1部分信息

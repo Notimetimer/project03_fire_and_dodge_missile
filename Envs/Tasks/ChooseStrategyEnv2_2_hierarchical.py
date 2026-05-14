@@ -199,7 +199,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 开火代价控制
         wasted = 0
-        now_dead = ego.dead or self.out_range(ego)
+        now_dead = ego.dead or self.out_cage(ego)
         if not getattr(ego, 'last_dead', False):
             if now_dead:
                 shoot = ego.ammo # 死亡瞬间，记录清仓惩罚
@@ -224,29 +224,29 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 角度奖励
         # 进攻引导
-        if len(alive_enm_missiles) == 0 and not warning:
+        if len(alive_ally_missiles) == 0 and not warning:
             # 瞄准奖励
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
             # 爬高奖励
             r_constraint += 0.5 * (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead)
             r_constraint += 0.5 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
-
+        # crank引导
         if len(alive_ally_missiles) > 0 and not warning:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
             r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
             r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
-
+        # 防御引导
+        if warning:
+            # 受到威胁应该三九线/置尾和下高
+            if abs(delta_psi_threat) < pi/2:
+                r_constraint += min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+        
         # 速度惩罚
         slow_mach = 0.7
         if ego.speed < slow_mach*340:
             r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
-        # # 防御引导
-        if warning and threat_distance <= 30e3:
-            # 受到威胁应该置尾和下高
-            if abs(delta_psi_threat) < pi/2:
-                r_constraint += min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            r_constraint += (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
         
         # 密集奖励只有在agent活着的时候有意义
         # r_constraint *= (1-ego.dead)
@@ -287,7 +287,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 r_event += 180 # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
             elif ego_lose:
                 r_event -= 180 # 125 + steps_left * total_shaping_sum # 旧 100 新 125
-                if self.out_range(ego) or ego.alt < self.min_alt:
+                if self.out_cage(ego) or ego.alt < self.min_alt:
                     r_event -= 50
             elif ego_draw:
                 # [修改] 不再使用常数-50奖励，而是根据平均态势分来结算

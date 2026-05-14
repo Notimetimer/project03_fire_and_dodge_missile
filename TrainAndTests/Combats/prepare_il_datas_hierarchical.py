@@ -11,19 +11,19 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=63.0e3,
+    parser.add_argument("--R-cage", type=float, default=55.00e3,
                         help="")
     args = parser.parse_args()
 
     env = ChooseStrategyEnv(args, tacview_show=1)
-    env.dt_move = 0.04 # 0.025 0.02
+    env.dt_move = 0.05 # 0.025 0.02
     env.shielded = shielded
 
     def creat_initial_state(randomized=0):
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-        blue_height = 9000
-        red_height = 9000
+        blue_height = np.random.uniform(5000, 11000)
+        red_height = blue_height
         red_psi = pi/2 + np.random.uniform(-1,1)*pi/3
         blue_psi = -pi/2 + np.random.uniform(-1,1)*pi/3
         init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
@@ -49,7 +49,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
         
         for _ in range(5):
             # 示范数据采集
-            for i_episode in range(3):
+            for i_episode in range(6):
 
                 last_r_action_label = 0
                 last_b_action_label = 0

@@ -215,7 +215,7 @@ class PolicyNetHybrid(torch.nn.Module):
             locked_cond = (locked >= 0.5)
             ammo_cond = (ammo > 0.0)
             # Use elementwise logical ops so this works on tensors
-            timd_cond = (t_since_launch >= 60) | ((dist < 30e3) & (t_since_launch >= 10))
+            timd_cond = (t_since_launch >= 40) | ((dist < 30e3) & (t_since_launch >= 10))
             dist_cond = (dist < 95e3)
             delta_theta_cond = (delta_theta > pi * (-30) / 180.0)
 

@@ -22,10 +22,10 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
     def creat_initial_state(randomized=0):
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-        blue_height = 9000
-        red_height = 9000
-        red_psi = -pi/2
-        blue_psi = pi/2
+        blue_height = np.random.uniform(5000, 11000)
+        red_height = blue_height
+        red_psi = pi/2 + np.random.uniform(-1,1)*pi/3
+        blue_psi = -pi/2 + np.random.uniform(-1,1)*pi/3
         init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
         red_N = init_North
         red_E = 55e3 # 45e3

@@ -650,7 +650,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 63.0e3, # 45e3 # 55e3,
+    R_cage = 55.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=2000, # 稍微调大一点，因为现在是批量进数据
     should_kick = True,
