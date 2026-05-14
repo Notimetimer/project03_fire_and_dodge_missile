@@ -65,6 +65,7 @@ if __name__ == "__main__":
 
     # --- 初始化环境 ---
     env = ChooseStrategyEnv(env_args)
+    env.dt_move = 0.025
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -176,9 +177,9 @@ if __name__ == "__main__":
                 
                 # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', tabu=0, action_label=None) # r_action_label)
+                    launch_missile_immediately(env, 'r', tabu=0, action_label=r_action_label) # r_action_label)
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', tabu=0, action_label=None) # b_action_label)
+                    launch_missile_immediately(env, 'b', tabu=0, action_label=b_action_label) # b_action_label)
                     
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
@@ -216,43 +217,43 @@ if __name__ == "__main__":
             # except Exception as e:
             #     print(f"Failed to save CSV: {e}")
 
-            # --- 绘制曲线 ---
-            plt.figure(figsize=(10, 10))
-            plt.subplot(4, 1, 1)
-            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
-            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
-            plt.ylabel('Ny (g)')
-            plt.title(f'Test vs Rule {rule_num}: Metrics')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
+            # # --- 绘制曲线 ---
+            # plt.figure(figsize=(10, 10))
+            # plt.subplot(4, 1, 1)
+            # plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
+            # plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
+            # plt.ylabel('Ny (g)')
+            # plt.title(f'Test vs Rule {rule_num}: Metrics')
+            # plt.legend()
+            # plt.grid(True, alpha=0.3)
 
-            plt.subplot(4, 1, 2)
-            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
-            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
-            plt.ylabel('Alpha (deg)')
-            plt.title('Angle of Attack (Alpha)')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
+            # plt.subplot(4, 1, 2)
+            # plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
+            # plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
+            # plt.ylabel('Alpha (deg)')
+            # plt.title('Angle of Attack (Alpha)')
+            # plt.legend()
+            # plt.grid(True, alpha=0.3)
 
-            plt.subplot(4, 1, 3)
-            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
-            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
-            plt.ylabel('Mach')
-            plt.title('Flight Mach Number')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
+            # plt.subplot(4, 1, 3)
+            # plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
+            # plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
+            # plt.ylabel('Mach')
+            # plt.title('Flight Mach Number')
+            # plt.legend()
+            # plt.grid(True, alpha=0.3)
 
-            plt.subplot(4, 1, 4)
-            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
-            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
-            plt.ylabel('Alt (m)')
-            plt.xlabel('Time (s)')
-            plt.title('Altitude (Height)')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
+            # plt.subplot(4, 1, 4)
+            # plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
+            # plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
+            # plt.ylabel('Alt (m)')
+            # plt.xlabel('Time (s)')
+            # plt.title('Altitude (Height)')
+            # plt.legend()
+            # plt.grid(True, alpha=0.3)
             
-            plt.tight_layout()
-            plt.show()
+            # plt.tight_layout()
+            # plt.show()
             
             # input("Press Enter to continue to the next test...")
 

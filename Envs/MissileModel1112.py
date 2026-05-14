@@ -156,7 +156,7 @@ class missile_class:
         # 最大视角
         self.sight_angle_max = np.radians(40) # 极限离轴可能接近40度，也有用53度的，稳定跟踪区在正负25度以内
         # 最大跟踪视角速度
-        self.sight_angle_rate_max = 0.7  # rad/s
+        self.sight_angle_rate_max = np.radians(40) # 0.7  # rad/s
         # 截获距离
         self.detect_range = 14e3  # 23e3 25e3 20e3  # m todo 计算截获距离
         self.distance = 100e3
@@ -279,8 +279,9 @@ class missile_class:
                 vtt_predict = self.vt0_
                 ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
             else:
-                vtt_predict = self.last_target_v  # * 0.5 #  0.8
+                vtt_predict = self.last_target_v * np.exp(-(self.t - self.last_target_t) / 15.0)  # * 0.5 #  0.8 # 预测速度带衰减
                 ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
+                ptt_predict[1] = max(ptt_predict[1], 1000) # 禁止往地底下线性递推
 
             if norm(ptt_predict-p_missile_) < self.detect_range:
                 self.radar_on = True
