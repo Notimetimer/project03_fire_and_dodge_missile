@@ -371,7 +371,7 @@ class Battle(object):
                             delta_heading = max(pi/2, delta_heading)
 
                 # 出界就炸
-                if self.out_range(UAV):
+                if self.out_cage(UAV):
                     UAV.dead = 1
                     # target_direction_ = horizontal_center - np.array(UAV.pos_[0], UAV.pos_[2])
                     # delta_heading = sub_of_radian(atan2(target_direction_[1], target_direction_[0]), UAV.psi)
@@ -474,7 +474,7 @@ class Battle(object):
         # terminate = self.get_terminate()
 
         for UAV in self.UAVs:
-            if UAV.got_hit or self.crash(UAV):  # or self.out_range(UAV): ###
+            if UAV.got_hit or self.crash(UAV):  # or self.out_cage(UAV): ###
                 UAV.dead = True
                 # self.running = False
 
@@ -963,7 +963,7 @@ class Battle(object):
         else:
             return False
 
-    def out_range(self, UAV):
+    def out_cage(self, UAV):
         horizontal_center = np.array([0, 0])
         position = UAV.pos_
         pos_h = np.array([position[0], position[2]])

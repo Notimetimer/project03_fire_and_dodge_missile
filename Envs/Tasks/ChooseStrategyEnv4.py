@@ -419,7 +419,7 @@ class ChooseStrategyEnv(Battle):
         # 如果死了，就把剩余导弹损耗的惩罚一并加上，禁止自杀套利
         
         # [修改] 引入 last_dead 判定，确保死亡惩罚只扣一次
-        now_dead = ego.dead or self.out_range(ego)
+        now_dead = ego.dead or self.out_cage(ego)
         if now_dead and not getattr(ego, 'last_dead', False):
             shoot = ego.ammo
             wasted = ego.ammo
@@ -434,7 +434,7 @@ class ChooseStrategyEnv(Battle):
             reward_main += ego.ammo * 10  # 每一发剩余导弹多给分 20
         if self.lose:
             reward_main -= 300
-            if self.out_range(ego) or ego.alt < self.min_alt:
+            if self.out_cage(ego) or ego.alt < self.min_alt:
                 reward_main -= 50  # 【新增】，如果不是被击落而是撞地/出界，惩罚更重
         if self.draw:
             reward_main -= 150 # 200
@@ -544,10 +544,10 @@ class ChooseStrategyEnv(Battle):
 
         if done:
             print('回合结束')
-            if self.out_range(ego):
+            if self.out_cage(ego):
                 print('出界')
             
-        # if self.out_range(ego) or self.out_range(enm):
+        # if self.out_cage(ego) or self.out_cage(enm):
         #     print()
 
         return done, reward_main+reward_assisted, reward_assisted

@@ -130,7 +130,7 @@ if __name__ == "__main__":
     critic_lr = scale_learning_rate(critic_lr, agent.critic)
     agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
-    out_range_count = 0
+    out_cage_count = 0
     return_list = []
     win_list = []
     total_steps = 0
@@ -228,7 +228,7 @@ if __name__ == "__main__":
                 env.render(t_bias=t_bias)
 
             if env.lose == 1:
-                out_range_count += 1
+                out_cage_count += 1
             return_list.append(episode_return)
             win_list.append(1 - env.lose)
             

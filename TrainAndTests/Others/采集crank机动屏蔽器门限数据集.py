@@ -94,7 +94,7 @@ if __name__=="__main__":
     
     transition_dict_threshold = env.args.max_episode_len//env.dt_maneuver + 1
 
-    out_range_count = 0
+    out_cage_count = 0
     return_list = []
     win_list = []
     steps_count = 0

@@ -379,7 +379,7 @@ class ChooseStrategyEnv(Battle):
                 #         # self.running = False
                 #         adv.got_hit = True
                 # 出界判别
-                if self.out_range(UAV):
+                if self.out_cage(UAV):
                     UAV.dead = True
                     # self.running = False
 
@@ -387,7 +387,7 @@ class ChooseStrategyEnv(Battle):
         # terminate = self.get_terminate()
 
         for UAV in self.UAVs:
-            if UAV.got_hit or UAV.crash or self.out_range(UAV):
+            if UAV.got_hit or UAV.crash or self.out_cage(UAV):
                 UAV.dead = True
                 # self.running = False
 

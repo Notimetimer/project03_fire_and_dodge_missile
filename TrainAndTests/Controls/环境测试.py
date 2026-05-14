@@ -521,7 +521,7 @@ if __name__=='__main__':
 
     from Visualize.tensorboard_visualize import TensorBoardLogger
 
-    out_range_count = 0
+    out_cage_count = 0
     return_list = []
     steps_count = 0
 
@@ -616,7 +616,7 @@ if __name__=='__main__':
             t_bias += env.t
 
             if env.fail==1:
-                out_range_count+=1
+                out_cage_count+=1
            
 
     except KeyboardInterrupt:

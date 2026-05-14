@@ -207,7 +207,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 开火代价控制
         shoot = action_shoot
         wasted = 0
-        now_dead = ego.dead or self.out_range(ego)
+        now_dead = ego.dead or self.out_cage(ego)
         if now_dead and not getattr(ego, 'last_dead', False):
             shoot = ego.ammo
             wasted = ego.ammo
@@ -317,7 +317,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 r_event += 150 # 100 + steps_left * total_shaping_sum
             elif self.lose:
                 r_event -= 150 # 100 + steps_left * total_shaping_sum
-                if self.out_range(ego) or ego.alt < self.min_alt:
+                if self.out_cage(ego) or ego.alt < self.min_alt:
                     r_event -= 50
             elif self.draw:
                 r_event -= 50

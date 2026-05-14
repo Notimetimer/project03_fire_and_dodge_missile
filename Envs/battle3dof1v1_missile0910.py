@@ -78,7 +78,7 @@ birthpointb = np.array([max_north - 2e3, (min_height + max_height) / 2, (min_eas
 # random_array = np.clip(np.random.randn(3),-1,1)
 # "笼子"的范围：x、y方向+-各5000m, z方向0~1000m
 
-def out_range(UAV):
+def out_cage(UAV):
     position = UAV.pos_
     pos_h = np.array([position[0], position[2]])
     R_uav = norm(pos_h - horizontal_center)
@@ -323,7 +323,7 @@ class Battle(object):
                 #         # self.running = False
                 #         adv.got_hit = True
                 # 出界判别
-                if out_range(UAV):
+                if out_cage(UAV):
                     UAV.dead = True
                     # self.running = False
 
@@ -331,7 +331,7 @@ class Battle(object):
         terminate = self.get_terminate()
 
         for UAV in self.UAVs:
-            if UAV.got_hit or UAV.crash or out_range(UAV):
+            if UAV.got_hit or UAV.crash or out_cage(UAV):
                 UAV.dead = True
                 # self.running = False
 
@@ -490,13 +490,13 @@ class Battle(object):
             # t_last_max = 60
             # t_last = np.ones(6)
             # # 出界惩罚
-            # if out_range(UAV):
+            # if out_cage(UAV):
             #     rewards[i] -= 100
             # # 超出限高惩罚
             # if UAV.pos_[1] >= max_height:
             #     rewards[i] -= 80
             # # 对手出界
-            # if out_range(adv):
+            # if out_cage(adv):
             #     rewards[i] += 10
             # # 被命中(不管是导弹还是"扫描枪")
             # if UAV.got_hit:

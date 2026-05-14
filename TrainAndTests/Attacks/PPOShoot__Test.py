@@ -135,7 +135,7 @@ if __name__ == "__main__":
         agent.actor.load_state_dict(sd)  # , strict=False)  # 忽略缺失的键
         print(f"Loaded actor for test from: {latest_actor_path}")
 
-    out_range_count = 0
+    out_cage_count = 0
     return_list = []
     win_list = []
     # steps_count = 0
