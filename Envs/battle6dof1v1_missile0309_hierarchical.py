@@ -517,7 +517,7 @@ class Battle(object):
                         target.got_hit = True
                         self.UAV_hit[self.UAV_ids.index(target.id)] = True
 
-                if missile.dead == True and not hit:
+                if missile.dead == True and not target.dead:
                     target.escape_once = 1
                     # 目标逃脱
                 # else:
