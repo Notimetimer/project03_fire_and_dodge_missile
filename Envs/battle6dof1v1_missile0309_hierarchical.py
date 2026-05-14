@@ -134,6 +134,7 @@ class Battle(object):
         self.min_alt = 100 # 0.5e3  # 1e3
         self.R_cage0 = getattr(self.args, 'R_cage', R_cage) if hasattr(self.args, 'R_cage') else R_cage
         self.R_cage = self.R_cage0
+        self.half_R_cage = self.R_cage / 2
         self.RWR_distance = 60e3 # 最大告警距离
         self.RWR_ranging_distance = self.RWR_distance # 最大告警可测距
 
@@ -297,7 +298,7 @@ class Battle(object):
         # # 变步长
         # alive_missiles = [m for m in self.missiles if not m.dead]
         # if not alive_missiles:
-        #     self.dt_move = 0.05
+        #     self.dt_move = 0.04 # 再高就有撞地风险了
         # else:
         #     self.dt_move = 0.04
         #     for m in alive_missiles:
@@ -1248,9 +1249,14 @@ class Battle(object):
         #                 )
         # 雷达画法
         data_to_send = (
-            f"10000,T={o00[0]}|{o00[1]}|{1000}"
-            f",Type=Beam,ShortName=Cage,Color=White,Visible=1,Radius=0.0,RadarMode=1"
+            # 外圈（纯白）
+            f"10000,T={o00[0]}|{o00[1]}|{300}"
+            f",Type=Beam,ShortName=Cage,Color=#FFFFFF,Visible=1,Radius=0.0,RadarMode=1"
             f",RadarRange={self.R_cage},RadarHorizontalBeamwidth=360,RadarVerticalBeamwidth=0\n"
+            # # 内圈（浅灰，颜色更深/更暗）
+            # f"10001,T={o00[0]}|{o00[1]}|{300}"
+            # f",Type=Beam,ShortName=Cage,Color=#AAAAAA,Visible=1,Radius=0.0,RadarMode=1"
+            # f",RadarRange={self.half_R_cage},RadarHorizontalBeamwidth=360,RadarVerticalBeamwidth=0\n"
         )
 
         self.tacview.send_data_to_client(data_to_send)
@@ -1336,7 +1342,7 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
         delta_target_height = action_array[0]
 
         desired_theta = (min(delta_target_height, env.max_alt_safe-uav.alt) / 5000.0) * (pi / 2) # 不能再爬升了，就得降低期望俯仰角
-        if desired_theta - uav.theta > (15 * pi / 180):
+        if (desired_theta - uav.theta > (15 * pi / 180)) and uav.alt < 7000: # 7000m以上很难再维持大爬升角，高抛延迟开火仅对7000m以下生效
             return None
 
     ego_state = env.get_state(uav.side)

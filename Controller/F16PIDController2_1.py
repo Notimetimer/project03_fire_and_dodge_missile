@@ -131,6 +131,14 @@ class F16PIDController:
             kh = pi / 2 # + pi/8
 
         target_theta = error_h * kh
+        target_delta_heading = state_input[1]
+        
+        # 加扰动，防止破S机动掉太多高度
+        if current_height_devided * 5000 < 4000 and \
+            target_theta < -pi/3:
+                target_delta_heading = np.sign(target_delta_heading) * np.clip(norm(target_delta_heading), 0, pi-pi/6)
+                target_theta = max(-pi/3, target_theta)
+        
         # print('target_theta',target_theta*180/pi)
 
         temp = state_input
@@ -357,7 +365,7 @@ if __name__ == '__main__':
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 7e3  # m # 测试飞行控制器
+    target_height = 2e3  # m # 测试飞行控制器
     target_heading = 270  # 度 to rad
     target_speed = 340 * 1.13  # m/s
     t_last = 60 * 5

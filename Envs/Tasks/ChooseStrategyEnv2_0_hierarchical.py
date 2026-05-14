@@ -257,14 +257,14 @@ class ChooseStrategyEnv(Battle):
         speed_cmd = 340
 
         # 垂直方向指令
-        if action_v == 0: # 比目标高45°
-            theta_desired = np.clip(theta+delta_theta+np.radians(45), -pi/2, pi/2)
+        if action_v == 0: # 比目标高50°
+            theta_desired = np.clip(theta+delta_theta+np.radians(50), -pi/2, pi/2)
         if action_v == 1: # 比目标高20°
             theta_desired = np.clip(theta+delta_theta+np.radians(20), -pi/2, pi/2)
         if action_v == 2: # 纯追踪
-            theta_desired = np.clip(theta+delta_theta+np.radians(0.5), -pi/2, pi/2)
-        if action_v == 3: # 比目标低20°
-            theta_desired = np.clip(theta+delta_theta+np.radians(-20), -pi/2, pi/2)
+            theta_desired = np.clip(theta+delta_theta+np.radians(1), -pi/2, pi/2)
+        if action_v == 3: # 比目标低30°
+            theta_desired = np.clip(theta+delta_theta+np.radians(-30), -pi/2, pi/2)
         if action_v == 4: # 急速下降
             theta_desired = -pi/2
         
@@ -312,10 +312,10 @@ class ChooseStrategyEnv(Battle):
         ])
         
         ATA_estimated = np.arccos(np.dot(desired_point_, target_delta_point_)*0.999)
-        if ATA_estimated > pi/3:
+        if ATA_estimated > np.radians(59):
             axis_ = np.cross(target_delta_point_, desired_point_)
             axis_ = axis_ / (norm(axis_) + 1e-6)
-            target_delta_point_ = RodRot(target_delta_point_, axis_, pi/3)
+            target_delta_point_ = RodRot(target_delta_point_, axis_, np.radians(59))
             
             if action_h in[1,5]:
                 theta_desired = np.arcsin(target_delta_point_[1])
