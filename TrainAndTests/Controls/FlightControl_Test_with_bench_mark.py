@@ -35,8 +35,9 @@ pre_log_dir = os.path.join(project_root, "logs/control")
 mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
-"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
+"FlightControl_parallel目标会动_不超控std_动态lr"
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+"对比实验FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 
 if mission_name != "PID":
     log_dir = get_latest_log_dir(pre_log_dir, mission_name=mission_name)

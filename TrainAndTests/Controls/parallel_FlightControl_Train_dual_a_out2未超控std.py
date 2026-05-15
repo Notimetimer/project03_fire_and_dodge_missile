@@ -38,7 +38,7 @@ from Math_calculates.coord_rotations import *
 from Math_calculates.SimpleAeroDynamics import *
 from TrainAndTests.Controls.UPolicyWrapper import *
 
-from TrainAndTests.Controls.FlightControl_Train_dual_a_out import track_env
+from TrainAndTests.Controls.FlightControl_Train_dual_a_out2 import track_env
 
 import torch.multiprocessing as mp
 import random
@@ -46,9 +46,8 @@ import traceback
 import time
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, action_bound, \
-    device_worker, seed, dt_decide, dt_move=0.02, k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}):
+    device_worker, seed, dt_decide, dt_move, beta_ao, k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}):
     try:
-        beta_ao = 0.01 ** (dt_decide / 10.0)
         worker_seed = seed + rank * 1000
         random.seed(worker_seed)
         np.random.seed(worker_seed)
@@ -83,9 +82,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                                 'psi': np.random.uniform(-pi/6, pi/6)}
                 
                 # 使用传入的 warm_up 调整难度
-                height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 3000, 15000)
+                height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 1000, 15000)
                 psi_req = np.random.uniform(-pi, pi) # * warm_up
-                v_req = np.random.uniform(0.8, 2.5) * 340
+                v_req = np.random.uniform(0.5, 2.5) * 340  # 根本不可能跑到2.5Ma, 1.1 就封顶了，但是在训练的时候就要处理好这个数据.
 
                 env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
                 
@@ -97,8 +96,20 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 steps_run = 0
                 ao_ema_episode = 0.0
                 v_error_ema_episode = 0.0
+                psi_error_ema_episode = 0.0
+                theta_error_ema_episode = 0.0
                 
+
+
                 while not done:
+                    # 目标会跑
+                    height_req += np.random.randn() * 80 * dt_decide # 每秒动 80m
+                    env.height_req = np.clip(height_req, 1000, 13000)
+                    psi_req += np.random.randn() * 10 *pi/180 * dt_decide # 每秒动10°
+                    env.psi_req = sub_of_radian(psi_req)
+                    v_req += np.random.randn() * 3 * dt_decide # 速度目标也在动
+                    env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)
+
                     obs, obs_check = env.get_obs()
                     action, u, _, _ = local_agent.take_action(obs, explore=True)
                     steps_run += 1
@@ -106,6 +117,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     next_obs, reward, done = env.step(action)
                     ao_ema_episode = beta_ao * ao_ema_episode + (1 - beta_ao) * (env.AO)
                     v_error_ema_episode = beta_ao * v_error_ema_episode + (1 - beta_ao) * abs(env.v_error)
+                    psi_error_ema_episode = beta_ao * psi_error_ema_episode + (1 - beta_ao) * abs(env.psi_error)
+                    theta_error_ema_episode = beta_ao * theta_error_ema_episode + (1 - beta_ao) * abs(env.theta_error)
                     
                     transition_dict['states'].append(obs)
                     transition_dict['actions'].append(u)
@@ -121,9 +134,14 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     'return': episode_return,
                     'steps': steps_run,
                     'fail': env.fail,
+                    'crash': env.crash,
+                    'stall': env.stall,
+                    'break_up': env.break_up,
                     't': env.t,
                     'ao_ema': ao_ema_episode,
                     'v_error_ema': v_error_ema_episode,
+                    'psi_error_ema': psi_error_ema_episode,
+                    'theta_error_ema': theta_error_ema_episode,
                     'height_overshoot': env.height_overshoot,
                     'heading_overshoot': env.heading_overshoot
                 }
@@ -135,13 +153,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
         except: pass
 
 # 网络结构参数
-state_dim = 7+7+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
+state_dim = 7+8+4  # obs_space[0].shape[0]  # env.observation_space.shape[0] # test
 hidden_dim = [128, 128] # [128, 128]
 action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
 action_bound = np.array([[-1.1,1.1],[-1.1,1.1],[-1.1,1.1],[-0.2,1.2]])  # aileron, elevator, rudder, throttle
-mission_name = 'FlightControl_parallel无课程无蒸馏_有过载限制'
+mission_name = 'FlightControl_parallel目标会动_不超控std_动态lr'
 
 if __name__=='__main__':
     # dof = 3
@@ -154,11 +172,15 @@ if __name__=='__main__':
     lmbda = 0.95
     epochs = 5  # 10
     eps = 0.2
-    dt_decide = 0.2 # 0.2 可以， 0.1很难 必须是0.02的整数倍  0.16 也挺快
-    dt_move = 0.04
+    dt_decide = 0.16 # 0.15 对 0.01, 0.16 对 0.02
+    dt_move = 0.02
     k_entropy={'cont':0.5, 'cat':0.0, 'bern':0.0} # 0.01
 
-    beta_ao = 0.01 ** (dt_decide / 10.0)
+    # --- EMA 统计参数设定 ---
+    # 学术设定：将 10s 设为 95% 权重的历史长度 (Cumulative Weight = 0.95)
+    # 计算公式: beta^k = 0.05, 其中 k = 10s / dt_decide
+    beta_ao_95_time = 10.0
+    beta_ao = 0.05 ** (dt_decide / beta_ao_95_time) # 分配给旧数值的权重
     parser = argparse.ArgumentParser("UAV flight control training parallel")
     parser.add_argument("--num_workers", type=int, default=20, help="number of parallel workers")  # 10
     parser.add_argument("--max-episode-len", type=float, default=5*60, help="maximum episode time length") # 7分钟有些长
@@ -213,7 +235,7 @@ if __name__=='__main__':
         p = mp.Process(target=worker_process, args=(
             i, child_conn, args, state_dim, hidden_dim, 
             action_dims_dict, action_bound, worker_device, 
-            seed, dt_decide, dt_move, k_entropy
+            seed, dt_decide, dt_move, beta_ao, k_entropy
         ))
         p.start()
         workers.append(p)
@@ -254,6 +276,9 @@ if __name__=='__main__':
             master_transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'action_bounds': []}
             batch_return_list = []
             batch_fail_cnt = 0
+            batch_crash_cnt = 0
+            batch_stall_cnt = 0
+            batch_breakup_cnt = 0
             batch_steps_run = 0
             
             for res in batch_results:
@@ -262,6 +287,9 @@ if __name__=='__main__':
                 
                 batch_return_list.append(metrics['return'])
                 if metrics['fail']: batch_fail_cnt += 1
+                if metrics.get('crash', 0): batch_crash_cnt += 1
+                if metrics.get('stall', 0): batch_stall_cnt += 1
+                if metrics.get('break_up', 0): batch_breakup_cnt += 1
                 batch_steps_run += metrics['steps']
                 
                 for k in master_transition_dict:
@@ -285,6 +313,22 @@ if __name__=='__main__':
                 actor_name = f"actor_rein{i_episode}.pt"
                 actor_path = os.path.join(log_dir, actor_name)
                 th.save(agent.actor.state_dict(), actor_path)
+                
+                # [新增] 记录当前模型的详细性能到 JSON
+                # 由于 mean_return 等变量在下方定义，这里先提前计算一下基础指标
+                summary_data = {
+                    "actor_name": actor_name,
+                    "rl_steps": int(rl_steps),
+                    "i_episode": int(i_episode),
+                    "mean_return": float(np.mean(batch_return_list)),
+                    "survive_rate": float(1.0 - (batch_fail_cnt / args.num_workers)),
+                    # 下面这些如果在这还没算，就用当时的全局记录
+                    "max_std": float(agent.max_std),
+                    "k_entropy": {k: float(v) for k, v in agent.k_entropy.items()}
+                }
+                summary_log_path = os.path.join(log_dir, "checkpoints_summary.json")
+                with open(summary_log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(summary_data, ensure_ascii=False) + "\n")
 
             # --- 日志和控制台输出 ---
             mean_return = np.mean(batch_return_list)
@@ -298,17 +342,48 @@ if __name__=='__main__':
             mean_height_overshoot = np.mean([abs(res['metrics']['height_overshoot']) for res in batch_results])
             logger.add("train_plus/0 height_overshoot", mean_height_overshoot, rl_steps)
             
+            # 记录失败分类比率
+            logger.add("train_plus/fail_rate_crash", batch_crash_cnt / args.num_workers, rl_steps)
+            logger.add("train_plus/fail_rate_stall", batch_stall_cnt / args.num_workers, rl_steps)
+            logger.add("train_plus/fail_rate_breakup", batch_breakup_cnt / args.num_workers, rl_steps)
+
             # 记录平均航向超调量
             mean_heading_overshoot = np.mean([abs(res['metrics']['heading_overshoot']) for res in batch_results])
             logger.add("train_plus/0 heading_overshoot", mean_heading_overshoot * 180 / pi, rl_steps)
 
-            # 记录平均 AO (回合 EMA 的算术平均，消除初始为0的偏差)
+            # 记录平均 AO (回合结束时的 EMA 的算术平均，消除初始为0的偏差)
             mean_ao_batch = np.mean([res['metrics']['ao_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
             logger.add("train_plus/0 avg AO", mean_ao_batch, rl_steps)
+
+            # [重构] 平滑衰减逻辑：
+            # 当 mean_ao_batch 从 20 减小到 5 时，线性地压制 max_std (0.2 -> 0.1) 和 k_entropy (0.5 -> 1e-5)
+            # 因子 alpha: 5->0.0, 20->1.0
+            alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
+            
+            # 平滑调整熵系数 (假设初始 cont 熵为 0.5)
+            agent.k_entropy['cont'] = 1e-5 + (0.5 - 1e-5) * alpha_decay
+            
+            # [新增] 动态调整学习率：从初始 lr 下降到 1/4
+            current_actor_lr = actor_lr * (1/4 + (3/4) * alpha_decay)
+            current_critic_lr = critic_lr * (1/4 + (3/4) * alpha_decay)
+            agent.set_learning_rate(actor_lr=current_actor_lr, critic_lr=current_critic_lr)
+
+            # logger 记录一下当前的干预值
+            logger.add("train_plus/agent_k_entropy_cont", agent.k_entropy['cont'], rl_steps)
+            logger.add("train_plus/actor_lr", current_actor_lr, rl_steps)
+            logger.add("train_plus/critic_lr", current_critic_lr, rl_steps)
 
             # 记录平均速度误差 (回合 EMA 的算术平均)
             mean_v_error_batch = np.mean([res['metrics']['v_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
             logger.add("train_plus/0 avg v_e", mean_v_error_batch, rl_steps)
+
+            # 记录平均航向偏差 (回合 EMA 的算术平均)
+            mean_psi_error_batch = np.mean([res['metrics']['psi_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            logger.add("train_plus/0 avg psi_e", mean_psi_error_batch, rl_steps)
+
+            # 记录平均俯仰偏差 (回合 EMA 的算术平均)
+            mean_theta_error_batch = np.mean([res['metrics']['theta_error_ema'] / (1 - beta_ao ** max(1, res['metrics']['steps'])) for res in batch_results])
+            logger.add("train_plus/0 avg theta_e", mean_theta_error_batch, rl_steps)
 
             actor_grad_norm = model_grad_norm(agent.actor)
             critic_grad_norm = model_grad_norm(agent.critic)
