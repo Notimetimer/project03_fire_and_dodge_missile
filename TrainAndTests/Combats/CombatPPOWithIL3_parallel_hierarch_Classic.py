@@ -1074,7 +1074,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in [0, 1, 2]: # , 3, 4]:
+                for r_idx in [0, 1, 2, 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1100,7 +1100,7 @@ def run_MLP_simulation(
                 
                 # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
                 test_tasks_no_random = []
-                for r_idx in [0, 1, 2]:
+                for r_idx in [0, 1, 2, 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         kwds={
@@ -1131,7 +1131,7 @@ def run_MLP_simulation(
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
-                    logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
+                    # logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
 
                 # 记录第二种测试结果 (test_No_random)
@@ -1140,7 +1140,7 @@ def run_MLP_simulation(
 
                 for r_num, score in outcomes_nr.items():
                     logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
-                    logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
+                    # logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
                 # 名人堂判定：如果全胜则保存并加入池子
