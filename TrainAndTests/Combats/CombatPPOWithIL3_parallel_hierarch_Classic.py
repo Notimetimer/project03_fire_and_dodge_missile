@@ -258,7 +258,7 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
     return player_elo + K_FACTOR * (score - expected)
 
 
-def get_opponent_probabilities(WinRates, Elite_WinRates=None, 
+def get_opponent_probabilities(WinRates=None, Elite_WinRates=None, 
                                SP_type='PFSP_classic', 
                                rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
     """
@@ -267,6 +267,10 @@ def get_opponent_probabilities(WinRates, Elite_WinRates=None,
     p_factor: 经典公式 (1-P)^p 中的指数，通常取 1.0~3.0，越高越针对强敌
     """
     # 合并池子以便查询
+    if WinRates is None:
+        WinRates = {}
+    if Elite_WinRates is None:
+        Elite_WinRates = {}
     candidate_pool = Elite_WinRates if Elite_WinRates else WinRates
     keys = list(candidate_pool.keys())
     
@@ -1306,11 +1310,15 @@ def run_MLP_simulation(
                 if opp_name in WinRates:
                     old_p = WinRates[opp_name]
                     WinRates[opp_name] = (1 - alpha_win) * old_p + alpha_win * actual_score
+                    # 同步更新 Elite 池中已有的对手
                     if opp_name in Elite_WinRates:
                         Elite_WinRates[opp_name] = WinRates[opp_name]
                 else:
-                    WinRates[opp_name] = 0.5
+                    # 只有 hist_agent_as_opponent=1 时，才允许 WinRates 增长
+                    if hist_agent_as_opponent:
+                        WinRates[opp_name] = 0.5
                 
+                # --- Elo 分值更新 (始终扩充，不受 hist_agent_as_opponent 限制) ---
                 if opp_name in elo_ratings:
                     prev_main_elo = main_agent_elo
                     adv_elo = elo_ratings[opp_name]
@@ -1321,11 +1329,12 @@ def run_MLP_simulation(
                     new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR)
                     elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
+                    # 同步更新 Elite 池中已有的对手
                     if opp_name in elite_elo_ratings:
                         elite_elo_ratings[opp_name] = new_adv_elo
                 else:
+                    # 新对手：始终添加到 elo_ratings
                     elo_ratings[opp_name] = main_agent_elo
-                    print('警告，elo_ratings没有全部收录!!!')
             
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
