@@ -180,7 +180,7 @@ class PolicyNetHybrid(torch.nn.Module):
             timd_cond = (t_since_launch >= 40) | ((dist < 30e3) & (t_since_launch >= 10))
             dist_cond = (dist < 95e3)
             delta_theta_cond = (delta_theta < pi * (30) / 180.0) # 之前的 > -30度可能写反了
-            cont_plus_1 = ~((delta_theta > 30.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0) & (dist >= 50e3))
+            cont_plus_1 = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0)) # & (dist >= 50e3))
 
             # 新代码2 Avoid Python branching on tensor-like `mask_on` (which breaks torch.jit.trace).
             # Create a scalar boolean tensor and select between the two candidate masks.
