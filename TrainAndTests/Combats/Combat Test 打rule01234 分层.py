@@ -64,7 +64,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- 初始化环境 ---
-    env = ChooseStrategyEnv(env_args)
+    # 构建场地边界
+    vertices = None # 默认圆形边界
+    # 南北长54km，东西宽100km的长方形边界
+    # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
+    env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
     env.dt_move = 0.025
     
     state_dim = env.obs_dim
@@ -101,9 +105,7 @@ if __name__ == "__main__":
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
-    # --- [修正] 移除重复的 env 初始化，直接配置已有的 env ---
-    # env = ChooseStrategyEnv(env_args, tacview_show=1) 
-    env.tacview_show = 1
+
     if env.tacview_show:
         env.tacview = Tacview()
         env.tacview.handshake()
