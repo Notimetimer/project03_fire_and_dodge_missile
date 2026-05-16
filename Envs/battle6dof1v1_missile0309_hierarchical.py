@@ -1379,7 +1379,7 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
 
     # 发射导弹
     if uav.ammo>0 and not uav.dead:
-        if not tabu or\
+        if (not tabu) or\
                 target_locked and ego_state["weapon"]>=0.1 and ATA<=env.RUAV.max_radar_angle_rad:
             new_missile = uav.launch_missile(target, env.t, missile_class)
             uav.ammo -= 1

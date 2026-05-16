@@ -113,7 +113,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2] # [0,1,2]
+    rule_opponents = [0,1,2,3,4] # [0,1,2]
     t_bias = 0
 
     try:

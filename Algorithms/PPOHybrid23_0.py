@@ -161,6 +161,7 @@ class PolicyNetHybrid(torch.nn.Module):
             cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
             delta_theta = xb[:, 8]
             ata = xb[:, 10]
+            sin_theta = xb[:, 17]
             locked = xb[:, 2]
             ammo = xb[:, 20]
             dist = xb[:, 9] * 10e3
@@ -178,7 +179,8 @@ class PolicyNetHybrid(torch.nn.Module):
             # Use elementwise logical ops so this works on tensors
             timd_cond = (t_since_launch >= 40) | ((dist < 30e3) & (t_since_launch >= 10))
             dist_cond = (dist < 95e3)
-            delta_theta_cond = (delta_theta > pi * (-30) / 180.0)
+            delta_theta_cond = (delta_theta < pi * (30) / 180.0) # 之前的 > -30度可能写反了
+            cont_plus_1 = ~((delta_theta > 30.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0) & (dist >= 50e3))
 
             # 新代码2 Avoid Python branching on tensor-like `mask_on` (which breaks torch.jit.trace).
             # Create a scalar boolean tensor and select between the two candidate masks.
@@ -188,7 +190,7 @@ class PolicyNetHybrid(torch.nn.Module):
                 mask_on_tensor = torch.tensor(bool(mask_on), device=shared_features.device)
             mask_on_bool = mask_on_tensor.to(dtype=torch.bool)
 
-            can_fire_full = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
+            can_fire_full = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond & cont_plus_1
             can_fire = torch.where(mask_on_bool, can_fire_full, ammo_cond)
 
             # # 旧代码2

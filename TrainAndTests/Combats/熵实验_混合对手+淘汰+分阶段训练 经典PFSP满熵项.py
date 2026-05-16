@@ -19,7 +19,6 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
-# IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260504-151707 决不能删掉!!!!!
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -57,7 +56,6 @@ if require_new_IL_data:
 original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
     "il_transitions_combat_LR.pkl",
-    # "il_transitions_top_agent_selfplay.pkl",
     "transition_dict_combat_LR.pkl"
 )
 

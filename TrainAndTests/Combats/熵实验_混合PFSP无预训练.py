@@ -5,11 +5,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练低熵'
-
-# NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s
-# NoILPFSP_分阶段_挑战_并行_分层2s
-
+mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -21,7 +17,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # 0.008  0.005
+k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -40,7 +36,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
 dt_move = 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
-max_episode_duration = 15*60  # 10*60 # 回合最长时间，单位s
+max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 55.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
@@ -59,7 +55,6 @@ if require_new_IL_data:
 original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
     "il_transitions_combat_LR.pkl",
-    # "il_transitions_top_agent_selfplay.pkl",
     "transition_dict_combat_LR.pkl"
 )
 
@@ -79,7 +74,7 @@ if __name__=='__main__':
     start_time = datetime.now()
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
-        k_nonlinear=1.0,
+        k_nonlinear=0.0,
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
@@ -115,9 +110,9 @@ if __name__=='__main__':
             'Rule_0': 1200, # debug
             "Rule_1": 1200,
             "Rule_2": 1200,
-            # 'Rule_3': 1200,
-            # 'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
             },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
@@ -136,7 +131,7 @@ if __name__=='__main__':
         R_cage_range = (R_cage, R_cage), # 固定场地大小
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
-        POMDP= 0, # 0表示全信息，1表示部分信息
+        POMDP=0, 
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
