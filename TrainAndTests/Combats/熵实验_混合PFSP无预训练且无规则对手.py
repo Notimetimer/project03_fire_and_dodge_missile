@@ -6,12 +6,12 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None
 # resume_target_dir = r""
 
-mission_name = 'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'
+mission_name = 'NoILand_PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 70 # 180
+IL_epoches= 0
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
