@@ -376,7 +376,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1, vertices=None):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -393,7 +393,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         # args.R_cage = np.random.uniform(30e3, 45e3) # 已移除：放在这里会导致同一个Worker的所有episode的环境大小不变
 
         # 初始化环境 (关闭可视化以加速)
-        env = ChooseStrategyEnv(args, tacview_show=False)
+        env = ChooseStrategyEnv(args, tacview_show=False, vertices=vertices)
         env.shielded = no_crash # 假设默认开启防撞
         env.dt_move = dt_move
         env.dt_maneuver = dt_maneuver
@@ -725,6 +725,7 @@ def run_MLP_simulation(
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
     R_cage_range = (55.00e3, 55.00e3), # 新增：环境随机化范围
+    vertices = None,
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     POMDP = 0, # 0全信息，1部分信息
@@ -976,7 +977,8 @@ def run_MLP_simulation(
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
                            'no_crash': no_crash,
-                           'pomdp': POMDP
+                           'pomdp': POMDP,
+                           'vertices': vertices,
                        })
         p.start()
         workers.append(p)
@@ -1098,6 +1100,7 @@ def run_MLP_simulation(
                             'no_out': 0,  # 这里可以根据需要设为 1
                             'deterministic': False,
                             'restrict_fire': True, # False, 和采样保持一致
+                            'vertices': vertices,
                         }
                     )
                     test_tasks.append(obj)

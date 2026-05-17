@@ -28,7 +28,7 @@ def test_worker(model_state_dict, rule_num,
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
-                no_out=0, deterministic=False, restrict_fire=False):
+                no_out=0, deterministic=False, restrict_fire=False, vertices=None):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -42,7 +42,7 @@ def test_worker(model_state_dict, rule_num,
     
     # 1. 局部初始化环境 (必须在子进程内创建)
     # 关闭渲染以节省资源
-    test_env = ChooseStrategyEnv(env_args, tacview_show=0)
+    test_env = ChooseStrategyEnv(env_args, tacview_show=0, vertices=vertices)
     test_env.shielded = 1
     test_env.no_out = no_out
     test_env.dt_move = 0.04

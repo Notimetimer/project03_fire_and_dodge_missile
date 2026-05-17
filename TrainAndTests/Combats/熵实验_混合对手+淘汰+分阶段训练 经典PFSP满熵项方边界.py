@@ -4,9 +4,9 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None 
-resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260516-235226"
+# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260509-105211"
 
-mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
+mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项方边界'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -130,7 +130,7 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
-        vertices = None,
+        vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]],
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0, 
