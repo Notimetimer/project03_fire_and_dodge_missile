@@ -274,7 +274,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if enm.escape_once:
             r_event -= 20 * (1-enm.dead)
             
-        # 死了也当剩下导弹全被逃脱处理 (自杀代价补偿)
+        # 死了也当剩下导弹全被逃脱处理 (自杀代价追加)
         if wasted > 0:
             r_event -= 20 * wasted
 
