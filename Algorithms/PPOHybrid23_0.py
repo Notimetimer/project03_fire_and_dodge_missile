@@ -617,6 +617,70 @@ class HybridActorWrapper(nn.Module):
                 total_loss_per_sample += bce_loss.sum(dim=-1)
         
         return total_loss_per_sample
+
+    @torch.no_grad()
+    def compute_marwil_monitor(self, states, expert_actions, mask_on=0, advantages=None):
+        """
+        [监控用] 在固定 batch 上计算每个动作头独立的 NLL 与策略熵。
+        - 全程 no_grad，不影响主网络更新；
+        - NLL 不带 label smoothing / focal / weights，是纯粹的负对数似然；
+        - 熵是策略分布本身的熵（不依赖 expert action）。
+        - advantages: 可选，(N,) 或 (N,1) 的 advantage tensor，用于计算 adv_positive_frac。
+
+        Returns:
+            dict: 包含 nll_cont/nll_cat/nll_bern/entropy_cont/entropy_cat/entropy_bern/adv_positive_frac,
+                  缺失的动作头或未传入 advantages 时对应键返回 None。
+        """
+        actor_outputs = self.net(states, mask_on=mask_on)
+        metrics = {
+            'nll_cont': None, 'nll_cat': None, 'nll_bern': None,
+            'entropy_cont': None, 'entropy_cat': None, 'entropy_bern': None,
+            'adv_positive_frac': None,
+        }
+
+        # --- Cont ---
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0 and actor_outputs.get('cont') is not None:
+            mu, std = actor_outputs['cont']
+            dist = SquashedNormal(mu, std)
+            u_expert = expert_actions['cont']
+            # 纯 NLL：sum over dim, mean over batch
+            nll_cont = (-dist.log_prob(0, u_expert).sum(dim=-1)).mean()
+            ent_cont_raw = dist.entropy()
+            ent_cont = ent_cont_raw.sum(dim=-1).mean() if ent_cont_raw.dim() > 1 else ent_cont_raw.mean()
+            metrics['nll_cont'] = nll_cont.item()
+            metrics['entropy_cont'] = ent_cont.item()
+
+        # --- Cat ---
+        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0 and actor_outputs.get('cat') is not None:
+            cat_probs_list = actor_outputs['cat']
+            expert_cat = expert_actions['cat'].long()
+            nll_cat_sum = torch.zeros(states.size(0), device=self.device)
+            ent_cat_sum = torch.zeros(states.size(0), device=self.device)
+            for i, probs in enumerate(cat_probs_list):
+                expert_idx = expert_cat[:, i]
+                log_probs = torch.log(probs + 1e-10)
+                nll_cat_sum += -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                dist = Categorical(probs=probs)
+                ent_cat_sum += dist.entropy()
+            metrics['nll_cat'] = nll_cat_sum.mean().item()
+            metrics['entropy_cat'] = ent_cat_sum.mean().item()
+
+        # --- Bern ---
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and actor_outputs.get('bern') is not None:
+            bern_logits = actor_outputs['bern'].clamp(min=-1e8)
+            dist = Bernoulli(logits=bern_logits)
+            target = expert_actions['bern']
+            nll_bern = (-dist.log_prob(target).sum(dim=-1)).mean()
+            ent_bern = dist.entropy().sum(dim=-1).mean()
+            metrics['nll_bern'] = nll_bern.item()
+            metrics['entropy_bern'] = ent_bern.item()
+
+        # --- adv_positive_frac ---
+        if advantages is not None:
+            adv = advantages.detach().view(-1)
+            metrics['adv_positive_frac'] = (adv > 0).float().mean().item()
+
+        return metrics
 # =============================================================================
 # 3. PPO 算法类 (精简版)
 # =============================================================================
@@ -1466,6 +1530,16 @@ class PPOHybrid:
         total_c = 0
         batch_count = 0
 
+        # [新增] 权重与 advantage 监控累加器
+        total_weight_mean = 0.0
+        total_weight_max = 0.0
+        total_weight_min = 0.0
+        total_clip_frac = 0.0
+        total_adv_std = 0.0
+        total_adv_p95 = 0.0
+        total_adv_max = 0.0
+        total_adv_mean = 0.0
+
         # 3. Mini-batch 循环
         for start in range(0, total_size, batch_size):
             end = min(start + batch_size, total_size)
@@ -1500,6 +1574,19 @@ class PPOHybrid:
                 raw_weights = torch.exp(beta * advantage)
                 weights = torch.clamp(raw_weights, max=max_weight)
 
+                # [新增] 记录本 batch 的权重统计
+                total_weight_mean += weights.mean().item()
+                total_weight_max += weights.max().item()
+                total_weight_min += weights.min().item()
+                total_clip_frac += (weights >= max_weight - 1e-6).float().mean().item()
+
+                # [新增] 记录本 batch advantage 分布统计
+                adv = advantage.detach()
+                total_adv_std += adv.std().item()
+                total_adv_p95 += torch.quantile(adv, 0.95).item()
+                total_adv_max += adv.max().item()
+                total_adv_mean += adv.mean().item()
+
             # B. Actor Loss
             raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing, no_bern=no_bern)
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
@@ -1527,9 +1614,48 @@ class PPOHybrid:
             total_c += c.item()
             batch_count += 1
 
+        avg_weight_mean = total_weight_mean / batch_count if batch_count > 0 else 0
+        avg_weight_max = total_weight_max / batch_count if batch_count > 0 else 0
+        avg_weight_min = total_weight_min / batch_count if batch_count > 0 else 0
+        avg_clip_frac = total_clip_frac / batch_count if batch_count > 0 else 0
+        avg_adv_std = total_adv_std / batch_count if batch_count > 0 else 0
+        avg_adv_p95 = total_adv_p95 / batch_count if batch_count > 0 else 0
+        avg_adv_max = total_adv_max / batch_count if batch_count > 0 else 0
+        avg_adv_mean = total_adv_mean / batch_count if batch_count > 0 else 0
+
         avg_actor_loss = total_actor_loss / batch_count if batch_count > 0 else 0
         avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0
         avg_c = total_c / batch_count if batch_count > 0 else 0
-        
+
+        # ============================================================
+        # [新增] 监控：在固定的全量 batch 上独立统计每个动作头的 NLL 与熵
+        # 全程 no_grad，不参与反传，因此不会干扰现有的网络更新。
+        # ============================================================
+        if use_obs:
+            monitor_input_all = obs_all
+        else:
+            monitor_input_all = states_all
+        with torch.no_grad():
+            values_all = self.critic(states_all)
+            residual_all = returns_all - values_all
+            advantage_all = residual_all / (torch.sqrt(self.c_sq) + 1e-8)
+        monitor_metrics = self.actor.compute_marwil_monitor(monitor_input_all, actions_all, advantages=advantage_all)
+        # 缓存到 agent 属性，便于训练脚本拉取写入 logger
+        self.marwil_nll_cont = monitor_metrics['nll_cont']
+        self.marwil_nll_cat = monitor_metrics['nll_cat']
+        self.marwil_nll_bern = monitor_metrics['nll_bern']
+        self.marwil_entropy_cont = monitor_metrics['entropy_cont']
+        self.marwil_entropy_cat = monitor_metrics['entropy_cat']
+        self.marwil_entropy_bern = monitor_metrics['entropy_bern']
+        self.marwil_weight_mean = avg_weight_mean
+        self.marwil_weight_max = avg_weight_max
+        self.marwil_weight_min = avg_weight_min
+        self.marwil_weight_clip_frac = avg_clip_frac
+        self.marwil_adv_std = avg_adv_std
+        self.marwil_adv_p95 = avg_adv_p95
+        self.marwil_adv_max = avg_adv_max
+        self.marwil_adv_mean = avg_adv_mean
+        self.marwil_adv_positive_frac = monitor_metrics['adv_positive_frac']
+
         return avg_actor_loss, avg_critic_loss, avg_c
     
