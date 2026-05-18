@@ -918,17 +918,19 @@ def run_MLP_simulation(
             for _name, _val in [
                 ("il_train/nll_cont", getattr(student_agent, "marwil_nll_cont", None)),
                 ("il_train/nll_cat", getattr(student_agent, "marwil_nll_cat", None)),
-                ("il_train/nll_bern", getattr(student_agent, "marwil_nll_bern", None)),
+                # ("il_train/nll_bern", getattr(student_agent, "marwil_nll_bern", None)),
                 ("il_train/entropy_cont", getattr(student_agent, "marwil_entropy_cont", None)),
                 ("il_train/entropy_cat", getattr(student_agent, "marwil_entropy_cat", None)),
-                ("il_train/entropy_bern", getattr(student_agent, "marwil_entropy_bern", None)),
+                # ("il_train/entropy_bern", getattr(student_agent, "marwil_entropy_bern", None)),
                 ("il_train/weight_mean", getattr(student_agent, "marwil_weight_mean", None)),
-                ("il_train/weight_max", getattr(student_agent, "marwil_weight_max", None)),
-                ("il_train/weight_min", getattr(student_agent, "marwil_weight_min", None)),
+                # ("il_train/weight_max", getattr(student_agent, "marwil_weight_max", None)),
+                # ("il_train/weight_min", getattr(student_agent, "marwil_weight_min", None)),
                 ("il_train/weight_clip_frac", getattr(student_agent, "marwil_weight_clip_frac", None)),
                 ("il_train/adv_std", getattr(student_agent, "marwil_adv_std", None)),
-                ("il_train/adv_p95", getattr(student_agent, "marwil_adv_p95", None)),
+                # ("il_train/adv_p95", getattr(student_agent, "marwil_adv_p95", None)),
                 ("il_train/adv_max", getattr(student_agent, "marwil_adv_max", None)),
+                ("il_train/adv_mean", getattr(student_agent, "marwil_adv_mean", None)),
+                ("il_train/adv_positive_frac", getattr(student_agent, "marwil_adv_positive_frac", None)),
             ]:
                 if _val is not None:
                     logger.add(_name, _val, epoch)

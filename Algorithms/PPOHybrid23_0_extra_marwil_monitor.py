@@ -619,21 +619,23 @@ class HybridActorWrapper(nn.Module):
         return total_loss_per_sample
 
     @torch.no_grad()
-    def compute_marwil_monitor(self, states, expert_actions, mask_on=0):
+    def compute_marwil_monitor(self, states, expert_actions, mask_on=0, advantages=None):
         """
         [监控用] 在固定 batch 上计算每个动作头独立的 NLL 与策略熵。
         - 全程 no_grad，不影响主网络更新；
         - NLL 不带 label smoothing / focal / weights，是纯粹的负对数似然；
         - 熵是策略分布本身的熵（不依赖 expert action）。
+        - advantages: 可选，(N,) 或 (N,1) 的 advantage tensor，用于计算 adv_positive_frac。
 
         Returns:
-            dict: 包含 nll_cont/nll_cat/nll_bern/entropy_cont/entropy_cat/entropy_bern,
-                  缺失的动作头返回 None。
+            dict: 包含 nll_cont/nll_cat/nll_bern/entropy_cont/entropy_cat/entropy_bern/adv_positive_frac,
+                  缺失的动作头或未传入 advantages 时对应键返回 None。
         """
         actor_outputs = self.net(states, mask_on=mask_on)
         metrics = {
             'nll_cont': None, 'nll_cat': None, 'nll_bern': None,
             'entropy_cont': None, 'entropy_cat': None, 'entropy_bern': None,
+            'adv_positive_frac': None,
         }
 
         # --- Cont ---
@@ -672,6 +674,11 @@ class HybridActorWrapper(nn.Module):
             ent_bern = dist.entropy().sum(dim=-1).mean()
             metrics['nll_bern'] = nll_bern.item()
             metrics['entropy_bern'] = ent_bern.item()
+
+        # --- adv_positive_frac ---
+        if advantages is not None:
+            adv = advantages.detach().view(-1)
+            metrics['adv_positive_frac'] = (adv > 0).float().mean().item()
 
         return metrics
 # =============================================================================
@@ -1531,6 +1538,7 @@ class PPOHybrid:
         total_adv_std = 0.0
         total_adv_p95 = 0.0
         total_adv_max = 0.0
+        total_adv_mean = 0.0
 
         # 3. Mini-batch 循环
         for start in range(0, total_size, batch_size):
@@ -1577,6 +1585,7 @@ class PPOHybrid:
                 total_adv_std += adv.std().item()
                 total_adv_p95 += torch.quantile(adv, 0.95).item()
                 total_adv_max += adv.max().item()
+                total_adv_mean += adv.mean().item()
 
             # B. Actor Loss
             raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing, no_bern=no_bern)
@@ -1612,6 +1621,7 @@ class PPOHybrid:
         avg_adv_std = total_adv_std / batch_count if batch_count > 0 else 0
         avg_adv_p95 = total_adv_p95 / batch_count if batch_count > 0 else 0
         avg_adv_max = total_adv_max / batch_count if batch_count > 0 else 0
+        avg_adv_mean = total_adv_mean / batch_count if batch_count > 0 else 0
 
         avg_actor_loss = total_actor_loss / batch_count if batch_count > 0 else 0
         avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0
@@ -1625,7 +1635,11 @@ class PPOHybrid:
             monitor_input_all = obs_all
         else:
             monitor_input_all = states_all
-        monitor_metrics = self.actor.compute_marwil_monitor(monitor_input_all, actions_all)
+        with torch.no_grad():
+            values_all = self.critic(states_all)
+            residual_all = returns_all - values_all
+            advantage_all = residual_all / (torch.sqrt(self.c_sq) + 1e-8)
+        monitor_metrics = self.actor.compute_marwil_monitor(monitor_input_all, actions_all, advantages=advantage_all)
         # 缓存到 agent 属性，便于训练脚本拉取写入 logger
         self.marwil_nll_cont = monitor_metrics['nll_cont']
         self.marwil_nll_cat = monitor_metrics['nll_cat']
@@ -1640,6 +1654,8 @@ class PPOHybrid:
         self.marwil_adv_std = avg_adv_std
         self.marwil_adv_p95 = avg_adv_p95
         self.marwil_adv_max = avg_adv_max
+        self.marwil_adv_mean = avg_adv_mean
+        self.marwil_adv_positive_frac = monitor_metrics['adv_positive_frac']
 
         return avg_actor_loss, avg_critic_loss, avg_c
     
