@@ -371,7 +371,7 @@ class track_env():
             self.fail = 1
         
         if self.realistic: # 考虑迎角过载限制
-            min_alpha_air = -7  # -5
+            min_alpha_air = -8  # -7
             max_alpha_air = 26  # 29
             max_beta_air = 15
             min_ny = -3
