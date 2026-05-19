@@ -275,9 +275,11 @@ class ChooseStrategyEnv(Battle):
         # 左crank
         if action_h == 1:
             delta_psi_cmd = sub_of_radian(delta_psi - 61 * pi/180, 0)
+            theta_desired = np.clip(theta_desired, -pi/4, pi/4) # 防止无效crank
         # 右crank
         if action_h == 5:
             delta_psi_cmd = sub_of_radian(delta_psi + 61 * pi/180, 0)
+            theta_desired = np.clip(theta_desired, -pi/4, pi/4) # 防止无效crank
         # 3线
         if action_h == 2:
             delta_psi_temp = delta_psi_threat if uav_obs["warning"] else delta_psi
@@ -299,13 +301,13 @@ class ChooseStrategyEnv(Battle):
             delta_psi_cmd = sub_of_radian(psi2center, UAV.psi) * dist2center/self.R_cage
 
         
-        # 不能出安全高度范围
-        delta_height_cmd = np.clip(theta_desired/pi*2*5000,
-                                   self.min_alt_safe-UAV.alt,
-                                   self.max_alt_safe-UAV.alt)
+        # # 不能出安全高度范围
+        # delta_height_cmd = np.clip(theta_desired/pi*2*5000,
+        #                            self.min_alt_safe-UAV.alt,
+        #                            self.max_alt_safe-UAV.alt)
         
         # 处理指令，让crank的时候依然能够保持锁定
-        theta_desired = delta_height_cmd /5000*pi/2
+        # theta_desired = delta_height_cmd /5000*pi/2
         
         target_delta_point_ = np.array([
             cos(theta + delta_theta) * cos(delta_psi),
