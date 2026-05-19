@@ -78,11 +78,13 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             enm = self.BUAV
             alive_enm_missiles = self.alive_b_missiles
             alive_ally_missiles = self.alive_r_missiles
+            i_can_guide = self.r_can_guide
         if side == 'b':
             ego = self.BUAV
             enm = self.RUAV
             alive_enm_missiles = self.alive_r_missiles
             alive_ally_missiles = self.alive_b_missiles
+            i_can_guide = self.b_can_guide
 
         # --- 2. 终止判定 ---
         done = 0
@@ -235,8 +237,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # crank引导
         if len(alive_ally_missiles) > 0 and not warning:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-            r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
-            r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * missile_in_mid_term * (1-ego.dead)
+            r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
+            r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
         # 防御引导
         if warning:
             # 受到威胁应该三九线/置尾和下高
