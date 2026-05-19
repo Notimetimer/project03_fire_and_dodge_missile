@@ -56,8 +56,8 @@ if require_new_IL_data:
 # 加载数据
 original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
-    "il_transitions_combat_LR.pkl",
-    "transition_dict_combat_LR.pkl"
+    f"il_transitions_combat_LR_rule{IL_rule}.pkl",
+    f"transition_dict_combat_LR_rule{IL_rule}.pkl"
 )
 
 # --- 关键步骤：执行数据重构 ---

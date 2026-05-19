@@ -165,8 +165,8 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
         il_dir = os.path.join(cur_dir, "IL")
         os.makedirs(il_dir, exist_ok=True)
         
-        il_pkl_path = os.path.join(il_dir, "il_transitions_combat_LR.pkl")
-        trans_pkl_path = os.path.join(il_dir, "transition_dict_combat_LR.pkl")
+        il_pkl_path = os.path.join(il_dir, f"il_transitions_combat_LR_rule{current_rule}.pkl")
+        trans_pkl_path = os.path.join(il_dir, f"transition_dict_combat_LR_rule{current_rule}.pkl")
         
         import pickle
         # 保存示范轨迹（IL 用）
@@ -176,8 +176,8 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
         with open(trans_pkl_path, "wb") as f:
             pickle.dump(transition_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        print(f"Saved il_transitions_combat to: {il_pkl_path}")
-        print(f"Saved transition_dict_combat to: {trans_pkl_path}")
+        print(f"Saved il_transitions_combat_rule{current_rule} to: {il_pkl_path}")
+        print(f"Saved transition_dict_combat_rule{current_rule} to: {trans_pkl_path}")
 
         
     except KeyboardInterrupt:

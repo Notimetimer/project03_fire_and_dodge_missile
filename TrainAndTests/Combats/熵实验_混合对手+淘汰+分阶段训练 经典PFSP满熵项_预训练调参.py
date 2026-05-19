@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None 
-resume_target_dir = r""
+resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Pure经典PFSP_smoothing_0.01-run-20260518-224143"
 
 mission_name = 'IL_and_Pure经典PFSP_smoothing_0.01'
 
@@ -56,8 +56,8 @@ if require_new_IL_data:
 # 加载数据
 original_il_transition_dict, transition_dict = load_il_and_transitions(
     os.path.join(cur_dir, "IL"),
-    "il_transitions_combat_LR.pkl",
-    "transition_dict_combat_LR.pkl"
+    f"il_transitions_combat_LR_rule{IL_rule}.pkl",
+    f"transition_dict_combat_LR_rule{IL_rule}.pkl"
 )
 
 # --- 关键步骤：执行数据重构 ---
