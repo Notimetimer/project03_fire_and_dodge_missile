@@ -1505,12 +1505,12 @@ def run_MLP_simulation(
 
                         toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
 
-                        # --- 新增逻辑：同步移除数值过高的“过期”Agent ---
-                        if max_rule_win is not None:
-                            purge_threshold = float(max_rule_win) + 0.1
-                            # 仅保留胜率没超过阈值的 NN 智能体
-                            toughest_agents = [a for a in toughest_agents if WinRates.get(a, 1.0) <= purge_threshold]
-                        # ----------------------------------------------
+                        # # --- 新增逻辑：同步移除数值过高的“过期”Agent ---
+                        # if max_rule_win is not None:
+                        #     purge_threshold = float(max_rule_win) + 0.1
+                        #     # 仅保留胜率没超过阈值的 NN 智能体
+                        #     toughest_agents = [a for a in toughest_agents if WinRates.get(a, 1.0) <= purge_threshold]
+                        # # ----------------------------------------------
 
                         # 3. 更新 Elite 表格（仅包含通过硬性门槛的 NN），并保证 init_elo_ratings 中的 Rule 被保留
                         Elite_WinRates = {k: WinRates[k] for k in toughest_agents}
@@ -1522,52 +1522,6 @@ def run_MLP_simulation(
                         # 4. 让 Elite_Elo_ratings 从属于 Elite_WinRates (用于对比记录)
                         elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in Elite_WinRates.keys()}
                         print(f"Accepted {actor_key}. Elite pool size: {len(Elite_WinRates)} (NN: {len(toughest_agents)})")
-                
-                if hist_agent_as_opponent and total_steps >= WARM_UP_STEPS:
-                    # 更新胜率表
-                    # 1. 产生新 Checkpoint 时，初始化其在胜率表中的地位
-                    WinRates[actor_key] = 0.5  # 经典做法：Learner 的镜像初始胜率为 0.5
-
-                    # 2. 筛选精英池：挑选“最难对付”的 MAX_HISTORY_SIZE 个对手
-                    # 新增硬性门槛：只有当该 NN 策略击败 Learner 的概率高于
-                    # 最差 Rule 对手（即 rule 中被我打败最多）的概率时
-                    # 才有资格进入 Elite_WinRates。换算成 win_rate（Learner 胜率）为：
-                    # WinRates[agent] < max_rule_win_rate
-                    # 如果没有 Rule 则维持原有按最小 win_rate 选取逻辑。
-                    # 本段先收集 agent 列表并按 win_rate 升序排列（越小越难打）
-                    agent_keys = [k for k in WinRates.keys() if k.startswith("actor_rein")]
-                    sorted_agents = sorted(agent_keys, key=lambda k: WinRates[k])
-
-                    # 计算 rule 的最大 win_rate（即 Learner 对规则对手中赢得最多的那个值）
-                    # 新的门槛规则：候选 NN 必须比最弱的 Rule（对 Learner 来说最容易打的 Rule）更难
-                    # 换句话说：要求 WinRates[agent] < max_rule_win
-                    rule_keys_present = [k for k in WinRates.keys() if k.startswith('Rule')]
-                    max_rule_win = None
-                    if rule_keys_present:
-                        max_rule_win = max([WinRates[k] for k in rule_keys_present])
-
-                    # 过滤出满足硬性门槛的 agents（如果有 rule 则必须使 Learner 胜率小于 rules 中的最高值）
-                    qualified_agents = []
-                    for a in sorted_agents:
-                        if max_rule_win is None:
-                            qualified_agents.append(a)
-                        else:
-                            # 要求：Learner 对 agent 的胜率 < rules 中的最高 Learner 胜率
-                            if WinRates.get(a, 1.0) < float(max_rule_win):
-                                qualified_agents.append(a)
-
-                    toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
-
-                    # 3. 更新 Elite 表格（仅包含通过硬性门槛的 NN），并保证 init_elo_ratings 中的 Rule 被保留
-                    Elite_WinRates = {k: WinRates[k] for k in toughest_agents}
-                    # 根据传入的 init_elo_ratings 决定加入的 Rule（保证按需包含）
-                    for rk in [k for k in init_elo_ratings.keys() if k.startswith("Rule")]:
-                        if rk in WinRates:
-                            Elite_WinRates[rk] = WinRates[rk]
-                        
-                    # 4. 让 Elite_Elo_ratings 从属于 Elite_WinRates (用于对比记录)
-                    elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in Elite_WinRates.keys()}
-                    print(f"Accepted {actor_key}. Elite pool size: {len(Elite_WinRates)}")
                     
                 # -----------------------------------------------------------
                 # 逻辑分支 B: 维护“全量历史记录” (Full JSON)
