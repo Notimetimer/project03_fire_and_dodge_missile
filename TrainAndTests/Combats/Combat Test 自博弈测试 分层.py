@@ -45,31 +45,32 @@ def create_initial_state():
 if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230"
-
-    # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260324-194317"
-    # "IL_and_MixedPFSP_分阶段_挑战_并行_分层-run-20260326-172341"
-
-    
+    dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260515-104131"
+   
 
     # 次要
-    experiment_name = "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s"
+    experiment_name = "IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项-run-20260516-170432"
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
     args = parser.parse_args()    
 
-    red_agent_id = 700
-    blue_agent_id = 200
+    red_agent_id = None # 700
+    blue_agent_id = None # 200
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=12*60, R_cage=50e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=55.00e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- 初始化环境 ---
-    env = ChooseStrategyEnv(env_args)
+    # 构建场地边界
+    vertices = None # 默认圆形边界
+    # 南北长54km，东西宽100km的长方形边界
+    # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
+    env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
+    env.dt_move = 0.025
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -112,11 +113,11 @@ if __name__ == "__main__":
 
     # --- [修正] 移除重复的 env 初始化，直接配置已有的 env ---
     # env = ChooseStrategyEnv(env_args, tacview_show=1) 
-    env.tacview_show = 1
-    if env.tacview_show:
-        env.tacview = Tacview()
-        env.tacview.handshake()
-        env.visualize_cage()
+    # env.tacview_show = 1
+    # if env.tacview_show:
+    #     env.tacview = Tacview()
+    #     env.tacview.handshake()
+    #     env.visualize_cage()
 
     env.shielded = 1
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
@@ -143,8 +144,8 @@ if __name__ == "__main__":
             # --- 初始化数据记录 ---
             history = {
                 'time': [],
-                'r_ny': [], 'r_alpha': [],
-                'b_ny': [], 'b_alpha': []
+                'r_ny': [], 'r_alpha': [], 'r_alt': [], 'r_mach': [],
+                'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
             }
 
             # 回合仿真循环
@@ -157,41 +158,57 @@ if __name__ == "__main__":
 
                 # 决策
                 if count % action_cycle_multiplier == 0:
-                    explore_dict = {'cat': 1, 'bern': 1}
-                    temp_dict = {'cat': 0.1, 'bern': 0.8}
-                    # --- 红方 (RL 智能体 700) ---
+                    # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
-                        # 由于训练时没有 state_check，去除 check_obs
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore=explore_dict, temp=temp_dict, bern_threshold=0.1
-                        )
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.4
+                            ) # check_obs=r_check_obs, check_obs=None
                         
-                    r_action_label = r_action_exec['cat'][0]
+                    r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
                     last_r_action_label = r_action_label
                     print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
 
                     if r_fire:
-                        launch_missile_immediately(env, 'r', tabu=1)
+                        env.RUAV.about_to_fire = 1
 
                     # --- 蓝方 (RL 智能体 200) ---
                     with torch.no_grad():
                         b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(
-                            b_obs, explore=explore_dict, temp=temp_dict, bern_threshold=0.1
+                            b_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.4
                         )
                         
-                    b_action_label = b_action_exec['cat'][0]
+                    b_action_label = b_action_exec['cat'] # [0]
                     b_fire = b_action_exec['bern'][0]
                     last_b_action_label = b_action_label
                     if b_fire:
-                        launch_missile_immediately(env, 'b', tabu=1)
+                        env.BUAV.about_to_fire = 1
 
                 # 执行机动并步进
                 r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
+                
+                # 测试时限制开火后爬升
+                if getattr(env.RUAV, 'about_to_fire', 0):
+                    launch_missile_immediately(env, 'r', tabu=0, action_label=r_action_label) # r_action_label)
+                if getattr(env.BUAV, 'about_to_fire', 0):
+                    launch_missile_immediately(env, 'b', tabu=0, action_label=b_action_label) # b_action_label)
+                    
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
                 done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
+
+                # --- 记录数据 ---
+                history['time'].append(count * action_cycle_multiplier * dt_maneuver)
+                history['r_ny'].append(env.RUAV.Ny)
+                history['r_alpha'].append(env.RUAV.alpha_air * 180 / np.pi)
+                history['r_alt'].append(env.RUAV.alt)
+                history['r_mach'].append(env.RUAV.mach)
+                history['b_ny'].append(env.BUAV.Ny)
+                history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
+                history['b_alt'].append(env.BUAV.alt)
+                history['b_mach'].append(env.BUAV.mach)
+
                 env.render(t_bias=t_bias)
 
             # 报告结果

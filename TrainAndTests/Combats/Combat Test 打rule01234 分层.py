@@ -49,7 +49,7 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'NoILand_PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     
     'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'
@@ -112,10 +112,10 @@ if __name__ == "__main__":
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
 
-    if env.tacview_show:
-        env.tacview = Tacview()
-        env.tacview.handshake()
-        env.visualize_cage()
+    # if env.tacview_show:
+    #     env.tacview = Tacview()
+    #     env.tacview.handshake()
+    #     env.visualize_cage()
 
     env.shielded = 1
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
