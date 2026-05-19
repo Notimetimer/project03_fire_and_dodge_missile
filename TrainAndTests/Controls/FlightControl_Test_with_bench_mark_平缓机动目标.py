@@ -36,7 +36,6 @@ pre_log_dir = os.path.join(project_root, "logs/control")
 mission_name = "FlightControl_parallel目标会动_高度可超调_自动调方差"
 # 可选其它控制器
 "PID"
-"FlightControl_parallel无课程无蒸馏_有过载限制_动态lr"
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 "FlightControl_parallel目标会动_高度可超调_自动调方差"
 
@@ -443,69 +442,69 @@ if save_csv:
     except Exception as e:
         print(f"\n[错误] 保存 CSV 失败: {e}")
 
-    import Draw3DTrajectory
-    Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)
+    # import Draw3DTrajectory
+    # Draw3DTrajectory.start_drawing(traj_file_name, interval=draw_interval, model_scale=model_scale, z_limits=z_limits)
 
-    # --- 自动化绘图 (展示最后一组测试案例) ---
-    if len(history['time']) > 0:
-        t = history['time']
-        # 动态选择颜色：RL 为红色，PID 为蓝色
-        color = 'r' if mission_name != "PID" else 'b'
+    # # --- 自动化绘图 (展示最后一组测试案例) ---
+    # if len(history['time']) > 0:
+    #     t = history['time']
+    #     # 动态选择颜色：RL 为红色，PID 为蓝色
+    #     color = 'r' if mission_name != "PID" else 'b'
         
-        # Figure 1: 核心跟踪性能
-        plt.figure(figsize=(15, 10))
-        # 1. 航向角误差
-        plt.subplot(3, 1, 1)
-        psi_err = [abs(sub_of_degree(p, pr)) for p, pr in zip(history['psi'], history['psi_req'])]
-        plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
-        plt.title("航向角误差 (Heading Error)")
-        plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)
+    #     # Figure 1: 核心跟踪性能
+    #     plt.figure(figsize=(15, 10))
+    #     # 1. 航向角误差
+    #     plt.subplot(3, 1, 1)
+    #     psi_err = [abs(sub_of_degree(p, pr)) for p, pr in zip(history['psi'], history['psi_req'])]
+    #     plt.plot(t, psi_err, color=color, label=f'{mission_name} Heading Error')
+    #     plt.title("航向角误差 (Heading Error)")
+    #     plt.ylabel(r"$\varepsilon_{\psi}$ (°)"); plt.legend(); plt.grid(True)
         
-        # 2. 俯仰角跟踪
-        plt.subplot(3, 1, 2)
-        plt.plot(t, history['theta'], color=color, linestyle='-', label=f'{mission_name} Pitch')
-        plt.plot(t, history['theta_req'], color=color, linestyle=':', alpha=0.6, label='Target Pitch')
-        plt.title("俯仰角 (Pitch) 跟踪对比")
-        plt.ylabel(r"$\theta$ (°)"); plt.legend(); plt.grid(True)
+    #     # 2. 俯仰角跟踪
+    #     plt.subplot(3, 1, 2)
+    #     plt.plot(t, history['theta'], color=color, linestyle='-', label=f'{mission_name} Pitch')
+    #     plt.plot(t, history['theta_req'], color=color, linestyle=':', alpha=0.6, label='Target Pitch')
+    #     plt.title("俯仰角 (Pitch) 跟踪对比")
+    #     plt.ylabel(r"$\theta$ (°)"); plt.legend(); plt.grid(True)
         
-        # 3. 速度跟踪
-        plt.subplot(3, 1, 3)
-        plt.plot(t, history['v'], color=color, linestyle='-', label=f'{mission_name} Velocity')
-        plt.plot(t, history['v_req'], color=color, linestyle=':', alpha=0.6, label='Target Velocity')
-        plt.title("速度 (Velocity) 跟踪对比")
-        plt.ylabel("v (m/s)"); plt.legend(); plt.grid(True)
-        plt.tight_layout()
+    #     # 3. 速度跟踪
+    #     plt.subplot(3, 1, 3)
+    #     plt.plot(t, history['v'], color=color, linestyle='-', label=f'{mission_name} Velocity')
+    #     plt.plot(t, history['v_req'], color=color, linestyle=':', alpha=0.6, label='Target Velocity')
+    #     plt.title("速度 (Velocity) 跟踪对比")
+    #     plt.ylabel("v (m/s)"); plt.legend(); plt.grid(True)
+    #     plt.tight_layout()
 
-        # Figure 2: 飞行包线与控制量
-        plt.figure(figsize=(15, 12))
-        # 1. Alpha 与 Ny 对比
-        ax1 = plt.subplot(2, 2, 1)
-        ax1_r = ax1.twinx()
-        ax1.plot(t, history['alpha'], color=color, linestyle='-', label='Alpha')
-        ax1_r.plot(t, history['Ny'], color='g', linestyle=':', alpha=0.6, label='Ny')
-        ax1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
-        ax1.set_ylabel("Alpha (°)"); ax1_r.set_ylabel("Ny (g)")
-        ax1.legend(loc='upper left'); ax1_r.legend(loc='upper right'); ax1.grid(True)
+    #     # Figure 2: 飞行包线与控制量
+    #     plt.figure(figsize=(15, 12))
+    #     # 1. Alpha 与 Ny 对比
+    #     ax1 = plt.subplot(2, 2, 1)
+    #     ax1_r = ax1.twinx()
+    #     ax1.plot(t, history['alpha'], color=color, linestyle='-', label='Alpha')
+    #     ax1_r.plot(t, history['Ny'], color='g', linestyle=':', alpha=0.6, label='Ny')
+    #     ax1.set_title("迎角 (Alpha) 与 法向过载 (Ny)")
+    #     ax1.set_ylabel("Alpha (°)"); ax1_r.set_ylabel("Ny (g)")
+    #     ax1.legend(loc='upper left'); ax1_r.legend(loc='upper right'); ax1.grid(True)
         
-        # 2. Phi 与 高度 对比
-        ax2 = plt.subplot(2, 2, 2)
-        ax2_r = ax2.twinx()
-        ax2.plot(t, history['phi'], color=color, linestyle='-', label='Phi')
-        ax2_r.plot(t, history['h'], color='g', linestyle=':', alpha=0.6, label='Height')
-        ax2_r.set_title("滚转角 (Phi) 与 高度 (Height)")
-        ax2.set_ylabel("Phi (°)"); ax2_r.set_ylabel("Height (m)")
-        ax2.legend(loc='upper left'); ax2_r.legend(loc='upper right'); ax2.grid(True)
+    #     # 2. Phi 与 高度 对比
+    #     ax2 = plt.subplot(2, 2, 2)
+    #     ax2_r = ax2.twinx()
+    #     ax2.plot(t, history['phi'], color=color, linestyle='-', label='Phi')
+    #     ax2_r.plot(t, history['h'], color='g', linestyle=':', alpha=0.6, label='Height')
+    #     ax2_r.set_title("滚转角 (Phi) 与 高度 (Height)")
+    #     ax2.set_ylabel("Phi (°)"); ax2_r.set_ylabel("Height (m)")
+    #     ax2.legend(loc='upper left'); ax2_r.legend(loc='upper right'); ax2.grid(True)
         
-        # 3. 控制量
-        plt.subplot(2, 1, 2)
-        ctrl_labels = ['aileron', 'elevator', 'rudder', 'throttle']
-        ctrl_data = [history['aileron'], history['elevator'], history['rudder'], history['throttle']]
-        for label, data in zip(ctrl_labels, ctrl_data):
-            plt.plot(t, data, label=label)
-        plt.title(f"{mission_name} 控制器指令")
-        plt.ylabel("Normalized Command")
-        plt.legend(); plt.grid(True)
+    #     # 3. 控制量
+    #     plt.subplot(2, 1, 2)
+    #     ctrl_labels = ['aileron', 'elevator', 'rudder', 'throttle']
+    #     ctrl_data = [history['aileron'], history['elevator'], history['rudder'], history['throttle']]
+    #     for label, data in zip(ctrl_labels, ctrl_data):
+    #         plt.plot(t, data, label=label)
+    #     plt.title(f"{mission_name} 控制器指令")
+    #     plt.ylabel("Normalized Command")
+    #     plt.legend(); plt.grid(True)
         
-        plt.suptitle(f"测试任务性能分析: {mission_name}", fontsize=15)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.show()
+    #     plt.suptitle(f"测试任务性能分析: {mission_name}", fontsize=15)
+    #     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        # plt.show()

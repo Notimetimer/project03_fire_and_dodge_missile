@@ -236,7 +236,7 @@ class F16PIDController:
 
         # 根据当前过载缩放delta_z_angle
         if ny_actual > 0:
-            delta_z_angle *= (1-ny_actual / 9) * 1.5 # 过载限制
+            delta_z_angle *= (1-ny_actual / 9.5) * 1.5 # 过载限制
         else:
             delta_z_angle *= (1+ny_actual / 2.5)
 
