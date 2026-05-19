@@ -49,14 +49,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'missile_warning': 0.06,
             'enemy_gets_warning': 0.05,
             'alt_limit_penalty': 1.0,
-            'border_penalty_scale': 0.2,
-            'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
-            'angle_advantage': 0.01, # 0.007, # 0.03
-            'height_advantage': 0.01,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
-            'to_center_reward' : 0.005, # 0.02 占领中心点的价值
-            'speed_penalty': 0.01, # 慢速惩罚
         }
 
         ego_win=0
@@ -167,6 +161,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
         #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
+        reward_weights['border_penalty_scale']=0.2
+        reward_weights['border_reward']=0.2
+        reward_weights['to_center_reward']=0.005 # 0.02 占领中心点的价值
+        
+        
         # 靠近边界惩罚
         o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
         ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
@@ -222,7 +221,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if threat_distance < distance:
             r_constraint -= 0.0005 * (1 - ego.dead) # 0.001
 
-        # 角度奖励
+        # 战术引导奖励
+        reward_weights['angle_advantage']=0.01 # 0.007, # 0.03
+        reward_weights['height_advantage']=0.01
+        reward_weights['speed_penalty']=0.01 # 慢速惩罚
         # 进攻引导
         if len(alive_ally_missiles) == 0 and not warning:
             # 瞄准奖励

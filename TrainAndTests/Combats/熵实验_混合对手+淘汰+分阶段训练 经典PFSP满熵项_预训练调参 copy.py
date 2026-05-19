@@ -4,9 +4,9 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None 
-resume_target_dir = r""
+resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_smoothing_0.1-run-20260518-160315"
 
-mission_name = 'IL_and_Pure经典PFSP_smoothing_0.01'
+mission_name = 'IL_and_Mixed经典PFSP_smoothing_0.1'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -25,7 +25,7 @@ il_batch_size2= 1e4 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 "调参改这里!!!"
-label_smoothing=0.01 # 0.3
+label_smoothing=0.1 # 0.3
 label_smoothing_mixed=0.01
 dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -109,21 +109,21 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            # 'Rule_0': 1200, # debug
-            # "Rule_1": 1200,
-            # "Rule_2": 1200,
-            # 'Rule_3': 1200,
-            # 'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
             },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,
-        WARM_UP_STEPS = 0, # 500e3, # 1e3 为debug
+        WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
-        rule_actor_rate = 0.0, # 0.2, # “复习”概率
+        rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
