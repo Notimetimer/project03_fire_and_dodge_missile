@@ -132,9 +132,10 @@ class missile_class:
         self.maxH_m = 25000
         self.minH_m = 100 # 500
         # 重量参数和燃烧时间参数
-        self.empty_weight = 157-51.01 # 96.82  # kg
-        self.stage1_weight = 51.01 # 20.28  # kg
-        self.stage2_weight = 1e-8 # 44.9  # kg
+        self.max_weight = 161.5 # 157 # kg 
+        self.stage1_weight = 52 # 51.01 # kg
+        self.stage2_weight = 1e-8 # 44.9 # kg
+        self.empty_weight = self.max_weight - self.stage1_weight # kg
         self.stage1_time = 8 # 7.75  # 2.3 s
         self.stage2_time = 1e-8 # 10.5 # 10.5 11  # s
         # self.stage1_burn_rate = self.stage1_weight / self.stage1_time  # 一级燃烧率kg/s
