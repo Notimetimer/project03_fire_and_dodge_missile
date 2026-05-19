@@ -213,32 +213,32 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             wasted = 0
 
 
-        # --- 态势辅助奖励 (千分位级别) ---
-        # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
-        enm_threat_dist = enm_states["threat"][3]
-        if enm_threat_dist < distance:
-            r_constraint += 0.0005 * (1 - ego.dead) # 0.001
+        # # --- 态势辅助奖励 (千分位级别) ---
+        # # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
+        # enm_threat_dist = enm_states["threat"][3]
+        # if enm_threat_dist < distance:
+        #     r_constraint += 0.0005 * (1 - ego.dead) # 0.001
 
-        # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
-        if threat_distance < distance:
-            r_constraint -= 0.0005 * (1 - ego.dead) # 0.001
+        # # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
+        # if threat_distance < distance:
+        #     r_constraint -= 0.0005 * (1 - ego.dead) # 0.001
 
         # 战术引导奖励
-        reward_weights['angle_advantage']=0.01 # 0.007, # 0.03
-        reward_weights['height_advantage']=0.01
+        reward_weights['angle_advantage']=0.05 # 0.01, # 0.03
+        reward_weights['height_advantage']=reward_weights['angle_advantage']
         reward_weights['speed_penalty']=0.01 # 慢速惩罚
         # 进攻引导
         if len(alive_ally_missiles) == 0 and not warning:
             # 瞄准奖励
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
             # 爬高奖励
-            r_constraint += 0.5 * (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead)
-            r_constraint += 0.5 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
+            r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
         # crank引导
         if len(alive_ally_missiles) > 0 and not warning:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-            r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
-            r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
+            r_constraint += (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+            r_constraint += (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 5 * 
         # 防御引导
         if warning:
             # 受到威胁应该三九线/置尾和下高
