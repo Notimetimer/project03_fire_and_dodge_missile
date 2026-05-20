@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None 
-resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Pure经典PFSP_smoothing_0.01-run-20260518-224143"
+# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Pure经典PFSP_smoothing_0.01-run-20260518-224143"
 
 mission_name = 'IL_and_Pure经典PFSP_smoothing_0.01'
 
@@ -116,7 +116,7 @@ if __name__=='__main__':
             # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             },
-        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'PFSP_WR', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,
