@@ -9,7 +9,7 @@ resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_m
 mission_name = 'IL_and_Pure经典PFSP_smoothing_0.01_rule2_搅拌'
 
 # 超参数
-stir_and_save = 1 # 存储策略熵搅拌后的版本
+stir_and_save = 0 # 存储策略熵搅拌后的版本
 
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
