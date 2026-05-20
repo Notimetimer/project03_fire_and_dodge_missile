@@ -3,7 +3,7 @@ from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
-resume_target_dir = None 
+resume_target_dir = None
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_smoothing_0.1-run-20260518-160315"
 
 mission_name = 'IL_and_Mixed经典PFSP_smoothing_0.1'
