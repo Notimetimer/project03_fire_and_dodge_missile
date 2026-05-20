@@ -1016,9 +1016,11 @@ def run_MLP_simulation(
     # 新增：胜率表文件路径
     WinRates_path = os.path.join(log_dir, "WinRates.json")
     Elite_WinRates_path = os.path.join(log_dir, "Elite_WinRates.json")
-    # 初始化胜率字典
+    GameTimes_path = os.path.join(log_dir, "GameTimes.json")
+    # 初始化胜率字典和游戏次数字典
     WinRates = {}
     Elite_WinRates = {}
+    GameTimes = {}
 
     # 尝试加载历史 # 中断续训
     if os.path.exists(full_json_path):
@@ -1031,6 +1033,8 @@ def run_MLP_simulation(
         with open(WinRates_path, 'r') as f: WinRates = json.load(f)
     if os.path.exists(Elite_WinRates_path):
         with open(Elite_WinRates_path, 'r') as f: Elite_WinRates = json.load(f)
+    if os.path.exists(GameTimes_path):
+        with open(GameTimes_path, 'r') as f: GameTimes = json.load(f)
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
@@ -1052,17 +1056,11 @@ def run_MLP_simulation(
         # 从零开始不论对手有多烂都要加入Elite池            
         Elite_WinRates = copy.deepcopy(WinRates)
         elite_elo_ratings = copy.deepcopy(elo_ratings)
-
-    
-    # # 初始对手(存储IL后的网络参数)
-    # if (not elo_ratings) and hist_agent_as_opponent: # or IL_epoches > 0: # 没有模仿学习也要存
-    #     elo_ratings[int_agent_name] = 1200
         
-    # # 初始化 init_elo_ratings 里面的元素胜率 以及 actor_rein0
-    # if not WinRates:
-    #     for k in init_elo_ratings.keys():
-    #         WinRates[k] = 0.5
-    #     WinRates["actor_rein0"] = 0.5
+        # 初始化GameTimes表
+        for k in WinRates.keys():
+            GameTimes[k] = 0
+
 
     # 训练循环变量
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
@@ -1171,6 +1169,54 @@ def run_MLP_simulation(
                     # logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
+                # --- 新增：从测试结果更新Elo分值和胜率表 ---
+                def update_ratings_from_test(test_results_data, test_type="test"):
+                    """从测试结果更新Elo分值和胜率表"""
+                    alpha_win = 0.05  # 胜率更新平滑系数
+                    
+                    for rule_num, score, result2, wins, loses, draws in test_results_data:
+                        opp_name = f"Rule_{rule_num}"
+                        actual_score = score  # score已经是胜率(0-1)
+                        
+                        # --- 更新胜率表 ---
+                        if opp_name in WinRates:
+                            old_p = WinRates[opp_name]
+                            WinRates[opp_name] = (1 - alpha_win) * old_p + alpha_win * actual_score
+                            # 同步更新 Elite 池中已有的对手
+                            if opp_name in Elite_WinRates:
+                                Elite_WinRates[opp_name] = WinRates[opp_name]
+                        else:
+                            # 新对手，初始化为当前胜率
+                            WinRates[opp_name] = actual_score
+                        
+                        # --- 更新Elo分值 ---
+                        if opp_name in elo_ratings:
+                            prev_main_elo = main_agent_elo
+                            adv_elo = elo_ratings[opp_name]
+                            
+                            # 更新主智能体Elo分
+                            new_main_elo = update_elo(prev_main_elo, adv_elo, actual_score, K_FACTOR*2)
+                            # 更新对手Elo分
+                            new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR*2)
+                            
+                            elo_ratings[opp_name] = new_adv_elo
+                            elo_ratings["__CURRENT_MAIN__"] = new_main_elo
+                            main_agent_elo = new_main_elo  # 更新局部变量
+                            
+                            # 同步更新 Elite 池中已有的对手
+                            if opp_name in elite_elo_ratings:
+                                elite_elo_ratings[opp_name] = new_adv_elo
+                        else:
+                            # 新对手，初始化Elo分值
+                            elo_ratings[opp_name] = main_agent_elo
+                        
+                
+                # 应用测试结果更新 (两种测试都更新)
+                update_ratings_from_test(test_results, "test")
+                update_ratings_from_test(test_results_no_random, "test_no_random")
+                
+                print(f"  [Ratings Update] Main Agent Elo: {main_agent_elo:.0f}")
+
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score > 0.5 for score in outcomes.values()):
                     # 【核心修改】从全量注册表 elo_ratings 中寻找最新的已保存编号
@@ -1197,19 +1243,28 @@ def run_MLP_simulation(
             # 这一步 Master 决定每个 Worker 打谁
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
-            # # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
-            # if not init_elo_ratings:
-            #     # 按照 Elo 分数降序排列，排除内部特殊键
-            #     sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
-            #                                     key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
-            #                                     reverse=True) if not k.startswith("__")]
-            #     effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
-            # else:
-            #     effective_pool = elite_elo_ratings
                 
-            for rank in range(num_workers):
-                # 采样对手
-                # 注意：采样始终基于 win_rates（Elite_WinRates 仅为记录用）
+            # PFSP_WR 特殊处理：无放回采样
+            selected_opponents = []
+            if self_play_type == "PFSP_WR":
+                # 获取所有可用对手
+                probs, opponent_keys = get_opponent_probabilities(
+                    WinRates,
+                    Elite_WinRates,
+                    SP_type="PFSP_classic",  # 使用PFSP_classic获取概率
+                    rule_rate=rule_actor_rate,
+                    p_factor=p_factor,
+                    deltaFSP_epsilon=deltaFSP_epsilon,
+                )
+                
+                if len(opponent_keys) < num_workers:
+                    # 对手数量少于worker数，使用有放回采样（与PFSP_classic一致）
+                    selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
+                else:
+                    # 对手数量>=worker数，使用无放回采样
+                    selected_opponents = np.random.choice(opponent_keys, size=num_workers, replace=False).tolist()
+            else:
+                # 其他采样方式，保持原有逻辑
                 probs, opponent_keys = get_opponent_probabilities(
                     WinRates,
                     Elite_WinRates,
@@ -1218,7 +1273,16 @@ def run_MLP_simulation(
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
-                selected_opponent_name = np.random.choice(opponent_keys, p=probs)
+                selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
+            
+            for rank in range(num_workers):
+                selected_opponent_name = selected_opponents[rank]
+                
+                # 更新GameTimes表
+                if selected_opponent_name in GameTimes:
+                    GameTimes[selected_opponent_name] += 1
+                else:
+                    GameTimes[selected_opponent_name] = 1
                 
                 # 准备对手数据
                 opp_type = 'rule'
@@ -1558,6 +1622,8 @@ def run_MLP_simulation(
                     json.dump(WinRates, f, ensure_ascii=False, indent=2)
                 with open(Elite_WinRates_path, "w", encoding="utf-8") as f:
                     json.dump(Elite_WinRates, f, ensure_ascii=False, indent=2)
+                with open(GameTimes_path, "w", encoding="utf-8") as f:
+                    json.dump(GameTimes, f, ensure_ascii=False, indent=2)
 
                 # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
                 valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
