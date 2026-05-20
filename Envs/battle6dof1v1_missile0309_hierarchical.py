@@ -55,12 +55,12 @@ o00 = np.array([144.7, 13.4])  # 地理原点的经纬
 g_ = np.array([0, -g, 0])
 # theta_limit = 85 * pi / 180
 
-R_cage = 100e3
+R_cage = 62.00e3
 
 # min_height = 0
 # max_height = 15e3
 
-R_birth = 40e3
+R_birth = 55e3
 
 horizontal_center = np.array([0, 0])
 
@@ -148,12 +148,12 @@ class Battle(object):
         # self.b_obs_spaces = [spaces.Box(low=-np.inf, high=+np.inf, shape=obs.shape, dtype=np.float32) for obs in
         #                      b_obs_n]
 
-        self.RED_BIRTH_STATE = {'position': np.array([-R_birth * cos(0), 8000.0, -R_birth * sin(0)]),
-                                        'psi': 0,
+        self.RED_BIRTH_STATE = {'position': np.array([R_birth * cos(-pi/2), 8000.0, R_birth * sin(-pi/2)]),
+                                        'psi': pi/2,
                                         'e2e': False
                                         }
-        self.BLUE_BIRTH_STATE = {'position': np.array([-R_birth * cos(pi), 8000.0, -R_birth * sin(pi)]),
-                                         'psi': pi,
+        self.BLUE_BIRTH_STATE = {'position': np.array([R_birth * cos(pi/2), 8000.0, R_birth * sin(pi/2)]),
+                                         'psi': -pi/2,
                                          'e2e': False
                                          }
         self.tacview_show = tacview_show

@@ -27,9 +27,9 @@ current_dir = get_current_file_dir()
 sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
 
 from Envs.battle6dof1v1_missile0919 import *
-from Envs.Tasks.AttackManeuverEnv import *
-from Envs.Tasks.CrankManeuverEnv import *
-from Envs.Tasks.EscapeManeuverEnv import *
+# from Envs.Tasks.AttackManeuverEnv import *
+# from Envs.Tasks.CrankManeuverEnv import *
+# from Envs.Tasks.EscapeManeuverEnv import *
 
 
 # 通过继承构建观测空间、奖励函数和终止条件

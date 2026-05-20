@@ -34,7 +34,7 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 
 def create_initial_state():
     """创建固定的初始状态"""
-    blue_height, red_height = 9000, 9000
+    blue_height, red_height = 8000, 9000
     red_psi, blue_psi = -pi / 2, pi / 2
     red_N, red_E = 0, 55e3  # 45e3
     blue_N, blue_E = red_N, -red_E # -45e3

@@ -164,11 +164,10 @@ if __name__=='__main__':
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=12*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=75e3,
-                        help="")
     args = parser.parse_args()
 
     env = ChooseStrategyEnv(args, tacview_show=use_tacview)
+    env.R_cage = 62.00e3
     # test
     env.dt_move = 0.02 # 0.025
 
@@ -182,8 +181,8 @@ if __name__=='__main__':
     def creat_initial_state():
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-        blue_height = 9000
-        red_height = 9000
+        blue_height = 8000
+        red_height = 8000
         red_psi = -pi/2
         blue_psi = pi/2
         red_N = 0

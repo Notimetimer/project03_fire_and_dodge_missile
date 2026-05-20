@@ -274,9 +274,8 @@ if __name__=='__main__':
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=55.0e3, # 69
-                        help="")
     args = parser.parse_args()
+    args.R_cage = 62.00e3
 
     # 构建场地边界
     vertices = None # 默认圆形边界
@@ -293,24 +292,24 @@ if __name__=='__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
-    def creat_initial_state():
-        # 飞机出生状态指定
-        # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-        blue_height = 9000
-        red_height = 9000
-        red_psi = -pi/2
-        blue_psi = pi/2
-        red_N = 0
-        red_E = 55e3
-        blue_N = red_N
-        blue_E = -red_E
-        DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
-                            'psi': red_psi
-                            }
-        DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
-                                    'psi': blue_psi
-                                    }
-        return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+    # def creat_initial_state():
+    #     # 飞机出生状态指定
+    #     # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
+    #     blue_height = 8000
+    #     red_height = 8000
+    #     red_psi = -pi/2
+    #     blue_psi = pi/2
+    #     red_N = 0
+    #     red_E = 55e3
+    #     blue_N = red_N
+    #     blue_E = -red_E
+    #     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
+    #                         'psi': red_psi
+    #                         }
+    #     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]),
+    #                                 'psi': blue_psi
+    #                                 }
+    #     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
     dt_action_cycle = dt_maneuver * action_cycle_multiplier # Agent takes action every dt_action_cycle seconds
 
@@ -341,7 +340,7 @@ if __name__=='__main__':
             episode_return = 0
             transition_dict = {'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [],}
 
-            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = creat_initial_state()
+            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = None, None # creat_initial_state()
 
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE,
                     red_init_ammo=6, blue_init_ammo=6)

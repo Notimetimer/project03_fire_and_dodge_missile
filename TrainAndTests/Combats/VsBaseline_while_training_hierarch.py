@@ -37,7 +37,7 @@ def test_worker(model_state_dict, rule_num,
     """
     device = torch.device(device_name)
 
-    env_args.R_cage = 55.00e3
+    env_args.R_cage = 62.00e3
     env_args.max_episode_len = 15*60
     
     # 1. 局部初始化环境 (必须在子进程内创建)

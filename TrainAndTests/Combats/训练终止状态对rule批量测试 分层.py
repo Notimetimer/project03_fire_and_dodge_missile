@@ -36,8 +36,8 @@ def sub_of_radian(rad):
     return (rad + np.pi) % (2 * np.pi) - np.pi
 
 def create_initial_state_worker(randomized=1):
-    blue_height = 9000
-    red_height = 9000
+    blue_height = 8000
+    red_height = 8000
     # 初始航向随机化
     red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-np.pi/3, np.pi/3) * randomized)
     blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-np.pi/3, np.pi/3) * randomized)

@@ -29,7 +29,7 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 
 def create_initial_state(randomized=0):
     """创建固定的初始状态"""
-    blue_height, red_height = 9000, 9000
+    blue_height, red_height = 8000, 9000
     red_psi, blue_psi = pi / 2, -pi / 2
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
     red_N, red_E = init_North, -45e3

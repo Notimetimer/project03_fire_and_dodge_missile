@@ -355,7 +355,7 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
 def create_initial_state_worker(randomized=0):
     # (复制原本的 create_initial_state 逻辑)
     blue_height = np.random.uniform(6000.0, 9000.0) * int(randomized) + \
-                9000.0 * (1-int(randomized))
+                8000.0 * (1-int(randomized))
     red_height = blue_height
     # 初始航向随机化
     red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
@@ -696,7 +696,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 55.00e3, # 45e3 # 55e3,
+    R_cage = 62.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
@@ -1178,13 +1178,16 @@ def run_MLP_simulation(
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
                 # --- 新增：从测试结果更新Elo分值和胜率表 ---
-                def update_ratings_from_test(test_results_data, test_type="test", current_main_elo=1200):
+                def update_ratings_from_test(test_results_data, test_type="test", current_main_elo=1200, valid_opponents=None):
                     """从测试结果更新Elo分值和胜率表"""
                     alpha_win = 0.05  # 胜率更新平滑系数
                     updated_main_elo = current_main_elo
                     
                     for rule_num, score, result2, wins, loses, draws in test_results_data:
                         opp_name = f"Rule_{rule_num}"
+                        # 跳过不在 init_elo_ratings 中的 rule，防止意外泄露进 WinRates/Elite_WinRates
+                        if valid_opponents is not None and opp_name not in valid_opponents:
+                            continue
                         actual_score = score  # score已经是胜率(0-1)
                         
                         # --- 更新胜率表 ---
@@ -1222,8 +1225,8 @@ def run_MLP_simulation(
                     return updated_main_elo
                 
                 # 应用测试结果更新 (两种测试都更新)
-                main_agent_elo = update_ratings_from_test(test_results, "test", main_agent_elo)
-                main_agent_elo = update_ratings_from_test(test_results_no_random, "test_no_random", main_agent_elo)
+                main_agent_elo = update_ratings_from_test(test_results, "test", main_agent_elo, valid_opponents=init_elo_ratings)
+                main_agent_elo = update_ratings_from_test(test_results_no_random, "test_no_random", main_agent_elo, valid_opponents=init_elo_ratings)
                 
                 print(f"  [Ratings Update] Main Agent Elo: {main_agent_elo:.0f}")
 
@@ -1564,8 +1567,7 @@ def run_MLP_simulation(
                     
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
-                # 清空 Buffer
-                transition_dict = copy.deepcopy(empty_transition_dict)
+                # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
                 
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
@@ -1590,10 +1592,10 @@ def run_MLP_simulation(
                     print(f"  [should_stir] Target cat entropy: {target_cat_entropy:.3f} (progress: {progress:.3f})")
                     
                     # 执行策略搅拌
-                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.1)
+                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.01)
                     
                     # 保存搅拌后的模型参数
-                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}_stirred.pt"))
+                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}.pt"))
                     torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
                     
                     # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
@@ -1607,7 +1609,7 @@ def run_MLP_simulation(
                     
                     print(f"  [should_stir] Actual cat entropy: {entropy_info['cat_entropy']:.3f}, bern entropy: {entropy_info['bern_entropy']:.3f}, cont entropy: {entropy_info['cont_entropy']:.3f}")
                     
-                    print(f"Saved Stirred Checkpoint: {actor_key}_stirred")
+                    print(f"Saved Stirred Checkpoint: {actor_key}")
                     print(f"Saved Current Actor: current_actor.pt")
                 else:
                     # 正常保存模型
@@ -1618,6 +1620,8 @@ def run_MLP_simulation(
                     print(f"Saved Checkpoint: {actor_key}")
                     print(f"Saved Current Actor: current_actor.pt")
                 
+                # 清空 Buffer（在搅拌之后）
+                transition_dict = copy.deepcopy(empty_transition_dict)
 
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表

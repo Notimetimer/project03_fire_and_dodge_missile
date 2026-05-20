@@ -11,12 +11,11 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,1,0]), action_cycle_multipl
     # Environment
     parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
-    parser.add_argument("--R-cage", type=float, default=55.00e3,
-                        help="")
     args = parser.parse_args()
 
     env = ChooseStrategyEnv(args, tacview_show=0) # 1
     env.dt_move = 0.04 # 0.025 0.02
+    env.R_cage = 62.00e3
     env.shielded = shielded
 
     def creat_initial_state(randomized=0):

@@ -31,15 +31,15 @@ dt_maneuver = 0.2  # 0.2
 # --- 2. 辅助函数 ---
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
 
-def create_initial_state():
-    """创建固定的初始状态"""
-    blue_height, red_height = 9000, 9000
-    red_psi, blue_psi = -pi / 2, pi / 2
-    red_N, red_E = 0, 55e3  # 45e3
-    blue_N, blue_E = red_N, -red_E # -45e3
-    DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
-    DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
-    return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+# def create_initial_state():
+#     """创建固定的初始状态"""
+#     blue_height, red_height = 8000, 8000
+#     red_psi, blue_psi = -pi / 2, pi / 2
+#     red_N, red_E = 0, 55e3  # 55e3
+#     blue_N, blue_E = red_N, -red_E # -45e3
+#     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
+#     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
+#     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
 # --- 3. 主程序 ---
 if __name__ == "__main__":
@@ -49,7 +49,7 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'NoILPFSP_分阶段_混规则对手_密集奖励函数调试'
+    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     
     'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'
@@ -132,7 +132,7 @@ if __name__ == "__main__":
             print("="*50)
 
             # 重置环境
-            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
+            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = None, None # create_initial_state()
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r', 
                       red_init_ammo=6, blue_init_ammo=6)
 

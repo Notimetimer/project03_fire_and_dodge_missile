@@ -537,8 +537,8 @@ def run_MLP_simulation(
     def create_initial_state():
         # 飞机出生状态指定
         # todo: 随机出生点，确保蓝方能躲掉但不躲就会被打到
-        blue_height = 9000
-        red_height = 9000
+        blue_height = 8000
+        red_height = 8000
         red_psi = -pi/2
         blue_psi = pi/2
         red_N = 0

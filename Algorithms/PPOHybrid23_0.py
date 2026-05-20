@@ -8,7 +8,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical, Bernoulli
-
+import copy
 import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
@@ -1659,7 +1659,7 @@ class PPOHybrid:
 
         return avg_actor_loss, avg_critic_loss, avg_c
     
-    def Stir(self, transition_dict, target_entropies, max_steps=50, lr=0.1):
+    def Stir(self, transition_dict, target_entropies, max_steps=50, lr=0.05):
         """
         策略搅拌：深拷贝网络并使用纯熵正则项更新，将策略分布推平到目标熵，
         同时尽可能保持原有动作的相对优先级排序不变。
@@ -1674,12 +1674,12 @@ class PPOHybrid:
             stirred_state_dict: 搅拌后的独立网络参数字典，与原计算图解耦
         """
         # 1. 深度拷贝网络，彻底解耦计算图
-        stirred_net = copy.deepcopy(self.actor.net)
-        stirred_net.train() # 确保开启梯度计算
+        stirred_net = copy.deepcopy(self.actor)
+        stirred_net.net.train() # 确保开启梯度计算
 
         # 2. 冻结特征提取层，仅放开动作头和 std 参数
         # 这是为了最大程度保护原始动作提取出的特征表达，防止由于大跨度更新彻底破坏策略逻辑
-        for name, param in stirred_net.named_parameters():
+        for name, param in stirred_net.net.named_parameters():
             if 'fc_' in name or 'log_std' in name:
                 param.requires_grad = True
             else:
@@ -1687,7 +1687,7 @@ class PPOHybrid:
 
         # 3. 必须使用无动量的 SGD！
         # 如果使用 Adam，动量积攒会导致 Logits 大幅超调，直接破坏原有的动作优先级排序
-        optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, stirred_net.parameters()), lr=lr)
+        optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, stirred_net.net.parameters()), lr=lr)
 
         # 4. 解析输入状态 (复用 update 的接口逻辑)
         if isinstance(transition_dict['states'], np.ndarray):
@@ -1695,12 +1695,10 @@ class PPOHybrid:
         else:
             states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
         
-        # 处理可能存在的 mask 逻辑
-        mask_on = transition_dict.get('mask_on', 1)
 
         # 5. 执行搅拌循环
         for step in range(max_steps):
-            outputs = stirred_net(states, mask_on=mask_on)
+            outputs = stirred_net.net(states)
             
             loss = 0.0
             current_entropies = {}
@@ -1728,29 +1726,26 @@ class PPOHybrid:
                     loss -= ent_cat
 
             # --- Bern ---
-            if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-                # clamp 防止被 mask 的 -1e8 导致 NaN
-                bern_logits = outputs['bern'].clamp(min=-1e8)
-                dist = Bernoulli(logits=bern_logits)
-                ent_bern = dist.entropy().sum(dim=-1).mean()
-                current_entropies['bern'] = ent_bern.item()
-                if ent_bern < target_entropies.get('bern', -float('inf')):
-                    loss -= ent_bern
+            # 跳过 Bernoulli 部分的搅拌，避免 mask_on 相关的复杂性
 
-            # 6. 检查退出条件：是否所有指定的动作头都达到了目标熵
-            all_met = True
-            for key, target in target_entropies.items():
-                if current_entropies.get(key, float('inf')) < target:
-                    all_met = False
-                    break
-            
-            if all_met or isinstance(loss, float): # loss 为 0.0 说明没有需要优化的项
-                break 
+            # 6. 如果没有需要优化的项，直接退出
+            if isinstance(loss, float):
+                break
 
             # 7. 反向传播与搅拌更新
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+            # 8. 更新后检查退出条件：所有指定的动作头都达到了目标熵则停止
+            # 注意：必须在 step() 之后检查，避免更新后过冲
+            all_met = True
+            for key, target in target_entropies.items():
+                if current_entropies.get(key, float('inf')) < target:
+                    all_met = False
+                    break
+            if all_met:
+                break
 
         # 8. 计算搅拌后的熵值
         with torch.no_grad():
@@ -1760,7 +1755,7 @@ class PPOHybrid:
             else:
                 states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
             
-            outputs = stirred_net(states, mask_on=transition_dict.get('mask_on', 1))
+            outputs = stirred_net.net(states)
             
             # 计算cat熵
             cat_entropy = 0.0
@@ -1771,12 +1766,8 @@ class PPOHybrid:
                     cat_entropy += dist.entropy().mean()
                 cat_entropy = cat_entropy.item()
             
-            # 计算bern熵
+            # Bern 熵不计算（搅拌时已跳过）
             bern_entropy = 0.0
-            if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
-                bern_logits = outputs['bern'].clamp(min=-1e8)
-                dist = Bernoulli(logits=bern_logits)
-                bern_entropy = dist.entropy().sum(dim=-1).mean().item()
             
             # 计算cont熵
             cont_entropy = 0.0
@@ -1786,6 +1777,7 @@ class PPOHybrid:
                 cont_entropy = dist.entropy().mean().item()
         
         # 9. 转换为 CPU 张量并 clone，彻底切断与本次优化过程及 GPU 的羁绊
+        # stirred_net 本身是 HybridActorWrapper 的深拷贝，直接取其 state_dict 即可与外部保存/加载保持一致
         stirred_state_dict = {k: v.cpu().clone() for k, v in stirred_net.state_dict().items()}
         
         # 返回搅拌后的状态字典和熵值信息

@@ -284,8 +284,8 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
 # 辅助：需要把 create_initial_state 定义在 worker 能访问的地方，或者 copy 进去
 def create_initial_state_worker(randomized=0):
     # (复制原本的 create_initial_state 逻辑)
-    blue_height = 9000
-    red_height = 9000
+    blue_height = 8000
+    red_height = 8000
     red_psi = -np.pi/2
     blue_psi = np.pi/2
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
@@ -569,7 +569,7 @@ def run_MLP_simulation(
     no_crash=1,
     dt_move=0.05,
     max_episode_duration=10*60,
-    R_cage = 55.00e3, # 45e3 # 55e3,
+    R_cage = 62.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
     should_kick = True,
