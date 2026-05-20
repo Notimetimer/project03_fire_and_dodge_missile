@@ -59,7 +59,7 @@ if __name__ == "__main__":
     args.agent_id = None # 172 # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
-    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=55.00e3) # 55e3
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3) # 55e3
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
