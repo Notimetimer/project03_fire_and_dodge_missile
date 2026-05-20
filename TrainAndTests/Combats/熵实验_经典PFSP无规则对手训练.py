@@ -6,7 +6,7 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None
 # resume_target_dir = r""
 
-mission_name = 'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'
+mission_name = 'IL_and_Pure经典PFSP_挑战_并行_分层_rule3_0.3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -31,7 +31,7 @@ action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 初始模仿对象
+IL_rule = 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
@@ -124,6 +124,7 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
+        vertices = None,
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0, 
