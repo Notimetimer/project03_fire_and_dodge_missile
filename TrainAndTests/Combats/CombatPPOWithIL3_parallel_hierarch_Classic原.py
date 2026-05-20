@@ -467,9 +467,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 blue_birth = settings['blue_birth']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
-                r_min, r_max = settings.get('R_cage_range', (55.00e3, 55.00e3))
+                # r_min, r_max = settings.get('R_cage_range', (55.00e3, 55.00e3))
                 fire_mask = settings.get('fire_mask', 1)
-                env.R_cage = np.random.uniform(r_min, r_max)
+                # env.R_cage = np.random.uniform(r_min, r_max)
                 
                 # 进场瞬间给全信息
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
@@ -695,7 +695,7 @@ def run_MLP_simulation(
     IL_rule=2,
     no_crash=1,
     dt_move=0.05,
-    max_episode_duration=10*60,
+    max_episode_duration=15*60,
     R_cage = 62.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
@@ -1249,7 +1249,7 @@ def run_MLP_simulation(
                     'weight_reward': weight_reward_0,
                     'red_birth': rb,
                     'blue_birth': bb,
-                    'R_cage_range': R_cage_range, # 将范围传给Worker
+                    # 'R_cage_range': R_cage_range, # 将范围传给Worker
                     'fire_mask': fire_mask,
                 }
                 

@@ -92,7 +92,7 @@ def worker_process_battle(args_pack):
     
     # 1. 初始化环境
     # 注意：这里假设 Namespace 参数是固定的，如果需要动态传参需修改 args_pack
-    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=600, R_cage=55e3), tacview_show=0)
+    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3), tacview_show=0)
     state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
     
     # 2. 初始化模型

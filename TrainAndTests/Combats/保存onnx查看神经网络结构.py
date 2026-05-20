@@ -58,7 +58,7 @@ def run_MLP_simulation(
     eps=0.2,
     k_entropy=None,
     label_smoothing=0.3,
-    max_episode_duration=10*60,
+    max_episode_duration=15*60,
     R_cage = 62.00e3, # 45e3 # 55e3,
     device = torch.device("cpu"),
 ):

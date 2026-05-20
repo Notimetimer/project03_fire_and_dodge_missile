@@ -61,7 +61,7 @@ min_height = 0
 max_height = 15e3
 
 R_cage = d1
-R_birth = 40e3
+R_birth = 55e3
 
 horizontal_center = np.array([0, 0])
 

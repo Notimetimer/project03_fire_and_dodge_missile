@@ -100,7 +100,7 @@ def worker_process_battle(args_pack):
     torch.set_num_threads(1) 
     
     # 1. 初始化环境
-    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=600, R_cage=55e3), tacview_show=0)
+    env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3), tacview_show=0)
     state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
     
     # 2. 初始化模型结构 (使用 CPU)

@@ -26,7 +26,7 @@ def run_self_play_collection(num_episodes=100, gamma=0.995):
         return
 
     # --- 2. 初始化环境与模型 ---
-    env_args = argparse.Namespace(max_episode_len=10*60, R_cage=45e3)
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3)
     hidden_dim = [128, 128, 128]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     

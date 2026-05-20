@@ -53,12 +53,12 @@ o00 = np.array([144.7, 13.4])  # 地理原点的经纬
 g_ = np.array([0, -g, 0])
 # theta_limit = 85 * pi / 180
 
-R_cage = 100e3
+R_cage = 62.00e3
 
 # min_height = 0
 # max_height = 15e3
 
-R_birth = 40e3
+R_birth = 55e3
 
 horizontal_center = np.array([0, 0])
 

@@ -118,7 +118,7 @@ if __name__=='__main__':
     # 在这里调用规则(编号)下的策略
     parser = argparse.ArgumentParser("UAV swarm confrontation")
     # Environment
-    parser.add_argument("--max-episode-len", type=float, default=10*60,  # 8 * 60,
+    parser.add_argument("--max-episode-len", type=float, default=15*60,  # 8 * 60,
                         help="maximum episode time length")  # test 真的中远距空战可能会持续20分钟那么长
     args = parser.parse_args()
 
