@@ -1170,9 +1170,10 @@ def run_MLP_simulation(
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
                 # --- 新增：从测试结果更新Elo分值和胜率表 ---
-                def update_ratings_from_test(test_results_data, test_type="test"):
+                def update_ratings_from_test(test_results_data, test_type="test", current_main_elo=1200):
                     """从测试结果更新Elo分值和胜率表"""
                     alpha_win = 0.05  # 胜率更新平滑系数
+                    updated_main_elo = current_main_elo
                     
                     for rule_num, score, result2, wins, loses, draws in test_results_data:
                         opp_name = f"Rule_{rule_num}"
@@ -1191,7 +1192,7 @@ def run_MLP_simulation(
                         
                         # --- 更新Elo分值 ---
                         if opp_name in elo_ratings:
-                            prev_main_elo = main_agent_elo
+                            prev_main_elo = updated_main_elo
                             adv_elo = elo_ratings[opp_name]
                             
                             # 更新主智能体Elo分
@@ -1201,19 +1202,20 @@ def run_MLP_simulation(
                             
                             elo_ratings[opp_name] = new_adv_elo
                             elo_ratings["__CURRENT_MAIN__"] = new_main_elo
-                            main_agent_elo = new_main_elo  # 更新局部变量
+                            updated_main_elo = new_main_elo  # 更新局部变量
                             
                             # 同步更新 Elite 池中已有的对手
                             if opp_name in elite_elo_ratings:
                                 elite_elo_ratings[opp_name] = new_adv_elo
                         else:
                             # 新对手，初始化Elo分值
-                            elo_ratings[opp_name] = main_agent_elo
+                            elo_ratings[opp_name] = updated_main_elo
                         
+                    return updated_main_elo
                 
                 # 应用测试结果更新 (两种测试都更新)
-                update_ratings_from_test(test_results, "test")
-                update_ratings_from_test(test_results_no_random, "test_no_random")
+                main_agent_elo = update_ratings_from_test(test_results, "test", main_agent_elo)
+                main_agent_elo = update_ratings_from_test(test_results_no_random, "test_no_random", main_agent_elo)
                 
                 print(f"  [Ratings Update] Main Agent Elo: {main_agent_elo:.0f}")
 
@@ -1244,25 +1246,49 @@ def run_MLP_simulation(
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
                 
-            # PFSP_WR 特殊处理：无放回采样
+            # PFSP_stratified 特殊处理：分段采样
             selected_opponents = []
-            if self_play_type == "PFSP_WR":
-                # 获取所有可用对手
+            if self_play_type == "PFSP_stratified":
+                # 分段采样逻辑
+                # 1. 2/3（向上取整）的worker按PFSP方式匹配对手
+                pfsp_count = int(np.ceil(num_workers * 2.0 / 3.0))
+                stratified_count = num_workers - pfsp_count
+                
+                # 获取PFSP概率和对手列表
                 probs, opponent_keys = get_opponent_probabilities(
                     WinRates,
                     Elite_WinRates,
-                    SP_type="PFSP_classic",  # 使用PFSP_classic获取概率
+                    SP_type="PFSP_classic",
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
                 
-                if len(opponent_keys) < num_workers:
-                    # 对手数量少于worker数，使用有放回采样（与PFSP_classic一致）
-                    selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
-                else:
-                    # 对手数量>=worker数，使用无放回采样
-                    selected_opponents = np.random.choice(opponent_keys, size=num_workers, replace=False).tolist()
+                # 第一段：PFSP采样
+                pfsp_opponents = np.random.choice(opponent_keys, size=pfsp_count, p=probs).tolist()
+                
+                # 第二段：剩余1/3按精英胜率分位数等距采样（允许重复）
+                stratified_opponents = []
+                if stratified_count > 0 and len(Elite_WinRates) > 0:
+                    # 获取精英池对手和胜率
+                    elite_keys = list(Elite_WinRates.keys())
+                    elite_win_rates = [Elite_WinRates[k] for k in elite_keys]
+                    
+                    # 按胜率排序
+                    sorted_indices = np.argsort(elite_win_rates)
+                    sorted_keys = [elite_keys[i] for i in sorted_indices]
+                    
+                    # 等距取n个分位数点（带随机偏移）
+                    for i in range(stratified_count):
+                        # 计算分位数位置，添加随机偏移[-0.1, 0.1]
+                        base_pos = i / max(stratified_count - 1, 1) if stratified_count > 1 else 0.5
+                        random_offset = np.random.uniform(-0.1, 0.1)
+                        pos = np.clip(base_pos + random_offset, 0, 1)
+                        index = int(pos * (len(sorted_keys) - 1))
+                        stratified_opponents.append(sorted_keys[index])
+                
+                # 合并两段选择的对手
+                selected_opponents = pfsp_opponents + stratified_opponents
             else:
                 # 其他采样方式，保持原有逻辑
                 probs, opponent_keys = get_opponent_probabilities(
