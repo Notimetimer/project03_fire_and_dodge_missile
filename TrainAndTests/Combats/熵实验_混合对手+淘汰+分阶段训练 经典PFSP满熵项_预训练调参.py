@@ -6,9 +6,11 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None 
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Pure经典PFSP_smoothing_0.01-run-20260518-224143"
 
-mission_name = 'IL_and_Pure经典PFSP_smoothing_0.01'
+mission_name = 'IL_and_Pure经典PFSP_smoothing_0.01_rule2'
 
 # 超参数
+stir_and_save = 1 # 存储策略熵搅拌后的版本
+
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 70 # 180
@@ -135,6 +137,7 @@ if __name__=='__main__':
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0, 
+        should_stir=stir_and_save,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

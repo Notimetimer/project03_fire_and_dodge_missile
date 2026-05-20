@@ -729,6 +729,7 @@ def run_MLP_simulation(
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     POMDP = 0, # 0全信息，1部分信息
+    should_stir = 0, # 是否搅拌策略参数后存储
 ):
 
     actor_lr0 = actor_lr
@@ -820,29 +821,36 @@ def run_MLP_simulation(
 
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
-        actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
-        if len(actor_files) > 0:
-            def extract_num(f):
-                m = re.search(r'actor_rein(\d+)\.pt$', f)
-                return int(m.group(1)) if m else -1
-            latest_actor = max(actor_files, key=extract_num)
-            student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
-            print(f"Loaded actor from: {latest_actor}")
-            
-            critic_path = os.path.join(log_dir, "critic.pt")
-            if os.path.exists(critic_path):
-                student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
-                print(f"Loaded critic from: {critic_path}")
-            
-            opt_path = os.path.join(log_dir, "optimizers_state.pt")
-            if os.path.exists(opt_path):
-                try:
-                    opt_states = torch.load(opt_path, map_location=device)
-                    student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
-                    student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
-                    print("Loaded optimizer states.")
-                except Exception as e:
-                    print(f"Failed to load optimizers: {e}")
+        # 优先加载current_actor（确保不加载搅拌后的参数）
+        current_actor_path = os.path.join(log_dir, "current_actor.pt")
+        if os.path.exists(current_actor_path):
+            student_agent.actor.load_state_dict(torch.load(current_actor_path, map_location=device))
+            print(f"Loaded current actor from: {current_actor_path}")
+        else:
+            # 如果current_actor不存在，回退到原来的逻辑
+            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+            if len(actor_files) > 0:
+                def extract_num(f):
+                    m = re.search(r'actor_rein(\d+)\.pt$', f)
+                    return int(m.group(1)) if m else -1
+                latest_actor = max(actor_files, key=extract_num)
+                student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
+                print(f"Loaded actor from: {latest_actor}")
+        
+        critic_path = os.path.join(log_dir, "critic.pt")
+        if os.path.exists(critic_path):
+            student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
+            print(f"Loaded critic from: {critic_path}")
+        
+        opt_path = os.path.join(log_dir, "optimizers_state.pt")
+        if os.path.exists(opt_path):
+            try:
+                opt_states = torch.load(opt_path, map_location=device)
+                student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
+                student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
+                print("Loaded optimizer states.")
+            except Exception as e:
+                print(f"Failed to load optimizers: {e}")
     
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
@@ -1561,9 +1569,55 @@ def run_MLP_simulation(
                 
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                print(f"Saved Checkpoint: {actor_key}")
+                
+                if should_stir:
+                    # 策略搅拌：计算目标熵并执行搅拌
+                    # cat熵从0step的2到20Mstep的1.5线性退火
+                    max_steps_for_stir = 20 * 1e6  # 20M steps
+                    cat_entropy_start = 2.0
+                    cat_entropy_end = 1.5
+                    
+                    # 线性插值计算当前目标cat熵
+                    progress = min(total_steps / max_steps_for_stir, 1.0)
+                    target_cat_entropy = cat_entropy_start + (cat_entropy_end - cat_entropy_start) * progress
+                    
+                    target_entropies = {
+                        'cont': 0.0,  # 连续动作目标熵为0
+                        'cat': target_cat_entropy,  # 离散动作线性退火
+                        'bern': 0.0  # 伯努利动作目标熵为0
+                    }
+                    
+                    print(f"  [should_stir] Target cat entropy: {target_cat_entropy:.3f} (progress: {progress:.3f})")
+                    
+                    # 执行策略搅拌
+                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.1)
+                    
+                    # 保存搅拌后的模型参数
+                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}_stirred.pt"))
+                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                    
+                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                    
+                    # 记录搅拌后的熵值
+                    logger.add("stir/cat_entropy", entropy_info['cat_entropy'], total_steps)
+                    logger.add("stir/bern_entropy", entropy_info['bern_entropy'], total_steps)
+                    logger.add("stir/cont_entropy", entropy_info['cont_entropy'], total_steps)
+                    logger.add("stir/target_cat_entropy", target_cat_entropy, total_steps)
+                    
+                    print(f"  [should_stir] Actual cat entropy: {entropy_info['cat_entropy']:.3f}, bern entropy: {entropy_info['bern_entropy']:.3f}, cont entropy: {entropy_info['cont_entropy']:.3f}")
+                    
+                    print(f"Saved Stirred Checkpoint: {actor_key}_stirred")
+                    print(f"Saved Current Actor: current_actor.pt")
+                else:
+                    # 正常保存模型
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                    print(f"Saved Checkpoint: {actor_key}")
+                    print(f"Saved Current Actor: current_actor.pt")
+                
 
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表

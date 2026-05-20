@@ -1659,3 +1659,140 @@ class PPOHybrid:
 
         return avg_actor_loss, avg_critic_loss, avg_c
     
+    def Stir(self, transition_dict, target_entropies, max_steps=50, lr=0.1):
+        """
+        策略搅拌：深拷贝网络并使用纯熵正则项更新，将策略分布推平到目标熵，
+        同时尽可能保持原有动作的相对优先级排序不变。
+        
+        Args:
+            transition_dict: 同 update 方法的输入，用于提供计算图所需的 states (和 mask)
+            target_entropies: dict, 例如 {'cont': 2.0, 'cat': 1.5, 'bern': 0.6}
+            max_steps: 最大允许的搅拌迭代次数
+            lr: SGD 学习率 (不宜过大，否则容易导致离散动作排序翻转)
+            
+        Returns:
+            stirred_state_dict: 搅拌后的独立网络参数字典，与原计算图解耦
+        """
+        # 1. 深度拷贝网络，彻底解耦计算图
+        stirred_net = copy.deepcopy(self.actor.net)
+        stirred_net.train() # 确保开启梯度计算
+
+        # 2. 冻结特征提取层，仅放开动作头和 std 参数
+        # 这是为了最大程度保护原始动作提取出的特征表达，防止由于大跨度更新彻底破坏策略逻辑
+        for name, param in stirred_net.named_parameters():
+            if 'fc_' in name or 'log_std' in name:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+        # 3. 必须使用无动量的 SGD！
+        # 如果使用 Adam，动量积攒会导致 Logits 大幅超调，直接破坏原有的动作优先级排序
+        optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, stirred_net.parameters()), lr=lr)
+
+        # 4. 解析输入状态 (复用 update 的接口逻辑)
+        if isinstance(transition_dict['states'], np.ndarray):
+            states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
+        else:
+            states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        
+        # 处理可能存在的 mask 逻辑
+        mask_on = transition_dict.get('mask_on', 1)
+
+        # 5. 执行搅拌循环
+        for step in range(max_steps):
+            outputs = stirred_net(states, mask_on=mask_on)
+            
+            loss = 0.0
+            current_entropies = {}
+
+            # --- Cont ---
+            if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+                mu, std = outputs['cont']
+                dist = SquashedNormal(mu, std)
+                # 平均到每个样本上
+                ent_cont = dist.entropy().mean()
+                current_entropies['cont'] = ent_cont.item()
+                # 如果当前熵低于目标值，则加上负熵作为 Loss (最小化负熵 = 最大化熵)
+                if ent_cont < target_entropies.get('cont', -float('inf')):
+                    loss -= ent_cont 
+
+            # --- Cat ---
+            if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                cat_probs_list = outputs['cat']
+                ent_cat = 0.0
+                for probs in cat_probs_list:
+                    dist = Categorical(probs=probs)
+                    ent_cat += dist.entropy().mean()
+                current_entropies['cat'] = ent_cat.item()
+                if ent_cat < target_entropies.get('cat', -float('inf')):
+                    loss -= ent_cat
+
+            # --- Bern ---
+            if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+                # clamp 防止被 mask 的 -1e8 导致 NaN
+                bern_logits = outputs['bern'].clamp(min=-1e8)
+                dist = Bernoulli(logits=bern_logits)
+                ent_bern = dist.entropy().sum(dim=-1).mean()
+                current_entropies['bern'] = ent_bern.item()
+                if ent_bern < target_entropies.get('bern', -float('inf')):
+                    loss -= ent_bern
+
+            # 6. 检查退出条件：是否所有指定的动作头都达到了目标熵
+            all_met = True
+            for key, target in target_entropies.items():
+                if current_entropies.get(key, float('inf')) < target:
+                    all_met = False
+                    break
+            
+            if all_met or isinstance(loss, float): # loss 为 0.0 说明没有需要优化的项
+                break 
+
+            # 7. 反向传播与搅拌更新
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        # 8. 计算搅拌后的熵值
+        with torch.no_grad():
+            # 使用输入的状态计算熵值
+            if isinstance(transition_dict['states'], np.ndarray):
+                states = torch.tensor(transition_dict['states'], dtype=torch.float).to(self.device)
+            else:
+                states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+            
+            outputs = stirred_net(states, mask_on=transition_dict.get('mask_on', 1))
+            
+            # 计算cat熵
+            cat_entropy = 0.0
+            if 'cat' in self.actor.action_dims and sum(self.actor.action_dims['cat']) > 0:
+                cat_probs_list = outputs['cat']
+                for probs in cat_probs_list:
+                    dist = Categorical(probs=probs)
+                    cat_entropy += dist.entropy().mean()
+                cat_entropy = cat_entropy.item()
+            
+            # 计算bern熵
+            bern_entropy = 0.0
+            if 'bern' in self.actor.action_dims and self.actor.action_dims['bern'] > 0:
+                bern_logits = outputs['bern'].clamp(min=-1e8)
+                dist = Bernoulli(logits=bern_logits)
+                bern_entropy = dist.entropy().sum(dim=-1).mean().item()
+            
+            # 计算cont熵
+            cont_entropy = 0.0
+            if 'cont' in self.actor.action_dims and self.actor.action_dims['cont'] > 0:
+                mu, std = outputs['cont']
+                dist = SquashedNormal(mu, std)
+                cont_entropy = dist.entropy().mean().item()
+        
+        # 9. 转换为 CPU 张量并 clone，彻底切断与本次优化过程及 GPU 的羁绊
+        stirred_state_dict = {k: v.cpu().clone() for k, v in stirred_net.state_dict().items()}
+        
+        # 返回搅拌后的状态字典和熵值信息
+        entropy_info = {
+            'cat_entropy': cat_entropy,
+            'bern_entropy': bern_entropy,
+            'cont_entropy': cont_entropy
+        }
+        
+        return stirred_state_dict, entropy_info
