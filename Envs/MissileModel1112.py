@@ -178,7 +178,7 @@ class missile_class:
         self.nzt = 0  # 过载量记忆值
         self.nyt = 0
         self.last_target_pos = None
-        self.last_target_t = 0
+        self.last_target_t = None
         self.last_target_v = None
         self.radar_on = False
         self.lock_on = False
