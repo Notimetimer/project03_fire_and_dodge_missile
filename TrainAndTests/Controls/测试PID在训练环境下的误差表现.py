@@ -54,10 +54,12 @@ def run_single_episode(episode_id):
     v_error_ema = 0.0
     psi_error_ema = 0.0
     theta_error_ema = 0.0
+    ao_ema = 0.0
     
     v_error_sum = 0.0
     psi_error_sum = 0.0
     theta_error_sum = 0.0
+    ao_sum = 0.0
     steps = 0
     episode_return = 0.0
     
@@ -85,21 +87,25 @@ def run_single_episode(episode_id):
         v_error_ema = beta_ao * v_error_ema + (1 - beta_ao) * abs(env.v_error)
         psi_error_ema = beta_ao * psi_error_ema + (1 - beta_ao) * abs(env.psi_error)
         theta_error_ema = beta_ao * theta_error_ema + (1 - beta_ao) * abs(env.theta_error)
+        ao_ema = beta_ao * ao_ema + (1 - beta_ao) * env.AO
         
         v_error_sum += abs(env.v_error)
         psi_error_sum += abs(env.psi_error)
         theta_error_sum += abs(env.theta_error)
+        ao_sum += env.AO
         
     # 回合结束，进行 EMA 无偏矫正计算
     unbias_factor = (1 - beta_ao ** max(1, steps))
     final_v_ema = v_error_ema / unbias_factor
     final_psi_ema = (psi_error_ema / unbias_factor)
     final_theta_ema = (theta_error_ema / unbias_factor)
+    final_ao_ema = (ao_ema / unbias_factor)
     
     # 算术平均对照组
     avg_v = v_error_sum / max(1, steps)
     avg_psi = (psi_error_sum / max(1, steps))
     avg_theta = (theta_error_sum / max(1, steps))
+    avg_ao = (ao_sum / max(1, steps))
     
     # 打包输出分析数据
     return {
@@ -109,7 +115,7 @@ def run_single_episode(episode_id):
         'stall': env.stall,
         'crash': env.crash,
         'break_up': getattr(env, 'break_up', False),
-        'fail_neg_alpha': (env.RUAV.alpha_air * 180 / pi < -7) if env.fail else False,
+        'fail_neg_alpha': (env.RUAV.alpha_air * 180 / pi < -8) if env.fail else False,
         'fail_pos_alpha': (env.RUAV.alpha_air * 180 / pi > 26) if env.fail else False,
         'fail_pos_ny': (env.RUAV.Ny > 9.5) if env.fail else False,
         'fail_neg_ny': (env.RUAV.Ny < -3) if env.fail else False,
@@ -117,9 +123,11 @@ def run_single_episode(episode_id):
         'v_ema': final_v_ema,
         'psi_ema': final_psi_ema,
         'theta_ema': final_theta_ema,
+        'ao_ema': final_ao_ema,
         'v_avg': avg_v,
         'psi_avg': avg_psi,
-        'theta_avg': avg_theta
+        'theta_avg': avg_theta,
+        'ao_avg': avg_ao,
     }
 
 if __name__ == '__main__':
@@ -143,7 +151,7 @@ if __name__ == '__main__':
             results.append(res)
             print(f"[{idx+1:02d}/{num_episodes}] 回合{'成功' if not res['fail'] else '坠机/失速/解体'} | "
                   f"存活步数: {res['steps']:04d} | 奖励: {res['return']:7.1f} | "
-                  f"EMA -> V: {res['v_ema']:6.2f}m/s, Psi: {res['psi_ema']:5.2f}°, Theta: {res['theta_ema']:5.2f}°")
+                  f"EMA -> V: {res['v_ema']:6.2f}m/s, AO: {res['ao_ema']:5.2f}°, Psi: {res['psi_ema']:5.2f}°, Theta: {res['theta_ema']:5.2f}°")
                   
     # 对收集到的所有回合作汇总统计
     fail_cnt = sum([1 for r in results if r['fail']])
@@ -160,14 +168,17 @@ if __name__ == '__main__':
     v_emas = [r['v_ema'] for r in results]
     psi_emas = [r['psi_ema'] for r in results]
     theta_emas = [r['theta_ema'] for r in results]
+    ao_emas = [r['ao_ema'] for r in results]
 
     mean_v_ema, max_v_ema, min_v_ema = np.mean(v_emas), np.max(v_emas), np.min(v_emas)
     mean_psi_ema, max_psi_ema, min_psi_ema = np.mean(psi_emas), np.max(psi_emas), np.min(psi_emas)
     mean_theta_ema, max_theta_ema, min_theta_ema = np.mean(theta_emas), np.max(theta_emas), np.min(theta_emas)
+    mean_ao_ema, max_ao_ema, min_ao_ema = np.mean(ao_emas), np.max(ao_emas), np.min(ao_emas)
     
     mean_v_avg = np.mean([r['v_avg'] for r in results])
     mean_psi_avg = np.mean([r['psi_avg'] for r in results])
     mean_theta_avg = np.mean([r['theta_avg'] for r in results])
+    mean_ao_avg = np.mean([r['ao_avg'] for r in results])
     
     mean_return = np.mean([r['return'] for r in results])
     survive_rate = (num_episodes - fail_cnt) / num_episodes * 100.0
@@ -184,9 +195,10 @@ if __name__ == '__main__':
     print(f" 详细诱因:   负迎角 {neg_alpha_cnt}次 | 正迎角 {pos_alpha_cnt}次 | 正过载 {pos_ny_cnt}次 | 负过载 {neg_ny_cnt}次")
     print("-" * 50)
     print("[由于训练场景生成的机动过激，PID 暴露的均值 EMA 基准底板]")
-    print(f" 基准速度误差 (v_ema):       {mean_v_ema:7.3f} m/s | 带宽: [{min_v_ema:6.2f}, {max_v_ema:6.2f}]")
-    print(f" 基准航向误差 (psi_ema):     {mean_psi_ema:7.3f} °   | 带宽: [{min_psi_ema:6.2f}, {max_psi_ema:6.2f}]")
-    print(f" 基准俯仰角误差 (theta_ema): {mean_theta_ema:7.3f} °   | 带宽: [{min_theta_ema:6.2f}, {max_theta_ema:6.2f}]")
+    print(f" 基准速度误差 (v_ema):       {mean_v_ema:7.3f} m/s | 范围: [{min_v_ema:6.2f}, {max_v_ema:6.2f}]")
+    print(f" 基准航向误差 (psi_ema):     {mean_psi_ema:7.3f} °   | 范围: [{min_psi_ema:6.2f}, {max_psi_ema:6.2f}]")
+    print(f" 基准俯仰角误差 (theta_ema): {mean_theta_ema:7.3f} °   | 范围: [{min_theta_ema:6.2f}, {max_theta_ema:6.2f}]")
+    print(f" 基准指向误差 (ao_ema): {mean_ao_ema:7.3f} °   | 范围: [{min_ao_ema:6.2f}, {max_ao_ema:6.2f}]")
     print("-" * 50)
     print("[算术平均误差值对照]")
     print(f" 基准速度算术误差:           {mean_v_avg:.3f} m/s")

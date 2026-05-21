@@ -49,7 +49,7 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'IL_and_Pure经典PFSP_挑战_并行_分层_rule3_0.3'
+    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3'
     
     'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'

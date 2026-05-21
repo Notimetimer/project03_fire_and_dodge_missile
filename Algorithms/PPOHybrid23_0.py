@@ -635,6 +635,7 @@ class HybridActorWrapper(nn.Module):
         metrics = {
             'nll_cont': None, 'nll_cat': None, 'nll_bern': None,
             'entropy_cont': None, 'entropy_cat': None, 'entropy_bern': None,
+            'accuracy_cont': None, 'accuracy_cat': None, 'accuracy_bern': None,
             'adv_positive_frac': None,
         }
 
@@ -647,8 +648,11 @@ class HybridActorWrapper(nn.Module):
             nll_cont = (-dist.log_prob(0, u_expert).sum(dim=-1)).mean()
             ent_cont_raw = dist.entropy()
             ent_cont = ent_cont_raw.sum(dim=-1).mean() if ent_cont_raw.dim() > 1 else ent_cont_raw.mean()
+            # Accuracy: mu的误差模均值
+            accuracy_cont = torch.norm(mu - u_expert, dim=-1).mean()
             metrics['nll_cont'] = nll_cont.item()
             metrics['entropy_cont'] = ent_cont.item()
+            metrics['accuracy_cont'] = accuracy_cont.item()
 
         # --- Cat ---
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0 and actor_outputs.get('cat') is not None:
@@ -656,14 +660,21 @@ class HybridActorWrapper(nn.Module):
             expert_cat = expert_actions['cat'].long()
             nll_cat_sum = torch.zeros(states.size(0), device=self.device)
             ent_cat_sum = torch.zeros(states.size(0), device=self.device)
+            correct_cat_sum = torch.zeros(states.size(0), device=self.device)
             for i, probs in enumerate(cat_probs_list):
                 expert_idx = expert_cat[:, i]
                 log_probs = torch.log(probs + 1e-10)
                 nll_cat_sum += -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
                 dist = Categorical(probs=probs)
                 ent_cat_sum += dist.entropy()
+                # Accuracy: argmax和示范的action完全一样
+                pred_idx = torch.argmax(probs, dim=1)
+                correct_cat_sum += (pred_idx == expert_idx).float()
             metrics['nll_cat'] = nll_cat_sum.mean().item()
             metrics['entropy_cat'] = ent_cat_sum.mean().item()
+            # 计算所有cat动作的平均准确度
+            total_cat_dims = len(cat_probs_list)
+            metrics['accuracy_cat'] = (correct_cat_sum / total_cat_dims).mean().item()
 
         # --- Bern ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and actor_outputs.get('bern') is not None:
@@ -672,8 +683,12 @@ class HybridActorWrapper(nn.Module):
             target = expert_actions['bern']
             nll_bern = (-dist.log_prob(target).sum(dim=-1)).mean()
             ent_bern = dist.entropy().sum(dim=-1).mean()
+            # Accuracy: argmax和示范的action完全一样
+            pred_bern = (bern_logits > 0).float()
+            accuracy_bern = (pred_bern == target).float().mean()
             metrics['nll_bern'] = nll_bern.item()
             metrics['entropy_bern'] = ent_bern.item()
+            metrics['accuracy_bern'] = accuracy_bern.item()
 
         # --- adv_positive_frac ---
         if advantages is not None:
@@ -1647,6 +1662,9 @@ class PPOHybrid:
         self.marwil_entropy_cont = monitor_metrics['entropy_cont']
         self.marwil_entropy_cat = monitor_metrics['entropy_cat']
         self.marwil_entropy_bern = monitor_metrics['entropy_bern']
+        self.marwil_accuracy_cont = monitor_metrics['accuracy_cont']
+        self.marwil_accuracy_cat = monitor_metrics['accuracy_cat']
+        self.marwil_accuracy_bern = monitor_metrics['accuracy_bern']
         self.marwil_weight_mean = avg_weight_mean
         self.marwil_weight_max = avg_weight_max
         self.marwil_weight_min = avg_weight_min

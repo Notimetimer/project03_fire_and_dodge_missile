@@ -178,7 +178,7 @@ class missile_class:
         self.nzt = 0  # 过载量记忆值
         self.nyt = 0
         self.last_target_pos = None
-        self.last_target_t = None
+        self.last_target_t = 0
         self.last_target_v = None
         self.radar_on = False
         self.lock_on = False
@@ -189,6 +189,7 @@ class missile_class:
         self.close_rate = None
         self.off_lock = False
         self.ground_close_rate = None
+        self.dt = 0.04 # 初始值
 
     def Cd(self, mach):
         lis0 = np.array([
@@ -278,20 +279,52 @@ class missile_class:
         # print("中制导")
         
         if not datalink:
-            # 线性递推预测目标位置
+            "线性递推加误差"
+            t_lost_data = self.t - self.last_target_t
             if self.last_target_t is None:
-                vtt_predict = self.vt0_
+                vtt_predict = self.vt0_.copy()
                 ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
+                # 保存预测状态，便于后续累积
+                self.last_target_v = vtt_predict.copy()
+                self.last_target_pos = ptt_predict.copy()
+                self.last_target_t = self.t
             else:
-                vtt_predict = self.last_target_v * np.exp(-(self.t - self.last_target_t) / 15.0)  # * 0.5 #  0.8 # 预测速度带衰减
-                ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
-                ptt_predict[1] = max(ptt_predict[1], 1000) # 禁止往地底下线性递推
+                # 上一帧预测速度
+                vtt_predict = self.last_target_v.copy()
+                # 未知机动噪声（随机游走）
+                sigma_a = 8.0 # 8.0   # m/s^2，可调
+                a_noise = np.random.randn(3) * sigma_a
+                # 高度方向弱一些
+                a_noise[1] *= 0.1
+                # 更新预测速度：误差累积
+                vtt_predict += a_noise * self.dt
+                # 限制最大预测速度
+                vmax = np.inf # 450.0
+                v_norm = np.linalg.norm(vtt_predict)
+                if v_norm > vmax:
+                    vtt_predict *= vmax / v_norm
+                self.last_target_v = vtt_predict.copy()
+                # 更新预测位置
+                ptt_predict = self.last_target_pos + vtt_predict * self.dt
+                # 防止预测扎地
+                ptt_predict[1] = max(ptt_predict[1], 1000.0)
+                self.last_target_pos = ptt_predict.copy()
+            
+            "原位置预测模型，没有考虑误差，精度过高被钻了空子"
+            # # 线性递推预测目标位置
+            # if self.last_target_t is None:
+            #     vtt_predict = self.vt0_
+            #     ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
+            # else:
+            #     vtt_predict = self.last_target_v * np.exp(-(self.t - self.last_target_t) / 15.0)  # * 0.5 #  0.8 # 预测速度带衰减
+            #     ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
+            #     ptt_predict[1] = max(ptt_predict[1], 1000) # 禁止往地底下线性递推
 
             if norm(ptt_predict-p_missile_) < self.detect_range:
                 self.radar_on = True
             else:
                 self.radar_on = False
-        else:
+        else: # 有数据链支持
             self.radar_on = False
             vtt_predict = v_target_
             ptt_predict = p_target_
@@ -469,6 +502,7 @@ class missile_class:
         '''
         输入结构：是否看到目标(1)，目标的位置(3)、目标的速度(3)
         '''
+        self.dt = dt
         # 根据目标信息产生制导指令
         visable = target_information[0]
         # if visable==0:
