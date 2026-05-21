@@ -237,8 +237,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # crank引导
         if len(alive_ally_missiles) > 0 and not warning:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-            r_constraint += (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
-            r_constraint += (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 5 * 
+            r_constraint += 3*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+            r_constraint += 3*(1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 5 * 
         # 防御引导
         if warning:
             # 受到威胁应该三九线/置尾和下高
