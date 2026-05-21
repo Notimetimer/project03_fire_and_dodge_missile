@@ -331,8 +331,8 @@ class missile_class:
 
         # 初制导阶段根据距离判断是否需要靠导弹来高抛
         if self.t < self.stage2_end:
-            if distance > 50e3:
-                nyt1 += (pi/6-self.theta) * 4 # 2
+            if distance > 30e3: # 50e3
+                nyt1 += (pi/6-self.theta) * 4.5 # 4
                 # nyt1 += max(0, (pi/6-self.theta)) * 4 # 2
 
         # 时间过半以后如果目标低于当前飞行高度，不能还在爬升

@@ -25,6 +25,8 @@ ALPHA_RAW = 0.1   # 原始噪声背景透明度 (0.1 风格)
 # 数据路径
 returns_path = os.path.join(project_root, "logs", "ReturnOfControllerTraining.csv")
 survive_rates_path = os.path.join(project_root, "logs", "SurviveRateOfControllerTraining.csv")
+returns_auto_path = os.path.join(project_root, "logs", "ReturnOfControllerTraining_AutoStd.csv")
+survive_rates_auto_path = os.path.join(project_root, "logs", "SurviveRateOfControllerTraining_AutoStd.csv")
 psi_error_path = os.path.join(project_root, "logs", "EMAPsiErrorOfControllerTraining.csv")
 theta_error_path = os.path.join(project_root, "logs", "EMAThetaErrorOfControllerTraining.csv")
 v_error_path = os.path.join(project_root, "logs", "EMAVErrorOfControllerTraining.csv")
@@ -54,17 +56,29 @@ ax1_l = fig1.add_subplot(1, 1, 1)
 # 准备数据
 df_reward = prepare_metric_df(returns_path, "Episode Reward", smooth_p=35)
 df_survive = prepare_metric_df(survive_rates_path, "Survive Rate", smooth_p=20)
+df_reward_auto = prepare_metric_df(returns_auto_path, "Episode Reward", smooth_p=35)
+df_survive_auto = prepare_metric_df(survive_rates_auto_path, "Survive Rate", smooth_p=20)
 
 # 绘制左轴 (Reward)
-color_reward = sns.color_palette("muted")[3]
+color_reward = "tab:red"
 sns.lineplot(data=df_reward, x='Step', y='Raw', ax=ax1_l, color=color_reward, linewidth=LW_RAW, alpha=ALPHA_RAW, legend=False)
-sns.lineplot(data=df_reward, x='Step', y='Smooth', ax=ax1_l, color=color_reward, linewidth=LW_SMOOTH, label='Episode Reward')
+sns.lineplot(data=df_reward, x='Step', y='Smooth', ax=ax1_l, color=color_reward, linewidth=LW_SMOOTH, label='Episode Reward (Limited Std)')
+
+# 绘制左轴 (Reward AutoStd)
+color_reward_auto = "tab:orange"
+sns.lineplot(data=df_reward_auto, x='Step', y='Raw', ax=ax1_l, color=color_reward_auto, linewidth=LW_RAW, alpha=ALPHA_RAW, legend=False)
+sns.lineplot(data=df_reward_auto, x='Step', y='Smooth', ax=ax1_l, color=color_reward_auto, linewidth=LW_SMOOTH, label='Episode Reward')
 
 # 绘制右轴 (Survive Rate)
 ax1_r = ax1_l.twinx()
-color_survive = sns.color_palette("muted")[0]
+color_survive = "tab:blue"
 sns.lineplot(data=df_survive, x='Step', y='Raw', ax=ax1_r, color=color_survive, linewidth=LW_RAW, alpha=ALPHA_RAW, legend=False)
-sns.lineplot(data=df_survive, x='Step', y='Smooth', ax=ax1_r, color=color_survive, linewidth=LW_SMOOTH, label='Survive Rate')
+sns.lineplot(data=df_survive, x='Step', y='Smooth', ax=ax1_r, color=color_survive, linewidth=LW_SMOOTH, label='Survive Rate (Limited Std)')
+
+# 绘制右轴 (Survive Rate AutoStd)
+color_survive_auto = "tab:green"
+sns.lineplot(data=df_survive_auto, x='Step', y='Raw', ax=ax1_r, color=color_survive_auto, linewidth=LW_RAW, alpha=ALPHA_RAW, legend=False)
+sns.lineplot(data=df_survive_auto, x='Step', y='Smooth', ax=ax1_r, color=color_survive_auto, linewidth=LW_SMOOTH, label='Survive Rate')
 
 # 合并图例
 ax1_r.legend_.remove() if ax1_r.get_legend() else None 
