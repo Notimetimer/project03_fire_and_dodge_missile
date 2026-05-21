@@ -332,7 +332,8 @@ class missile_class:
         # 初制导阶段根据距离判断是否需要靠导弹来高抛
         if self.t < self.stage2_end:
             if distance > 50e3:
-                nyt1 += max(0, (pi/6-self.theta)) * 4 # 2
+                nyt1 += (pi/6-self.theta) * 4 # 2
+                # nyt1 += max(0, (pi/6-self.theta)) * 4 # 2
 
         # 时间过半以后如果目标低于当前飞行高度，不能还在爬升
         delta_height = self.delta_height
@@ -553,8 +554,8 @@ class missile_class:
         # 速率更新
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
         vmt += v_dot * dt
-        # 限马赫数
-        vmt = min(vmt, self.max_mach * sound_speed)
+        # # 限马赫数
+        # vmt = min(vmt, self.max_mach * sound_speed)
         # 过载限制2
         self.get_max_g(Rho, vmt) # 动态改变最大过载
         nt = np.clip(np.linalg.norm([nyt, nzt]), 0, self.max_g)
@@ -663,8 +664,8 @@ if __name__ == '__main__':
     # 抛射
     p_carrier_ = np.array([0, 12e3, 0])
     v_carrier_ = np.array([cos(pi/6), sin(pi/6), 0]) * 1.2 *340
-    list_pt_ = np.array([80e3, 3e3, 0])  # 目标 3e3
-    list_vt_ = np.array([-300, 0, 80])
+    list_pt_ = np.array([135e3, 9e3, 0])  # 目标 3e3
+    list_vt_ = np.array([-300, 0, 40])
 
     missile_used = 0
     hit = False
