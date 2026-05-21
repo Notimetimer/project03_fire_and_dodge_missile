@@ -707,8 +707,13 @@ class PPOHybrid:
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
+        "Adam优化器（有动量）"
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
+        # 使用 RMSprop，alpha 控制二阶矩的衰减率（对应 Adam 的 beta2），eps 稍微调大防数值爆炸
+        "RMSprop优化器（有二阶矩但是没有一阶动量）"
+        # self.actor_optimizer = torch.optim.RMSprop(self.actor.parameters(), lr=actor_lr, alpha=0.99, eps=1e-5)
+        # self.critic_optimizer = torch.optim.RMSprop(self.critic.parameters(), lr=critic_lr, alpha=0.99, eps=1e-5)
 
         self.gamma = gamma
         self.lmbda = lmbda
