@@ -167,7 +167,7 @@ class missile_class:
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
         self.t = 0  # 导弹初始计时
-        self.t_max = 110  # 100 最大运行时间
+        self.t_max = self.stage1_start + 110  # 100 电池工作时间
         self.t_go = 120
         self.trajectory = np.empty((0, 7))  # 导弹轨迹, 结构为时间、位置（3）、速度（3）
         self.guidance_stage = 2  # 2为中制导，3为末制导
@@ -662,9 +662,9 @@ if __name__ == '__main__':
     # list_vt_ = np.array([-200, 0, 0])
 
     # 抛射
-    p_carrier_ = np.array([0, 12e3, 0])
+    p_carrier_ = np.array([0, 11e3, 0])
     v_carrier_ = np.array([cos(pi/6), sin(pi/6), 0]) * 1.2 *340
-    list_pt_ = np.array([135e3, 9e3, 0])  # 目标 3e3
+    list_pt_ = np.array([140e3, 9e3, 0])  # 目标 3e3
     list_vt_ = np.array([-300, 0, 40])
 
     missile_used = 0
@@ -693,6 +693,14 @@ if __name__ == '__main__':
     for i in i_list:
         t = np.round(i * dt, 2)
         # 更新载机位置和速度
+        theta_carrier = np.arcsin(v_carrier_[1]/norm(v_carrier_))
+        # theta_carrier = (15000-pmt_[1])/5000 * pi/2 # 不管载机了，定高不好写
+        psi_carrier = atan2(v_carrier_[2], v_carrier_[0])
+        v_carrier_ = norm(v_carrier_)*np.array([
+            cos(theta_carrier)*cos(psi_carrier),
+            sin(theta_carrier),
+            cos(theta_carrier)*sin(psi_carrier),
+        ])
         p_carrier_ += v_carrier_ * dt
         # 更新目标位置和速度
         ptt_, vtt_ = Target.step(dt=dt)
