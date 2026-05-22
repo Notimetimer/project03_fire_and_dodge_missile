@@ -707,14 +707,19 @@ class PPOHybrid:
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
-        "Adam优化器（有动量）"
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        
+        # critic优化器不动了，保持adam
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
-        # 使用 RMSprop，alpha 控制二阶矩的衰减率（对应 Adam 的 beta2），eps 稍微调大防数值爆炸
-        "RMSprop优化器（有二阶矩但是没有一阶动量）"
+        
+        "Adam优化器（有动量）"
+        # self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        "RMSprop优化器（有二阶矩但是没有一阶动量），初步测试效果更差"
         # self.actor_optimizer = torch.optim.RMSprop(self.actor.parameters(), lr=actor_lr, alpha=0.99, eps=1e-5)
-        # self.critic_optimizer = torch.optim.RMSprop(self.critic.parameters(), lr=critic_lr, alpha=0.99, eps=1e-5)
-
+        "AdamW优化器（weight_decay）"
+        self.actor_optimizer = torch.optim.AdamW(self.actor.parameters(), lr=actor_lr, weight_decay=1e-4, eps=1e-5)
+        "RAdam优化器(为冷启动优化，但非平稳环境不建议用)"
+        # self.actor_optimizer = torch.optim.RAdam(self.actor.parameters(), lr=actor_lr, eps=1e-5)
+        
         self.gamma = gamma
         self.lmbda = lmbda
         self.epochs = epochs
@@ -769,7 +774,7 @@ class PPOHybrid:
                 param_group['lr'] = critic_lr  
 
 
-    # 重置优化器
+    # 重置优化器，这里仍然是adam，目前只有PBT在使用这个方法
     def reset_optimizer(self):
         """
         清除 optimizer 的动量等 state，但保留当前学习率/其他 param_group 设置。
@@ -806,7 +811,8 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None, target_p1=0.65, target_p1_b=0.8, k_nonlinear=0.89, mask_on=1): 
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, 
+                k_nonlinear=0.89, mask_on=1, actor_frozen=0): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1176,8 +1182,8 @@ class PPOHybrid:
                 self.critic_optimizer.zero_grad()
                 # if alpha_loss.requires_grad:    # [新增]
                 #     self.k_cat_optim.zero_grad()
-                    
-                actor_loss.backward()
+                if not actor_frozen:
+                    actor_loss.backward()
                 critic_loss.backward()
                 # if alpha_loss.requires_grad:    # [新增] 反向传播温度损失
                 #     alpha_loss.backward()
@@ -1190,8 +1196,8 @@ class PPOHybrid:
 
                 nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-
-                self.actor_optimizer.step()
+                if not actor_frozen:
+                    self.actor_optimizer.step()
                 self.critic_optimizer.step()
                 # if alpha_loss.requires_grad:    # [新增] 步进自适应熵系数
                 #     self.k_cat_optim.step()
