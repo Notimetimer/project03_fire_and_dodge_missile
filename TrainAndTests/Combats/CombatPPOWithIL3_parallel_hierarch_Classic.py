@@ -666,6 +666,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
 def run_MLP_simulation(
     k_nonlinear,
+    collape_recover={
+        "collapsed": False,
+        "best_actor_name": None,
+        "actor_frozen_batchs": 5,
+    },
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
     mission_name='无名',
     actor_lr=1e-4,
@@ -821,8 +826,12 @@ def run_MLP_simulation(
 
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
-        # 优先加载current_actor（确保不加载搅拌后的参数）
-        current_actor_path = os.path.join(log_dir, "current_actor.pt")
+        if collape_recover["collapsed"]:
+            current_actor_path = os.path.join(log_dir, f"{collape_recover["best_actor_name"]}.pt")
+        else:
+            # 优先加载current_actor（确保不加载搅拌后的参数）
+            current_actor_path = os.path.join(log_dir, "current_actor.pt")
+            
         if os.path.exists(current_actor_path):
             student_agent.actor.load_state_dict(torch.load(current_actor_path, map_location=device))
             print(f"Loaded current actor from: {current_actor_path}")
@@ -1076,6 +1085,11 @@ def run_MLP_simulation(
     # 训练循环变量
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
     batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
+    if collape_recover["collapsed"]:
+        actor_freeze_until = batch_idx + int(collape_recover["actor_frozen_batchs"])
+        student_agent.reset_optimizer() # 恢复训练清除动量
+    else:
+        actor_freeze_until = -1
     trigger = trigger0 + (total_steps // trigger_delta) * trigger_delta
     
     current_max_steps = int(max_steps)
@@ -1532,8 +1546,12 @@ def run_MLP_simulation(
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
+                if batch_idx <= actor_freeze_until:
+                    freeze_actor = 1
+                else:
+                    freeze_actor = 0
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
-                                     k_nonlinear=k_nonlinear, mask_on=fire_mask)
+                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor)
                 #====================
                 # 记录 Log
 
