@@ -9,7 +9,7 @@ collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
-        },
+        }
 mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3'
 
 # 超参数

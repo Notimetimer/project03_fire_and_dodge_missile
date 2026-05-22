@@ -827,7 +827,8 @@ def run_MLP_simulation(
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
         if collape_recover["collapsed"]:
-            current_actor_path = os.path.join(log_dir, f"{collape_recover["best_actor_name"]}.pt")
+            best_actor_name = collape_recover["best_actor_name"]
+            current_actor_path = os.path.join(log_dir, f"{best_actor_name}.pt")
         else:
             # 优先加载current_actor（确保不加载搅拌后的参数）
             current_actor_path = os.path.join(log_dir, "current_actor.pt")
