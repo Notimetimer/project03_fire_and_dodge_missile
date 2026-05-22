@@ -260,8 +260,7 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
 
 def get_opponent_probabilities(WinRates=None, Elite_WinRates=None, 
                                SP_type='PFSP_classic', 
-                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5,
-                               Fire_Stats=None, Main_Fire_Stats=None):
+                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
     """
     经典 PFSP 采样逻辑：
     WinRates: dict, 记录 Learner 对阵各对手的胜率 P
@@ -285,7 +284,7 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
 
     # 2. 经典 PFSP 采样核心
     # 正确判断不同 SP_type，PFSP 核心在 SP_type 为这两者之一时生效
-    if SP_type == 'PFSP_classic' or SP_type == 'PFSP_challenge' or SP_type == 'PFSP_double_dims':
+    if SP_type == 'PFSP_classic' or SP_type == 'PFSP_challenge':
         # 获取所有候选对手的胜率 P
         ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
         
@@ -300,33 +299,6 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
         weights = np.power((1.0 - ps), p_factor)
         weights = weights * opponent_mask
         
-        if SP_type == 'PFSP_double_dims':
-            # 新增：偏离程度距离
-            if Fire_Stats is not None and Main_Fire_Stats is not None:
-                # Main_Fire_Stats 格式为 [alt, dist, ATA]
-                main_alt = Main_Fire_Stats[0] / 15e3
-                main_dist = Main_Fire_Stats[1] / 100e3
-                main_ata = Main_Fire_Stats[2] / np.pi
-                main_vec = np.array([main_alt, main_dist, main_ata])
-                
-                dist_scores = []
-                for k in keys:
-                    if k in Fire_Stats:
-                        opp_stats = Fire_Stats[k]
-                        opp_alt = opp_stats[0] / 15e3
-                        opp_dist = opp_stats[1] / 100e3
-                        opp_ata = opp_stats[2] / np.pi
-                        opp_vec = np.array([opp_alt, opp_dist, opp_ata])
-                        # 计算欧几里得距离
-                        dist = float(np.linalg.norm(main_vec - opp_vec))
-                    else:
-                        dist = 0.0
-                    dist_scores.append(dist)
-                    
-                dist_scores = np.array(dist_scores)
-                # 距离越大，偏离程度越高，直接将其作为权重乘数 (权重全部为1)
-                weights = weights * (1.0 + 0.3 * dist_scores)
-            
         # 防止全为 0 的情况（例如胜率全是 1）
         if weights.sum() < 1e-8:
             probs = np.ones(len(keys)) / len(keys)
@@ -484,11 +456,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
                 enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
 
-                # 新增: 开火高度、距离及导弹存活期 abs(ATA) 的回合统计容器
-                episode_red_fire_alts = []
-                episode_red_fire_dists = []
-                episode_red_ATAs = []
-
                 # D. 环境重置
                 # randomized_birth = settings['randomized_birth']  # 改在外面随机，里面不需要
                 action_cycle_multiplier = settings['action_cycle_multiplier']
@@ -531,22 +498,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     b_obs, b_check_obs = env.obs_1v1('b', pomdp=pomdp)
                     b_state_global, _ = env.obs_1v1('b', reward_fn=1)
                     r_state_global, _ = env.obs_1v1('r', reward_fn=1)
-
-                    # 额外记录红方导弹存活期（env.alive_r_missiles > 0）时，RUAV的 abs(ATA)
-                    # has_alive_r_missiles = False
-                    # if hasattr(env, 'alive_r_missiles'):
-                    #     if isinstance(env.alive_r_missiles, list):
-                    #         has_alive_r_missiles = len(env.alive_r_missiles) > 0
-                    #     elif isinstance(env.alive_r_missiles, (int, float)):
-                    #         has_alive_r_missiles = env.alive_r_missiles > 0
-                    
-                    # 改为记录开火后30s的ATA情况
-                    if r_check_obs["weapon"] * 120 <= 30: # has_alive_r_missiles:
-                        r_state_check = env.unscale_state(r_check_obs)
-                        if "target_information" in r_state_check and len(r_state_check["target_information"]) > 0:
-                            ATA = r_state_check["target_information"][4]
-                            episode_red_ATAs.append(float(ATA))
-
 
                     # 2. 决策点 (Action Cycle)
                     if steps_run % action_cycle_multiplier == 0:
@@ -616,12 +567,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     
                     if b_m_id: 
                         m_fired += 1
-                    if r_m_id is not None:
-                        from numpy.linalg import norm
-                        fire_alt = float(env.RUAV.alt)
-                        fire_dist = float(norm(env.RUAV.pos_ - env.BUAV.pos_))
-                        episode_red_fire_alts.append(fire_alt)
-                        episode_red_fire_dists.append(fire_dist)
+                    if r_m_id:
+                        pass
                     
                     # debug
                     if r_action_label[0] > 4:
@@ -689,27 +636,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 enm_trans = truncate_and_shift(enm_trans)
                 # ----------------------------------------------
 
-                # 计算本回合红方开火与平均 ATA 指标
-                if len(episode_red_fire_alts) > 0:
-                    ep_avg_alt = float(np.mean(episode_red_fire_alts))
-                    ep_avg_dist = float(np.mean(episode_red_fire_dists))
-                else:
-                    ep_avg_alt = None
-                    ep_avg_dist = None
-                    
-                # 计算本回合红方开火与平均 ATA 指标
-                if len(episode_red_fire_alts) > 0:
-                    ep_avg_alt = float(np.mean(episode_red_fire_alts))
-                    ep_avg_dist = float(np.mean(episode_red_fire_dists))
-                else:
-                    ep_avg_alt = None
-                    ep_avg_dist = None
-                    
-                if len(episode_red_ATAs) > 0:
-                    ep_avg_ATA = float(np.mean(episode_red_ATAs))
-                else:
-                    ep_avg_ATA = None
-
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
@@ -723,11 +649,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         'draw': env.draw,
                         'm_fired': m_fired
                     },
-                    'opp_name': opp_name,
-                    # 新增: 本回合开火与导弹期参数统计
-                    'ep_avg_alt': ep_avg_alt,
-                    'ep_avg_dist': ep_avg_dist,
-                    'ep_avg_ATA': ep_avg_ATA
+                    'opp_name': opp_name
                 }
                 
                 # 8. 发送回 Master
@@ -1116,15 +1038,10 @@ def run_MLP_simulation(
     WinRates_path = os.path.join(log_dir, "WinRates.json")
     Elite_WinRates_path = os.path.join(log_dir, "Elite_WinRates.json")
     GameTimes_path = os.path.join(log_dir, "GameTimes.json")
-    # 新增：对手及精英开火与导弹期参数统计文件路径
-    Elite_Fire_Stats_path = os.path.join(log_dir, "Elite_Fire_Stats.json")
-
     # 初始化胜率字典和游戏次数字典
     WinRates = {}
     Elite_WinRates = {}
     GameTimes = {}
-    # 初始化开火与导弹期参数统计字典（不区分普通和精英）
-    Elite_Fire_Stats = {}
 
     # 尝试加载历史 # 中断续训
     if os.path.exists(full_json_path):
@@ -1139,8 +1056,6 @@ def run_MLP_simulation(
         with open(Elite_WinRates_path, 'r') as f: Elite_WinRates = json.load(f)
     if os.path.exists(GameTimes_path):
         with open(GameTimes_path, 'r') as f: GameTimes = json.load(f)
-    if os.path.exists(Elite_Fire_Stats_path):
-        with open(Elite_Fire_Stats_path, 'r', encoding='utf-8') as f: Elite_Fire_Stats = json.load(f)
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
@@ -1163,10 +1078,9 @@ def run_MLP_simulation(
         Elite_WinRates = copy.deepcopy(WinRates)
         elite_elo_ratings = copy.deepcopy(elo_ratings)
         
-        # 初始化GameTimes表与Elite_Fire_Stats表
+        # 初始化GameTimes表
         for k in WinRates.keys():
             GameTimes[k] = 0
-            Elite_Fire_Stats[k] = [0.0, 0.0, 0.0]
 
 
     # 训练循环变量
@@ -1360,14 +1274,7 @@ def run_MLP_simulation(
             # 这一步 Master 决定每个 Worker 打谁
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
-            # 获取最新的 Main_Agent_Fire_Stats
-            rein_keys_in_stats = [k for k in Elite_Fire_Stats.keys() if re.match(r'^actor_rein\d+$', k)]
-            if rein_keys_in_stats:
-                latest_rein_key = max(rein_keys_in_stats, key=lambda k: int(k.replace('actor_rein', '')))
-                Main_Agent_Fire_Stats = Elite_Fire_Stats[latest_rein_key]
-            else:
-                Main_Agent_Fire_Stats = [0.0, 0.0, 0.0]
-
+                
             # PFSP_stratified 特殊处理：分段采样
             selected_opponents = []
             if self_play_type == "PFSP_stratified":
@@ -1384,8 +1291,6 @@ def run_MLP_simulation(
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
-                    Fire_Stats=Elite_Fire_Stats,
-                    Main_Fire_Stats=Main_Agent_Fire_Stats,
                 )
                 
                 # 第一段：PFSP采样
@@ -1422,8 +1327,6 @@ def run_MLP_simulation(
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
-                    Fire_Stats=Elite_Fire_Stats,
-                    Main_Fire_Stats=Main_Agent_Fire_Stats,
                 )
                 selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
             
@@ -1507,28 +1410,6 @@ def run_MLP_simulation(
                 enm_tr = res['enm_trans'] # SIL 红方数据
                 metrics = res['metrics']
                 opp_name = res['opp_name']
-                
-                # --- 新增: 更新开火高度、距离及 ATA 的 EMA ---
-                ep_avg_alt = res.get('ep_avg_alt')
-                ep_avg_dist = res.get('ep_avg_dist')
-                ep_avg_ATA = res.get('ep_avg_ATA')
-                
-                # 更新 EMA
-                alpha_ema = 0.1
-                if opp_name not in Elite_Fire_Stats:
-                    Elite_Fire_Stats[opp_name] = [0.0, 0.0, 0.0]
-                    
-                old_stats = Elite_Fire_Stats[opp_name]
-                new_stats = list(old_stats)
-                
-                if ep_avg_alt is not None:
-                    new_stats[0] = alpha_ema * ep_avg_alt + (1 - alpha_ema) * old_stats[0]
-                if ep_avg_dist is not None:
-                    new_stats[1] = alpha_ema * ep_avg_dist + (1 - alpha_ema) * old_stats[1]
-                if ep_avg_ATA is not None:
-                    new_stats[2] = alpha_ema * ep_avg_ATA + (1 - alpha_ema) * old_stats[2]
-                    
-                Elite_Fire_Stats[opp_name] = new_stats
                 
                 # [新增] 填充 buffer 用户打印详情
                 result_str = "Win" if metrics['win'] else ("Lose" if metrics['lose'] else "Draw")
@@ -1767,9 +1648,8 @@ def run_MLP_simulation(
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
                 if total_steps >= WARM_UP_STEPS:
-                    # 1. 产生新 Checkpoint 时，初始化其在胜率表和开火指标统计表中的地位
+                    # 1. 产生新 Checkpoint 时，初始化其在胜率表中的地位
                     WinRates[actor_key] = 0.5  # Learner 的镜像初始胜率为 0.5
-                    Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0]
                     elo_ratings[opp_name] = main_agent_elo
 
                     if hist_agent_as_opponent:
@@ -1850,8 +1730,6 @@ def run_MLP_simulation(
                     json.dump(Elite_WinRates, f, ensure_ascii=False, indent=2)
                 with open(GameTimes_path, "w", encoding="utf-8") as f:
                     json.dump(GameTimes, f, ensure_ascii=False, indent=2)
-                with open(Elite_Fire_Stats_path, "w", encoding="utf-8") as f:
-                    json.dump(Elite_Fire_Stats, f, ensure_ascii=False, indent=2)
 
                 # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
                 valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
