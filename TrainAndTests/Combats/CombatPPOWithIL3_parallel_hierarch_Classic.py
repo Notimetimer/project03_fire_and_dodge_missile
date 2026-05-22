@@ -19,6 +19,7 @@ from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 import traceback # [新增]
 import random
+from sklearn.cluster import KMeans
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
@@ -260,8 +261,7 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
 
 def get_opponent_probabilities(WinRates=None, Elite_WinRates=None, 
                                SP_type='PFSP_classic', 
-                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5,
-                               Fire_Stats=None, Main_Fire_Stats=None):
+                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
     """
     经典 PFSP 采样逻辑：
     WinRates: dict, 记录 Learner 对阵各对手的胜率 P
@@ -300,33 +300,6 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
         weights = np.power((1.0 - ps), p_factor)
         weights = weights * opponent_mask
         
-        if SP_type == 'PFSP_double_dims':
-            # 新增：偏离程度距离
-            if Fire_Stats is not None and Main_Fire_Stats is not None:
-                # Main_Fire_Stats 格式为 [alt, dist, ATA]
-                main_alt = Main_Fire_Stats[0] / 15e3
-                main_dist = Main_Fire_Stats[1] / 100e3
-                main_ata = Main_Fire_Stats[2] / np.pi
-                main_vec = np.array([main_alt, main_dist, main_ata])
-                
-                dist_scores = []
-                for k in keys:
-                    if k in Fire_Stats:
-                        opp_stats = Fire_Stats[k]
-                        opp_alt = opp_stats[0] / 15e3
-                        opp_dist = opp_stats[1] / 100e3
-                        opp_ata = opp_stats[2] / np.pi
-                        opp_vec = np.array([opp_alt, opp_dist, opp_ata])
-                        # 计算欧几里得距离
-                        dist = float(np.linalg.norm(main_vec - opp_vec))
-                    else:
-                        dist = 0.0
-                    dist_scores.append(dist)
-                    
-                dist_scores = np.array(dist_scores)
-                # 距离越大，偏离程度越高，直接将其作为权重乘数 (权重全部为1)
-                weights = weights * (1.0 + 0.3 * dist_scores)
-            
         # 防止全为 0 的情况（例如胜率全是 1）
         if weights.sum() < 1e-8:
             probs = np.ones(len(keys)) / len(keys)
@@ -750,6 +723,7 @@ def run_MLP_simulation(
         "actor_frozen_batchs": 5,
     },
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
+    n_clusters=5,
     mission_name='无名',
     actor_lr=1e-4,
     critic_lr=5e-4,
@@ -1370,13 +1344,8 @@ def run_MLP_simulation(
 
             # PFSP_stratified 特殊处理：分段采样
             selected_opponents = []
-            if self_play_type == "PFSP_stratified":
-                # 分段采样逻辑
-                # 1. 2/3（向上取整）的worker按PFSP方式匹配对手
-                pfsp_count = int(np.ceil(num_workers * 2.0 / 3.0))
-                stratified_count = num_workers - pfsp_count
-                
-                # 获取PFSP概率和对手列表
+            if self_play_type == "PFSP_double_dims":
+                # 双维度 PFSP 采样：1. 根据 Elite_Fire_Stats 聚类；2. 类内 PFSP 有放回抽样
                 probs, opponent_keys = get_opponent_probabilities(
                     WinRates,
                     Elite_WinRates,
@@ -1384,35 +1353,54 @@ def run_MLP_simulation(
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
-                    Fire_Stats=Elite_Fire_Stats,
-                    Main_Fire_Stats=Main_Agent_Fire_Stats,
                 )
                 
-                # 第一段：PFSP采样
-                pfsp_opponents = np.random.choice(opponent_keys, size=pfsp_count, p=probs).tolist()
+                # 提取候选对手的行为偏好向量 [alt, dist, ATA] 并进行分维度归一化
+                vecs = []
+                for k in opponent_keys:
+                    if k in Elite_Fire_Stats:
+                        stats = Elite_Fire_Stats[k]
+                        alt = stats[0] / 15e3
+                        dist = stats[1] / 100e3
+                        ata = stats[2] / np.pi
+                    else:
+                        alt, dist, ata = 0.0, 0.0, 0.0
+                    vecs.append([alt, dist, ata])
+                vecs = np.array(vecs)
                 
-                # 第二段：剩余1/3按精英胜率分位数等距采样（允许重复）
-                stratified_opponents = []
-                if stratified_count > 0 and len(Elite_WinRates) > 0:
-                    # 获取精英池对手和胜率
-                    elite_keys = list(Elite_WinRates.keys())
-                    elite_win_rates = [Elite_WinRates[k] for k in elite_keys]
-                    
-                    # 按胜率排序
-                    sorted_indices = np.argsort(elite_win_rates)
-                    sorted_keys = [elite_keys[i] for i in sorted_indices]
-                    
-                    # 等距取n个分位数点（带随机偏移）
-                    for i in range(stratified_count):
-                        # 计算分位数位置，添加随机偏移[-0.1, 0.1]
-                        base_pos = i / max(stratified_count - 1, 1) if stratified_count > 1 else 0.5
-                        random_offset = np.random.uniform(-0.1, 0.1)
-                        pos = np.clip(base_pos + random_offset, 0, 1)
-                        index = int(pos * (len(sorted_keys) - 1))
-                        stratified_opponents.append(sorted_keys[index])
+                # 聚类，产生 n_clusters 种流派类别
+                # 先限制不超过对手数量，再限制不超过实际不重复的特征向量数
+                # （训练初期大量对手的 Fire_Stats 都是 [0,0,0]，重复向量过多会导致 ConvergenceWarning）
+                n_unique = len(np.unique(vecs, axis=0))
+                n_clusters = min(n_clusters, len(opponent_keys), n_unique)
+                if n_clusters > 1:
+                    kmeans = KMeans(n_clusters=n_clusters, n_init='auto')
+                    labels = kmeans.fit_predict(vecs)
+                else:
+                    labels = np.zeros(len(opponent_keys), dtype=int)
                 
-                # 合并两段选择的对手
-                selected_opponents = pfsp_opponents + stratified_opponents
+                # 由 num_workers 平分这些类别
+                workers_per_cluster = num_workers // n_clusters
+                remainder = num_workers % n_clusters
+                
+                for c in range(n_clusters):
+                    cluster_indices = np.where(labels == c)[0]
+                    cluster_keys = [opponent_keys[i] for i in cluster_indices]
+                    cluster_probs = np.array([probs[i] for i in cluster_indices])
+                    
+                    if cluster_probs.sum() < 1e-8:
+                        cluster_probs = np.ones(len(cluster_keys)) / len(cluster_keys)
+                    else:
+                        cluster_probs = cluster_probs / cluster_probs.sum()
+                        
+                    alloc = workers_per_cluster + (1 if c < remainder else 0)
+                    
+                    if alloc > 0:
+                        sampled = np.random.choice(cluster_keys, size=alloc, p=cluster_probs, replace=True).tolist()
+                        selected_opponents.extend(sampled)
+                        
+                # 打乱顺序，以免特定的 worker 总是对战特定流派
+                np.random.shuffle(selected_opponents)
             else:
                 # 其他采样方式，保持原有逻辑
                 probs, opponent_keys = get_opponent_probabilities(
@@ -1422,8 +1410,6 @@ def run_MLP_simulation(
                     rule_rate=rule_actor_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
-                    Fire_Stats=Elite_Fire_Stats,
-                    Main_Fire_Stats=Main_Agent_Fire_Stats,
                 )
                 selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
             

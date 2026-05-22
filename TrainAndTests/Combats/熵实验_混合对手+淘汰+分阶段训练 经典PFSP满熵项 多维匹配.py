@@ -10,7 +10,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'IL_and_Mixed经典PFSP_多维度匹配_并行_分层_rule3_0.3'
+mission_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -82,6 +82,7 @@ if __name__=='__main__':
         k_nonlinear=0.0,
         collape_recover=collape_recover,
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
+        n_clusters=3,
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
