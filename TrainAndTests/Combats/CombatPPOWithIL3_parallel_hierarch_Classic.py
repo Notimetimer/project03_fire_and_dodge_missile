@@ -19,6 +19,25 @@ from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 import traceback # [新增]
 import random
+# 必须在任何 sklearn 导入之前执行！
+try:
+    import threadpoolctl
+    # 彻底让信息查询返回空列表
+    threadpoolctl.threadpool_info = lambda *args, **kwargs: []
+    # 核心修复：直接将 threadpool_limits 变为一个什么都不做的空上下文管理器
+    class DummyContextManager:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, exc_type, exc_val, exc_tb): pass
+        def _set_threadpool_limits(self): return []
+    threadpoolctl.threadpool_limits = DummyContextManager
+    # 针对 3.x 版本的控制器拦截
+    if hasattr(threadpoolctl, 'ThreadpoolController'):
+        threadpoolctl.ThreadpoolController.info = lambda self, *args, **kwargs: []
+        threadpoolctl.ThreadpoolController.limit = lambda self, *args, **kwargs: DummyContextManager()
+    print("[Patch] threadpoolctl 全版本上下文拦截补丁已成功强行注入。")
+except Exception as e:
+    print(f"[Patch] 补丁注入失败: {e}，尝试继续运行...")
 from sklearn.cluster import KMeans
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -457,10 +476,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
                 enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
 
-                # 新增: 开火高度、距离及导弹存活期 abs(ATA) 的回合统计容器
-                episode_red_fire_alts = []
-                episode_red_fire_dists = []
-                episode_red_ATAs = []
+                # 新增: 开火角度参数及导弹存活期 ATA 的回合统计容器
+                episode_red_fire_thetas = []      # 开火瞬间俯仰角
+                episode_red_ATAs = []             # 开火后30s的ATA
+                episode_red_delta_psi_threats = [] # 收到告警后的delta_psi_threat
+                episode_red_delta_thetas = []     # 开火后30s内的delta_theta
+                episode_red_delta_psis = []       # 开火后30s内的delta_psi
+                
 
                 # D. 环境重置
                 # randomized_birth = settings['randomized_birth']  # 改在外面随机，里面不需要
@@ -505,20 +527,21 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     b_state_global, _ = env.obs_1v1('b', reward_fn=1)
                     r_state_global, _ = env.obs_1v1('r', reward_fn=1)
 
-                    # 额外记录红方导弹存活期（env.alive_r_missiles > 0）时，RUAV的 abs(ATA)
-                    # has_alive_r_missiles = False
-                    # if hasattr(env, 'alive_r_missiles'):
-                    #     if isinstance(env.alive_r_missiles, list):
-                    #         has_alive_r_missiles = len(env.alive_r_missiles) > 0
-                    #     elif isinstance(env.alive_r_missiles, (int, float)):
-                    #         has_alive_r_missiles = env.alive_r_missiles > 0
+                    # 收到告警后的delta_psi_threat
+                    r_state_check = env.unscale_state(r_check_obs)
+                    delta_psi_threat = np.arccos(r_check_obs["threat"][0])
+                    if r_state_check["warning"]:
+                        episode_red_delta_psi_threats.append(float(delta_psi_threat))
                     
-                    # 改为记录开火后30s的ATA情况
-                    if r_check_obs["weapon"] * 120 <= 30: # has_alive_r_missiles:
-                        r_state_check = env.unscale_state(r_check_obs)
+                    # 记录开火后30s内的角度数据（与ATA同级别）
+                    if r_check_obs["weapon"] * 120 <= 30 and not r_state_check["warning"]:  # 有存活导弹（30s内）且没有告警
                         if "target_information" in r_state_check and len(r_state_check["target_information"]) > 0:
+                            delta_psi = np.arccos(r_state_check["target_information"][0])
+                            delta_theta = r_state_check["target_information"][2]
                             ATA = r_state_check["target_information"][4]
                             episode_red_ATAs.append(float(ATA))
+                            episode_red_delta_thetas.append(float(delta_theta))
+                            episode_red_delta_psis.append(float(delta_psi))
 
 
                     # 2. 决策点 (Action Cycle)
@@ -590,11 +613,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     if b_m_id: 
                         m_fired += 1
                     if r_m_id is not None:
-                        from numpy.linalg import norm
-                        fire_alt = float(env.RUAV.alt)
-                        fire_dist = float(norm(env.RUAV.pos_ - env.BUAV.pos_))
-                        episode_red_fire_alts.append(fire_alt)
-                        episode_red_fire_dists.append(fire_dist)
+                        fire_theta = float(env.RUAV.theta)
+                        episode_red_fire_thetas.append(fire_theta)
                     
                     # debug
                     if r_action_label[0] > 4:
@@ -662,26 +682,31 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 enm_trans = truncate_and_shift(enm_trans)
                 # ----------------------------------------------
 
-                # 计算本回合红方开火与平均 ATA 指标
-                if len(episode_red_fire_alts) > 0:
-                    ep_avg_alt = float(np.mean(episode_red_fire_alts))
-                    ep_avg_dist = float(np.mean(episode_red_fire_dists))
+                # 计算本回合红方开火与角度参数指标
+                if len(episode_red_fire_thetas) > 0:
+                    ep_avg_fire_theta = float(np.mean(episode_red_fire_thetas))
                 else:
-                    ep_avg_alt = None
-                    ep_avg_dist = None
-                    
-                # 计算本回合红方开火与平均 ATA 指标
-                if len(episode_red_fire_alts) > 0:
-                    ep_avg_alt = float(np.mean(episode_red_fire_alts))
-                    ep_avg_dist = float(np.mean(episode_red_fire_dists))
-                else:
-                    ep_avg_alt = None
-                    ep_avg_dist = None
+                    ep_avg_fire_theta = None
                     
                 if len(episode_red_ATAs) > 0:
                     ep_avg_ATA = float(np.mean(episode_red_ATAs))
                 else:
                     ep_avg_ATA = None
+                    
+                if len(episode_red_delta_psi_threats) > 0:
+                    ep_avg_delta_psi_threat = float(np.mean(episode_red_delta_psi_threats))
+                else:
+                    ep_avg_delta_psi_threat = None
+                    
+                if len(episode_red_delta_thetas) > 0:
+                    ep_avg_delta_theta = float(np.mean(episode_red_delta_thetas))
+                else:
+                    ep_avg_delta_theta = None
+                    
+                if len(episode_red_delta_psis) > 0:
+                    ep_avg_delta_psi = float(np.mean(episode_red_delta_psis))
+                else:
+                    ep_avg_delta_psi = None
 
                 # 7. 打包结果
                 result_packet = {
@@ -697,10 +722,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         'm_fired': m_fired
                     },
                     'opp_name': opp_name,
-                    # 新增: 本回合开火与导弹期参数统计
-                    'ep_avg_alt': ep_avg_alt,
-                    'ep_avg_dist': ep_avg_dist,
-                    'ep_avg_ATA': ep_avg_ATA
+                    # 新增: 本回合开火角度参数统计 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
+                    'ep_avg_fire_theta': ep_avg_fire_theta,
+                    'ep_avg_ATA': ep_avg_ATA,
+                    'ep_avg_delta_psi_threat': ep_avg_delta_psi_threat,
+                    'ep_avg_delta_theta': ep_avg_delta_theta,
+                    'ep_avg_delta_psi': ep_avg_delta_psi
                 }
                 
                 # 8. 发送回 Master
@@ -1140,7 +1167,7 @@ def run_MLP_simulation(
         # 初始化GameTimes表与Elite_Fire_Stats表
         for k in WinRates.keys():
             GameTimes[k] = 0
-            Elite_Fire_Stats[k] = [0.0, 0.0, 0.0]
+            Elite_Fire_Stats[k] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
 
 
     # 训练循环变量
@@ -1340,7 +1367,7 @@ def run_MLP_simulation(
                 latest_rein_key = max(rein_keys_in_stats, key=lambda k: int(k.replace('actor_rein', '')))
                 Main_Agent_Fire_Stats = Elite_Fire_Stats[latest_rein_key]
             else:
-                Main_Agent_Fire_Stats = [0.0, 0.0, 0.0]
+                Main_Agent_Fire_Stats = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
 
             # PFSP_stratified 特殊处理：分段采样
             selected_opponents = []
@@ -1355,17 +1382,19 @@ def run_MLP_simulation(
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
                 
-                # 提取候选对手的行为偏好向量 [alt, dist, ATA] 并进行分维度归一化
+                # 提取候选对手的行为偏好向量 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi] 并进行分维度归一化
                 vecs = []
                 for k in opponent_keys:
                     if k in Elite_Fire_Stats:
                         stats = Elite_Fire_Stats[k]
-                        alt = stats[0] / 15e3
-                        dist = stats[1] / 100e3
-                        ata = stats[2] / np.pi
+                        fire_theta = stats[0] / (np.pi / 2)   # 俯仰角归一化到 [-1, 1]
+                        ata = stats[1] / np.pi                # ATA归一化到 [0, 1]
+                        delta_psi_threat = stats[2] / np.pi     # delta_psi_threat归一化
+                        delta_theta = stats[3] / (np.pi / 2)   # delta_theta归一化
+                        delta_psi = stats[4] / np.pi            # delta_psi归一化（同ATA方式）
                     else:
-                        alt, dist, ata = 0.0, 0.0, 0.0
-                    vecs.append([alt, dist, ata])
+                        fire_theta, ata, delta_psi_threat, delta_theta, delta_psi = 0.0, 0.0, 0.0, 0.0, 0.0
+                    vecs.append([fire_theta, ata, delta_psi_threat, delta_theta, delta_psi])
                 vecs = np.array(vecs)
                 
                 # 聚类，产生 n_clusters 种流派类别
@@ -1494,25 +1523,31 @@ def run_MLP_simulation(
                 metrics = res['metrics']
                 opp_name = res['opp_name']
                 
-                # --- 新增: 更新开火高度、距离及 ATA 的 EMA ---
-                ep_avg_alt = res.get('ep_avg_alt')
-                ep_avg_dist = res.get('ep_avg_dist')
+                # --- 新增: 更新开火角度参数的 EMA ---
+                ep_avg_fire_theta = res.get('ep_avg_fire_theta')
                 ep_avg_ATA = res.get('ep_avg_ATA')
+                ep_avg_delta_psi_threat = res.get('ep_avg_delta_psi_threat')
+                ep_avg_delta_theta = res.get('ep_avg_delta_theta')
+                ep_avg_delta_psi = res.get('ep_avg_delta_psi')
                 
-                # 更新 EMA
+                # 更新 EMA [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
                 alpha_ema = 0.1
                 if opp_name not in Elite_Fire_Stats:
-                    Elite_Fire_Stats[opp_name] = [0.0, 0.0, 0.0]
+                    Elite_Fire_Stats[opp_name] = [0.0, 0.0, 0.0, 0.0, 0.0]
                     
                 old_stats = Elite_Fire_Stats[opp_name]
                 new_stats = list(old_stats)
                 
-                if ep_avg_alt is not None:
-                    new_stats[0] = alpha_ema * ep_avg_alt + (1 - alpha_ema) * old_stats[0]
-                if ep_avg_dist is not None:
-                    new_stats[1] = alpha_ema * ep_avg_dist + (1 - alpha_ema) * old_stats[1]
+                if ep_avg_fire_theta is not None:
+                    new_stats[0] = alpha_ema * ep_avg_fire_theta + (1 - alpha_ema) * old_stats[0]
                 if ep_avg_ATA is not None:
-                    new_stats[2] = alpha_ema * ep_avg_ATA + (1 - alpha_ema) * old_stats[2]
+                    new_stats[1] = alpha_ema * ep_avg_ATA + (1 - alpha_ema) * old_stats[1]
+                if ep_avg_delta_psi_threat is not None:
+                    new_stats[2] = alpha_ema * ep_avg_delta_psi_threat + (1 - alpha_ema) * old_stats[2]
+                if ep_avg_delta_theta is not None:
+                    new_stats[3] = alpha_ema * ep_avg_delta_theta + (1 - alpha_ema) * old_stats[3]
+                if ep_avg_delta_psi is not None:
+                    new_stats[4] = alpha_ema * ep_avg_delta_psi + (1 - alpha_ema) * old_stats[4]
                     
                 Elite_Fire_Stats[opp_name] = new_stats
                 
@@ -1755,7 +1790,7 @@ def run_MLP_simulation(
                 if total_steps >= WARM_UP_STEPS:
                     # 1. 产生新 Checkpoint 时，初始化其在胜率表和开火指标统计表中的地位
                     WinRates[actor_key] = 0.5  # Learner 的镜像初始胜率为 0.5
-                    Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0]
+                    Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
                     elo_ratings[opp_name] = main_agent_elo
 
                     if hist_agent_as_opponent:
