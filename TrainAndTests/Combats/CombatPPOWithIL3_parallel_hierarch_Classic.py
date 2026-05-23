@@ -477,11 +477,18 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
 
                 # 新增: 开火角度参数及导弹存活期 ATA 的回合统计容器
+                # 红方（对手）统计
                 episode_red_fire_thetas = []      # 开火瞬间俯仰角
                 episode_red_ATAs = []             # 开火后30s的ATA
                 episode_red_delta_psi_threats = [] # 收到告警后的delta_psi_threat
                 episode_red_delta_thetas = []     # 开火后30s内的delta_theta
                 episode_red_delta_psis = []       # 开火后30s内的delta_psi
+                # 蓝方（本方学习代理）统计
+                episode_blue_fire_thetas = []     # 开火瞬间俯仰角
+                episode_blue_ATAs = []            # 开火后30s的ATA
+                episode_blue_delta_psi_threats = [] # 收到告警后的delta_psi_threat
+                episode_blue_delta_thetas = []    # 开火后30s内的delta_theta
+                episode_blue_delta_psis = []      # 开火后30s内的delta_psi
                 
 
                 # D. 环境重置
@@ -527,13 +534,19 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     b_state_global, _ = env.obs_1v1('b', reward_fn=1)
                     r_state_global, _ = env.obs_1v1('r', reward_fn=1)
 
-                    # 收到告警后的delta_psi_threat
+                    # 收到告警后的delta_psi_threat - 红方（对手）
                     r_state_check = env.unscale_state(r_check_obs)
                     delta_psi_threat = np.arccos(r_check_obs["threat"][0])
                     if r_state_check["warning"]:
                         episode_red_delta_psi_threats.append(float(delta_psi_threat))
                     
-                    # 记录开火后30s内的角度数据（与ATA同级别）
+                    # 收到告警后的delta_psi_threat - 蓝方（本方）
+                    b_state_check = env.unscale_state(b_check_obs)
+                    blue_delta_psi_threat = np.arccos(b_check_obs["threat"][0])
+                    if b_state_check["warning"]:
+                        episode_blue_delta_psi_threats.append(float(blue_delta_psi_threat))
+                    
+                    # 记录开火后30s内的角度数据（与ATA同级别）- 红方（对手）
                     if r_check_obs["weapon"] * 120 <= 30 and not r_state_check["warning"]:  # 有存活导弹（30s内）且没有告警
                         if "target_information" in r_state_check and len(r_state_check["target_information"]) > 0:
                             delta_psi = np.arccos(r_state_check["target_information"][0])
@@ -542,6 +555,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             episode_red_ATAs.append(float(ATA))
                             episode_red_delta_thetas.append(float(delta_theta))
                             episode_red_delta_psis.append(float(delta_psi))
+                    
+                    # 记录开火后30s内的角度数据 - 蓝方（本方）
+                    if b_check_obs["weapon"] * 120 <= 30 and not b_state_check["warning"]:  # 有存活导弹（30s内）且没有告警
+                        if "target_information" in b_state_check and len(b_state_check["target_information"]) > 0:
+                            blue_delta_psi = np.arccos(b_state_check["target_information"][0])
+                            blue_delta_theta = b_state_check["target_information"][2]
+                            blue_ATA = b_state_check["target_information"][4]
+                            episode_blue_ATAs.append(float(blue_ATA))
+                            episode_blue_delta_thetas.append(float(blue_delta_theta))
+                            episode_blue_delta_psis.append(float(blue_delta_psi))
 
 
                     # 2. 决策点 (Action Cycle)
@@ -612,6 +635,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     
                     if b_m_id: 
                         m_fired += 1
+                        # 记录蓝方（本方）开火俯仰角
+                        blue_fire_theta = float(env.BUAV.theta)
+                        episode_blue_fire_thetas.append(blue_fire_theta)
                     if r_m_id is not None:
                         fire_theta = float(env.RUAV.theta)
                         episode_red_fire_thetas.append(fire_theta)
@@ -708,6 +734,32 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 else:
                     ep_avg_delta_psi = None
 
+                # 计算本回合蓝方（本方）开火与角度参数指标
+                if len(episode_blue_fire_thetas) > 0:
+                    ep_blue_avg_fire_theta = float(np.mean(episode_blue_fire_thetas))
+                else:
+                    ep_blue_avg_fire_theta = None
+                    
+                if len(episode_blue_ATAs) > 0:
+                    ep_blue_avg_ATA = float(np.mean(episode_blue_ATAs))
+                else:
+                    ep_blue_avg_ATA = None
+                    
+                if len(episode_blue_delta_psi_threats) > 0:
+                    ep_blue_avg_delta_psi_threat = float(np.mean(episode_blue_delta_psi_threats))
+                else:
+                    ep_blue_avg_delta_psi_threat = None
+                    
+                if len(episode_blue_delta_thetas) > 0:
+                    ep_blue_avg_delta_theta = float(np.mean(episode_blue_delta_thetas))
+                else:
+                    ep_blue_avg_delta_theta = None
+                    
+                if len(episode_blue_delta_psis) > 0:
+                    ep_blue_avg_delta_psi = float(np.mean(episode_blue_delta_psis))
+                else:
+                    ep_blue_avg_delta_psi = None
+
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
@@ -722,12 +774,18 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         'm_fired': m_fired
                     },
                     'opp_name': opp_name,
-                    # 新增: 本回合开火角度参数统计 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
+                    # 新增: 本回合红方（对手）开火角度参数统计 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
                     'ep_avg_fire_theta': ep_avg_fire_theta,
                     'ep_avg_ATA': ep_avg_ATA,
                     'ep_avg_delta_psi_threat': ep_avg_delta_psi_threat,
                     'ep_avg_delta_theta': ep_avg_delta_theta,
-                    'ep_avg_delta_psi': ep_avg_delta_psi
+                    'ep_avg_delta_psi': ep_avg_delta_psi,
+                    # 新增: 本回合蓝方（本方）开火角度参数统计
+                    'ep_blue_avg_fire_theta': ep_blue_avg_fire_theta,
+                    'ep_blue_avg_ATA': ep_blue_avg_ATA,
+                    'ep_blue_avg_delta_psi_threat': ep_blue_avg_delta_psi_threat,
+                    'ep_blue_avg_delta_theta': ep_blue_avg_delta_theta,
+                    'ep_blue_avg_delta_psi': ep_blue_avg_delta_psi
                 }
                 
                 # 8. 发送回 Master
@@ -1168,6 +1226,8 @@ def run_MLP_simulation(
         for k in WinRates.keys():
             GameTimes[k] = 0
             Elite_Fire_Stats[k] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
+        # 初始化主代理（蓝方）的fire_stats
+        Elite_Fire_Stats["__CURRENT_MAIN__"] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
 
 
     # 训练循环变量
@@ -1523,7 +1583,7 @@ def run_MLP_simulation(
                 metrics = res['metrics']
                 opp_name = res['opp_name']
                 
-                # --- 新增: 更新开火角度参数的 EMA ---
+                # --- 新增: 更新红方（对手）开火角度参数的 EMA ---
                 ep_avg_fire_theta = res.get('ep_avg_fire_theta')
                 ep_avg_ATA = res.get('ep_avg_ATA')
                 ep_avg_delta_psi_threat = res.get('ep_avg_delta_psi_threat')
@@ -1550,6 +1610,34 @@ def run_MLP_simulation(
                     new_stats[4] = alpha_ema * ep_avg_delta_psi + (1 - alpha_ema) * old_stats[4]
                     
                 Elite_Fire_Stats[opp_name] = new_stats
+                
+                # --- 新增: 更新蓝方（本方/主代理）开火角度参数的 EMA ---
+                ep_blue_avg_fire_theta = res.get('ep_blue_avg_fire_theta')
+                ep_blue_avg_ATA = res.get('ep_blue_avg_ATA')
+                ep_blue_avg_delta_psi_threat = res.get('ep_blue_avg_delta_psi_threat')
+                ep_blue_avg_delta_theta = res.get('ep_blue_avg_delta_theta')
+                ep_blue_avg_delta_psi = res.get('ep_blue_avg_delta_psi')
+                
+                # 使用当前主代理的key来记录本方行为
+                main_agent_key = "__CURRENT_MAIN__"
+                if main_agent_key not in Elite_Fire_Stats:
+                    Elite_Fire_Stats[main_agent_key] = [0.0, 0.0, 0.0, 0.0, 0.0]
+                
+                old_main_stats = Elite_Fire_Stats[main_agent_key]
+                new_main_stats = list(old_main_stats)
+                
+                if ep_blue_avg_fire_theta is not None:
+                    new_main_stats[0] = alpha_ema * ep_blue_avg_fire_theta + (1 - alpha_ema) * old_main_stats[0]
+                if ep_blue_avg_ATA is not None:
+                    new_main_stats[1] = alpha_ema * ep_blue_avg_ATA + (1 - alpha_ema) * old_main_stats[1]
+                if ep_blue_avg_delta_psi_threat is not None:
+                    new_main_stats[2] = alpha_ema * ep_blue_avg_delta_psi_threat + (1 - alpha_ema) * old_main_stats[2]
+                if ep_blue_avg_delta_theta is not None:
+                    new_main_stats[3] = alpha_ema * ep_blue_avg_delta_theta + (1 - alpha_ema) * old_main_stats[3]
+                if ep_blue_avg_delta_psi is not None:
+                    new_main_stats[4] = alpha_ema * ep_blue_avg_delta_psi + (1 - alpha_ema) * old_main_stats[4]
+                    
+                Elite_Fire_Stats[main_agent_key] = new_main_stats
                 
                 # [新增] 填充 buffer 用户打印详情
                 result_str = "Win" if metrics['win'] else ("Lose" if metrics['lose'] else "Draw")
