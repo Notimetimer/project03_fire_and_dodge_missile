@@ -712,11 +712,11 @@ class PPOHybrid:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
         
         "Adam优化器（有动量）"
-        # self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         "RMSprop优化器（有二阶矩但是没有一阶动量），初步测试效果更差"
         # self.actor_optimizer = torch.optim.RMSprop(self.actor.parameters(), lr=actor_lr, alpha=0.99, eps=1e-5)
         "AdamW优化器（weight_decay）"
-        self.actor_optimizer = torch.optim.AdamW(self.actor.parameters(), lr=actor_lr, weight_decay=1e-4, eps=1e-5)
+        # self.actor_optimizer = torch.optim.AdamW(self.actor.parameters(), lr=actor_lr, weight_decay=1e-4, eps=1e-5)
         "RAdam优化器(为冷启动优化，但非平稳环境不建议用)"
         # self.actor_optimizer = torch.optim.RAdam(self.actor.parameters(), lr=actor_lr, eps=1e-5)
         
