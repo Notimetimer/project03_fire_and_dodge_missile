@@ -1878,7 +1878,11 @@ def run_MLP_simulation(
                 if total_steps >= WARM_UP_STEPS:
                     # 1. 产生新 Checkpoint 时，初始化其在胜率表和开火指标统计表中的地位
                     WinRates[actor_key] = 0.5  # Learner 的镜像初始胜率为 0.5
-                    Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
+                    # 复制当前主代理的蓝方行为统计到该历史版本，记录它"作为蓝方时"的行为特征
+                    if "__CURRENT_MAIN__" in Elite_Fire_Stats:
+                        Elite_Fire_Stats[actor_key] = copy.deepcopy(Elite_Fire_Stats["__CURRENT_MAIN__"])
+                    else:
+                        Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
                     elo_ratings[opp_name] = main_agent_elo
 
                     if hist_agent_as_opponent:
