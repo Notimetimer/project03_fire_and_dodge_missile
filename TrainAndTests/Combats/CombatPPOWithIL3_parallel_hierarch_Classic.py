@@ -1387,7 +1387,7 @@ def run_MLP_simulation(
                 for k in opponent_keys:
                     if k in Elite_Fire_Stats:
                         stats = Elite_Fire_Stats[k]
-                        fire_theta = stats[0] / (np.pi / 2)   # 俯仰角归一化到 [-1, 1]
+                        fire_theta = 5 * stats[0] / (np.pi / 2)   # 高抛角归一化到 [-1, 1]，并且加大权重
                         ata = stats[1] / np.pi                # ATA归一化到 [0, 1]
                         delta_psi_threat = stats[2] / np.pi     # delta_psi_threat归一化
                         delta_theta = stats[3] / (np.pi / 2)   # delta_theta归一化
