@@ -74,11 +74,11 @@ def run_offline_tactical_analysis(json_path="Elite_Fire_Stats.json", n_clusters=
     # 5. 画布架构部署 (20x12 复合看板)
     fig = plt.figure(figsize=(20, 12))
     feature_names = [
-        'Fire Pitch (rad)', 
-        'Avg ATA 30s (rad)', 
-        'Warning Delta Psi Threat (rad)', 
-        'Delta Pitch 30s (rad)', 
-        'Delta Psi 30s (rad)'
+        'Fire Pitch (deg)', 
+        'Avg ATA 30s (deg)', 
+        'Warning Delta Psi Threat (deg)', 
+        'Delta Pitch 30s (deg)', 
+        'Delta Psi 30s (deg)'
     ]
 
     # --- 左半壁：5个原始维度的一维数轴离散分布图 (引入高斯微幅抖动防止点群重叠) ---
@@ -86,7 +86,7 @@ def run_offline_tactical_analysis(json_path="Elite_Fire_Stats.json", n_clusters=
         ax = fig.add_subplot(5, 2, idx * 2 + 1)
         # 用轻微的 Y 轴高斯抖动将一维数轴上的点“抖开”，方便肉眼评估同一坐标下的点集群密度
         y_jitter = np.random.normal(0, 0.04, size=len(X_raw)) if len(X_raw) > 1 else np.zeros(len(X_raw))
-        ax.scatter(X_raw[:, idx], y_jitter, c=labels, cmap='Set1', s=60, alpha=0.8, edgecolors='k')
+        ax.scatter(X_raw[:, idx] / np.pi * 180, y_jitter, c=labels, cmap='Set1', s=60, alpha=0.8, edgecolors='k')
         ax.set_title(f'1D Physical Dimension: {feature_names[idx]}', fontsize=11, weight='bold')
         ax.set_ylim(-0.5, 0.5)
         ax.get_yaxis().set_visible(False) # 强制隐藏无物理意义的Y轴
@@ -123,8 +123,9 @@ def run_offline_tactical_analysis(json_path="Elite_Fire_Stats.json", n_clusters=
     
     # 导出为高清晰度物理图像
     output_img = "joint_tactical_analysis.png"
-    plt.savefig(output_img, dpi=150)
-    plt.close()
+    plt.show()
+    # plt.savefig(output_img, dpi=150)
+    # plt.close()
     print(f"[Success] 离线战术看板分析完成！保存路径: {output_img}")
 
 if __name__ == "__main__":
@@ -132,7 +133,7 @@ if __name__ == "__main__":
     dir_name = None # "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230"
    
     # 短名称次之（自动找最新实验结果）
-    experiment_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3'
+    experiment_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3_5类'
     # --- 查找模型 ---
     logs_root_dir = os.path.join(project_root, "logs/combat")
     
@@ -141,10 +142,10 @@ if __name__ == "__main__":
     print(f"Log directory: {latest_log_dir}")
     json_path = os.path.join(latest_log_dir, "Elite_Fire_Stats.json")
     strat_weights = np.array([
-        1.5,  # 开火俯仰角 (平射 vs 高抛)
-        2.0,  # Avg ATA     (是否维持中制导)
-        3.0,  # delta_psi_threat (置尾逃逸 vs 三九线缠斗，重度提权)
+        1.0,  # 开火俯仰角 (平射 vs 高抛)
+        1.0,  # Avg ATA     (是否维持中制导)
+        1.0,  # delta_psi_threat (置尾逃逸 vs 三九线缠斗，重度提权)
         1.0,  # delta_theta (常规机动幅度)
         1.0   # delta_psi   (常规机动幅度)
     ])
-    run_offline_tactical_analysis(json_path, n_clusters=4, weights=strat_weights)
+    run_offline_tactical_analysis(json_path, n_clusters=5, weights=strat_weights)
