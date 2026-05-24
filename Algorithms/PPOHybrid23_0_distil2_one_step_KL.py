@@ -80,14 +80,14 @@ class PolicyNetHybrid(torch.nn.Module):
             # 初始化为 0 (即 temperature=1.0)
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
-    # [修改] 增加 action_masks 参数, [新增] 增加 temp 参数
+    # [修改] 增加 action_masks 参数, [新增] 增加 temperature 参数
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0):
-        if isinstance(temp, dict):
-            temp_cat = temp.get('cat', 1.0)
-            temp_bern = temp.get('bern', 1.0)
+        if isinstance(temperature, dict):
+            temp_cat = temperature.get('cat', 1.0)
+            temp_bern = temperature.get('bern', 1.0)
         else:
-            temp_cat = temp
-            temp_bern = temp
+            temp_cat = temperature
+            temp_bern = temperature
 
         shared_features = self.net(x)
         outputs = {'cont': None, 'cat': None, 'bern': None}
@@ -110,17 +110,17 @@ class PolicyNetHybrid(torch.nn.Module):
             # 1. 切分 Logits
             cat_logits_list = torch.split(cat_logits_all, self.cat_dims, dim=-1)
             
-            # 2. 获取温度 (Temp = exp(log_temp))
+            # 2. 获取温度 (temperature = exp(log_temp))
             # temp_cat 形状: (num_heads, )
-            # temps = 1.0  # [修改] 使用传入的 temp
+            # temperatures = 1.0  # [修改] 使用传入的 temperature
             # >2 强随机，<0.1 强确定性
             
-            # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
-            # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
-            # 较低的 Temp -> Logits 数值差距拉大 -> Softmax 后分布趋向 One-hot (熵减小)
+            # 3. 应用温度缩放 (Logits / temperature) 并 Softmax
+            # 较高的 temperature -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
+            # 较低的 temperature -> Logits 数值差距拉大 -> Softmax 后分布趋向 One-hot (熵减小)
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
-                # 对应的温度: temps[i]
+                # 对应的温度: temperatures[i]
                 # 使用 temp_cat 进行缩放, 防止除0
                 scaled_logits = logits / (temp_cat + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
@@ -139,7 +139,7 @@ class PolicyNetHybrid(torch.nn.Module):
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
             # [修改] 使用我们提取的 temp_bern
-            # temps = 1.0 
+            # temperatures = 1.0 
             scaled_bern_logits = bern_logits / (temp_bern + 1e-8)
             outputs['bern'] = scaled_bern_logits
             
@@ -179,7 +179,7 @@ class HybridActorWrapper(nn.Module):
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temp 参数
+    # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temperature 参数
     def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temperature=1.0):
         """
         推理接口。
@@ -275,8 +275,8 @@ class HybridActorWrapper(nn.Module):
             action_masks = {'bern': mask_tensor}
         # =====================================================================
 
-        # [修改] 调用网络时传入 action_masks 和 temp
-        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks, temperature=temp)
+        # [修改] 调用网络时传入 action_masks 和 temperature
+        actor_outputs = self.net(state, max_std=max_std, action_masks=action_masks, temperature=temperature)
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行

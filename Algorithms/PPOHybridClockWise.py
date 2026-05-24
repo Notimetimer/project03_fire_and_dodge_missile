@@ -135,12 +135,12 @@ class PolicyNetHybrid(torch.nn.Module):
         if max_std is None:
             max_std = 10
 
-        if isinstance(temp, dict):
-            temp_cat = temp.get('cat', 1.0)
-            temp_bern = temp.get('bern', 1.0)
+        if isinstance(temperature, dict):
+            temp_cat = temperature.get('cat', 1.0)
+            temp_bern = temperature.get('bern', 1.0)
         else:
-            temp_cat = temp
-            temp_bern = temp
+            temp_cat = temperature
+            temp_bern = temperature
 
         shared_features = self.net(x)
         outputs = {'cont': None, 'cat': None, 'bern': None, 'circ': None, 'lin': None}
@@ -172,7 +172,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
-            # temps = 1.0  # [修改] 使用传入的 temp
+            # temperatures = 1.0  # [修改] 使用传入的 temperature
             # >2 强随机，<0.1 强确定性
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
@@ -180,7 +180,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # 较低的 Temp -> Logits 数值差距拉大 -> Softmax 后分布趋向 One-hot (熵减小)
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
-                # 对应的温度: temps[i]
+                # 对应的温度: temperatures[i]
                 # 使用 temp_cat 进行缩放, 防止除0
                 scaled_logits = logits / (temp_cat + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
@@ -326,7 +326,7 @@ class HybridActorWrapper(nn.Module):
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
-    # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temp 参数
+    # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temperature 参数
     def get_action(self, state, h=None, explore=True, min_std=None, max_std=None, check_obs=None, bern_threshold=0.5, temperature=1.0, mask_on=1):
         """
         推理接口。
@@ -423,8 +423,8 @@ class HybridActorWrapper(nn.Module):
         #     action_masks = {'bern': mask_tensor}
         # # =====================================================================
 
-        # [修改] 调用网络时传入 action_masks 和 temp
-        actor_outputs = self.net(state, min_std=min_std, max_std=max_std, temperature=temp, mask_on=mask_on)
+        # [修改] 调用网络时传入 action_masks 和 temperature
+        actor_outputs = self.net(state, min_std=min_std, max_std=max_std, temperature=temperature, mask_on=mask_on)
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, min_std=min_std, max_std=max_std)  # 如果需要gru，改动这一行

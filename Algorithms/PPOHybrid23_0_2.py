@@ -164,16 +164,16 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 2. 获取温度 (Temp = exp(log_temp))
             # temp_cat 形状: (num_heads, )
-            temps = 1.0  # use scalar temp (or replace with tensor if per-head temps are needed)
+            temperatures = 1.0  # use scalar temperature (or replace with tensor if per-head temperatures are needed)
             
             # 3. 应用温度缩放 (Logits / Temp) 并 Softmax
             # 较高的 Temp -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
             # 较低的 Temp -> Logits 数值差距拉大 -> Softmax 后分布趋向 One-hot (熵减小)
             final_probs_list = []
             for i, logits in enumerate(cat_logits_list):
-                # 对应的温度: temps[i]
-                # scaled_logits = logits / (temps[i] + 1e-8)
-                scaled_logits = logits / (temps + 1e-8)
+                # 对应的温度: temperatures[i]
+                # scaled_logits = logits / (temperatures[i] + 1e-8)
+                scaled_logits = logits / (temperatures + 1e-8)
                 final_probs_list.append(F.softmax(scaled_logits, dim=-1))
             
             outputs['cat'] = final_probs_list
@@ -188,9 +188,9 @@ class PolicyNetHybrid(torch.nn.Module):
                 # mask == 0 代表禁止开火，设为极小值
                 bern_logits = bern_logits.masked_fill(mask == 0, -1e9)
 
-            # use scalar temp (no tensor ops on plain number)
-            temps = 1.0 # torch.exp(self.log_temp_bern)
-            scaled_bern_logits = bern_logits / (temps + 1e-8)
+            # use scalar temperature (no tensor ops on plain number)
+            temperatures = 1.0 # torch.exp(self.log_temp_bern)
+            scaled_bern_logits = bern_logits / (temperatures + 1e-8)
             outputs['bern'] = scaled_bern_logits
             
         return outputs
