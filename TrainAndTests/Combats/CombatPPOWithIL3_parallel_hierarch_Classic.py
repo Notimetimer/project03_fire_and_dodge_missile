@@ -1395,8 +1395,8 @@ def run_MLP_simulation(
                 
                 print(f"  [Ratings Update] Main Agent Elo: {main_agent_elo:.0f}")
 
-                # 名人堂判定：如果全胜则保存并加入池子
-                if all(score > 0.5 for score in outcomes.values()):
+                # 名人堂判定：如果 test_no_random 全胜（score > 0.5）则保存并加入池子
+                if all(score > 0.5 for score in outcomes_nr.values()): # 原先为outcomes.values()
                     # 【核心修改】从全量注册表 elo_ratings 中寻找最新的已保存编号
                     rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
                     
@@ -1404,7 +1404,7 @@ def run_MLP_simulation(
                         # 找到数值最大的编号（即最新的已保存智能体）
                         hof_key = max(rein_keys, key=lambda k: int(k.replace('actor_rein', '')))
                         
-                        if hof_key not in hall_of_fame:
+                        if hof_key not in hall_of_fame: # 只能判断key，不能判断value
                             # 存入字典，分数优先取全量表中的记录
                             hall_of_fame[hof_key] = elo_ratings.get(hof_key, main_agent_elo)
                             print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
@@ -1421,13 +1421,13 @@ def run_MLP_simulation(
             # 这一步 Master 决定每个 Worker 打谁
             worker_metrics_buffer = [] # 暂存本轮 metrics 方便打印
             
-            # 获取最新的 Main_Agent_Fire_Stats
-            rein_keys_in_stats = [k for k in Elite_Fire_Stats.keys() if re.match(r'^actor_rein\d+$', k)]
-            if rein_keys_in_stats:
-                latest_rein_key = max(rein_keys_in_stats, key=lambda k: int(k.replace('actor_rein', '')))
-                Main_Agent_Fire_Stats = Elite_Fire_Stats[latest_rein_key]
-            else:
-                Main_Agent_Fire_Stats = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
+            # # 获取最新的 Main_Agent_Fire_Stats
+            # rein_keys_in_stats = [k for k in Elite_Fire_Stats.keys() if re.match(r'^actor_rein\d+$', k)]
+            # if rein_keys_in_stats:
+            #     latest_rein_key = max(rein_keys_in_stats, key=lambda k: int(k.replace('actor_rein', '')))
+            #     Main_Agent_Fire_Stats = Elite_Fire_Stats[latest_rein_key]
+            # else:
+            #     Main_Agent_Fire_Stats = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
 
             # PFSP_stratified 特殊处理：分段采样
             selected_opponents = []
@@ -1700,9 +1700,12 @@ def run_MLP_simulation(
                     new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR)
                     elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
-                    # 同步更新 Elite 池中已有的对手
+                    # 同步更新 Elite 池中已有的对手Elo分值
                     if opp_name in elite_elo_ratings:
                         elite_elo_ratings[opp_name] = new_adv_elo
+                    # 同步更新 Hall of Fame 中已有的对手Elo分值
+                    if opp_name in hall_of_fame:
+                        hall_of_fame[opp_name] = new_adv_elo
                 else:
                     # 新对手：始终添加到 elo_ratings
                     elo_ratings[opp_name] = main_agent_elo
