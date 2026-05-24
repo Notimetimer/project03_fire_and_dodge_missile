@@ -58,7 +58,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 为每一个独立的离散头 (Head) 创建一个温度参数
             # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
-            # 初始化为 0 (即 temp=1.0)，保持原网络特性，让网络自己学去增大熵
+            # 初始化为 0 (即 temperature=1.0)，保持原网络特性，让网络自己学去增大熵
             # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
 
         # 3. 伯努利动作头 (Bernoulli)
@@ -70,7 +70,7 @@ class PolicyNetHybrid(torch.nn.Module):
             nn.init.constant_(self.fc_bern.bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
-            # 初始化为 0 (即 temp=1.0)
+            # 初始化为 0 (即 temperature=1.0)
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
     # [修改] 增加 action_masks 参数

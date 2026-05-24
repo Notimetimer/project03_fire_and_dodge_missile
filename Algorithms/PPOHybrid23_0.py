@@ -75,7 +75,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # 为每一个独立的离散头 (Head) 创建一个温度参数
             # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
-            # 初始化为 0 (即 temp=1.0)，保持原网络特性，让网络自己学去增大熵
+            # 初始化为 0 (即 temperature=1.0)，保持原网络特性，让网络自己学去增大熵
             # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
 
         # 3. 伯努利动作头 (Bernoulli)
@@ -98,11 +98,11 @@ class PolicyNetHybrid(torch.nn.Module):
             nn.init.constant_(self.fc_bern[-1].bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
-            # 初始化为 0 (即 temp=1.0)
+            # 初始化为 0 (即 temperature=1.0)
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temp 参数
-    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temp=1.0, mask_on=1):
+    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=1):
         if isinstance(temp, dict):
             temp_cat = temp.get('cat', 1.0)
             temp_bern = temp.get('bern', 1.0)
@@ -263,7 +263,7 @@ class HybridActorWrapper(nn.Module):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
     # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temp 参数
-    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temp=1.0, mask_on=1):
+    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temperature=1.0, mask_on=1):
         """
         推理接口。
         Args:
@@ -359,7 +359,7 @@ class HybridActorWrapper(nn.Module):
         # # =====================================================================
 
         # [修改] 调用网络时传入 action_masks 和 temp
-        actor_outputs = self.net(state, max_std=max_std, temp=temp, mask_on=mask_on)
+        actor_outputs = self.net(state, max_std=max_std, temperature=temp, mask_on=mask_on)
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
@@ -803,7 +803,7 @@ class PPOHybrid:
         
         # [修改] 透传 check_obs
         actions_exec, actions_raw, h_state, actions_dist_check = self.actor.get_action(
-            state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs, temp=temperature, mask_on=mask_on
+            state, h=h0, explore=explore, max_std=max_s, check_obs=check_obs, temperature=temperature, mask_on=mask_on
         )
         #  保持原有的返回两个字典的接口，或者根据需要返回 diagnostic output
         return actions_exec, actions_raw, h_state, actions_dist_check

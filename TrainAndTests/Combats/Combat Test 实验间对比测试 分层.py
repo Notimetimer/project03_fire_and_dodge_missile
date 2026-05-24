@@ -148,7 +148,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         # 由于训练时没有 state_check，去除 check_obs
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore=explore_dict, temp=temp_dict, bern_threshold=0.1
+                            r_obs, explore=explore_dict, temperature=temp_dict, bern_threshold=0.1
                         )
                         
                     r_action_label = r_action_exec['cat'][0]
@@ -162,7 +162,7 @@ if __name__ == "__main__":
                     # --- 蓝方 (RL 智能体 200) ---
                     with torch.no_grad():
                         b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(
-                            b_obs, explore=explore_dict, temp=temp_dict, bern_threshold=0.1
+                            b_obs, explore=explore_dict, temperature=temp_dict, bern_threshold=0.1
                         )
                         
                     b_action_label = b_action_exec['cat'][0]

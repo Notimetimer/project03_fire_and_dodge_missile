@@ -133,8 +133,8 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
                 # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
                 temp_dict = {'cat': 0.1, 'bern': 1.0}
                 # 不再向网络传入 check_obs 执行强力动作屏蔽
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temp=temp_dict)
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temp=temp_dict)
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temperature=temp_dict)
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temperature=temp_dict)
             # 交给环境物理函数使用 tabu=1 (相对宽松的条件) 拦截无效开火
             if r_act['bern'][0]: launch_missile_immediately(env, 'r', tabu=1)
             if b_act['bern'][0]: launch_missile_immediately(env, 'b', tabu=1)
