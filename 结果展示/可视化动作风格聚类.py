@@ -81,15 +81,29 @@ def run_offline_tactical_analysis(json_path="Elite_Fire_Stats.json", n_clusters=
         'Delta Psi 30s (deg)'
     ]
 
-    # --- 左半壁：5个原始维度的一维数轴离散分布图 (引入高斯微幅抖动防止点群重叠) ---
+    # --- 读取 Elo 评分 ---
+    elo_path = os.path.join(os.path.dirname(json_path), "elo_ratings.json")
+    elo_scores = None
+    if os.path.exists(elo_path):
+        with open(elo_path, 'r', encoding='utf-8') as f:
+            elo_dict = json.load(f)
+        elo_scores = np.array([elo_dict.get(k, np.nan) for k in valid_keys], dtype=np.float64)
+
+    # --- 左半壁：5个原始维度的一维数轴离散分布图 ---
     for idx in range(5):
         ax = fig.add_subplot(5, 2, idx * 2 + 1)
-        # 用轻微的 Y 轴高斯抖动将一维数轴上的点“抖开”，方便肉眼评估同一坐标下的点集群密度
-        y_jitter = np.random.normal(0, 0.04, size=len(X_raw)) if len(X_raw) > 1 else np.zeros(len(X_raw))
-        ax.scatter(X_raw[:, idx] / np.pi * 180, y_jitter, c=labels, cmap='Set1', s=60, alpha=0.8, edgecolors='k')
+        x_vals = X_raw[:, idx] / np.pi * 180
+        if elo_scores is not None:
+            y_vals = elo_scores
+            ax.scatter(x_vals, y_vals, c=labels, cmap='Set1', s=60, alpha=0.8, edgecolors='k')
+            ax.set_ylabel('Elo Rating', fontsize=9)
+            ax.get_yaxis().set_visible(True)
+        else:
+            y_jitter = np.random.normal(0, 0.04, size=len(X_raw)) if len(X_raw) > 1 else np.zeros(len(X_raw))
+            ax.scatter(x_vals, y_jitter, c=labels, cmap='Set1', s=60, alpha=0.8, edgecolors='k')
+            ax.set_ylim(-0.5, 0.5)
+            ax.get_yaxis().set_visible(False)
         ax.set_title(f'1D Physical Dimension: {feature_names[idx]}', fontsize=11, weight='bold')
-        ax.set_ylim(-0.5, 0.5)
-        ax.get_yaxis().set_visible(False) # 强制隐藏无物理意义的Y轴
         ax.grid(True, linestyle='--', alpha=0.4)
 
     # --- 右上壁：3D PCA 全空间拓扑投影 ---
