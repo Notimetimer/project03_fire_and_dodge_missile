@@ -9,7 +9,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.1_5类'
+mission_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3_5类'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -123,7 +123,7 @@ if __name__=='__main__':
         self_play_type = 'PFSP_double_dims', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
-        p_factor = 0.35, # 0.23,
+        p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100

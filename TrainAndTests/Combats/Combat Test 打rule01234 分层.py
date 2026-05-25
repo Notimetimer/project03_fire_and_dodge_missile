@@ -49,7 +49,9 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'IL_and_Mixed_FSP_挑战_并行_分层_rule3_0.1'
+    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3'
+    
+    'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3'
     
     'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'
@@ -63,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
     args = parser.parse_args()    
 
-    args.agent_id = 214 # 172 # 838
+    args.agent_id = None # 214 # 172 # 838
     
     # --- 环境和模型参数 (必须与训练时一致) ---
     env_args = argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3) # 55e3

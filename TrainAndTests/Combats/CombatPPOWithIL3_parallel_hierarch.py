@@ -677,7 +677,7 @@ def run_MLP_simulation(
     il_buffer_max_size=2e4,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
-    label_smoothing=0.1,
+    label_smoothing=0.3,
     label_smoothing_mixed=0.01,
     action_cycle_multiplier=30,
     trigger0=50e3,

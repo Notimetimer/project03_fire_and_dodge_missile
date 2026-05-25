@@ -400,7 +400,7 @@ class HybridActorWrapper(nn.Module):
         # [修改] 返回 actor_outputs 以便外部访问 logits
         return log_probs, entropy, entropy_details, actor_outputs, None
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1, no_bern=False):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3, no_bern=False):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         
@@ -1120,7 +1120,7 @@ class PPOHybrid:
     
     
     # --- 修改后的 MARWIL_update ---
-    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0,
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.3, max_weight=100.0,
                       tau=0.8):
         """
         MARWIL 离线更新函数
@@ -1262,7 +1262,7 @@ class PPOHybrid:
                      # RL 参数
                      adv_normed=False, clip_vf=False, clip_range=0.2, 
                      # IL 参数
-                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.1, max_weight=100.0, il_epochs=1,
+                     beta=1.0, il_batch_size=None, alpha=1.0, c_v=1.0, label_smoothing=0.3, max_weight=100.0, il_epochs=1,
                      sil_only_maneuver=True,
                      # 公共参数
                      shuffled=1, mini_batch_size=None, alpha_logit_reg=0.05):

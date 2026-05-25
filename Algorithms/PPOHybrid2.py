@@ -741,7 +741,7 @@ class PPOHybrid:
         check_weights_bias_nan(self.critic, "critic", "update后")
 
     # --- 新增功能 2: MARWIL Update ---
-    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.1, max_weight=100.0):
+    def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.3, max_weight=100.0):
         """
         MARWIL 离线更新函数 (混合动作空间支持版 + Mini-batch)
         """
