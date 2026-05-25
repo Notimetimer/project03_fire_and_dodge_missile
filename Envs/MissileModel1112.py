@@ -280,51 +280,51 @@ class missile_class:
         
         if not datalink:
             "线性递推加误差"
+            # # if self.last_target_t is None:
+            # #     t_lost_data = 0.0
+            # # else:
+            # #     t_lost_data = self.t - self.last_target_t
             # if self.last_target_t is None:
-            #     t_lost_data = 0.0
+            #     vtt_predict = self.vt0_.copy()
+            #     ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
+            #     # 保存预测状态，便于后续累积
+            #     self.last_target_v = vtt_predict.copy()
+            #     self.last_target_pos = ptt_predict.copy()
+            #     self.last_target_t = self.t
             # else:
-            #     t_lost_data = self.t - self.last_target_t
-            if self.last_target_t is None:
-                vtt_predict = self.vt0_.copy()
-                ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
-                # 保存预测状态，便于后续累积
-                self.last_target_v = vtt_predict.copy()
-                self.last_target_pos = ptt_predict.copy()
-                self.last_target_t = self.t
-            else:
-                # 上一帧预测速度
-                vtt_predict = self.last_target_v.copy() if self.last_target_v is not None else self.vt0_.copy()
-                # 未知机动噪声（随机游走）
-                sigma_a = 8.0 # 8.0   # m/s^2，可调
-                a_noise = np.random.randn(3) * sigma_a
-                # 高度方向弱一些
-                a_noise[1] *= 0.1
-                # 更新预测速度：误差累积
-                vtt_predict += a_noise * self.dt
-                # 限制最大预测速度
-                vmax = np.inf # 450.0
-                v_norm = np.linalg.norm(vtt_predict)
-                if v_norm > vmax:
-                    vtt_predict *= vmax / v_norm
-                self.last_target_v = vtt_predict.copy()
-                # 更新预测位置
-                if self.last_target_pos is not None:
-                    ptt_predict = self.last_target_pos + vtt_predict * self.dt
-                else:
-                    ptt_predict = self.pt0_ + vtt_predict * (self.t - self.latest_time_of_target)
-                # 防止预测扎地
-                ptt_predict[1] = max(ptt_predict[1], 1000.0)
-                self.last_target_pos = ptt_predict.copy()
+            #     # 上一帧预测速度
+            #     vtt_predict = self.last_target_v.copy() if self.last_target_v is not None else self.vt0_.copy()
+            #     # 未知机动噪声（随机游走）
+            #     sigma_a = 8.0 # 8.0   # m/s^2，可调
+            #     a_noise = np.random.randn(3) * sigma_a
+            #     # 高度方向弱一些
+            #     a_noise[1] *= 0.1
+            #     # 更新预测速度：误差累积
+            #     vtt_predict += a_noise * self.dt
+            #     # 限制最大预测速度
+            #     vmax = np.inf # 450.0
+            #     v_norm = np.linalg.norm(vtt_predict)
+            #     if v_norm > vmax:
+            #         vtt_predict *= vmax / v_norm
+            #     self.last_target_v = vtt_predict.copy()
+            #     # 更新预测位置
+            #     if self.last_target_pos is not None:
+            #         ptt_predict = self.last_target_pos + vtt_predict * self.dt
+            #     else:
+            #         ptt_predict = self.pt0_ + vtt_predict * (self.t - self.latest_time_of_target)
+            #     # 防止预测扎地
+            #     ptt_predict[1] = max(ptt_predict[1], 1000.0)
+            #     self.last_target_pos = ptt_predict.copy()
             
             "原位置预测模型，没有考虑误差，精度过高被钻了空子"
             # # 线性递推预测目标位置
-            # if self.last_target_t is None:
-            #     vtt_predict = self.vt0_
-            #     ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
-            # else:
-            #     vtt_predict = self.last_target_v * np.exp(-(self.t - self.last_target_t) / 15.0)  # * 0.5 #  0.8 # 预测速度带衰减
-            #     ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
-            #     ptt_predict[1] = max(ptt_predict[1], 1000) # 禁止往地底下线性递推
+            if self.last_target_t is None:
+                vtt_predict = self.vt0_
+                ptt_predict = self.pt0_ + self.vt0_ * (self.t - self.latest_time_of_target)
+            else:
+                vtt_predict = self.last_target_v * np.exp(-(self.t - self.last_target_t) / 15.0)  # * 0.5 #  0.8 # 预测速度带衰减
+                ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
+                ptt_predict[1] = max(ptt_predict[1], 1000) # 禁止往地底下线性递推
 
             if norm(ptt_predict-p_missile_) < self.detect_range:
                 self.radar_on = True

@@ -266,7 +266,7 @@ class ChooseStrategyEnv(Battle):
         if action_v == 3: # 比目标低30°
             theta_desired = np.clip(theta+delta_theta+np.radians(-30), -pi/2, pi/2)
         if action_v == 4: # 急速下降
-            theta_desired = -pi/2
+            theta_desired = -pi/4  # -pi/2
         
         # 水平方向指令：
         # 追踪
@@ -357,18 +357,18 @@ class ChooseStrategyEnv(Battle):
                     # 角度优势杀
                     if cos_ATA_r >= cos(pi / 6) and cos_ATA_b < cos(pi / 6):
                         BUAV.dead = True
-                        BUAV.got_hit = True
+                        # BUAV.got_hit = True
                         print('近距单杀')
                     elif cos_ATA_r < cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
-                        RUAV.got_hit = True
+                        # RUAV.got_hit = True
                         print('近距单杀')
                     # 都在可攻击角度
                     elif cos_ATA_r >= cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
                         BUAV.dead = True
-                        RUAV.got_hit = True
-                        BUAV.got_hit = True
+                        # RUAV.got_hit = True
+                        # BUAV.got_hit = True
                         print('近距双杀')
 
                     # 更复杂，但不一定好用的判定逻辑

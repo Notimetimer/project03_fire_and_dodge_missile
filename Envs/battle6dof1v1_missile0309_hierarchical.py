@@ -566,6 +566,7 @@ class Battle(object):
         # r_reward_n, b_reward_n = self.get_reward()
         # terminate = self.get_terminate()
 
+        "可能是重复逻辑，需要排查"
         for UAV in self.UAVs:
             if UAV.got_hit or self.crash(UAV):  # or self.out_cage(UAV): ###
                 UAV.dead = True
