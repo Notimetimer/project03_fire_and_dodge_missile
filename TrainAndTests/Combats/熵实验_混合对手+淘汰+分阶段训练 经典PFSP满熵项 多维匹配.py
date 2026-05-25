@@ -3,14 +3,13 @@ from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
-resume_target_dir = None 
-resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3-run-20260523-130951"
+resume_target_dir = None
 collape_recover={ # 是否是崩盘后恢复 
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3'
+mission_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3_5类'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -82,7 +81,7 @@ if __name__=='__main__':
         k_nonlinear=0.0,
         collape_recover=collape_recover,
         num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
-        n_clusters=3,
+        n_clusters=5,
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,

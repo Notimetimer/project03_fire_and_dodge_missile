@@ -4,9 +4,9 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_smoothing_0.1-run-20260518-160315"
+resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_smoothing_0.3_rule3-run-20260522-115354"
 
-mission_name = 'IL_and_Mixed经典PFSP_smoothing_0.1'
+mission_name = 'IL_and_Mixed经典PFSP_smoothing_0.3_rule3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -25,14 +25,15 @@ il_batch_size2= 1e4 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 "调参改这里!!!"
-label_smoothing=0.1 # 0.3
+label_smoothing=0.3 # 0.3
 label_smoothing_mixed=0.01
 dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
+
 weight_reward_0 = np.array([1,0,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 初始模仿对象
+IL_rule = 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
