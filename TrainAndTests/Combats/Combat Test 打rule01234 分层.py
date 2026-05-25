@@ -49,7 +49,7 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3_5类'
+    experiment_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3'
     
     'IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项'
     'IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项'
@@ -162,7 +162,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.4
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.02,
+                            temperature={'cat':0.8, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_label = r_action_exec['cat'] # [0]
