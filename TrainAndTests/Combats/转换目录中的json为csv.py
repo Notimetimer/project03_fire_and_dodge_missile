@@ -4,7 +4,7 @@ import os
 
 # 读取JSON文件
 logs_directory = r"d:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat"
-experiment_name = r"IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3_5类-run-20260523-150613"
+experiment_name = r"IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.1_5类-run-20260523-150613"
 
 json_path = os.path.join(logs_directory, experiment_name, 'Elite_Fire_Stats.json')
 

@@ -171,7 +171,7 @@ if __name__ == "__main__":
     dir_name = None # "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230"
    
     # 短名称次之（自动找最新实验结果）
-    experiment_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3'
+    experiment_name = 'IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.1'
     # --- 查找模型 ---
     logs_root_dir = os.path.join(project_root, "logs/combat")
     

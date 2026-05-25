@@ -112,7 +112,7 @@ if __name__=='__main__':
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
-        p_factor = 0.23,
+        p_factor = 0.35, # 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
         MAX_HISTORY_SIZE = 300,  # 100
