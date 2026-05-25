@@ -4,7 +4,7 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None 
-# resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3-run-20260520-233433"
+resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_多技术流派_并行_分层_rule3_0.3-run-20260523-130951"
 collape_recover={ # 是否是崩盘后恢复 
             "collapsed": False,
             "best_actor_name": None,
@@ -34,7 +34,7 @@ dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,1,0]) # 1,1,1 引导奖励很难说该不该有
+weight_reward_0 = np.array([1,0,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 

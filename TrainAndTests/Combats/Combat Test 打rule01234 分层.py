@@ -162,7 +162,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.02,
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.02,
                             temperature={'cat':0.8, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None
                         

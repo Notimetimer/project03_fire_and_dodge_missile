@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from _context import *
-
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial.distance import cdist
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
 
 
@@ -65,11 +66,55 @@ def run_offline_tactical_analysis(json_path="Elite_Fire_Stats.json", n_clusters=
     n_unique = len(np.unique(X_weighted, axis=0))
     actual_clusters = min(n_clusters, n_unique)
     
+    "按距离聚类"
+    # if actual_clusters > 1:
+    #     kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init='auto')
+    #     labels = kmeans.fit_predict(X_weighted)
+    # else:
+    #     labels = np.zeros(len(X_raw), dtype=int)
+    
+    "类别数均等"
+    n_samples = len(X_weighted)
+    actual_clusters = min(n_clusters, n_samples)
+    
     if actual_clusters > 1:
-        kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init='auto')
-        labels = kmeans.fit_predict(X_weighted)
+        # A. 先通过标准 KMeans 获取初始聚类中心（为了保持流派的物理特性）
+        kmeans = KMeans(n_clusters=actual_clusters, random_state=42, n_init='auto').fit(X_weighted)
+        centers = kmeans.cluster_centers_
+        
+        # B. 计算每个样本到每个中心的距离矩阵 [n_samples, actual_clusters]
+        dist_matrix = cdist(X_weighted, centers)
+        
+        # C. 构建指派问题的成本矩阵
+        # 每个聚类中心需要分配 n_samples // actual_clusters 个名额
+        counts_per_cluster = n_samples // actual_clusters
+        remainder = n_samples % actual_clusters
+        
+        # 复制中心点列，使得每个中心点都有固定数量的“槽位”
+        # 例如：如果名额是 10, 10, 10, 11，则将距离矩阵扩展
+        expanded_dist_matrix = np.repeat(dist_matrix, counts_per_cluster, axis=1)
+        
+        # 处理余数：将前几个中心额外增加一个槽位
+        if remainder > 0:
+            extra_cols = dist_matrix[:, :remainder]
+            expanded_dist_matrix = np.column_stack([expanded_dist_matrix, extra_cols])
+            
+        # D. 使用匈牙利算法求解最优指派，使总距离和最小且名额均等
+        row_ind, col_ind = linear_sum_assignment(expanded_dist_matrix)
+        
+        # E. 将槽位索引映射回类别标签
+        # 逻辑：col_ind 是扩展矩阵的列索引，需要还原为原始中心的索引
+        labels = np.zeros(n_samples, dtype=int)
+        for i, col in enumerate(col_ind):
+            if col < counts_per_cluster * actual_clusters:
+                labels[i] = col // counts_per_cluster
+            else:
+                labels[i] = col - (counts_per_cluster * actual_clusters) # 余数部分的映射
+                
+        print(f"[Info] 已完成等名额分配：每类约 {n_samples/actual_clusters:.1f} 个样本")
     else:
         labels = np.zeros(len(X_raw), dtype=int)
+
 
     # 5. 画布架构部署 (20x12 复合看板，使用GridSpec实现左右不同行间距)
     fig = plt.figure(figsize=(20, 12))

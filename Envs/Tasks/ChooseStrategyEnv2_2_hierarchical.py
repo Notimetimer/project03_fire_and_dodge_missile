@@ -155,6 +155,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
+        r_event1 = r_event
+        r_event2 = r_event
+        r_event3 = r_event
+        
         r_constraint = 0.0 # 约束与代价
         r_shaping = 0.0    # 战术引导
 
@@ -307,15 +311,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         enm_avg_dist = r_avg_dist
                     
                     # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
-                    r_event += -30 - 20 * (ego_avg_dist-enm_avg_dist)/self.R_cage0
+                    r_event1 += -30 - 20 * (ego_avg_dist-enm_avg_dist)/self.R_cage0
                     self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
-                else:
-                    # 如果由于某种原因没有记录到态势数据，退回之前的默认惩罚或给0
-                    pass
                 
-                # # “同归于尽收回导弹浪费惩罚，先死才有补偿，后死照样惩罚”
-                # if enm.dead and getattr(ego, 'last_dead', False):
-                #     r_event += 15 * ego.ammo
+                if enm.dead: # 平局，对面还死了，那就是双杀了
+                    r_event2 += 180 # 双杀当做赢
+                    r_event3 -= 180 # 双杀当做输
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
@@ -323,4 +324,4 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
-        return done, r_event, r_constraint, r_shaping
+        return done, r_event1+r_constraint, r_event2+r_constraint, r_event3+r_constraint
