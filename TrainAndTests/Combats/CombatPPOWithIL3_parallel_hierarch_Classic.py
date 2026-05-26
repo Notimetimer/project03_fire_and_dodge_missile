@@ -326,6 +326,29 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
             probs = weights / weights.sum()
             
         return probs, keys
+    # 倾向势均力敌
+    elif SP_type == 'PFSP_balanced':
+        # 获取所有候选对手的胜率 P
+        ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
+        
+        # 计算权重：((1 - P)*P)^(p/2)
+        # 解释：胜率越低（越打不过），权重越高，但太强太弱的对手被过滤掉
+        opponent_mask = np.ones_like(ps)
+        for i in range(len(ps)):
+            if ps[i] > 0.2 and ps[i] < 0.8:
+                opponent_mask[i] = 1.0
+            else:
+                opponent_mask[i] = 0.01
+        weights = np.power((1.0 - ps)*ps, p_factor/2)
+        weights = weights * opponent_mask
+        
+        # 防止全为 0 的情况（例如胜率全是 1）
+        if weights.sum() < 1e-8:
+            probs = np.ones(len(keys)) / len(keys)
+        else:
+            probs = weights / weights.sum()
+            
+        return probs, keys
 
     # 2. 处理 FSP (全样本均匀分布)
     elif SP_type == 'FSP':
@@ -630,8 +653,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
-                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label) if getattr(env.BUAV, 'about_to_fire', 0) else None
-                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label) if getattr(env.RUAV, 'about_to_fire', 0) else None
+                    b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                    r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     
                     if b_m_id: 
                         m_fired += 1
@@ -652,14 +675,14 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     steps_run += 1
                     
                     # 4. 奖励计算
-                    done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
-                    _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
+                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
                     
-                    reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * reward_weight)
-                    reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * reward_weight)
+                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
+                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += (b_rew_event + b_rew_constraint)
+                        episode_return += b_reward1
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -1782,6 +1805,9 @@ def run_MLP_simulation(
                     freeze_actor = 1
                 else:
                     freeze_actor = 0
+                # critic先收敛
+                if total_steps < 50e3:
+                    freeze_actor = 1
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor)
                 #====================

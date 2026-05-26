@@ -154,7 +154,7 @@ if __name__ == "__main__":
                 r_maneuver = env.maneuver14(env.RUAV, r_action_label)
                 b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                 env.step(r_maneuver, b_maneuver)
-                done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)
+                done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)
                 done = done
                 env.render(t_bias=t_bias)
 

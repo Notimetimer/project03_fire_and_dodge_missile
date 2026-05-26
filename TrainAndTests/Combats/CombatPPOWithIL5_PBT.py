@@ -845,7 +845,7 @@ def run_MLP_simulation(
         current_action_exec = None
         current_enm_action_exec = None
         
-        b_rew_event, b_rew_constraint, b_rew_shaping = 0,0,0
+        b_reward1, b_reward2, b_reward3 = 0,0,0
         
         # 新增：每回合的死亡查询表（0 表示存活，1 表示已记录死亡瞬间）
         dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
@@ -971,21 +971,21 @@ def run_MLP_simulation(
             b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
 
             env.step(r_maneuver, b_maneuver)
-            done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
-            _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
+            done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+            _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
             
-            reward_for_show = b_rew_event + b_rew_constraint
+            reward_for_show = b_1 + b_2
             
             weight_reward = weight_reward_0
             # weight_reward[2] = 0.0
             
-            reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * weight_reward)
-            reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * weight_reward)
+            reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * weight_reward)
+            reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * weight_reward)
             
             # Accumulate rewards between student_agent decisions
             if steps_of_this_eps % action_cycle_multiplier == 0:
                 episode_return += reward_for_show
-                # print(b_rew_event, b_rew_constraint, b_rew_shaping)
+                # print(b_reward1, b_reward2, b_reward3)
                 # print()
             
             # if dead_dict['b'] == 0:

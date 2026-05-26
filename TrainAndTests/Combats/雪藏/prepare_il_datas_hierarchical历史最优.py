@@ -103,8 +103,8 @@ def run_self_play_collection(num_episodes=100, gamma=0.995):
                 b_man = env.maneuver14LR(env.BUAV, b_action_label)
                 env.step(r_man, b_man)
                 
-                done, b_rew_event, b_rew_con, b_rew_sha = env.combat_terminate_and_reward('b', b_action_label, b_fire)
-                b_reward = b_rew_event + b_rew_con + b_rew_sha
+                done, b_1, b_rew_con, b_rew_sha = env.combat_terminate_and_reward('b', b_action_label, b_fire)
+                b_reward = b_1 + b_rew_con + b_rew_sha
                 steps += 1
 
             # 存储回合最后一步

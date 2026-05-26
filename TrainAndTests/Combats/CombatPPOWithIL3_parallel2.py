@@ -470,14 +470,14 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     steps_run += 1
                     
                     # 4. 奖励计算
-                    done, b_rew_event, b_rew_constraint, b_rew_shaping = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
-                    _, r_rew_event, r_rew_constraint, r_rew_shaping = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
+                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
+                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
                     
-                    reward_for_learn = sum(np.array([b_rew_event, b_rew_constraint, b_rew_shaping]) * reward_weight)
-                    reward_for_enm = sum(np.array([r_rew_event, r_rew_constraint, r_rew_shaping]) * reward_weight)
+                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
+                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += (b_rew_event + b_rew_constraint)
+                        episode_return += b_reward1
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)

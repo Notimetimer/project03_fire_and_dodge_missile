@@ -27,7 +27,7 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.1 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
-dt_decide = 1 # 2 # 6
+dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10

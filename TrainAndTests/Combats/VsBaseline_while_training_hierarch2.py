@@ -119,11 +119,11 @@ def test_worker(model_state_dict, rule_num,
             test_env.step(r_maneuver, b_maneuver)
             
             # 判定
-            done, b_rew_event, b_rew_constraint, b_rew_shaping = test_env.combat_terminate_and_reward('b', b_action_radians, b_m_id is not None, action_cycle)
+            done, b_reward1, b_reward2, b_reward3 = test_env.combat_terminate_and_reward('b', b_action_radians, b_m_id is not None, action_cycle)
             steps += 1
 
             if steps % action_cycle == 0:
-                episode_return += (b_rew_event + b_rew_constraint)
+                episode_return += b_reward1
 
             if steps * dt_maneuver_val > env_args.max_episode_len: break
 

@@ -217,20 +217,20 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             wasted = 0
 
 
-        # # --- 态势辅助奖励 (千分位级别) ---
-        # # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
-        # enm_threat_dist = enm_states["threat"][3]
-        # if enm_threat_dist < distance:
-        #     r_constraint += 0.0005 * (1 - ego.dead) # 0.001
+        # --- 态势辅助奖励 (千分位级别) ---
+        # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
+        enm_threat_dist = enm_states["threat"][3]
+        if enm_threat_dist < distance:
+            r_constraint += 0.002 * (1 - ego.dead) # 0.001
 
-        # # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
-        # if threat_distance < distance:
-        #     r_constraint -= 0.0005 * (1 - ego.dead) # 0.001
+        # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
+        if threat_distance < distance:
+            r_constraint -= 0.002 * (1 - ego.dead) # 0.001
 
         # 战术引导奖励
         reward_weights['angle_advantage']=0.05 # 0.01, # 0.03
         reward_weights['height_advantage']=reward_weights['angle_advantage']
-        reward_weights['speed_penalty']=0.01 # 慢速惩罚
+        reward_weights['speed_penalty']=0.005 # 0.01 # 慢速惩罚
         # 进攻引导
         if len(alive_ally_missiles) == 0 and not warning:
             # 瞄准奖励
@@ -241,8 +241,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # crank引导
         if len(alive_ally_missiles) > 0 and not warning:
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-            r_constraint += 3*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
-            r_constraint += 3*(1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 5 * 
+            r_constraint += (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+            r_constraint += (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 5 * 
         # 防御引导
         if warning:
             # 受到威胁应该三九线/置尾和下高
@@ -260,7 +260,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # r_constraint *= (1-ego.dead)
         # r_shaping *= (1-ego.dead)
 
-        # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
+        # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
             r_event -= 5 * shoot
 
@@ -324,4 +324,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
-        return done, r_event1+r_constraint, r_event2+r_constraint, r_event3+r_constraint
+        return done, \
+                    r_event1+r_constraint+r_shaping, \
+                        r_event2+r_constraint+r_shaping, \
+                            r_event3+r_constraint+r_shaping
