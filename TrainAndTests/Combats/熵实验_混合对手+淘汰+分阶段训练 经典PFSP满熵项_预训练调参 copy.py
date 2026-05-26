@@ -25,7 +25,7 @@ il_batch_size2= 1e4 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 "调参改这里!!!"
-label_smoothing=0.1 # 0.3
+label_smoothing=0.3 # 0.3
 label_smoothing_mixed=0.01
 dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次

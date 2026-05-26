@@ -463,7 +463,7 @@ class HybridActorWrapper(nn.Module):
 
         return log_probs, entropy, entropy_details, actor_outputs, next_h
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         

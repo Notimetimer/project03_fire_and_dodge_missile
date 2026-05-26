@@ -196,7 +196,7 @@ class CascadeActorWrapper(nn.Module): # 警告，这个结构没有泛化性，�
 
         return log_probs, entropy, entropy_details, None
 
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3):
         """
         MARWIL/BC Loss 计算
         Expert Actions Keys: 'l0_cat', 'l1_bern'

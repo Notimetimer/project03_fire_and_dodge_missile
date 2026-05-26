@@ -403,7 +403,7 @@ class HybridActorWrapper(nn.Module):
         # [修改] 返回 actor_outputs 以便外部访问 logits
         return log_probs, entropy, entropy_details, actor_outputs, None
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.1):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         
