@@ -177,8 +177,8 @@ class PolicyNetHybrid(torch.nn.Module):
             locked_cond = (locked >= 0.5) # == 1
             ammo_cond = (ammo > 0.0)
             # Use elementwise logical ops so this works on tensors
-            timd_cond = (t_since_launch >= 40) | ((dist < 30e3) & (t_since_launch >= 10))
-            dist_cond = (dist < 95e3)
+            timd_cond = (t_since_launch >= 40) | ((dist < 30e3) & (t_since_launch >= 15)) # 10
+            dist_cond = (dist < 105e3) # 95e3
             delta_theta_cond = (delta_theta < pi * (30) / 180.0) # 之前的 > -30度可能写反了
             cont_plus_1 = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0)) # & (dist >= 50e3))
 
@@ -193,6 +193,11 @@ class PolicyNetHybrid(torch.nn.Module):
             can_fire_full = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond & cont_plus_1
             can_fire = torch.where(mask_on_bool, can_fire_full, ammo_cond)
 
+            # if not can_fire:
+            #     print("禁止开火")
+            # else:
+            #     print("  可以开炮  ")
+            
             # # 旧代码2
             # if mask_on:
             #     can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
@@ -1120,47 +1125,47 @@ class PPOHybrid:
                 # 原有非目标熵正则项
                 # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
 
-                # =====================================================================
-                # [修改/重构] Bernoulli 开火头的专属正则化、稀疏惩罚与冷却约束
-                # =====================================================================
-                if actor_outputs['bern'] is not None:
-                    bern_logits = actor_outputs['bern']
-                    bern_probs = torch.sigmoid(bern_logits)
-                    
-                    # # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
-                    # over = F.relu(torch.abs(bern_logits) - 4.0)
-                    # 只惩罚允许开火的位置
-                    # fire_mask = (bern_logits > -1e4).float()
-                    # logit_loss = ((over ** 2) * fire_mask).mean()
-                    # actor_loss = actor_loss + alpha_logit_reg * logit_loss
-
-                    # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效)
-                    # 惩罚项 = -log(1 - p)。其梯度为 alpha * p
-                    alpha_sparsity = 0.001
-                    eps = 1e-7
-                    # 这里的 -log(1-p) 在数学上等于 softplus(logits)，更数值稳定
-                    # 但为了直观对应方案 A，我们写成对数形式
-                    sparsity_loss_term = -torch.log(1.0 - bern_probs + eps)
-                    sparsity_loss = (sparsity_loss_term * mb_active_masks).sum() / (active_sum + mask_eps)
-                    actor_loss = actor_loss + alpha_sparsity * sparsity_loss
-
-                #     if time_since_shoot_location is not None:
-                #         # 3. [核心新增] 冷却时间强制压制 (方案 A 版)
-                #         t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
-                        
-                #         # 构建惩罚权重: t < 0.333 时生效
-                #         cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
-                        
-                #         # 严厉惩罚系数：由于梯度不再消失，0.4 的力度已经非常有震慑力
-                #         alpha_cooldown = 0.3
-                        
-                #         # 核心修改：将原来的 bern_probs 替换为 -log(1 - p)
-                #         # 这样当网络“极度想开火”(p->1) 时，惩罚项的梯度达到峰值 alpha_cooldown
-                #         cooldown_log_penalty = -torch.log(1.0 - bern_probs + eps)
-                        
-                #         cooldown_loss = (cooldown_weight * cooldown_log_penalty * mb_active_masks).sum() / (active_sum + mask_eps)
-                #         actor_loss = actor_loss + alpha_cooldown * cooldown_loss
                 # # =====================================================================
+                # # [修改/重构] Bernoulli 开火头的专属正则化、稀疏惩罚与冷却约束
+                # # =====================================================================
+                # if actor_outputs['bern'] is not None:
+                #     bern_logits = actor_outputs['bern']
+                #     bern_probs = torch.sigmoid(bern_logits)
+                    
+                #     # # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
+                #     # over = F.relu(torch.abs(bern_logits) - 4.0)
+                #     # 只惩罚允许开火的位置
+                #     # fire_mask = (bern_logits > -1e4).float()
+                #     # logit_loss = ((over ** 2) * fire_mask).mean()
+                #     # actor_loss = actor_loss + alpha_logit_reg * logit_loss
+
+                #     # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效)
+                #     # 惩罚项 = -log(1 - p)。其梯度为 alpha * p
+                #     alpha_sparsity = 0.001
+                #     eps = 1e-7
+                #     # 这里的 -log(1-p) 在数学上等于 softplus(logits)，更数值稳定
+                #     # 但为了直观对应方案 A，我们写成对数形式
+                #     sparsity_loss_term = -torch.log(1.0 - bern_probs + eps)
+                #     sparsity_loss = (sparsity_loss_term * mb_active_masks).sum() / (active_sum + mask_eps)
+                #     actor_loss = actor_loss + alpha_sparsity * sparsity_loss
+
+                # #     if time_since_shoot_location is not None:
+                # #         # 3. [核心新增] 冷却时间强制压制 (方案 A 版)
+                # #         t_since_launch = mb_actor_inputs[:, time_since_shoot_location:time_since_shoot_location+1] 
+                        
+                # #         # 构建惩罚权重: t < 0.333 时生效
+                # #         cooldown_weight = torch.clamp(1.0 - t_since_launch * 3.0, min=0.0)
+                        
+                # #         # 严厉惩罚系数：由于梯度不再消失，0.4 的力度已经非常有震慑力
+                # #         alpha_cooldown = 0.3
+                        
+                # #         # 核心修改：将原来的 bern_probs 替换为 -log(1 - p)
+                # #         # 这样当网络“极度想开火”(p->1) 时，惩罚项的梯度达到峰值 alpha_cooldown
+                # #         cooldown_log_penalty = -torch.log(1.0 - bern_probs + eps)
+                        
+                # #         cooldown_loss = (cooldown_weight * cooldown_log_penalty * mb_active_masks).sum() / (active_sum + mask_eps)
+                # #         actor_loss = actor_loss + alpha_cooldown * cooldown_loss
+                # # # =====================================================================
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
