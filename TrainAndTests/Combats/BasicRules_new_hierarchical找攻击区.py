@@ -385,7 +385,7 @@ if __name__=='__main__':
     # 参数范围（红蓝高度相同）
     heights = np.arange(2000, 10001, 1000)          # 2000到10000，间隔1000
     distances = np.arange(20e3, 81e3, 10e3)         # 20km到80km，间隔10km
-    
+    enter_angle = np.radians(180) # 0
     use_tacview = 0  # 批量仿真关闭可视化
     
     # 创建结果列表
@@ -401,7 +401,7 @@ if __name__=='__main__':
         case_num += 1
         
         # 执行仿真（红蓝高度相同）
-        hit, t_end = run_single_test(h, h, distance, AA_hor=0, env=None, use_tacview=use_tacview)
+        hit, t_end = run_single_test(h, h, distance, AA_hor=enter_angle, env=None, use_tacview=use_tacview)
         
         # 记录结果
         results.append({
