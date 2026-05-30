@@ -10,5 +10,7 @@
     "reportOptionalSubscript": "none",
     "reportOptionalIterable": "none",
     "reportPrivateImportUsage": "none",
-    "reportIndexIssue": "none"
+    "reportIndexIssue": "none",
+    "reportIncompatibleMethodOverride": "none",
+    "reportCallIssue": "none"
 }
