@@ -453,11 +453,11 @@ class missile_class:
 
 
         # 超出导引头视角导致脱锁
-        ATA = np.arccos(np.dot(v_missile_, line_t_) / vmt / distance)
+        ATA = np.arccos(np.dot(v_missile_, line_t_) / (vmt * distance + 1e-7))
         if ATA > self.sight_angle_max:
             self.off_lock = True
         # 超出跟踪角速度导致脱锁
-        if np.linalg.norm(np.cross(line_t_, vrt_)) / distance ** 2 > self.sight_angle_rate_max:
+        if np.linalg.norm(np.cross(line_t_, vrt_)) / (distance ** 2 + 1e-7) > self.sight_angle_rate_max:
             self.off_lock = True
         
         # 试验：多普勒 导致脱锁

@@ -1,3 +1,4 @@
+# pyright: reportWildcardImportFromLibrary=false, reportGeneralTypeIssues=false
 '''
 遍历机动样式，根据命中的结果数占的比例获取发射概率
 '''
@@ -8,7 +9,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from Envs.MissileModel1 import *
-from Envs.MissileModel1112 import *
+from Envs.MissileModel1112 import *  # type: ignore
 
 
 g = 9.81
@@ -28,25 +29,25 @@ def latest(vectors):
         return vectors[-1]  # 直接返回最后一行
 
 
-# 定义大气计算等通用部分
-# 大气密度计算
-def rho(h):
-    # 输入高度(m)
-    answer = 1.225 * np.exp(-h / 9300)
-    return answer
+# # 定义大气计算等通用部分
+# # 大气密度计算
+# def rho(h):
+#     # 输入高度(m)
+#     answer = 1.225 * np.exp(-h / 9300)
+#     return answer
 
 
-# 马赫数计算：
-def calc_mach(v, height):
-    sound_speed = 20.0463 * np.sqrt(288.15 - 0.00651122 * height) if height <= 11000 else 295.069
-    return v / sound_speed, sound_speed
+# # 马赫数计算：
+# def calc_mach(v, height):
+#     sound_speed = 20.0463 * np.sqrt(288.15 - 0.00651122 * height) if height <= 11000 else 295.069
+#     return v / sound_speed, sound_speed
 
 
-def sub_of_radian(input1, input2):
-    # 计算两个弧度的差值，范围为[-pi, pi]
-    diff = input1 - input2
-    diff = (diff + pi) % (2 * pi) - pi
-    return diff
+# def sub_of_radian(input1, input2):
+#     # 计算两个弧度的差值，范围为[-pi, pi]
+#     diff = input1 - input2
+#     diff = (diff + pi) % (2 * pi) - pi
+#     return diff
 
 
 # 定义目标模型
@@ -60,7 +61,7 @@ class target:
         self.a_refer = 6 * g  # 参考加速度大小
         self.target_moves = np.array(range(5)) + 1
 
-    def step(self, pm_, dt=dt, target_move=1, RWR_dist=20e3):
+    def step(self, pm_, dt=dt, target_move=1, RWR_dist=15e3):
         theta = atan2(self.vel_[1], sqrt(self.vel_[0] ** 2 + self.vel_[2] ** 2))
         heading = atan2(self.vel_[2], self.vel_[0])
         v = norm(self.vel_)
@@ -222,9 +223,9 @@ def hit_prob(p_carrier_, v_carrier_, p_target_, v_target_):
 
 
 if __name__ == '__main__':
-    p_carrier_ = np.array([0, 10000, 0], dtype='float64')
-    v_carrier_ = np.array([350, 0, 0], dtype='float64')
-    p_target_ = np.array([12e3, 10000, 0e3], dtype='float64')
+    p_carrier_ = np.array([0, 7000, 0], dtype='float64')
+    v_carrier_ = np.array([300, 0, 0], dtype='float64')
+    p_target_ = np.array([30e3, 7000, 0e3], dtype='float64')
     v_target_ = np.array([-300, 0, 0], dtype='float64')
 
     # 变步长解算导弹和目标的运动直到目标被命中或导弹超时/速度过低/错过目标
