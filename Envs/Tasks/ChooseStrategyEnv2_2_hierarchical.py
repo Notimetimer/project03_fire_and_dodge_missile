@@ -241,22 +241,27 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
             # 爬高奖励
             r_constraint += (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
+
+            dist_thres = 20e3
+            target_delta_theta = -pi/4 * sigmoid(21*(distance-dist_thres))
+            sigma = 0.7
+            r_constraint += np.exp(-(delta_theta-target_delta_theta)**2/(2*sigma**2)) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             # # WVR进攻
             # if distance <= 20e3: # 落入敌机的不可逃逸区，banzai
             #     r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             # # BVR进攻
             # else:
-            r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+            #     r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             
         # crank引导
         if len(alive_ally_missiles) > 0 and not warning:
-            if distance < 35e3 and abs(AA_hor) < radians(90):
+            if distance < 25e3 and abs(AA_hor) < radians(90):
                 # 如果距离很近而对手没有还手之力，直接乘胜追击
                 # 瞄准奖励
                 r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
                 r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
-                # 爬高奖励
-                r_constraint += (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead)
+                # # 爬高奖励
+                # r_constraint += (ego.alt/1e5) * reward_weights['height_advantage'] * (1-ego.dead)
             else:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
                 r_constraint += 1.2*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
