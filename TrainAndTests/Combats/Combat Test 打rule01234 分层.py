@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    # dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3-run-20260526-213603"
+    # dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask-run-20260531-233800"
    
 
     # 次要
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.04,
-                            temperature={'cat':0.1, 'bern':2.0}
+                            temperature={'cat':0.1, 'bern':1.0}
                             ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_label = r_action_exec['cat'] # [0]

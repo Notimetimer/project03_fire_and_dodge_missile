@@ -210,7 +210,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
             # cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
             # delta_theta = xb[:, 8]
-            # ata = xb[:, 10]
+            ata = xb[:, 10]
             # alt = xb[:, 15] * 5e3
             # sin_theta = xb[:, 17]
             # locked = xb[:, 2]
@@ -221,8 +221,9 @@ class PolicyNetHybrid(torch.nn.Module):
 
             ammo_cond = (ammo > 0.0)
             time_const_cond = t_since_launch >= 10  # 冷却时间10s，全程开启
+            ata_cond = ata < math.pi / 2
             # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
-            can_fire = ammo_cond & time_const_cond
+            can_fire = ammo_cond & time_const_cond & ata_cond
             
             # if not can_fire:
             #     print("禁止开火")

@@ -88,7 +88,7 @@ def test_worker(model_state_dict, rule_num,
                     # 如果 deterministic 为 True，则机动(cat)采用确定性决策，开火(bern)仍保持随机(1)
                     if deterministic:
                         explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0
-                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':0.2, 'bern':0.5}, check_obs=b_check)
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':0.5, 'bern':0.5}, check_obs=b_check)
                     else:
                         explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':1, 'bern':1})
