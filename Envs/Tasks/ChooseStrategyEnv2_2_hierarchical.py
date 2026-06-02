@@ -238,7 +238,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 进攻引导
         if len(alive_ally_missiles) == 0 and not warning:
             # 瞄准奖励
-            r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
             # 爬高奖励
             r_constraint += np.clip(ego.vu/100, -1, 1) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
 
@@ -259,7 +259,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if len(alive_enm_missiles) == 0 and abs(AA_hor) < radians(90):
                 # 如果对手没有开火而且没有还手之力，直接乘胜追击
                 # 瞄准奖励
-                r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_constraint += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
                 r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
                 # # 爬高奖励
                 r_constraint += np.clip(ego.vu/100, -1, 1) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 

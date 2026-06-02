@@ -166,7 +166,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.04,
-                            temperature={'cat':0.1, 'bern':1.0}
+                            temperature={'cat':1.0, 'bern':1.0}
                             ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_label = r_action_exec['cat'] # [0]

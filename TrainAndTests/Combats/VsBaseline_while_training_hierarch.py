@@ -92,7 +92,7 @@ def test_worker(model_state_dict, rule_num,
                         explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
                     else:
-                        if Temperature is not None:
+                        if Temperature is None:
                             Temperature = {'cat':1, 'bern':1}
                         explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=None)
