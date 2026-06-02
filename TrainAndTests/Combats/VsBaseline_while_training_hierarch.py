@@ -28,7 +28,7 @@ def test_worker(model_state_dict, rule_num,
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
-                no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0):
+                no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0, Temperature=None):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -87,11 +87,15 @@ def test_worker(model_state_dict, rule_num,
                 with torch.no_grad():
                     # 如果 deterministic 为 True，则机动(cat)采用确定性决策，开火(bern)仍保持随机(1)
                     if deterministic:
+                        if Temperature is None:
+                            Temperature = {'cat':0.5, 'bern':0.5}
                         explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0
-                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':0.5, 'bern':0.5}, check_obs=b_check)
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
                     else:
+                        if Temperature is not None:
+                            Temperature = {'cat':1, 'bern':1}
                         explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
-                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':1, 'bern':1})
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=None)
 
                     b_action_label = b_act_exec['cat'] # [0]
                     if b_act_exec['bern'][0]: 
