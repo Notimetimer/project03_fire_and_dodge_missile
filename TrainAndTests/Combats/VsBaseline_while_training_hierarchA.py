@@ -17,7 +17,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0A import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
@@ -28,7 +28,7 @@ def test_worker(model_state_dict, rule_num,
                 env_args, state_dim, hidden_dim, 
                 action_dims_dict, dt_maneuver_val, 
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
-                no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0):
+                no_out=0, deterministic=False, restrict_fire=False, vertices=None):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -88,10 +88,10 @@ def test_worker(model_state_dict, rule_num,
                     # 如果 deterministic 为 True，则机动(cat)采用确定性决策，开火(bern)仍保持随机(1)
                     if deterministic:
                         explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0
-                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':0.2, 'bern':0.5}, check_obs=b_check)
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, check_obs=b_check)
                     else:
                         explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
-                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature={'cat':1, 'bern':1})
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict)
 
                     b_action_label = b_act_exec['cat'] # [0]
                     if b_act_exec['bern'][0]: 
@@ -100,13 +100,13 @@ def test_worker(model_state_dict, rule_num,
             # 尝试发射
             if getattr(test_env.RUAV, 'about_to_fire', 0):
                 # 如果 restrict_fire 为 True，则限制动作次序（传入 r_action_label）
-                r_act_label_to_pass = r_action_label if (restrict_fire or auto_regressive) else None
+                r_act_label_to_pass = r_action_label if restrict_fire else None
                 tabu_fire = 1 if restrict_fire else 0
                 launch_missile_immediately(test_env, 'r', action_label=r_act_label_to_pass, tabu=tabu_fire)
             b_m_id = None
             if getattr(test_env.BUAV, 'about_to_fire', 0):
                 # 如果 restrict_fire 为 True，则限制动作次序（传入 b_action_label）
-                b_act_label_to_pass = b_action_label if (restrict_fire or auto_regressive) else None
+                b_act_label_to_pass = b_action_label if restrict_fire else None
                 tabu_fire = 1 if restrict_fire else 0
                 b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_act_label_to_pass, tabu=tabu_fire)
 

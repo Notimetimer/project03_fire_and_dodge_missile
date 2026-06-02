@@ -1,18 +1,18 @@
 import os, sys
-from CombatPPOWithIL3_parallel_hierarch_Classic import *
+from CombatPPOWithIL3_parallel_hierarch_ClassicA import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask-run-20260601-213210")
+    r"IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_开火改-run-20260530-152637")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask'
+mission_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_开火改'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -140,7 +140,7 @@ if __name__=='__main__':
         vertices = None,
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
-        POMDP=0,
+        POMDP=0, 
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

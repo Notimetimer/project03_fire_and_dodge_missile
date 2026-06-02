@@ -21,7 +21,7 @@ from _context import *
 from BasicRules_new_hierarchical import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
+from Algorithms.PPOHybrid23_0A import PolicyNetHybrid, HybridActorWrapper # 纯MLP
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
@@ -50,7 +50,7 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask'
+    experiment_name = 'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_开火改'
     
     'IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_0.3'
     
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.04,
-                            temperature={'cat':0.1, 'bern':2.0}
+                            temperature={'cat':1, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None
                         
                     r_action_label = r_action_exec['cat'] # [0]

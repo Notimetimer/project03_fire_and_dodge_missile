@@ -120,7 +120,7 @@ class Battle(object):
         # self.RmissilesTable = None
         # self.BmissilesTable = None
         # self.missilesTable = None
-        self.t = None
+        self.t = 0.0
         self.game_time_limit = self.args.max_episode_len  # None
         self.running = None
         self.action_space = []
@@ -214,6 +214,8 @@ class Battle(object):
         # self.RmissilesTable = {}
         # self.BmissilesTable = {}
         # self.missilesTable = {}
+        self.r_hitter_id = None
+        self.b_hitter_id = None
         self.win = 0
         self.lose = 0
         self.draw = 0
@@ -285,6 +287,8 @@ class Battle(object):
                 self.BUAVsTable[UAV.id] = {'entity': UAV, 'side': UAV.side, 'dead': UAV.dead}
                 
             UAV.lock_on = 0
+            UAV.last_locked_by_target_time = 0
+            
         self.running = True
         self.UAVs = self.RUAVs + self.BUAVs
         self.UAVsTable = {**self.RUAVsTable, **self.BUAVsTable}
@@ -535,6 +539,10 @@ class Battle(object):
                         target.dead = True
                         target.got_hit = True
                         self.UAV_hit[self.UAV_ids.index(target.id)] = True
+                        if missile.side=='r':
+                            self.r_hitter_id = missile.id
+                        if missile.side=='b':
+                            self.b_hitter_id = missile.id
 
                 if missile.dead == True and not target.dead:
                     target.escape_once = 1
@@ -758,6 +766,14 @@ class Battle(object):
         else:
             d_hor, left_or_right = calc_intern_dist2circle(self.R_cage, ego.pos_, ego.psi)
 
+        # 脱离锁定的时间（30s）为最长
+        if locked_by_target:
+            ego.last_locked_by_target_time = self.t
+            out_locked_time = 0.0
+        else:
+            out_locked_time = self.t - ego.last_locked_by_target_time
+
+        
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
         self.key_order = [
             "target_alive",  # 1 暂未使用
@@ -772,6 +788,7 @@ class Battle(object):
             "weapon",  # 1 仅用于动作切换
             "threat",  # 4
             "border",  # 2
+            "out_locked", # 1
         ]
 
         one_side_states = {
@@ -837,8 +854,10 @@ class Battle(object):
             "border": np.array([
                 float(d_hor),  # 0
                 float(left_or_right),  # 1
-            ])
+            ]),
 
+            # 脱离锁定时间
+            "out_locked": float(out_locked_time),
         }
 
         ego.current_state = one_side_states
@@ -859,6 +878,7 @@ class Battle(object):
         s["weapon"] /= 120
         s["threat"][3] /= 10e3
         s["border"][0] = min(1, s["border"][0] / 50e3)
+        s["out_locked"] = min(1, s["out_locked"] / 30)
         # 全程都要看到边界的相对方位 # s["border"][1] = 0 if s["border"][0] == 1 else s["border"][1]
         return s
     
@@ -888,7 +908,9 @@ class Battle(object):
 
         if "border" in s and s["border"] is not None:
             s["border"][0] = s["border"][0] * 50e3
-
+        
+        if "out_locked" in s and s["out_locked"] is not None:
+            s["out_locked"] = s["out_locked"] * 30
         return s
 
     def base_obs(self, side, pomdp=0, reward_fn=0):  # 默认为完全可观测，设置pomdp后为部分可观测
@@ -936,6 +958,7 @@ class Battle(object):
         self.state_init["weapon"] = 120
         self.state_init["threat"] = np.array([1, 0, 0, self.RWR_distance])
         self.state_init["border"] = np.array([50e3, 0])
+        self.state_init["out_locked"] = 0.0
 
         if pomdp:  # 只有在部分观测情况下需要添加屏蔽
             # 1. 获取记忆 (Rolling Memory)

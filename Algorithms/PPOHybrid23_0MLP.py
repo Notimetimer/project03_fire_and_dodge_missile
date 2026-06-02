@@ -807,7 +807,7 @@ class PPOHybrid:
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, 
-                k_nonlinear=0.89, mask_on=0, actor_frozen=0, fire_min_logits=4.0): 
+                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1137,7 +1137,7 @@ class PPOHybrid:
                     bern_probs = torch.sigmoid(bern_logits)
                     
                     # 1. 基础 Logit 越界惩罚 (保持 Logit 在可激活区间)
-                    over = F.relu(torch.abs(bern_logits) - fire_min_logits) # 4.0  20步至少打一发，那么开火概率至少也是0.05，对应-3的logits
+                    over = F.relu(torch.abs(bern_logits) - bern_max_logits) # 4.0  20步至少打一发，那么开火概率至少也是0.05，对应-3的logits
                     # 只惩罚允许开火的位置
                     if 'fire_mask' in actor_outputs and actor_outputs['fire_mask'] is not None:
                         fire_mask = actor_outputs['fire_mask']  # shape: (batch, bern_dim)

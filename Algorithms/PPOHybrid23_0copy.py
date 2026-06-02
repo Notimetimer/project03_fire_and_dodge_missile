@@ -25,36 +25,13 @@ class PolicyNetHybrid(torch.nn.Module):
     支持混合动作空间的策略网络 (纯 MLP)。
     引入了可学习的温度参数来控制离散和伯努利动作的熵。
     """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
-        # self.Autoregressive = Autoregressive
-        # # 确定bern_dim和主干网络输入维度
-        # bern_dim = self.action_dims.get('bern', 0)
         
-        # # 如果需要Autoregressive，bern头网络直接处理原始state，输出再拼接到state后面
-        # if self.Autoregressive == 1 and bern_dim > 0:
-        #     # bern头网络：从原始state直接计算bern_logits
-        #     layers_bern = []
-        #     prev_size_bern = state_dim
-        #     for layer_size in hidden_dims:
-        #         layers_bern.append(nn.Linear(prev_size_bern, layer_size))
-        #         layers_bern.append(nn.ReLU())
-        #         prev_size_bern = layer_size
-        #     layers_bern.append(nn.Linear(prev_size_bern, int(prev_size_bern/2)))
-        #     layers_bern.append(nn.ReLU())
-        #     layers_bern.append(nn.Linear(int(prev_size_bern/2), bern_dim))
-        #     self.fc_bern = nn.Sequential(*layers_bern)
-        #     nn.init.constant_(self.fc_bern[-1].bias, 0)
-        #     # 主干网络输入维度增加bern_dim
-        #     backbone_input_dim = state_dim + bern_dim
-        # else:
-        #     backbone_input_dim = state_dim
-        backbone_input_dim = state_dim
-
         # 共享主干网络
         layers = []
-        prev_size = backbone_input_dim
+        prev_size = state_dim
         for layer_size in hidden_dims:
             layers.append(nn.Linear(prev_size, layer_size))
             layers.append(nn.ReLU())
@@ -105,9 +82,6 @@ class PolicyNetHybrid(torch.nn.Module):
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
-            
-            # # 仅在非Autoregressive模式下才创建共享特征层的bern头
-            # if self.Autoregressive != 1:
             # # 原·单层输出
             # self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
@@ -127,14 +101,14 @@ class PolicyNetHybrid(torch.nn.Module):
             保险起见折个半，在18s内取憋着不开火的概率为p18=0.5，这样就是同时满足开火概率p18=(1-p0)^9=0.5,
             (1-1/(1+e^x))^9=0.5, 解出bern_logits=-2.5
             """
-            nn.init.constant_(self.fc_bern[-1].bias, 0) # -2.5) # 2.0
+            nn.init.constant_(self.fc_bern[-1].bias, -2.5) # 2.0
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temperature=1.0)
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temperature 参数
-    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=0):
+    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=1):
         if isinstance(temperature, dict):
             temp_cat = temperature.get('cat', 1.0)
             temp_bern = temperature.get('bern', 1.0)
@@ -142,20 +116,7 @@ class PolicyNetHybrid(torch.nn.Module):
             temp_cat = temperature
             temp_bern = temperature
 
-        # # --- 处理Autoregressive模式 ---
-        # if self.Autoregressive == 1 and hasattr(self, 'fc_bern'):
-        #     # 1. 先从原始state计算bern_logits（无mask）
-        #     bern_logits_direct = self.fc_bern(x)
-        #     # 2. 将bern输出拼接到state后面
-        #     x_enhanced = torch.cat([x, bern_logits_direct], dim=-1)
-        #     # 3. 使用增强后的输入通过主干网络
-        #     shared_features = self.net(x_enhanced)
-        # else:
-        #     shared_features = self.net(x)
-        #     bern_logits_direct = None
         shared_features = self.net(x)
-        bern_logits_direct = None
-
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
         # --- Continuous ---
@@ -195,11 +156,6 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # --- Bernoulli (核心修改区域) ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-            # # 根据是否使用Autoregressive选择bern_logits来源
-            # if self.Autoregressive == 1:
-            #     bern_logits = bern_logits_direct
-            # else:
-            #     bern_logits = self.fc_bern(shared_features)
             bern_logits = self.fc_bern(shared_features)
 
             # Compute can_fire mask from flattened observation x (always applied)
@@ -208,22 +164,57 @@ class PolicyNetHybrid(torch.nn.Module):
                 xb = xb.unsqueeze(0)
 
             # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
-            # cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
-            # delta_theta = xb[:, 8]
-            # ata = xb[:, 10]
-            # alt = xb[:, 15] * 5e3
-            # sin_theta = xb[:, 17]
-            # locked = xb[:, 2]
+            cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
+            delta_theta = xb[:, 8]
+            ata = xb[:, 10]
+            alt = xb[:, 15] * 5e3
+            sin_theta = xb[:, 17]
+            locked = xb[:, 2]
             ammo = xb[:, 20]
-            # dist = xb[:, 9] * 10e3
-            # AA_hor = xb[:, 12]
+            dist = xb[:, 9] * 10e3
+            AA_hor = xb[:, 12]
             t_since_launch = xb[:, 21] * 120
 
+            ata_hor = torch.acos(cos_ata_hor)
+            # 新代码1 Use Python/math pi (float) to avoid creating a constant tensor via numpy
+            pi = math.pi
+            ata_cond = (ata <= (60.0 * pi / 180.0)) & (ata_hor <= (30.0 * pi / 180.0))
+            # 旧代码1
+            # pi_val = torch.tensor(np.pi, device=shared_features.device)
+            # ata_cond = (ata <= (60.0 * pi_val / 180.0)) & (ata_hor <= (30.0 * pi_val / 180.0))
+            locked_cond = (locked >= 0.5) # == 1
             ammo_cond = (ammo > 0.0)
-            time_const_cond = t_since_launch >= 10  # 冷却时间10s，全程开启
-            # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
-            can_fire = ammo_cond & time_const_cond
-            
+            # Use elementwise logical ops so this works on tensors
+            timd_cond = (t_since_launch >= 40) | ((dist < 30e3) & (t_since_launch >= 15)) # 10
+            dist_cond = (dist < 105e3) # 95e3
+            delta_theta_cond = (delta_theta < pi * (30) / 180.0) # 之前的 > -30度可能写反了
+            cont_plus_1 = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0)) # & (dist >= 50e3))
+            # 低空(<=7000m) + 远距离(>30km) + 追尾(AA_hor < 75°) 禁止开火
+            low_alt_no_chase_fire = ~((dist > 25e3) & (torch.abs(AA_hor) < (120.0 * pi / 180.0)))
+            # 高度-距离限制：低高度下不能远距离开火
+            # alt < 4000m 且 dist > 30e3 禁止
+            # alt < 5000m 且 dist > 40e3 禁止
+            # alt < 6000m 且 dist > 60e3 禁止
+            # alt < 7000m 且 dist > 70e3 禁止
+            # alt < 8000m 且 dist > 80e3 禁止
+            alt_dist_fire_ok = ~(
+                ((alt < 4000.0) & (dist > 30e3+5e3)) |
+                ((alt < 5000.0) & (dist > 40e3+5e3)) |
+                ((alt < 6000.0) & (dist > 60e3+5e3)) |
+                ((alt < 7000.0) & (dist > 70e3+5e3)) |
+                ((alt < 8000.0) & (dist > 80e3+5e3))
+            )
+            # 新代码2 Avoid Python branching on tensor-like `mask_on` (which breaks torch.jit.trace).
+            # Create a scalar boolean tensor and select between the two candidate masks.
+            if torch.is_tensor(mask_on):
+                mask_on_tensor = mask_on.to(device=shared_features.device)
+            else:
+                mask_on_tensor = torch.tensor(bool(mask_on), device=shared_features.device)
+            mask_on_bool = mask_on_tensor.to(dtype=torch.bool)
+
+            can_fire_full = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond & cont_plus_1 & low_alt_no_chase_fire & alt_dist_fire_ok
+            can_fire = torch.where(mask_on_bool, can_fire_full, ammo_cond)
+
             # if not can_fire:
             #     print("禁止开火")
             # else:
@@ -231,7 +222,7 @@ class PolicyNetHybrid(torch.nn.Module):
             
             # # 旧代码2
             # if mask_on:
-            #     can_fire = ata_cond & locked_cond & ammo_cond & time_cond & dist_cond & delta_theta_cond
+            #     can_fire = ata_cond & locked_cond & ammo_cond & timd_cond & dist_cond & delta_theta_cond
             # else:
             #     can_fire = ammo_cond
 
@@ -302,7 +293,7 @@ class HybridActorWrapper(nn.Module):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
 
     # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temperature 参数
-    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temperature=1.0, mask_on=0): # 1
+    def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temperature=1.0, mask_on=1):
         """
         推理接口。
         Args:
@@ -347,52 +338,62 @@ class HybridActorWrapper(nn.Module):
             # 对于其他意外的输入类型，默认全部探索
             explore_opts = {'cont': True, 'cat': True, 'bern': True}
 
-        # =====================================================================
-        # check_obs 非空时，从 state 直接提取特征计算角度/距离规则 mask（仅部署阶段）
-        # =====================================================================
-        _deploy_can_fire = True  # 默认不限制
-        if (check_obs is not None) and isinstance(check_obs, dict):
-            with torch.no_grad():
-                xb = state
-                # 照搬 forward 中的索引提取（state 此时已是 (batch, D) tensor）
-                cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
-                delta_theta = xb[:, 8]
-                ata         = xb[:, 10]
-                alt         = xb[:, 15] * 5e3
-                sin_theta   = xb[:, 17]
-                locked      = xb[:, 2]
-                ammo        = xb[:, 20]
-                dist        = xb[:, 9] * 10e3
-                AA_hor      = xb[:, 12]
-                t_since_launch = xb[:, 21] * 120
+        # # =====================================================================
+        # # [迁移] 解析 check_obs 并构建 Action Mask
+        # # =====================================================================
+        # action_masks = None
+        # can_fire = True
+        # # 当且仅当传入了单个 dict 类型的 check_obs 时启用 mask, 不受explore影响
+        # if (check_obs is not None) and isinstance(check_obs, dict):  # and (not explore_opts['bern']):
+        #     # 默认允许开火，下面按规则逐项收敛（保留注释）
+        #     can_fire = True
+        #     # 如果是Batch训练模式，通常check_obs会增加维度，这里只在推理的时候启用
 
-                pi = math.pi
-                ata_hor      = torch.acos(cos_ata_hor)
-                ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 30.0 * pi / 180.0)
-                locked_cond  = (locked > 0)
-                # ammo_cond    = (ammo > 0.0)
-                # time_cond    = (t_since_launch >= 20) | ((dist < 30e3) & (t_since_launch >= 10))
-                dist_cond    = (dist < 105e3)
-                delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
-                cont_plus_1  = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0))
-                low_alt_no_chase_fire = ~((dist > 25e3) & (torch.abs(AA_hor) < 120.0 * pi / 180.0))
-                alt_dist_fire_ok = ~(
-                    ((alt < 4000.0) & (dist > 35e3)) |
-                    ((alt < 5000.0) & (dist > 45e3)) |
-                    ((alt < 6000.0) & (dist > 65e3)) |
-                    ((alt < 7000.0) & (dist > 75e3)) |
-                    ((alt < 8000.0) & (dist > 85e3))
-                )
-                can_fire_full = (ata_cond & locked_cond & dist_cond
-                                 & delta_theta_cond & cont_plus_1 & low_alt_no_chase_fire & alt_dist_fire_ok)
-                _deploy_can_fire = can_fire_full.all().item()  # 转成 bool
+        #     # 1. ATA <= 60度 (0.5236 rad)
+        #     ata_hor = np.arccos(check_obs["target_information"][0])
+        #     ata = check_obs["target_information"][4]
+        #     ata_condition = (ata <= 60 * np.pi / 180 and ata_hor <= 20 * np.pi / 180)
+        #     # [新增] ata_hor 是第一个漂亮结果后新增的mask项
+        #     can_fire = can_fire and ata_condition
 
-        # 调用网络（net 内部只施加弹药+冷却 mask）
+        #     # 2. Target Locked == 1
+        #     locked = check_obs["target_locked"]
+        #     locked_condition = (locked == 1)
+        #     can_fire = can_fire and locked_condition
+
+        #     # 3. Ammo > 0 (ego_main 最后一个元素是 ammo)
+        #     ammo = check_obs["ego_main"][6]
+        #     ammo_condition = (ammo > 0)
+        #     can_fire = can_fire and ammo_condition
+
+        #     # 4. 超远距离尾追不打（使用 AA_hor 判断尾追）
+        #     distance = check_obs["target_information"][3]
+        #     AA_hor = check_obs["target_information"][6]
+        #     if (distance > 30e3) and (abs(AA_hor) < np.pi/6):
+        #         can_fire = False
+
+        #     # 5. 30km 外12s内禁止重复发射第二枚 或 mid-term 有在飞导弹
+        #     # weapon 计时单位兼容原逻辑
+        #     if (distance > 30e3 and check_obs["weapon"] * 120 < 12) or check_obs.get("missile_in_mid_term", False):
+        #         can_fire = False
+
+        #     # 构建 Tensor Mask: (Batch_Size, Bern_Dim) -> (1, 1)
+        #     # 1.0 表示允许 (保留 Logits)，0.0 表示禁止 (Logits -> -inf)
+        #     mask_val = 1.0 if can_fire else 0.0
+            
+        #     # 适配 state 的 batch size
+        #     batch_size = state.size(0)
+        #     mask_tensor = torch.full((batch_size, 1), mask_val, device=self.device, dtype=torch.float)
+            
+        #     action_masks = {'bern': mask_tensor}
+        # # =====================================================================
+
+        # [修改] 调用网络时传入 action_masks 和 temperature
         actor_outputs = self.net(state, max_std=max_std, temperature=temperature, mask_on=mask_on)
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
-
+        
         actions_exec = {}
         actions_raw = {}
         actions_dist_check = {} #  诊断输出
@@ -453,9 +454,6 @@ class HybridActorWrapper(nn.Module):
         # --- Bern ---
         if actor_outputs['bern'] is not None:
             bern_logits = actor_outputs['bern']
-            # 部署阶段（check_obs非空）施加角度/距离规则 mask
-            if _deploy_can_fire is False:
-                bern_logits = torch.full_like(bern_logits, -1e8)
             dist = Bernoulli(logits=bern_logits)
             bern_action = dist.sample() if explore_opts['bern'] else (dist.probs > bern_threshold).float()
             
@@ -470,7 +468,7 @@ class HybridActorWrapper(nn.Module):
 
         return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
-    def evaluate_actions(self, states, actions_raw, h=None, max_std=None, mask_on=0):
+    def evaluate_actions(self, states, actions_raw, h=None, max_std=None, mask_on=1):
         """
         训练接口。计算 log_probs 和 entropy。
         Args:
@@ -836,7 +834,7 @@ class PPOHybrid:
         else:
             pass
     
-    def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None, temperature=1.0, mask_on=0):
+    def take_action(self, state, h0=None, explore=True, max_std=None, check_obs=None, temperature=1.0, mask_on=1):
         # 委托给 Actor Wrapper
         max_s = max_std if max_std is not None else self.max_std
         
@@ -851,7 +849,7 @@ class PPOHybrid:
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, 
-                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0): 
+                k_nonlinear=0.89, mask_on=1, actor_frozen=0, bern_max_logits=3.5): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1024,8 +1022,6 @@ class PPOHybrid:
         entropy_bern_list = []
         entropy_cont_list = []
         grad_norm_ratio_list = [] # [新增] 范数比列表
-        max_fire_prob_list = [] # [新增] 记录未被mask的bern最大触发概率
-        min_fire_prob_list = [] # [新增] 记录未被mask的bern最小触发概率
         
         # [新增] 初始化样本统计计数器 (包含重复更新累加)
         ppo_samples_total = 0
@@ -1158,19 +1154,18 @@ class PPOHybrid:
                     #     torch.square(loss_ent_cat - target_entropy_cat_tensor)
                     # , 0.0)
                 )
-                # # 2. Bernoulli 约束项 (动态系数：熵越高推力越弱，理论最大时归零)
-                # # f(H) = -H + H^2/(2*H_max), 导数 f'(H) = -1 + H/H_max
-                # # H=0 时全力推，H=H_max 时导数为0
-                # bern_constraint_term = k_bern * (
-                #     - loss_ent_bern
-                #     + torch.where(loss_ent_bern > target_entropy_bern_tensor,
-                #     min(max(k_nonlinear_bern, 0.0), 1.0)/(2 * diff_bern0) * \
-                #         torch.square(loss_ent_bern - target_entropy_bern_tensor)
-                #     , 0.0)
-                # )
+                # 2. Bernoulli 约束项 (动态系数：熵越高推力越弱，理论最大时归零)
+                # f(H) = -H + H^2/(2*H_max), 导数 f'(H) = -1 + H/H_max
+                # H=0 时全力推，H=H_max 时导数为0
+                bern_constraint_term = k_bern * (
+                    - loss_ent_bern
+                    + torch.where(loss_ent_bern > target_entropy_bern_tensor,
+                    min(max(k_nonlinear_bern, 0.0), 1.0)/(2 * diff_bern0) * \
+                        torch.square(loss_ent_bern - target_entropy_bern_tensor)
+                    , 0.0)
+                )
                 # 3. 组合最终 Actor Loss
-                # [修改] 移除 bern_constraint_term（熵约束），由 mini-batch 内的 FRR 替代
-                actor_loss = actor_loss + cat_constraint_term - (k_cont * loss_ent_cont)
+                actor_loss = actor_loss + cat_constraint_term + bern_constraint_term - (k_cont * loss_ent_cont)
                 
                 # 原有非目标熵正则项
                 # actor_loss = actor_loss - (k_cont * loss_ent_cont + k_cat * loss_ent_cat + k_bern * loss_ent_bern)
@@ -1193,39 +1188,17 @@ class PPOHybrid:
                     fireable_sum = (mb_active_masks * bern_fire_mask).sum()
                     logit_loss = ((over ** 2) * fire_mask * mb_active_masks).sum() / (fireable_sum + mask_eps)
                     actor_loss = actor_loss + alpha_logit_reg * logit_loss
-                    
-                    # [新增] 记录未被mask的bern触发概率极值
-                    valid_fire_mask = (fire_mask * mb_active_masks).bool()
-                    if valid_fire_mask.any():
-                        valid_probs = bern_probs[valid_fire_mask]
-                        max_fire_prob_list.append(valid_probs.max().item())
-                        min_fire_prob_list.append(valid_probs.min().item())
 
-                    # # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效) 伪重力场
-                    # # 惩罚项 = -log(1 - p)。其梯度为 alpha * p
-                    # alpha_sparsity = 0.01 # 0.001
-                    # eps = 1e-7
-                    # sparsity_loss_term = -torch.log(1.0 - bern_probs + eps)
-                    # # 只对 p > target_p1_b 的样本施加惩罚（开火概率已超出目标才压制）
-                    # p_threshold = min(target_p1_b, 1.0 - target_p1_b)
-                    # over_target_mask = (bern_probs > p_threshold).float()
-                    # sparsity_loss = (sparsity_loss_term * fire_mask * mb_active_masks * over_target_mask).sum() / (fireable_sum + mask_eps)
-                    # actor_loss = actor_loss + alpha_sparsity * sparsity_loss
-
-                    # [新增] 3. 单阈值均值约束 (FRR) —— 替代 bern 熵正则项
-                    # 约束允许开火样本的平均概率不超过 p_target，用 pseudo-Huber loss
-                    # 保护弹药节奏：防止中远距离手痒乱射导致后期无弹可用
-                    fire_mask_1d = fire_mask[:, 0] if fire_mask.dim() > 1 else fire_mask.squeeze(-1)
-                    active_1d = mb_active_masks.squeeze(-1)
-                    fireable_frr = (fire_mask_1d > 0.5) & (active_1d > 0.5)
-                    if fireable_frr.sum() > 0:
-                        p_mean_fireable = bern_probs[:, 0][fireable_frr].mean()
-                        p_target = 0.1  # 目标平均开火概率 20%，对应 6 枚 / 30 个有效开火步
-                        delta = F.relu(p_mean_fireable - p_target)
-                        # pseudo-Huber loss: sqrt(1 + delta^2) - 1，平缓惩罚，对异常值不爆炸
-                        frr_loss = torch.sqrt(1.0 + delta * delta) - 1.0
-                        # 复用原熵系数 k_bern 作为强度（建议 0.001~0.005）
-                        actor_loss = actor_loss + k_bern * frr_loss
+                    # 2. 基础稀疏惩罚 (也采用方案 A，防止高概率时失效) 伪重力场
+                    # 惩罚项 = -log(1 - p)。其梯度为 alpha * p
+                    alpha_sparsity = 0.01 # 0.001
+                    eps = 1e-7
+                    sparsity_loss_term = -torch.log(1.0 - bern_probs + eps)
+                    # 只对 p > target_p1_b 的样本施加惩罚（开火概率已超出目标才压制）
+                    p_threshold = min(target_p1_b, 1.0 - target_p1_b)
+                    over_target_mask = (bern_probs > p_threshold).float()
+                    sparsity_loss = (sparsity_loss_term * fire_mask * mb_active_masks * over_target_mask).sum() / (fireable_sum + mask_eps)
+                    actor_loss = actor_loss + alpha_sparsity * sparsity_loss
 
                 # Critic Loss
                 # Critic 使用 critic_inputs
@@ -1338,44 +1311,7 @@ class PPOHybrid:
         #         rule_loss.backward()
         #         nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
         #         self.actor_optimizer.step()
-
-        # =====================================================================
-        # [新增] fire_mask 监督：用 mask_on=0 的 fire_mask 作为标签，
-        # 监督 mask_on=0 的 bern logits，让网络自主学会"禁止开火态势下输出低概率"
-        # =====================================================================
-        # if mask_on and ('bern' in self.actor.action_dims) and self.actor.action_dims['bern'] > 0:
-        #     # 1. mask_on=0 前向，获取 fire_mask（不需要梯度，仅作标签）
-        #     with torch.no_grad():
-        #         masked_outputs = self.actor.net(actor_inputs, max_std=self.max_std, mask_on=0)
-        #         fire_mask_label = masked_outputs['fire_mask']  # (N, bern_dim)
-        #         # 只取第一个 bern 维度
-        #         no_fire_mask = (1.0 - fire_mask_label[:, 0])  # (N,) 1=禁止开火位置
-
-        #     # 只有存在禁止开火样本时才执行
-        #     no_fire_count = (no_fire_mask * active_masks.squeeze(-1)).sum()
-        #     if no_fire_count > 0:
-        #         # 2. mask_on=0 前向，获取无 mask 压制的原始 bern logits（需要梯度）
-        #         unmasked_outputs = self.actor.net(actor_inputs, max_std=self.max_std, mask_on=0)
-        #         raw_bern_logits = unmasked_outputs['bern'][:, 0]  # (N,) 第一个 bern 维度
-
-        #         # 3. BCE loss：target=0（禁止开火位置应输出低概率）
-        #         target_zeros = torch.zeros_like(raw_bern_logits)
-        #         bce_per_sample = F.binary_cross_entropy_with_logits(
-        #             raw_bern_logits, target_zeros, reduction='none'
-        #         )
-
-        #         # 只对 fire_mask=0 且 active 的样本计算 loss
-        #         alpha_fire_supervise = 0.2
-        #         fire_supervise_loss = alpha_fire_supervise * (
-        #             bce_per_sample * no_fire_mask * active_masks.squeeze(-1)
-        #         ).sum() / (no_fire_count + 1e-5)
-
-        #         # 4. 独立优化步
-        #         self.actor_optimizer.zero_grad()
-        #         fire_supervise_loss.backward()
-        #         nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
-        #         self.actor_optimizer.step()
-
+                
         self.actor_loss = np.mean(actor_loss_list)
         self.actor_grad = np.mean(actor_grad_list)
         self.critic_loss = np.mean(critic_loss_list)
@@ -1407,10 +1343,6 @@ class PPOHybrid:
         self.PPO_samples = ppo_samples_total
         self.PPO_valid_samples = ppo_valid_samples_total
         
-        # [新增] 汇总未被mask的bern触发概率极值
-        self.max_fire_prob = np.mean(max_fire_prob_list) if len(max_fire_prob_list) > 0 else 0
-        self.min_fire_prob = np.mean(min_fire_prob_list) if len(min_fire_prob_list) > 0 else 0
-        
         #  计算 Explained Variance
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
         # 这里使用 numpy 计算以防 tensor 维度广播问题
@@ -1441,115 +1373,6 @@ class PPOHybrid:
 
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
-
-    # =========================================================================
-    #  [New Method] 将平铺的 transition_dict 重排为 (num_seqs, seq_len, ...) 形状
-    # =========================================================================
-    def reshape_for_rnn(self, transition_dict, seq_len):
-        """
-        将按回合顺序排列的平铺 transition_dict 切分为固定长度序列，供 GRU 网络使用。
-
-        切分规则（与 HybridBuffer_rnn 保持一致）：
-          - 以 dones == 1 作为回合边界，逐回合处理。
-          - 每个回合内从后往前倒序切块，每块长度为 seq_len；头部余数丢弃。
-          - 回合步数 < seq_len 的整个回合丢弃。
-
-        Args:
-            transition_dict: dict，键包含
-                'states'      : (N, S)
-                'next_states' : (N, S)   保留，用于现场计算 V(s')
-                'rewards'     : (N,) 或 (N,1)
-                'dones'       : (N,) 或 (N,1)
-                'actions'     : dict of arrays, 每个值形状 (N, ...)
-                可选: 'obs' (N, O), 'active_masks' (N,) 或 (N,1)
-            seq_len: int，每条序列的长度
-
-        Returns:
-            dict，各字段形状为 (num_seqs, seq_len, ...) 的 numpy 数组；
-            'actions' 仍为 dict，每个值形状 (num_seqs, seq_len, ...)。
-            若无任何有效序列则抛出 RuntimeError。
-        """
-        def _to_np(x):
-            if isinstance(x, torch.Tensor):
-                return x.cpu().numpy()
-            return np.array(x)
-
-        states      = _to_np(transition_dict['states'])       # (N, S)
-        next_states = _to_np(transition_dict['next_states'])  # (N, S)
-        rewards     = _to_np(transition_dict['rewards']).reshape(-1)   # (N,)
-        dones       = _to_np(transition_dict['dones']).reshape(-1)     # (N,)
-
-        has_obs          = 'obs' in transition_dict
-        has_active_masks = 'active_masks' in transition_dict
-        obs          = _to_np(transition_dict['obs'])          if has_obs          else None
-        active_masks = _to_np(transition_dict['active_masks']).reshape(-1) if has_active_masks else None
-
-        actions_np = {}
-        for k, v in transition_dict['actions'].items():
-            actions_np[k] = _to_np(v)  # (N, ...)
-
-        N = dones.shape[0]
-        S = states.shape[-1]
-
-        # --- 识别回合边界，倒序切块 ---
-        done_indices = list(np.where(dones == 1)[0])
-        ep_ends = done_indices[:]
-        if len(ep_ends) == 0 or ep_ends[-1] != N - 1:
-            ep_ends.append(N - 1)
-
-        valid_seqs = []  # list of (ep_start, block_start) — both absolute indices
-        curr_start = 0
-        for ep_end in ep_ends:
-            ep_len = ep_end - curr_start + 1
-            if ep_len < seq_len:
-                curr_start = ep_end + 1
-                continue
-            # 从 ep_end 向前每 seq_len 步切一块
-            for block_end in range(ep_end, curr_start + seq_len - 2, -seq_len):
-                block_start = block_end - seq_len + 1
-                valid_seqs.append((block_start, block_end))
-            curr_start = ep_end + 1
-
-        if not valid_seqs:
-            raise RuntimeError(
-                f"reshape_for_rnn: 没有找到长度 >= {seq_len} 的回合，无法构建序列批次。"
-            )
-
-        num_seqs = len(valid_seqs)
-
-        # --- 预分配输出容器 ---
-        out = {
-            'states':      np.zeros((num_seqs, seq_len, S),           dtype=np.float32),
-            'next_states': np.zeros((num_seqs, seq_len, S),           dtype=np.float32),
-            'rewards':     np.zeros((num_seqs, seq_len),               dtype=np.float32),
-            'dones':       np.zeros((num_seqs, seq_len),               dtype=np.float32),
-            'actions':     {},
-        }
-        if has_obs:
-            O = obs.shape[-1]
-            out['obs'] = np.zeros((num_seqs, seq_len, O), dtype=np.float32)
-        if has_active_masks:
-            out['active_masks'] = np.zeros((num_seqs, seq_len), dtype=np.float32)
-
-        for k, v in actions_np.items():
-            act_shape = v.shape[1:]  # e.g. (cont_dim,) or (n_cat_heads,) or (bern_dim,)
-            dtype = np.int64 if k == 'cat' else np.float32
-            out['actions'][k] = np.zeros((num_seqs, seq_len) + act_shape, dtype=dtype)
-
-        # --- 填充 ---
-        for i, (s, e) in enumerate(valid_seqs):
-            out['states'][i]      = states[s:e+1]
-            out['next_states'][i] = next_states[s:e+1]
-            out['rewards'][i]     = rewards[s:e+1]
-            out['dones'][i]       = dones[s:e+1]
-            if has_obs:
-                out['obs'][i]          = obs[s:e+1]
-            if has_active_masks:
-                out['active_masks'][i] = active_masks[s:e+1]
-            for k in actions_np:
-                out['actions'][k][i]   = actions_np[k][s:e+1]
-
-        return out
 
     # =========================================================================
     #  [New Helper] 提取出的 MSE 计算逻辑 (供 mixed_update 和 BC_update 复用)

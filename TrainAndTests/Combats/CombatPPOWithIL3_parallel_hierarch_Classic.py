@@ -399,13 +399,17 @@ def create_initial_state_worker(randomized=0):
     # (复制原本的 create_initial_state 逻辑)
     blue_height = np.random.uniform(6000.0, 9000.0) * int(randomized) + \
                 8000.0 * (1-int(randomized))
+    if np.random.uniform(0,1) < 0.2 and int(randomized): # 以很低概率在更大的范围随机初始高度
+        blue_height = np.random.uniform(2000.0, 12000.0)
     red_height = blue_height
     # 初始航向随机化
-    red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi/3, pi/3))
-    blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi/3, pi/3))
+    red_psi = sub_of_radian(-np.pi/2 + np.random.uniform(-pi*2/3, pi*2/3)) # -pi/3, pi/3
+    blue_psi = sub_of_radian(np.pi/2 + np.random.uniform(-pi*2/3, pi*2/3))
     init_North = np.random.uniform(-30e3, 30e3) * int(randomized)
     red_N = init_North
     red_E = 55e3 # 45e3
+    if np.random.uniform(0,1) < 0.2: # 以低概率随机初始距离
+        red_E = np.random.uniform(10e3,55e3)
     blue_N = init_North
     blue_E = -red_E
     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]),
@@ -513,6 +517,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 episode_blue_delta_thetas = []    # 开火后30s内的delta_theta
                 episode_blue_delta_psis = []      # 开火后30s内的delta_psi
                 
+                # 新增: 开火策略指标统计容器
+                # 蓝方（本方）开火策略指标
+                episode_blue_fire_intervals = []  # 开火间隔时长
+                episode_blue_fire_delta_psis = [] # 开火瞬间的abs(delta_psi)
+                episode_blue_fire_distances = []  # 开火距离
+                episode_blue_fire_AA_hors = []    # 开火瞬间的abs(AA_hor)
+                
+                # 记录上次开火时间用于计算间隔
+                last_blue_fire_time = -1.0
+                
 
                 # D. 环境重置
                 # randomized_birth = settings['randomized_birth']  # 改在外面随机，里面不需要
@@ -530,7 +544,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # env.R_cage = np.random.uniform(r_min, r_max)
                 
                 # 进场瞬间给全信息
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
+                red_init_ammo=6
+                blue_init_ammo=6
+                # 残局训练
+                if np.random.uniform(0,1) < 0.1:
+                    red_init_ammo = int(np.round(np.random.uniform(0,3)))
+                    blue_init_ammo = int(np.round(np.random.uniform(0,3)))
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=0)
                 
                 # 状态变量初始化
                 done = False
@@ -609,22 +629,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.3 产生新动作 (No Grad)
                         with torch.no_grad():
                             # Blue Decision
-                            # “警报响起，少整活、多保命”
                             b_state_check = env.unscale_state(b_check_obs)
-                            if b_state_check["warning"]:
-                                temperature = 1 # 0.3
-                            else:
-                                temperature = 1
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature, mask_on=fire_mask)
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
                             b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
                             r_state_check = env.unscale_state(r_check_obs)
-                            if r_state_check["warning"]:
-                                temperature = 1 # 0.3
-                            else:
-                                temperature = 1
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
@@ -632,7 +643,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, temperature=temperature, mask_on=fire_mask)
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, mask_on=fire_mask)
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -653,14 +664,40 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
-                    b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
-                    r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
+
+                    r_action_label_fire=None
+                    b_action_label_fire=None
+                    
+                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label_fire) if getattr(env.RUAV, 'about_to_fire', 0) else None
+                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label_fire) if getattr(env.BUAV, 'about_to_fire', 0) else None
                     
                     if b_m_id: 
                         m_fired += 1
                         # 记录蓝方（本方）开火俯仰角
                         blue_fire_theta = float(env.BUAV.theta)
                         episode_blue_fire_thetas.append(blue_fire_theta)
+                        
+                        # 记录蓝方开火策略指标
+                        current_time = steps_run * dt_maneuver
+                        if last_blue_fire_time >= 0:
+                            fire_interval = current_time - last_blue_fire_time
+                            episode_blue_fire_intervals.append(fire_interval)
+                        last_blue_fire_time = current_time
+                        
+                        # 记录开火瞬间的abs(delta_psi)、距离、AA_hor
+                        if "target_information" in b_state_check and len(b_state_check["target_information"]) > 0:
+                            # delta_psi: target_information[0]
+                            fire_delta_psi = np.arccos(b_state_check["target_information"][0])
+                            episode_blue_fire_delta_psis.append(float(fire_delta_psi))
+                            
+                            # 距离: target_information[1]
+                            fire_distance = b_state_check["target_information"][3]
+                            episode_blue_fire_distances.append(float(fire_distance))
+                            
+                            # AA_hor: target_information[6]
+                            fire_AA_hor = b_state_check["target_information"][6]
+                            episode_blue_fire_AA_hors.append(abs(float(fire_AA_hor)))
+                        
                     if r_m_id is not None:
                         fire_theta = float(env.RUAV.theta)
                         episode_red_fire_thetas.append(fire_theta)
@@ -783,6 +820,28 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 else:
                     ep_blue_avg_delta_psi = None
 
+                # 计算本回合蓝方（本方）开火策略指标
+                if len(episode_blue_fire_intervals) > 0:
+                    ep_blue_avg_fire_interval = float(np.mean(episode_blue_fire_intervals))
+                else:
+                    ep_blue_avg_fire_interval = None
+                    
+                if len(episode_blue_fire_delta_psis) > 0:
+                    ep_blue_avg_fire_delta_psi = float(np.mean(episode_blue_fire_delta_psis))
+                else:
+                    ep_blue_avg_fire_delta_psi = None
+                    
+                if len(episode_blue_fire_distances) > 0:
+                    ep_blue_avg_fire_distance = float(np.mean(episode_blue_fire_distances))
+                else:
+                    ep_blue_avg_fire_distance = None
+                    
+                if len(episode_blue_fire_AA_hors) > 0:
+                    ep_blue_avg_fire_AA_hor = float(np.mean(episode_blue_fire_AA_hors))
+                else:
+                    ep_blue_avg_fire_AA_hor = None
+
+                
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
@@ -808,7 +867,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ep_blue_avg_ATA': ep_blue_avg_ATA,
                     'ep_blue_avg_delta_psi_threat': ep_blue_avg_delta_psi_threat,
                     'ep_blue_avg_delta_theta': ep_blue_avg_delta_theta,
-                    'ep_blue_avg_delta_psi': ep_blue_avg_delta_psi
+                    'ep_blue_avg_delta_psi': ep_blue_avg_delta_psi,
+                    # 新增: 本回合蓝方（本方）开火策略指标统计
+                    'ep_blue_avg_fire_interval': ep_blue_avg_fire_interval,
+                    'ep_blue_avg_fire_delta_psi': ep_blue_avg_fire_delta_psi,
+                    'ep_blue_avg_fire_distance': ep_blue_avg_fire_distance,
+                    'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor
                 }
                 
                 # 8. 发送回 Master
@@ -1083,7 +1147,7 @@ def run_MLP_simulation(
             beta=beta_mixed, 
             batch_size=il_batch_size, # 显存如果够大可以适当调大
             label_smoothing=label_smoothing,
-            no_bern = 0,
+            no_bern = 0, # 0
         )
         
         # 记录
@@ -1117,6 +1181,11 @@ def run_MLP_simulation(
                     logger.add(_name, _val, epoch)
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
+    
+    # MARWIL 结束后恢复 bern bias，防止稀疏开火动作被拉向高熵中间态（无济于事）
+    if hasattr(student_agent.actor.net, 'fc_bern'):
+        with torch.no_grad():
+            student_agent.actor.net.fc_bern[-1].bias.clamp_(max=-2.5)
     
     if IL_epoches > 0:
         print("IL Training Finished.")
@@ -1281,9 +1350,9 @@ def run_MLP_simulation(
         while total_steps < current_max_steps:
             # 先尝尝乱开或的后果，再mask掉错误开火
             if total_steps < 5e3:
-                fire_mask = 1 # 0 # 全程开启开火mask
+                fire_mask = 0 # 0 # 全程开启开火mask
             else:
-                fire_mask = 1
+                fire_mask = 0
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
             # --- 1. 并行测试触发逻辑 (Async) ---
@@ -1338,7 +1407,8 @@ def run_MLP_simulation(
                             'action_cycle_multiplier': action_cycle_multiplier,
                             'no_out': 0,
                             'deterministic': True,     # 机动动作确定化
-                            'restrict_fire': True      # 动作次序限制打开
+                            'restrict_fire': True,      # 动作次序限制打开
+                            'vertices': vertices,
                         }
                     )
                     test_tasks_no_random.append(obj)
@@ -1598,6 +1668,13 @@ def run_MLP_simulation(
             batch_total_return = 0    # 新增统计
             batch_total_m_fired = 0   # 新增统计
             
+            # 新增: 批次开火策略指标统计
+            batch_blue_fire_intervals = []
+            batch_blue_fire_delta_psis = []
+            batch_blue_fire_distances = []
+            batch_blue_fire_AA_hors = []
+            batch_blue_fire_thetas = []
+            
             for res in batch_results:
                 # res 结构: {'trans':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
                 l_tr = res['trans'] # PPO 训练数据 (含探索)
@@ -1670,6 +1747,24 @@ def run_MLP_simulation(
                 batch_total_return += metrics['return']
                 batch_total_m_fired += metrics['m_fired']
 
+                # 收集蓝方开火策略指标
+                ep_blue_avg_fire_interval = res.get('ep_blue_avg_fire_interval')
+                ep_blue_avg_fire_delta_psi = res.get('ep_blue_avg_fire_delta_psi')
+                ep_blue_avg_fire_distance = res.get('ep_blue_avg_fire_distance')
+                ep_blue_avg_fire_AA_hor = res.get('ep_blue_avg_fire_AA_hor')
+                ep_blue_avg_fire_theta = res.get('ep_blue_avg_fire_theta')
+                
+                if ep_blue_avg_fire_interval is not None:
+                    batch_blue_fire_intervals.append(ep_blue_avg_fire_interval)
+                if ep_blue_avg_fire_delta_psi is not None:
+                    batch_blue_fire_delta_psis.append(ep_blue_avg_fire_delta_psi)
+                if ep_blue_avg_fire_distance is not None:
+                    batch_blue_fire_distances.append(ep_blue_avg_fire_distance)
+                if ep_blue_avg_fire_AA_hor is not None:
+                    batch_blue_fire_AA_hors.append(ep_blue_avg_fire_AA_hor)
+                if ep_blue_avg_fire_theta is not None:
+                    batch_blue_fire_thetas.append(ep_blue_avg_fire_theta)
+
                 if metrics['win']: batch_wins += 1
                 elif metrics['lose']: batch_loss_cnt += 1
                 else: batch_draw_cnt += 1
@@ -1733,6 +1828,13 @@ def run_MLP_simulation(
                     # 新对手：始终添加到 elo_ratings
                     elo_ratings[opp_name] = main_agent_elo
             
+            # 计算蓝方开火策略指标的批次平均值
+            batch_blue_avg_fire_interval = float(np.mean(batch_blue_fire_intervals)) if batch_blue_fire_intervals else None
+            batch_blue_avg_fire_delta_psi = float(np.mean(batch_blue_fire_delta_psis)) if batch_blue_fire_delta_psis else None
+            batch_blue_avg_fire_distance = float(np.mean(batch_blue_fire_distances)) if batch_blue_fire_distances else None
+            batch_blue_avg_fire_AA_hor = float(np.mean(batch_blue_fire_AA_hors)) if batch_blue_fire_AA_hors else None
+            batch_blue_avg_fire_theta = float(np.mean(batch_blue_fire_thetas)) if batch_blue_fire_thetas else None
+
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
                 print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
@@ -1761,6 +1863,19 @@ def run_MLP_simulation(
 
             # 记录导弹发射平均数量或总数
             logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
+            
+            # 记录开火策略指标 - 蓝方（本方）
+            if batch_blue_avg_fire_interval is not None:
+                logger.add("special/1 蓝方平均开火间隔时长", batch_blue_avg_fire_interval, total_steps)
+            if batch_blue_avg_fire_delta_psi is not None:
+                logger.add("special/2 蓝方平均开火abs(delta_psi)", batch_blue_avg_fire_delta_psi*180/pi, total_steps)
+            if batch_blue_avg_fire_distance is not None:
+                logger.add("special/3 蓝方平均开火距离", batch_blue_avg_fire_distance, total_steps)
+            if batch_blue_avg_fire_AA_hor is not None:
+                logger.add("special/4 蓝方平均开火abs(AA_hor)", batch_blue_avg_fire_AA_hor*180/pi, total_steps)
+            if batch_blue_avg_fire_theta is not None:
+                logger.add("special/5 蓝方平均fire_theta", batch_blue_avg_fire_theta*180/pi, total_steps)
+            
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
@@ -1805,11 +1920,14 @@ def run_MLP_simulation(
                     freeze_actor = 1
                 else:
                     freeze_actor = 0
-                # critic先收敛
-                if total_steps < 50e3:
-                    freeze_actor = 1
+                # # critic先收敛
+                # if total_steps < 50e3:
+                #     freeze_actor = 1
+                
+                max_fire_logits = 4.0
+
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
-                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor)
+                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
                 #====================
                 # 记录 Log
 
@@ -1827,7 +1945,9 @@ def run_MLP_simulation(
                 logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
                 logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
                 logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
-                
+                logger.add("train_plus/max_fire_prob", student_agent.max_fire_prob, total_steps)
+                logger.add("train_plus/min_fire_prob", student_agent.min_fire_prob, total_steps)
+
                 logger.add("train/10 advantage", student_agent.advantage, total_steps) 
                 # 强化学习
                 logger.add("train/10 explained_var", student_agent.explained_var, total_steps)

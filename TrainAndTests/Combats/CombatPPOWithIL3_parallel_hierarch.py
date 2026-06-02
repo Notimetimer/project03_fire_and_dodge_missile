@@ -898,7 +898,7 @@ def run_MLP_simulation(
             beta=beta_mixed, 
             batch_size=il_batch_size, # 显存如果够大可以适当调大
             label_smoothing=label_smoothing,
-            no_bern = 0,
+            no_bern = 1, # 0
         )
         
         # 记录

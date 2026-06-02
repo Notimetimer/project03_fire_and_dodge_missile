@@ -65,8 +65,9 @@ class ChooseStrategyEnv(Battle):
             "weapon", # 1
             "threat",  # 4
             "border",  # 2
+            "out_locked", # 1
         ]
-        self.obs_dim = 1*6+8+7+1+4+2
+        self.obs_dim = 1*6+8+7+1+4+2+1
         self.fly_act_dim = [5, 7] # [5,7] 14
         self.fly_act_dim_circ = [5, 6]
         self.fire_dim = 1
@@ -135,6 +136,7 @@ class ChooseStrategyEnv(Battle):
             "weapon": 1,              # float -> 1
             "threat": 4,              # np.array length 4
             "border": 2,              # np.array length 2
+            "out_locked": 1,          # float -> 1
         }
         
         # 3. 确定是否为 Batch 模式
@@ -266,7 +268,7 @@ class ChooseStrategyEnv(Battle):
         if action_v == 3: # 比目标低30°
             theta_desired = np.clip(theta+delta_theta+np.radians(-30), -pi/2, pi/2)
         if action_v == 4: # 急速下降
-            theta_desired = -pi/4  # -pi/2
+            theta_desired = -np.radians(85)  # -pi/2
         
         # 水平方向指令：
         # 追踪
