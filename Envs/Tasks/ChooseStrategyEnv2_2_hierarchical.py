@@ -323,33 +323,32 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
-            r_event -= 20*np.tanh( \
-                (
-                    # 4*(distance/100e3)**2 +\
-                    # 4*max(0, 1-missile_time_since_shoot/100)**2 +\
-                    # 4*(1 - abs(AA_hor)/pi)**2 +\
-                    # 4*(abs(delta_psi)/pi)**2 +\
-                    # 4*(max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
-                    # 4*sigmoid(-2*ego.theta/pi*2)
+            # r_event -= 20*np.tanh( \
+            #     (
+            #         # 4*(distance/100e3)**2 +\
+            #         # 4*max(0, 1-missile_time_since_shoot/100)**2 +\
+            #         # 4*(1 - abs(AA_hor)/pi)**2 +\
+            #         # 4*(abs(delta_psi)/pi)**2 +\
+            #         # 4*(max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
+            #         # 4*sigmoid(-2*ego.theta/pi*2)
 
-                    (distance/100e3)**2 +\
-                    max(0, 1-missile_time_since_shoot/100)**2 +\
-                    (1 - abs(AA_hor)/pi)**2 +\
-                    (abs(delta_psi)/pi)**2 +\
-                    (max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
-                    sigmoid(-2*ego.theta/pi*2)
-                )/6
-            )
+            #         (distance/100e3)**2 +\
+            #         max(0, 1-missile_time_since_shoot/100)**2 +\
+            #         (1 - abs(AA_hor)/pi)**2 +\
+            #         (abs(delta_psi)/pi)**2 +\
+            #         (max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
+            #         sigmoid(-2*ego.theta/pi*2)
+            #     )/6
+            # )
 
-            # r_event -= np.clip(20 * \
-            #     sigmoid(5*distance/100e3) * \
-            #     2*sigmoid(5*max(0, 1-missile_time_since_shoot/60)) *\
-            #     2*sigmoid(5*(1 - abs(AA_hor)/pi)) * \
-            #     2*sigmoid(5*abs(delta_psi)/pi) * \
-            #     2*sigmoid(5*max(1.0-ego.speed/340, 0)) *\
-            #     2*sigmoid(-5*ego.theta/pi*2)
-            # , 5, 500)
-
+            r_event -= 20 *(
+                3 * (distance/100e3)**2 +
+                5 * max(0, 1-missile_time_since_shoot/100)**2 +
+                5 * (1 - abs(AA_hor)/pi) +
+                5 * (abs(delta_psi)/pi) +
+                1 * (max(1.0-ego.speed/340, 0)/(target_mach - 0.7)) +
+                3 * (max(-1 + np.exp(ego.theta/pi*2), -1))
+            ) / 24
 
 
 
