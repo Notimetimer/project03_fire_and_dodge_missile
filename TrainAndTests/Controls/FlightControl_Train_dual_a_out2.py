@@ -461,7 +461,7 @@ class track_env():
         r_angle += 10 * np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
         r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
         r_angle += - 5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
-        
+
 
         # 俯仰角惩罚
         desired_theta = height2req/5000*pi/2  # 去除 pi/3 约束
@@ -494,11 +494,18 @@ class track_env():
         # 滚转角速度惩罚
         if abs(psi2req) < 15 * pi/180 \
             or abs(theta)*180/pi > 75:  # 大俯仰机动应该降低滚转角速度
-            r_angle += -0.2 * abs(p)/pi  # 0.4 偏强？ 0.1偏弱？
+            # 原有写法
+            # r_angle += -0.2 * abs(p)/pi  # 0.4 偏强？ 0.1偏弱？
+            # 平方项修改
+            r_angle += -0.2 * (p/pi)**2
         else:
-            r_angle += -0.05 * abs(p)/pi # 0.01 可能有些弱？
+            # 原有写法
+            # r_angle += -0.05 * abs(p)/pi # 0.01 可能有些弱？
+            # 平方项修改
+            r_angle += -0.1 * (p/pi)**2
         
-        # r_angle -= (0.05 * abs(q)/pi + 0.01 * abs(r)/pi) # 加q和r的惩罚
+        # 平方项修改
+        r_angle -= (0.1 * (r/pi)**2) # 加r的惩罚
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
@@ -518,7 +525,10 @@ class track_env():
             reward_alpha -= 3 + (ny-7)*3 *2
         
         # 侧滑角惩罚（尽量少侧滑）
-        reward_beta = - 1.2 * abs(beta_air/5) # 1可能有些小，2可能大了
+        # 原有写法
+        # reward_beta = - 1.2 * abs(beta_air/5) # 1可能有些小，2可能大了
+        # 平方项修改
+        reward_beta = - 1.2 * abs(beta_air/5)**2
         reward_beta -= abs(rudder) * 0.3  # 方向舵在稳定的的时候尽量少打 0.1 可能小了
 
         reward = np.sum([
