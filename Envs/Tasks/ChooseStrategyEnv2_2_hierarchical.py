@@ -246,21 +246,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 爬高奖励
             r_constraint += np.clip(ego.vu/100, -1, 1) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
 
-            dist_thres = 20e3
+            # dist_thres = 20e3
             # target_delta_theta = -pi/4 * sigmoid(21*(distance-dist_thres))
             # sigma = 0.7
             # r_constraint += np.exp(-(delta_theta-target_delta_theta)**2/(2*sigma**2)) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
 
-            target_delta_theta = -pi/4 * sigmoid(10*(distance-dist_thres)/100e3) # 21*
-            r_constraint += (1-(delta_theta-target_delta_theta)**2/(2*1.1**2)) *\
-                    reward_weights['angle_advantage'] * (1-ego.dead)
+            # target_delta_theta = -pi/4 * sigmoid(10*(distance-dist_thres)/100e3) # 21*
+            # r_constraint += (1-(delta_theta-target_delta_theta)**2/(2*1.1**2)) *\
+            #         reward_weights['angle_advantage'] * (1-ego.dead)
 
             # # WVR进攻
             # if distance <= 20e3: # 落入敌机的不可逃逸区，banzai
             #     r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             # # BVR进攻
             # else:
-            #     r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+            r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             
         # crank引导
         enm_threat_dist = enm_states["threat"][3]
@@ -268,26 +268,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if len(alive_enm_missiles) == 0 and abs(AA_hor) < radians(90):
                 # 如果对手没有开火而且没有还手之力，直接乘胜追击
                 # 瞄准奖励
-                # r_constraint += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
-                #  r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
-                r_constraint += (1-2*(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
-                r_constraint += (1-(delta_theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
-                # # 爬高奖励
-                r_constraint += np.clip(ego.vu/100, -1, 1) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
+                r_constraint += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+                # r_constraint += (1-2*(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
+                # r_constraint += (1-(delta_theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             else:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-
-                # r_constraint += 1.2*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
-                # if ego.alt > 5000:
-                #     r_constraint += 1.2*((-ego.theta) / (pi/2)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
-                # else:
-                #     r_constraint += 1.2*(1-abs(ego.theta)/(pi/2)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
-                # # r_constraint += 3*(1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 5 *
-
-                r_constraint += 1.2*(1-3*(abs(delta_psi)-pi/3)**2) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
-                target_theta = -pi/2*softplus((ego.alt-5000)/10e3)
-                r_constraint += 1.2*(1-abs(ego.theta-target_theta)**1.2/(2*1.0**2)) *\
-                        reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
+                r_constraint += 1.2*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+                r_constraint += 1.2*((-ego.theta) / (pi/2)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
+                
+                # r_constraint += 1.2*(1-3*(abs(delta_psi)-pi/3)**2) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+                # target_theta = -pi/2*softplus((ego.alt-5000)/10e3)
+                # r_constraint += 1.2*(1-abs(ego.theta-target_theta)**1.2/(2*1.0**2)) *\
+                #         reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
 
 
         # 提前防御引导
