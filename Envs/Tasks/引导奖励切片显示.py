@@ -15,7 +15,7 @@ VAR_DEFS = {
     'delta_psi': (-np.pi, np.pi, 0),
     'vu': (-100, 100, 0),
 }
-zmin, zmax = -0.2, 1.2
+zmin, zmax = -1.2, 1.2
 
 # --- 2. 向量化的奖励函数 ---
 def sigmoid(x):
@@ -43,7 +43,7 @@ def compute_reward(ATA, theta, delta_psi, vu):
         3*(-1+(abs(delta_psi)/(pi/2)))
     )/(5)
 
-    r_event = sigmoid(3*inner)
+    r_event = inner # sigmoid(3*inner)
     return r_event
 
 # --- 3. GUI 与 可视化逻辑 ---
