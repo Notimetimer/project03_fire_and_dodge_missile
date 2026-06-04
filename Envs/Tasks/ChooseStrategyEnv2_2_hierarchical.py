@@ -313,25 +313,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint -= (target_mach-ego.speed/340)/(target_mach - 0.8) * reward_weights['speed_penalty'] * (1-ego.dead)
             r_constraint -= (max(ego.theta, 0)/(pi/2)) * reward_weights['angle_advantage'] * (1-ego.dead) # 速度太慢，惩罚上仰过度
 
-        # # 空弹惩罚
-        # if ego.ammo == 0:
-        #     r_constraint -= 0.002
-
-        # 密集奖励只有在agent活着的时候有意义
-        # r_constraint *= (1-ego.dead)
-        # r_shaping *= (1-ego.dead)
 
         # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
             # r_event -= 20*np.tanh( \
             #     (
-            #         # 4*(distance/100e3)**2 +\
-            #         # 4*max(0, 1-missile_time_since_shoot/100)**2 +\
-            #         # 4*(1 - abs(AA_hor)/pi)**2 +\
-            #         # 4*(abs(delta_psi)/pi)**2 +\
-            #         # 4*(max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
-            #         # 4*sigmoid(-2*ego.theta/pi*2)
-
             #         (distance/100e3)**2 +\
             #         max(0, 1-missile_time_since_shoot/100)**2 +\
             #         (1 - abs(AA_hor)/pi)**2 +\
@@ -341,14 +327,23 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             #     )/6
             # )
 
-            r_event -= 20 *(
+            # r_event -= 20 *(
+            #     3 * (distance/100e3)**2 +
+            #     5 * max(0, 1-missile_time_since_shoot/100)**2 +
+            #     5 * (1 - abs(AA_hor)/pi) +
+            #     5 * (abs(delta_psi)/pi) +
+            #     3 * (max(1.0-ego.speed/340, 0)/(target_mach - 0.7)) +
+            #     3 * (max(-1 + np.exp(ego.theta/pi*2), -1))
+            # ) / 24
+
+            r_event -= (
                 3 * (distance/100e3)**2 +
-                5 * max(0, 1-missile_time_since_shoot/100)**2 +
-                5 * (1 - abs(AA_hor)/pi) +
-                5 * (abs(delta_psi)/pi) +
-                1 * (max(1.0-ego.speed/340, 0)/(target_mach - 0.7)) +
-                3 * (max(-1 + np.exp(ego.theta/pi*2), -1))
-            ) / 24
+                4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))) +
+                3 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
+                3 * (-1 + np.exp(np.abs(delta_psi) / np.pi)) +
+                2 * np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))) +
+                3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -1)
+            )
 
 
 
