@@ -1,18 +1,12 @@
-import os, sys
 from CombatPPOWithIL3_parallel_hierarch_Classic import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260604-153546")
-collape_recover={ # 是否是崩盘后恢复
-            "collapsed": False,
-            "best_actor_name": None,
-            "actor_frozen_batchs": 5,
-        }
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+# resume_target_dir = r""
+
+mission_name = 'NoILPFSP_分阶段_混规则对手_密集奖励函数调试'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -24,7 +18,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -32,11 +26,11 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
-dt_decide = 1 # 2 # 6
+dt_decide = 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
-weight_reward_0 = np.array([1,0,0]) # 1,1,1 引导奖励很难说该不该有
+weight_reward_0 = np.array([0,1,0]) # 1,1,1 引导奖励很难说该不该有
 IL_rule = 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -82,8 +76,7 @@ if __name__=='__main__':
     print(f"Simulation start: {start_time.isoformat(sep=' ', timespec='seconds')}")
     run_MLP_simulation(
         k_nonlinear=0.0,
-        collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15, # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -122,13 +115,13 @@ if __name__=='__main__':
             'Rule_4': 1200,
             'Rule_5': 1200,
             },
-        self_play_type = 'FSP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈
+        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 150,  # 300
+        MAX_HISTORY_SIZE = 300,  # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
@@ -137,10 +130,9 @@ if __name__=='__main__':
         num_runs = 3, # 测试回合重复次数
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小
-        vertices = None,
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
-        POMDP=0,
+        POMDP=0, 
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
