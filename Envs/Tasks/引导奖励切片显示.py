@@ -25,27 +25,27 @@ def sigmoid(x):
 def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
     i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
     "attack"
-    # inner = (
-    #     2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-    #     1*np.clip(vu/100, -1, 1) +
-    #     1*(theta/pi)
-    # )/(4)
+    inner = 4*(sigmoid(
+        2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
+        1*np.clip(vu/100, -1, 1) +
+        1*(theta/pi)
+    )/(4))
 
     "crank"
-    inner = (
-        1.0 * i_can_guide +
-        -0.7 * np.exp(1.2*abs(1-abs(delta_psi)/(pi/3))) + 
-        1.5 * ((-theta) / (pi/2))
-    )/(3.4)
+    # inner = 4*(sigmoid(
+    #     1.0 * i_can_guide +
+    #     0.5 - 3.5*abs(abs(delta_psi)-pi/3) + 
+    #     1.5 * ((-theta) / (pi/2))
+    # )/(3.4))
 
     "escape"
-    # inner = (
+    # inner = 2*sigmoid((
     #     -2 * np.exp(2*theta/(pi/2)) * np.where(delta_theta_threat>=0, 1, 0)+
-    #     -2 * np.exp(1.2*(theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
-    #     3 * (-1+(abs(delta_psi)/(pi/2)))
-    # )/(5)
+    #     -5 * np.exp(1.2*(theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
+    #     4 * (-1+(abs(delta_psi)/(pi/2)))
+    # )/(5))
 
-    r_event = inner # sigmoid(3*inner)
+    r_event = inner
     return r_event
 
 # --- 3. GUI 与 可视化逻辑 ---
