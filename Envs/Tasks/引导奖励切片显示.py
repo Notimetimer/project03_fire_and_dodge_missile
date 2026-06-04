@@ -14,6 +14,7 @@ VAR_DEFS = {
     'theta': (-pi/2, pi/2, 0),
     'delta_psi': (-np.pi, np.pi, 0),
     'vu': (-100, 100, 0),
+    'delta_theta_threat': (-pi/2, pi/2, 0),
 }
 zmin, zmax = -1.2, 1.2
 
@@ -21,27 +22,28 @@ zmin, zmax = -1.2, 1.2
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
-def compute_reward(ATA, theta, delta_psi, vu):
-    i_can_guide =  - np.tanh(8*(abs(ATA)-pi/3))
+def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
+    i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
     "attack"
-    inner = (
-        2*(1-(abs(delta_psi)*2/pi)) +
-        1*np.clip(vu/100, -1, 1) +
-        1*(theta/pi)
-    )/(4)
+    # inner = (
+    #     2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
+    #     1*np.clip(vu/100, -1, 1) +
+    #     1*(theta/pi)
+    # )/(4)
 
     "crank"
     inner = (
         1.0 * i_can_guide +
-        1.2 * (1 - abs(1-abs(delta_psi)/(pi/3))) + 
-        1.2 * ((-theta) / (pi/2))
+        -0.7 * np.exp(1.2*abs(1-abs(delta_psi)/(pi/3))) + 
+        1.5 * ((-theta) / (pi/2))
     )/(3.4)
 
     "escape"
-    inner = (
-        2*(-theta)/(pi/2)+
-        3*(-1+(abs(delta_psi)/(pi/2)))
-    )/(5)
+    # inner = (
+    #     -2 * np.exp(2*theta/(pi/2)) * np.where(delta_theta_threat>=0, 1, 0)+
+    #     -2 * np.exp(1.2*(theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
+    #     3 * (-1+(abs(delta_psi)/(pi/2)))
+    # )/(5)
 
     r_event = inner # sigmoid(3*inner)
     return r_event
@@ -201,7 +203,7 @@ class RewardVisualizer:
             return
         vmin = float(self.sliders[name]['vmin'])
         vmax = float(self.sliders[name]['vmax'])
-        step = (vmax - vmin) / 20.0
+        step = (vmax - vmin) / 25.0
         new = slider.get() + delta * step
         new = max(vmin, min(vmax, new))
         slider.set(new)
@@ -217,8 +219,8 @@ class RewardVisualizer:
         # 1. 为 X 和 Y 生成网格点 (分辨率 50x50 保证流畅度)
         x_min, x_max, _ = VAR_DEFS[x_name]
         y_min, y_max, _ = VAR_DEFS[y_name]
-        xx = np.linspace(x_min, x_max, 20)
-        yy = np.linspace(y_min, y_max, 20)
+        xx = np.linspace(x_min, x_max, 25)
+        yy = np.linspace(y_min, y_max, 25)
         X, Y = np.meshgrid(xx, yy)
         
         # 2. 准备传入计算函数的参数 kwargs

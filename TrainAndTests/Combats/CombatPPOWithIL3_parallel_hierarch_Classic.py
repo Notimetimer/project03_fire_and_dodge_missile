@@ -537,6 +537,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 使用从master传来的出生状态
                 red_birth = settings['red_birth']
                 blue_birth = settings['blue_birth']
+                end_reward_rate = settings['end_reward_rate']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
                 # r_min, r_max = settings.get('R_cage_range', (55.00e3, 55.00e3))
@@ -547,7 +548,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 red_init_ammo=6
                 blue_init_ammo=6
                 # 残局训练
-                if np.random.uniform(0,1) < 0.1:
+                if np.random.uniform(0,1) < 0.3:
                     red_init_ammo = int(np.round(np.random.uniform(0,3)))
                     blue_init_ammo = int(np.round(np.random.uniform(0,3)))
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=0)
@@ -560,6 +561,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 steps_run = 0
                 episode_return = 0 # 仅用于统计显示
+                episode_return_dense = 0
                 m_fired = 0
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
@@ -592,17 +594,17 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     # 记录开火后30s内的角度数据（与ATA同级别）- 红方（对手）
                     if r_check_obs["weapon"] * 120 <= 30 and not r_state_check["warning"]:  # 有存活导弹（30s内）且没有告警
                         if "target_information" in r_state_check and len(r_state_check["target_information"]) > 0:
-                            delta_psi = np.arccos(r_state_check["target_information"][0])
-                            delta_theta = r_state_check["target_information"][2]
-                            ATA = r_state_check["target_information"][4]
-                            episode_red_ATAs.append(float(ATA))
-                            episode_red_delta_thetas.append(float(delta_theta))
-                            episode_red_delta_psis.append(float(delta_psi))
+                            red_delta_psi = np.arctan2(r_state_check["target_information"][1], r_state_check["target_information"][0])
+                            red_delta_theta = r_state_check["target_information"][2]
+                            red_ATA = r_state_check["target_information"][4]
+                            episode_red_ATAs.append(float(red_ATA))
+                            episode_red_delta_thetas.append(float(red_delta_theta))
+                            episode_red_delta_psis.append(float(red_delta_psi))
                     
                     # 记录开火后30s内的角度数据 - 蓝方（本方）
                     if b_check_obs["weapon"] * 120 <= 30 and not b_state_check["warning"]:  # 有存活导弹（30s内）且没有告警
                         if "target_information" in b_state_check and len(b_state_check["target_information"]) > 0:
-                            blue_delta_psi = np.arccos(b_state_check["target_information"][0])
+                            blue_delta_psi = np.arctan2(b_state_check["target_information"][1], b_state_check["target_information"][0])
                             blue_delta_theta = b_state_check["target_information"][2]
                             blue_ATA = b_state_check["target_information"][4]
                             episode_blue_ATAs.append(float(blue_ATA))
@@ -712,14 +714,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     steps_run += 1
                     
                     # 4. 奖励计算
-                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier)
-                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier)
-                    
+                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_rate=end_reward_rate)
+                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_rate=end_reward_rate)
+                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_rate=0)
+
                     reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
                     reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
                         episode_return += b_reward1
+                        episode_return_dense += b_dense_reward
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -730,7 +734,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 # 6. 存储最后一步经验 (Terminal State)
                 # 强制做一次终局判定
-                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier)
+                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier, end_reward_rate=end_reward_rate)
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
@@ -849,6 +853,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
+                        'dense_return': b_dense_reward,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -1635,6 +1640,7 @@ def run_MLP_simulation(
                     'blue_birth': bb,
                     # 'R_cage_range': R_cage_range, # 将范围传给Worker
                     'fire_mask': fire_mask,
+                    'end_reward_rate': 0.1 # np.clip(total_steps/5e3, 0, 1)
                 }
                 
                 # 发送指令 pipe.send
@@ -1666,6 +1672,7 @@ def run_MLP_simulation(
             batch_loss_cnt = 0
             batch_draw_cnt = 0        # 新增统计
             batch_total_return = 0    # 新增统计
+            batch_total_dense_return = 0
             batch_total_m_fired = 0   # 新增统计
             
             # 新增: 批次开火策略指标统计
@@ -1674,6 +1681,9 @@ def run_MLP_simulation(
             batch_blue_fire_distances = []
             batch_blue_fire_AA_hors = []
             batch_blue_fire_thetas = []
+            batch_blue_ATAs = []
+            batch_blue_delta_psi_threats = []
+            batch_blue_delta_thetas = []
             
             for res in batch_results:
                 # res 结构: {'trans':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
@@ -1745,6 +1755,7 @@ def run_MLP_simulation(
                 
                 batch_total_steps += metrics['steps']
                 batch_total_return += metrics['return']
+                batch_total_dense_return += metrics['dense_return']
                 batch_total_m_fired += metrics['m_fired']
 
                 # 收集蓝方开火策略指标
@@ -1764,6 +1775,13 @@ def run_MLP_simulation(
                     batch_blue_fire_AA_hors.append(ep_blue_avg_fire_AA_hor)
                 if ep_blue_avg_fire_theta is not None:
                     batch_blue_fire_thetas.append(ep_blue_avg_fire_theta)
+                
+                if ep_blue_avg_ATA is not None:
+                    batch_blue_ATAs.append(ep_blue_avg_ATA)
+                if ep_blue_avg_delta_psi_threat is not None:
+                    batch_blue_delta_psi_threats.append(ep_blue_avg_delta_psi_threat)
+                if ep_blue_avg_delta_theta is not None:
+                    batch_blue_delta_thetas.append(ep_blue_avg_delta_theta)
 
                 if metrics['win']: batch_wins += 1
                 elif metrics['lose']: batch_loss_cnt += 1
@@ -1834,6 +1852,9 @@ def run_MLP_simulation(
             batch_blue_avg_fire_distance = float(np.mean(batch_blue_fire_distances)) if batch_blue_fire_distances else None
             batch_blue_avg_fire_AA_hor = float(np.mean(batch_blue_fire_AA_hors)) if batch_blue_fire_AA_hors else None
             batch_blue_avg_fire_theta = float(np.mean(batch_blue_fire_thetas)) if batch_blue_fire_thetas else None
+            batch_blue_avg_ATA = float(np.mean(batch_blue_ATAs)) if batch_blue_ATAs else None
+            batch_blue_avg_delta_psi_threat = float(np.mean(batch_blue_delta_psi_threats)) if batch_blue_delta_psi_threats else None
+            batch_blue_avg_delta_theta = float(np.mean(batch_blue_delta_thetas)) if batch_blue_delta_thetas else None
 
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
@@ -1875,9 +1896,16 @@ def run_MLP_simulation(
                 logger.add("special/4 蓝方平均开火abs(AA_hor)", batch_blue_avg_fire_AA_hor*180/pi, total_steps)
             if batch_blue_avg_fire_theta is not None:
                 logger.add("special/5 蓝方平均fire_theta", batch_blue_avg_fire_theta*180/pi, total_steps)
+            if batch_blue_avg_ATA is not None:
+                logger.add("special/6 蓝方平均ATA", batch_blue_avg_ATA*180/pi, total_steps)
+            if batch_blue_avg_delta_psi_threat is not None:
+                logger.add("special/7 蓝方平均delta_psi_threat", batch_blue_avg_delta_psi_threat*180/pi, total_steps)
+            if batch_blue_avg_delta_theta is not None:
+                logger.add("special/8 蓝方平均delta_theta", batch_blue_avg_delta_theta*180/pi, total_steps)
             
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
+            logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
