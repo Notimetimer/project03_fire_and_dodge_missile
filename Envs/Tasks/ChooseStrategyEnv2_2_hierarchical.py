@@ -239,49 +239,32 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         "所有引导奖励的除去权重，都缩放到-1~1之间，避免agent利用奖励差值刷分"
         # 进攻引导, 如果没有存活导弹，或者导弹射错了方向，按瞄准误差给分
         if len(alive_ally_missiles) == 0 and not warning:
-            r_constraint += (
+            r_constraint += 4*(sigmoid( # 没有4*sigmoid
                 2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-                # 2*(1-(abs(delta_psi)*2/pi)) +
                 1*np.clip(ego.vu/100, -1, 1) +
                 1*(ego.theta/pi*2)
-            )/(4) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # # 瞄准奖励
-            # r_constraint += 2*(1-(abs(delta_psi)*2/pi)) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # # 爬高奖励
-            # r_constraint += np.clip(ego.vu/100, -1, 1) * reward_weights['angle_advantage'] * (1-ego.dead) # 0.5 * 
-            # r_constraint += (ego.theta/pi*2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+            )/(4)) * reward_weights['angle_advantage'] * (1-ego.dead)
             
         # crank引导，如果导弹飞在正确的方向上，做crank下高
         if len(alive_ally_missiles) > 0 and not warning:
             # print("应该crank")
             # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
             i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
-            r_constraint += 2 * (
+            r_constraint += 4*(sigmoid( # 2 * (
                 1.0 * i_can_guide +
-                0.5 - 2*abs(abs(delta_psi)-pi/3) +
-                # -0.7 * np.exp(1.2*abs(1-abs(delta_psi)/(pi/3))) +
-                # 1.2 * (1 - abs(1-abs(delta_psi)/(pi/3))) + 
+                0.5 - 3.5*abs(abs(delta_psi)-pi/3) +
                 1.5 * ((-ego.theta) / (pi/2))
-            )/(3.4) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # r_constraint += (
-            #     1.0 * i_can_guide +
-            #     1.2 * (1 - abs(1-abs(delta_psi)/(pi/3))) + 
-            #     1.2 * ((-ego.theta) / (pi/2))
-            # ) * reward_weights['angle_advantage'] * (1-ego.dead)
+            )/(3.4)) * reward_weights['angle_advantage'] * (1-ego.dead)
 
         # RWR防御引导，如果有告警，不论如何都置尾下高
         if warning:
             # print("应该躲")
             # 受到上方威胁威胁应该置尾和下高
-            r_constraint += 2 * (
+            r_constraint += 2*(sigmoid( # 2 * (
                 -2 * np.exp(2*ego.theta/(pi/2)) * (delta_theta_threat>=0)+
                 -2 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
                 4 * (-1+(abs(delta_psi_threat)/(pi/2)))
-            )/(5) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # r_constraint += 2*(-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # # r_constraint += 2*(1-np.exp(-abs(delta_psi_threat)**0.7)) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # # r_constraint += 2*(1-(1+ego.theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # r_constraint += 2*(min(abs(delta_psi_threat), pi)/pi) * reward_weights['angle_advantage'] * (1-ego.dead)            
+            )/(5)) * reward_weights['angle_advantage'] * (1-ego.dead)       
 
         # 提前防御引导
         # if locked_by_target:
