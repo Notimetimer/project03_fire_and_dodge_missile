@@ -1411,7 +1411,36 @@ class PPOHybrid:
         # [新增] 汇总未被mask的bern触发概率极值
         self.max_fire_prob = np.mean(max_fire_prob_list) if len(max_fire_prob_list) > 0 else 0
         self.min_fire_prob = np.mean(min_fire_prob_list) if len(min_fire_prob_list) > 0 else 0
-        
+
+        # # [伪重力场] 在全量 PPO 更新完成后，根据本轮统计决定是否追加一次 bern 头压制 pass
+        # # 触发条件：max_fire_prob > 0.1 且 min_fire_prob >= 0.06（说明整体开火概率偏高）
+        # # 做法：冻结 backbone（保持其特征提取稳定），仅允许 fc_bern 头承受 -log(1-p) 梯度
+        # p_target_gravity = 0.1
+        # if self.max_fire_prob > p_target_gravity and self.min_fire_prob >= 0.06:
+        #     # 1. 冻结 backbone（除 fc_bern 之外的所有参数）
+        #     for name, param in self.actor.net.named_parameters():
+        #         if 'fc_bern' not in name:
+        #             param.requires_grad_(False)
+        #     # 2. 对全量数据做一次前向 + 稀疏惩罚
+        #     self.actor_optimizer.zero_grad()
+        #     actor_outputs_g = self.actor.net(actor_inputs, mask_on=mask_on)
+        #     bern_logits_g = actor_outputs_g['bern']
+        #     if bern_logits_g is not None:
+        #         fire_mask_g = actor_outputs_g.get('fire_mask', None)
+        #         if fire_mask_g is None:
+        #             fire_mask_g = (bern_logits_g > -1e6).float()
+        #         bern_probs_g = torch.sigmoid(bern_logits_g)
+        #         eps_g = 1e-7
+        #         alpha_sparsity = 0.05
+        #         active_sum_g = active_masks.sum() + mask_eps
+        #         sparsity_loss_g = alpha_sparsity * (-torch.log(1.0 - bern_probs_g + eps_g) * fire_mask_g * active_masks).sum() / active_sum_g
+        #         sparsity_loss_g.backward()
+        #         nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+        #         self.actor_optimizer.step()
+        #     # 3. 解冻 backbone，恢复正常训练状态
+        #     for param in self.actor.net.parameters():
+        #         param.requires_grad_(True)
+
         #  计算 Explained Variance
         # y_true: td_target, y_pred: v_pred_old (更新前的值) 或 v_pred (更新后的值，通常用更新前比较多，或者直接对比)
         # 这里使用 numpy 计算以防 tensor 维度广播问题
