@@ -2037,13 +2037,15 @@ def run_MLP_simulation(
                     if hist_agent_as_opponent:
                         agent_keys = [k for k in WinRates.keys() if k.startswith("actor_rein")]
                         sorted_agents = sorted(agent_keys, key=lambda k: WinRates[k])
-                        # 计算 rule 的最大 win_rate（即 Learner 对规则对手中赢得最多的那个值）
-                        # 新的门槛规则：候选 NN 必须比最弱的 Rule（对 Learner 来说最容易打的 Rule）更难
-                        # 换句话说：要求 WinRates[agent] < max_rule_win
+                        # 计算 rule 的最大 win_rate（排除 Rule0，在其他 Rule 中找最弱的作为门槛）
+                        # 新的门槛规则：候选 NN 必须比"排除Rule0后最弱的Rule"更难
+                        # 这样可以过滤掉那些"以逃为胜，仅比Rule0强一点"的智能体
                         rule_keys_present = [k for k in WinRates.keys() if k.startswith('Rule')]
+                        # 排除 Rule0，在其余 Rule 中取最大胜率作为门槛
+                        rule_keys_excluding_rule0 = [k for k in rule_keys_present if k != 'Rule0']
                         max_rule_win = None
-                        if rule_keys_present:
-                            max_rule_win = max([WinRates[k] for k in rule_keys_present])
+                        if rule_keys_excluding_rule0:
+                            max_rule_win = max([WinRates[k] for k in rule_keys_excluding_rule0])
 
                         # 过滤出满足硬性门槛的 agents（如果有 rule 则必须使 Learner 胜率小于 rules 中的最高值）
                         qualified_agents = []
