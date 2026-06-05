@@ -215,12 +215,14 @@ class PolicyNetHybrid(torch.nn.Module):
             # sin_theta = xb[:, 17]
             # locked = xb[:, 2]
             ammo = xb[:, 20]
-            # dist = xb[:, 9] * 10e3
+            dist = xb[:, 9] * 10e3
             # AA_hor = xb[:, 12]
             t_since_launch = xb[:, 21] * 120
 
             ammo_cond = (ammo > 0.0)
-            time_const_cond = t_since_launch >= 10  # 冷却时间10s，全程开启
+            time_const_cond = t_since_launch >= torch.max(dist/(3*340)/2, torch.tensor(10.0))
+            # 最小开火冷却时间10s，随开火距离增加 # 10  # 冷却时间10s，全程开启
+            
             ata_cond = ata < math.pi / 2
             # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
             can_fire = ammo_cond & time_const_cond & ata_cond

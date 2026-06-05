@@ -252,7 +252,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
             r_constraint += 4*(sigmoid( # 2 * (
                 1.0 * i_can_guide +
-                0.5 - 3.5*abs(abs(delta_psi)-pi/3) +
+                0.5 - 3*abs(abs(delta_psi)-pi/3) +
                 1.5 * ((-ego.theta) / (pi/2))
             )/(3.4)) * reward_weights['angle_advantage'] * (1-ego.dead)
 
@@ -262,7 +262,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 受到上方威胁威胁应该置尾和下高
             r_constraint += 2*(sigmoid( # 2 * (
                 -2 * np.exp(2*ego.theta/(pi/2)) * (delta_theta_threat>=0)+
-                -2 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
+                -5 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
                 4 * (-1+(abs(delta_psi_threat)/(pi/2)))
             )/(5)) * reward_weights['angle_advantage'] * (1-ego.dead)       
 
