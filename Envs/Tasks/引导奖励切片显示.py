@@ -23,20 +23,20 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
-    i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
     "attack"
-    # inner = 4*(sigmoid(
-    #     2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-    #     1*np.clip(vu/100, -1, 1) +
-    #     1*(theta/pi)
-    # )/(4))
+    inner = 9*(sigmoid(
+        2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
+        1*np.clip(vu/100, -1, 1) +
+        1*(1-np.exp(-theta/pi*3))
+    )/8)
 
     "crank"
-    inner = 4*(sigmoid(
-        1.0 * i_can_guide +
-        0.5 - 3*abs(abs(delta_psi)-pi/3) + 
-        1.5 * ((-theta) / (pi/2))
-    )/(3.4))
+    # i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
+    # inner = 4*(sigmoid(
+    #     1.0 * i_can_guide +
+    #     0.5 - 3*abs(abs(delta_psi)-pi/3) + 
+    #     1.5 * ((-theta) / (pi/2))
+    # )/(3.4))
 
     "escape"
     # inner = 2*sigmoid((
