@@ -220,7 +220,8 @@ class PolicyNetHybrid(torch.nn.Module):
             t_since_launch = xb[:, 21] * 120
 
             ammo_cond = (ammo > 0.0)
-            time_const_cond = t_since_launch >= torch.max(dist/(3*340)/2, torch.as_tensor(10.0, device=dist.device, dtype=dist.dtype))
+            # time_const_cond = t_since_launch >= torch.max(dist/(3*340)/2, torch.as_tensor(10.0, device=dist.device, dtype=dist.dtype))
+            time_const_cond = t_since_launch >= torch.clamp_min(dist/(3*340)/2, 10.0)
             # 最小开火冷却时间10s，随开火距离增加 # 10  # 冷却时间10s，全程开启
             
             ata_cond = ata < math.pi / 2
