@@ -32,14 +32,14 @@ def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, speed,
     # term6 = np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -1)
     
     inner = - (
-        3 * (distance / 100e3)**2 +
-        2.5 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))) +
-        3 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
-        3 * (-1 + np.exp(np.abs(delta_psi) / np.pi)) +
+        5 * (distance / 100e3) +
+        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))) + # 至关重要
+        2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
+        3 * (-1 + np.exp(2*np.abs(delta_psi) / np.pi)) + # 至关重要
         2 * np.exp(np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.6)) +
-        3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -1)
-    )
-    r_event = inner # np.tanh(inner)
+        3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -1) # 相当重要
+    )/20
+    r_event =  15 * np.tanh(inner)
     return r_event
 
 # --- 3. GUI 与 可视化逻辑 ---
