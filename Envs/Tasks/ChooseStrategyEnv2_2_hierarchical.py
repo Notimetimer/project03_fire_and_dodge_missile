@@ -315,7 +315,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
             r_event -= (
                 3 * (distance/100e3)**2 +
-                4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))) +
+                # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))) +
+                2.5 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))) +
                 3 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
                 3 * (-1 + np.exp(np.abs(delta_psi) / np.pi)) +
                 2 * np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))) +
