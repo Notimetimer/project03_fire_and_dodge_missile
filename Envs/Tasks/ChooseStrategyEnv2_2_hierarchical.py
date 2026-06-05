@@ -46,7 +46,18 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     combat_terminate_and_reward (keeps other definitions/vars from base).
     """
     
-    def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, end_reward_rate=1.0):
+    def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
+        end_reward_rate=1.0, 
+        fire_reward_rate=0.5,
+        fire_inside_rate = np.array([
+            1, # distance
+            1, # time
+            1, # AA
+            1, # Δψ
+            1, # v
+            1, # θ
+        ])
+        ):
         # --- 1. 参数初始化与状态获取 ---
         # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
         reward_weights = {
@@ -225,11 +236,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         enm_threat_dist = enm_states["threat"][3]
         # 把导弹送得越近，分数就越高
         if enm_threat_dist <= threat_start_dist:
-            r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
+            r_constraint += 1.0 * fire_reward_rate * np.exp(-2*enm_threat_dist/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
-        # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
-        if threat_distance <= threat_start_dist:
-            r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
+        # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
+        # if threat_distance <= threat_start_dist:
+        #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
         # 战术引导奖励
         reward_weights['angle_advantage']=0.08 # 0.05
@@ -313,15 +324,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             #     3 * (max(-1 + np.exp(ego.theta/pi*2), -1))
             # ) / 24
 
-            r_event -= 15 * np.tanh((
-                5 * (distance/100e3) +
-                # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))) +
-                3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))) +
-                2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
-                3 * (-1 + np.exp(2*np.abs(delta_psi) / np.pi)) +
-                2 * np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))) +
-                3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -1)
-            )/20)
+            r_event -= 15 * fire_reward_rate * \
+            np.tanh(
+                sum(
+                    fire_inside_rate * \
+                    np.array([
+                        5 * (distance/100e3),
+                        # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))),
+                        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))),
+                        2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
+                        3 * (-1 + np.exp(2*np.abs(delta_psi) / np.pi)),
+                        2 * np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
+                        3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -1),
+                    ])
+                )/20
+            )
 
 
 
@@ -347,7 +364,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 导弹脱靶
         if enm.escape_once:
-            r_event -= 5 * (1-enm.dead) # 20
+            r_event -= 5 * (1-enm.dead) * fire_reward_rate # 20
 
 
         # # 死了也当剩下导弹全被逃脱处理 (自杀代价追加)
