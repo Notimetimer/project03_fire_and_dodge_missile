@@ -1236,10 +1236,29 @@ class PPOHybrid:
                 v_pred = self.critic(mb_critic_inputs)
                 if clip_vf:
                     v_pred_old_batch = v_pred_old[batch_idx]
-                    v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - clip_range, v_pred_old_batch + clip_range)
+
+                    # 新的critic clip方法，按标准差倍数缩放限幅
+                    # 1. 动态计算当前批次 TD Target 的标准差，作为价值尺度的基准
+                    with torch.no_grad():
+                        td_target_std = torch.std(mb_td_target).item()
+                    # 2. 自适应计算 clip_range。设定 0.5 倍标准差为窗口，并用 10.0 进行保底
+                    # 防止训练初期或特定批次由于 Target 过于单一导致 std 接近 0 从而锁死更新
+                    adaptive_clip_range = max(td_target_std * 0.5, 10.0)
+                    # 3. 使用动态计算的范围进行截断
+                    v_pred_clipped = torch.clamp(
+                        v_pred, 
+                        v_pred_old_batch - adaptive_clip_range, 
+                        v_pred_old_batch + adaptive_clip_range
+                    )
                     vf_loss1 = (v_pred - mb_td_target).pow(2)
                     vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
                     critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
+
+                    # 旧的静态Valueclip(静态数值可能会阻碍价值漂移的跟踪，需要根据奖励尺度调节clip范围)
+                    # v_pred_clipped = torch.clamp(v_pred, v_pred_old_batch - 20.0, v_pred_old_batch + 20.0)
+                    # vf_loss1 = (v_pred - mb_td_target).pow(2)
+                    # vf_loss2 = (v_pred_clipped - mb_td_target).pow(2)
+                    # critic_loss_per_sample = torch.max(vf_loss1, vf_loss2)
                 else:
                     #  reduction='none' 使得我们可以应用 mask
                     critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
