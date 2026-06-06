@@ -24,26 +24,26 @@ def sigmoid(x):
 
 def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
     "attack"
-    inner = 9*(sigmoid(
+    inner = 2*(9*(sigmoid(
         2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
         1*np.clip(vu/100, -1, 1) +
         1*(1-np.exp(-theta/pi*3))
-    )/8)
+    )/8)-0.5)
 
     "crank"
-    # i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
-    # inner = 4*(sigmoid(
-    #     1.0 * i_can_guide +
-    #     0.5 - 3*abs(abs(delta_psi)-pi/3) + 
-    #     1.5 * ((-theta) / (pi/2))
-    # )/(3.4))
+    i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
+    inner = 2*(4*(sigmoid(
+        1.0 * i_can_guide +
+        0.5 - 3*abs(abs(delta_psi)-pi/3) + 
+        1.5 * ((-theta) / (pi/2))
+    )/(3.4))-0.5)
 
     "escape"
-    # inner = 2*sigmoid((
-    #     -2 * np.exp(2*theta/(pi/2)) * np.where(delta_theta_threat>=0, 1, 0)+
-    #     -5 * np.exp(1.2*(theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
-    #     4 * (-1+(abs(delta_psi)/(pi/2)))
-    # )/(5))
+    inner = 2*sigmoid((
+        -2 * np.exp(2*theta/(pi/2)) * np.where(delta_theta_threat>=0, 1, 0)+
+        -5 * np.exp(1.2*(theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
+        4 * (-1+(abs(delta_psi)/(pi/2)))
+    )/(5))
 
     r_event = inner
     return r_event
