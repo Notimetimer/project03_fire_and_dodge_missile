@@ -274,13 +274,13 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 1. 计算三个势能（无守卫，每次调用都执行当前状态）
         
         # 进攻引导, 如果没有存活导弹，或者导弹射错了方向，按瞄准误差给分
-        # phi_offense = \
+        # phi_attack = \
         #     9 * sigmoid((
         #         2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
         #         1*np.clip(ego.vu/100, -1, 1) +
         #         1*(1-np.exp(-ego.theta/pi*3)) # (1-np.exp(-ego.theta/pi*3))  or (1-np.exp(delta_theta/pi*3))
         #     )/8)
-        phi_offense = \
+        phi_attack = \
             (
                 2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
                 1*np.clip(ego.vu/100, -1, 1) +
@@ -300,7 +300,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 1.0 * i_can_guide +
                 0.5 - 3.5*abs(abs(delta_psi)-pi/3)*(abs(delta_psi)<pi/3) + 
                 - 2 * abs(abs(delta_psi)-pi/3) *(abs(delta_psi)>=pi/3) +
-                2.0 * ((-ego.theta) / (pi/2))
+                2.0 * ((-ego.theta) / (pi/2)) +
+                np.clip(-ego.vu/100, -1, 1) # 开火后要降高度
             )
 
         
@@ -316,7 +317,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 8 +
                 -3 * np.exp(1.2*ego.theta/(pi/2)) + #  * np.where(delta_theta_threat>=0, 1, 0)+
                 # -3 * np.exp(1.2*(ego.theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
-                4 * (-1+(abs(delta_psi)/(pi/2)))
+                4 * (-1+(abs(delta_psi)/(pi/2))) +
+                2 * np.clip(-ego.vu/100, -1, 1) # 遇到威胁要降高度
             )
         
         # 速度势能（替代原速度惩罚）
@@ -327,8 +329,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             phi_speed = 0.0
 
         # 2. 初始化上一时刻势能（首次进入）
-        if not hasattr(ego, '_last_phi_offense'):
-            ego._last_phi_offense = phi_offense
+        if not hasattr(ego, '_last_phi_attack'):
+            ego._last_phi_attack = phi_attack
             ego._last_phi_crank = phi_crank
             ego._last_phi_defense = phi_defense
             ego._last_phi_speed = phi_speed
@@ -339,14 +341,14 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         gamma = 0.997
         
         if self.t % 10 < 0.1:
-            print("进攻势变化率", (gamma*phi_offense - ego._last_phi_offense)/(dt_phi + 1e-6))
+            print("进攻势变化率", (gamma*phi_attack - ego._last_phi_attack)/(dt_phi + 1e-6))
             print("crank势变化率", (gamma*phi_crank - ego._last_phi_crank)/(dt_phi + 1e-6))
             print("防御势变化率", (gamma * phi_defense - ego._last_phi_defense)/(dt_phi + 1e-6))
             print()
 
         # 进攻期：如果没有存活导弹，按瞄准误差给分
         if len(alive_ally_missiles) == 0 and not warning:
-            delta_phi = gamma*phi_offense - ego._last_phi_offense
+            delta_phi = gamma*phi_attack - ego._last_phi_attack
             r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
         
         # crank期：如果导弹飞在正确的方向上，做crank下高
@@ -368,7 +370,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             self.last_phi_record_t = -cycle_time
         if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_phi_record_t) > (cycle_time * 0.5):
             # 更新时间戳保护的"上一次"状态（守卫内）
-            ego._last_phi_offense = phi_offense
+            ego._last_phi_attack = phi_attack
             ego._last_phi_crank = phi_crank
             ego._last_phi_defense = phi_defense
             ego._last_phi_speed = phi_speed
