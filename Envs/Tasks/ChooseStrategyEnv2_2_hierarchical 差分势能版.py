@@ -231,14 +231,24 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             wasted = 0
 
 
-        # # --- 态势辅助奖励 ---
+        # --- 态势辅助奖励 ---
         threat_start_dist = 20e3
-        # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御
-        enm_threat_dist = enm_states["threat"][3]
-        # 把导弹送得越近，分数就越高
-        if enm_threat_dist <= threat_start_dist:
-            r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
-            #  * fire_reward_weight 被拿掉
+        # # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御
+        # enm_threat_dist = enm_states["threat"][3]
+        # # 把导弹送得越近，分数就越高
+        # if enm_threat_dist <= threat_start_dist:
+        #     r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) * fire_reward_weight # * self.dt_maneuver * action_cycle_multiplier # 0.001
+            
+        #     if abs(self.t % 2) < 0.1:
+        #         print("威胁奖励：", 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) * fire_reward_weight)
+        #         print()
+
+        if not hasattr(ego, '_last_enm_threat_dist'):
+            ego._last_enm_threat_dist = enm_states["threat"][3]
+
+        if ego._last_enm_threat_dist > 10e3 and enm_states["threat"][3] <= 10e3:
+            r_constraint += 8 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+
 
         # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
         # if threat_distance <= threat_start_dist:
@@ -350,6 +360,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             ego._last_phi_defense = phi_defense
             ego._last_phi_speed = phi_speed
             ego._last_phi_t = self.t
+
+            # 上一步敌方受到的威胁距离
+            ego._last_enm_threat_dist = enm_states["threat"][3]
             
             # 更新势能计算独立时间戳
             self.last_phi_record_t = self.t
@@ -384,25 +397,25 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             else:
                 time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
 
-            r_event -= 15 * fire_reward_weight * \
+            r_event -= 10 * fire_reward_weight * (1.0 + \
             np.tanh(
                 sum(
                     fire_inside_weight * \
                     np.array([
                         1 * 1, # (distance/100e3),
-                        4 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 100))),
+                        20 * (-1 + np.exp(2*np.maximum(0, 1 - (time_since_last_shoot) / 120))),
                         5 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
-                        1 * ((-1 + np.exp(1*np.abs(delta_psi) / np.pi)) * (len(alive_ally_missiles)<=1) +
-                            (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
+                        1 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)), # * (len(alive_ally_missiles)<=1) +
+                            # (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
                         2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
-                        2 * (max(-1 + np.exp(-2 * ego.theta/pi*2), -50) * (len(alive_ally_missiles)<=1) +
-                            4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
+                        4 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
+                            # 4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
                     ])
-                )/20
-            )
+                )/40 # 20
+            ))
 
-            if len(alive_ally_missiles) > 1:
-                r_event -= 5 # 重复开火有额外惩罚
+            # if len(alive_ally_missiles) > 1:
+            #     r_event -= 5 # 重复开火有额外惩罚
 
 
             # r_event -= 5 * shoot
@@ -419,7 +432,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             #     # r_event += 1.0 * (abs(AA_hor)/pi - 1) # 鼓励对头射击，惩罚追尾射击
             #     r_event += 1.3 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
             #     # r_event -= 0.7 * max(1.0-ego.speed/340, 0)  # 开火时候的速度不能太低
-                
+            
+            print("状态空间里记录到的间隔时间", ego_states["weapon"])
+            print("新记录方式记录到的间隔时间", time_since_last_shoot)
+            print("在途导弹数量", len(alive_ally_missiles))
+            print()
+
 
         # 逃脱导弹，做三九线和置尾机动才算是逃脱而非对手打偏
         if ego.escape_once:
@@ -435,15 +453,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     r_event -= 20 * wasted
 
         if done:
-            # 清理势能记忆，下一回合重新初始化
-            for uav in [self.RUAV, self.BUAV]:
-                for attr in ['_last_phi_offense', '_last_phi_crank', '_last_phi_defense', '_last_phi_speed', '_last_phi_t']:
-                    if hasattr(uav, attr):
-                        delattr(uav, attr)
-            # 清理势能时间戳
-            if hasattr(self, 'last_phi_record_t'):
-                delattr(self, 'last_phi_record_t')
-            
             time_left = self.game_time_limit - self.t
             steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())
