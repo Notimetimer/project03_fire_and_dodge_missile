@@ -164,7 +164,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
         missile_in_mid_term = ego_states["missile_in_mid_term"]
-        missile_time_since_shoot = ego_states["weapon"]
+        # missile_time_since_shoot = ego_states["weapon"] # 无法用在奖励函数里面，会随着执行顺序被覆盖掉
         
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
@@ -360,7 +360,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # r_event -= 20*np.tanh( \
             #     (
             #         (distance/100e3)**2 +\
-            #         max(0, 1-missile_time_since_shoot/100)**2 +\
+            #         max(0, 1-time_since_last_shoot/100)**2 +\
             #         (1 - abs(AA_hor)/pi)**2 +\
             #         (abs(delta_psi)/pi)**2 +\
             #         (max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
@@ -370,7 +370,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
             # r_event -= 20 *(
             #     3 * (distance/100e3)**2 +
-            #     5 * max(0, 1-missile_time_since_shoot/100)**2 +
+            #     5 * max(0, 1-time_since_last_shoot/100)**2 +
             #     5 * (1 - abs(AA_hor)/pi) +
             #     5 * (abs(delta_psi)/pi) +
             #     3 * (max(1.0-ego.speed/340, 0)/(target_mach - 0.7)) +
@@ -408,7 +408,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # r_event -= 5 * shoot
             
             # # if len(alive_ally_missiles) > 1: # 重复开火惩罚
-            # #     r_event -= 10 * max(1-missile_time_since_shoot/60, 0) # 20
+            # #     r_event -= 10 * max(1-time_since_last_shoot/60, 0) # 20
             
             # # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
             # if not ego.dead:
