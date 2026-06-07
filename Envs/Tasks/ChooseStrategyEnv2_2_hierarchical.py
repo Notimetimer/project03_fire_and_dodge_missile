@@ -262,8 +262,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
         # 战术引导奖励
-        reward_weights['angle_advantage']= 10 # 0.2 # 0.08 # 0.05
-        reward_weights['speed_penalty']= 4 # 0.1 # 0.03 # 0.005 # 慢速惩罚
+        reward_weights['angle_advantage']= 5 # 0.2 # 0.08 # 0.05
+        reward_weights['speed_penalty']= 2 # 0.1 # 0.03 # 0.005 # 慢速惩罚
 
         enm_threat_dist = enm_states["threat"][3]
         "所有引导奖励的除去权重，都缩放到-1~1之间，避免agent利用奖励差值刷分"
@@ -280,29 +280,26 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #         1*np.clip(ego.vu/100, -1, 1) +
         #         1*(1-np.exp(-ego.theta/pi*3)) # (1-np.exp(-ego.theta/pi*3))  or (1-np.exp(delta_theta/pi*3))
         #     )/8)
-        phi_attack = \
-            (
-                2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-                1*np.clip(ego.vu/100, -1, 1) +
-                1*(1-np.exp(-ego.theta/pi*3))
-            )
+        phi_attack = (
+            2.0 * (1.0 - abs(delta_psi) / pi) +            # 偏角越小，势能越高 (线性)
+            0.1 * np.clip(ego.vu / 100, -1, 1) +           # 爬升率势函数(线性)
+            1.0 * np.clip(ego.theta / (pi/2), -1, 1)       # 俯仰角优势 (线性)
+        )
         
         # crank引导，如果导弹飞在正确的方向上，做crank下高
-        i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
+        # i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
         # phi_crank = \
         #     4 * sigmoid((
         #         1.0 * i_can_guide +
         #         0.5 - 3*abs(abs(delta_psi)-pi/3) +
         #         1.5 * ((-ego.theta) / (pi/2))
         #     )/(3.4))
-        phi_crank = \
-            (
-                1.0 * i_can_guide +
-                0.5 - 3.5*abs(abs(delta_psi)-pi/3)*(abs(delta_psi)<pi/3) + 
-                - 2 * abs(abs(delta_psi)-pi/3) *(abs(delta_psi)>=pi/3) +
-                2.0 * ((-ego.theta) / (pi/2)) +
-                np.clip(-ego.vu/100, -1, 1) # 开火后要降高度
-            )
+        i_can_guide = 1*(ATA<np.radians(55)) - (ATA>=np.radians(55)) * abs(ATA - np.radians(55)) / (pi/2 - np.radians(55)) # ATA偏离60度的线性惩罚
+        phi_crank = (
+            2.0 * i_can_guide +                            # 引导夹角
+            -2.0 * abs(abs(delta_psi) - np.radians(55)) / (np.radians(55)) +   # 偏角逼近 60度
+            0.1 * np.clip(-ego.vu / 100, -1, 1)            # Crank 必须伴随降高
+        )
 
         
         # RWR防御引导，如果有告警，不论如何都置尾下高
@@ -312,14 +309,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #         -5 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
         #         4 * (-1+(abs(delta_psi_threat)/(pi/2)))
         #     )/(5))
-        phi_defense = \
-            (
-                8 +
-                -3 * np.exp(1.2*ego.theta/(pi/2)) + #  * np.where(delta_theta_threat>=0, 1, 0)+
-                # -3 * np.exp(1.2*(ego.theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
-                4 * (-1+(abs(delta_psi)/(pi/2))) +
-                2 * np.clip(-ego.vu/100, -1, 1) # 遇到威胁要降高度
-            )
+        phi_defense = (
+            4.0 * (abs(delta_psi_threat) / pi) +           # 导弹在后半球势能最高
+            3.0 * np.clip(-ego.theta / (pi/2), 0, 1) +     # 严厉逼迫俯冲下高
+            0.2 * np.clip(-ego.vu / 100, -1, 1)            # 速度势能倾向于掉高加速
+        )
         
         # 速度势能（替代原速度惩罚）
         target_mach = 1.0
@@ -340,30 +334,30 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         dt_phi = self.t - ego._last_phi_t
         gamma = 0.997
         
-        if self.t % 10 < 0.1:
-            print("进攻势变化率", (gamma*phi_attack - ego._last_phi_attack)/(dt_phi + 1e-6))
-            print("crank势变化率", (gamma*phi_crank - ego._last_phi_crank)/(dt_phi + 1e-6))
-            print("防御势变化率", (gamma * phi_defense - ego._last_phi_defense)/(dt_phi + 1e-6))
+        if self.t % 10 < 0.1 and not ego.dead:
+            print("进攻势变化率", (gamma*phi_attack - ego._last_phi_attack)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
+            print("crank势变化率", (gamma*phi_crank - ego._last_phi_crank)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
+            print("防御势变化率", (gamma * phi_defense - ego._last_phi_defense)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
             print()
 
         # 进攻期：如果没有存活导弹，按瞄准误差给分
         if len(alive_ally_missiles) == 0 and not warning:
             delta_phi = gamma*phi_attack - ego._last_phi_attack
-            r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
         
         # crank期：如果导弹飞在正确的方向上，做crank下高
         elif len(alive_ally_missiles) > 0 and not warning:
             delta_phi = gamma*phi_crank - ego._last_phi_crank
-            r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
         
         # 防御期：如果有告警，不论如何都置尾下高
         elif warning:
             delta_phi = gamma * phi_defense - ego._last_phi_defense
-            r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
         
         # 速度奖励（速度势能变化）
         delta_phi_speed = gamma * phi_speed - ego._last_phi_speed
-        r_constraint += (delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'] * (1-ego.dead)
+        r_constraint += np.clip((delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'], -3, 3) * (1-ego.dead)
         
         # 4. 时间戳保护：旧势能更新（守卫内）
         if not hasattr(self, 'last_phi_record_t'):
