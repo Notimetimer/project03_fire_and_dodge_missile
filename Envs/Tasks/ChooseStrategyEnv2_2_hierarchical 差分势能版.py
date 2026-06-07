@@ -48,16 +48,22 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
         end_reward_weight=1.0, 
-        fire_reward_weight=1.0,
-        fire_inside_weight = np.array([
-            1, # distance
-            1, # time
-            1, # AA
-            1, # Δψ
-            1, # v
-            1, # θ
+        fire_reward_weight=None,
+        fire_inside_weight = None,):
+
+        if fire_reward_weight is None:
+            fire_reward_weight=1.0
+
+        if fire_inside_weight is None:
+            fire_inside_weight = np.array([
+            1, # 0 distance
+            1, # 1 time
+            1, # 2 AA
+            1, # 3 Δψ
+            1, # 4 v
+            1, # 5 θ
         ])
-        ):
+
         # --- 1. 参数初始化与状态获取 ---
         # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
         reward_weights = {
