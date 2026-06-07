@@ -331,8 +331,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             ego._last_phi_t = self.t
         
         # 3. 计算 Delta 奖励（无守卫，每次调用都执行）
-        dt_phi = self.t - ego._last_phi_t
-        gamma = 0.997
+        dt_phi = cycle_time # self.t - ego._last_phi_t
+        gamma = 1.0 # 0.997
         
         if self.t % 10 < 0.1 and not ego.dead:
             print("进攻势变化率", (gamma*phi_attack - ego._last_phi_attack)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
