@@ -47,17 +47,23 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_rate=1.0, 
-        fire_reward_rate=0.5,
-        fire_inside_rate = np.array([
-            1, # distance
-            1, # time
-            1, # AA
-            1, # Δψ
-            1, # v
-            1, # θ
+        end_reward_weight=1.0, 
+        fire_reward_weight=None,
+        fire_inside_weight = None,):
+
+        if fire_reward_weight is None:
+            fire_reward_weight=1.0
+
+        if fire_inside_weight is None:
+            fire_inside_weight = np.array([
+            1, # 0 distance
+            1, # 1 time
+            1, # 2 AA
+            1, # 3 Δψ
+            1, # 4 v
+            1, # 5 θ
         ])
-        ):
+
         # --- 1. 参数初始化与状态获取 ---
         # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
         reward_weights = {
@@ -82,6 +88,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 允许极小的误差，并通过 last_record_t 避免在一帧内被两个智能体调用时重复记录
         if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_record_t) > (cycle_time * 0.5):
+            # 原有记录逻辑（距离序列）
             r_dist = np.linalg.norm(np.array([self.RUAV.pos_[0] - self.horizontal_center[0], self.RUAV.pos_[2] - self.horizontal_center[1]]))
             b_dist = np.linalg.norm(np.array([self.BUAV.pos_[0] - self.horizontal_center[0], self.BUAV.pos_[2] - self.horizontal_center[1]]))
             self.r_dist_seq.append(r_dist)
@@ -163,7 +170,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
         missile_in_mid_term = ego_states["missile_in_mid_term"]
-        missile_time_since_shoot = ego_states["weapon"]
+        # missile_time_since_shoot = ego_states["weapon"] # 无法用在奖励函数里面，会随着执行顺序被覆盖掉
         
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
@@ -230,76 +237,148 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             wasted = 0
 
 
-        # # --- 态势辅助奖励 ---
+        # --- 态势辅助奖励 ---
         threat_start_dist = 20e3
-        # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御
-        enm_threat_dist = enm_states["threat"][3]
-        # 把导弹送得越近，分数就越高
-        if enm_threat_dist <= threat_start_dist:
-            r_constraint += 1.0 * fire_reward_rate * np.exp(-2*enm_threat_dist/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
+        # # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御
+        # enm_threat_dist = enm_states["threat"][3]
+        # # 把导弹送得越近，分数就越高
+        # if enm_threat_dist <= threat_start_dist:
+        #     r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) * fire_reward_weight # * self.dt_maneuver * action_cycle_multiplier # 0.001
+            
+        #     if abs(self.t % 2) < 0.1:
+        #         print("威胁奖励：", 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) * fire_reward_weight)
+        #         print()
+
+        if not hasattr(ego, '_last_enm_threat_dist'):
+            ego._last_enm_threat_dist = enm_states["threat"][3]
+
+        threat_distance_threshold = 5e3
+        if ego._last_enm_threat_dist > threat_distance_threshold and enm_states["threat"][3] <= threat_distance_threshold:
+            r_constraint += 8 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+
 
         # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
         # if threat_distance <= threat_start_dist:
         #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
         # 战术引导奖励
-        reward_weights['angle_advantage']=0.08 # 0.05
-        reward_weights['speed_penalty']=0.03 # 0.005 # 慢速惩罚
+        reward_weights['angle_advantage']= 10 # 0.2 # 0.08 # 0.05
+        reward_weights['speed_penalty']= 4 # 0.1 # 0.03 # 0.005 # 慢速惩罚
 
         enm_threat_dist = enm_states["threat"][3]
         "所有引导奖励的除去权重，都缩放到-1~1之间，避免agent利用奖励差值刷分"
+
+        # ==========================================
+        # Delta 势能奖励计算（替代原引导奖励）
+        # ==========================================
+        # 1. 计算三个势能（无守卫，每次调用都执行当前状态）
+        
         # 进攻引导, 如果没有存活导弹，或者导弹射错了方向，按瞄准误差给分
-        if len(alive_ally_missiles) == 0 and not warning:
-            r_constraint += 4*(sigmoid( # 没有4*sigmoid
+        # phi_offense = \
+        #     9 * sigmoid((
+        #         2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
+        #         1*np.clip(ego.vu/100, -1, 1) +
+        #         1*(1-np.exp(-ego.theta/pi*3)) # (1-np.exp(-ego.theta/pi*3))  or (1-np.exp(delta_theta/pi*3))
+        #     )/8)
+        phi_offense = \
+            (
                 2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
                 1*np.clip(ego.vu/100, -1, 1) +
-                1*(ego.theta/pi*2)
-            )/(4)) * reward_weights['angle_advantage'] * (1-ego.dead)
-            
+                1*(1-np.exp(-ego.theta/pi*3))
+            )
+        
         # crank引导，如果导弹飞在正确的方向上，做crank下高
-        if len(alive_ally_missiles) > 0 and not warning:
-            # print("应该crank")
-            # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-            i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
-            r_constraint += 4*(sigmoid( # 2 * (
+        i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
+        # phi_crank = \
+        #     4 * sigmoid((
+        #         1.0 * i_can_guide +
+        #         0.5 - 3*abs(abs(delta_psi)-pi/3) +
+        #         1.5 * ((-ego.theta) / (pi/2))
+        #     )/(3.4))
+        phi_crank = \
+            (
                 1.0 * i_can_guide +
-                0.5 - 3*abs(abs(delta_psi)-pi/3) +
-                1.5 * ((-ego.theta) / (pi/2))
-            )/(3.4)) * reward_weights['angle_advantage'] * (1-ego.dead)
-
-        # RWR防御引导，如果有告警，不论如何都置尾下高
-        if warning:
-            # print("应该躲")
-            # 受到上方威胁威胁应该置尾和下高
-            r_constraint += 2*(sigmoid( # 2 * (
-                -2 * np.exp(2*ego.theta/(pi/2)) * (delta_theta_threat>=0)+
-                -5 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
-                4 * (-1+(abs(delta_psi_threat)/(pi/2)))
-            )/(5)) * reward_weights['angle_advantage'] * (1-ego.dead)       
-
-        # 提前防御引导
-        # if locked_by_target:
-        #     pass
-
-        # maybe_in_DOR = (locked_by_target | (out_locked_time < 10)) & (
-        #         # ((ego.alt > 4000.0) & (distance < 20e3)) |
-        #         ((ego.alt > 5000.0) & (distance < 30e3)) |
-        #         ((ego.alt > 6000.0) & (distance < 50e3)) |
-        #         ((ego.alt > 7000.0) & (distance < 60e3)) &
-        #         (distance > 20e3) # 20km 以内就是开躲也很难躲掉，不如冲
-        #         # ((ego.alt > 8000.0) & (distance < 70e3))
-        #     )
-        # if maybe_in_DOR:
-        #     r_constraint += 0.6*((-ego.alt)/1e5) * reward_weights['angle_advantage'] * (1-ego.dead)  # 进入DOR提前下高
-        #     # r_constraint += 0.6*min(abs(delta_psi)-pi/2, 0)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 进入DOR提前脱离
-
+                0.5 - 3.5*abs(abs(delta_psi)-pi/3)*(abs(delta_psi)<pi/3) + 
+                - 2 * abs(abs(delta_psi)-pi/3) *(abs(delta_psi)>=pi/3) +
+                2.0 * ((-ego.theta) / (pi/2))
+            )
 
         
-        # 速度惩罚
+        # RWR防御引导，如果有告警，不论如何都置尾下高
+        # phi_defense = \
+        #     2 * sigmoid((
+        #         -2 * np.exp(2*ego.theta/(pi/2)) * (delta_theta_threat>=0)+
+        #         -5 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
+        #         4 * (-1+(abs(delta_psi_threat)/(pi/2)))
+        #     )/(5))
+        phi_defense = \
+            (
+                8 +
+                -3 * np.exp(1.2*ego.theta/(pi/2)) + #  * np.where(delta_theta_threat>=0, 1, 0)+
+                # -3 * np.exp(1.2*(ego.theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
+                4 * (-1+(abs(delta_psi)/(pi/2)))
+            )
+        
+        # 速度势能（替代原速度惩罚）
         target_mach = 1.0
         if ego.speed < target_mach*340:
-            r_constraint -= (target_mach-ego.speed/340)/(target_mach - 0.8) * reward_weights['speed_penalty'] * (1-ego.dead)
-            r_constraint -= (max(ego.theta, 0)/(pi/2)) * reward_weights['angle_advantage'] * (1-ego.dead) # 速度太慢，惩罚上仰过度
+            phi_speed = -((target_mach-ego.speed/340)/(target_mach - 0.8) + max(ego.theta, 0)/(pi/2))
+        else:
+            phi_speed = 0.0
+
+        # 2. 初始化上一时刻势能（首次进入）
+        if not hasattr(ego, '_last_phi_offense'):
+            ego._last_phi_offense = phi_offense
+            ego._last_phi_crank = phi_crank
+            ego._last_phi_defense = phi_defense
+            ego._last_phi_speed = phi_speed
+            ego._last_phi_t = self.t
+        
+        # 3. 计算 Delta 奖励（无守卫，每次调用都执行）
+        dt_phi = self.t - ego._last_phi_t
+        gamma = 0.997
+        
+        if self.t % 10 < 0.1:
+            print("进攻势变化率", (gamma*phi_offense - ego._last_phi_offense)/(dt_phi + 1e-6))
+            print("crank势变化率", (gamma*phi_crank - ego._last_phi_crank)/(dt_phi + 1e-6))
+            print("防御势变化率", (gamma * phi_defense - ego._last_phi_defense)/(dt_phi + 1e-6))
+            print()
+
+        # 进攻期：如果没有存活导弹，按瞄准误差给分
+        if len(alive_ally_missiles) == 0 and not warning:
+            delta_phi = gamma*phi_offense - ego._last_phi_offense
+            r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
+        
+        # crank期：如果导弹飞在正确的方向上，做crank下高
+        elif len(alive_ally_missiles) > 0 and not warning:
+            delta_phi = gamma*phi_crank - ego._last_phi_crank
+            r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
+        
+        # 防御期：如果有告警，不论如何都置尾下高
+        elif warning:
+            delta_phi = gamma * phi_defense - ego._last_phi_defense
+            r_constraint += (delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'] * (1-ego.dead)
+        
+        # 速度奖励（速度势能变化）
+        delta_phi_speed = gamma * phi_speed - ego._last_phi_speed
+        r_constraint += (delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'] * (1-ego.dead)
+        
+        # 4. 时间戳保护：旧势能更新（守卫内）
+        if not hasattr(self, 'last_phi_record_t'):
+            self.last_phi_record_t = -cycle_time
+        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_phi_record_t) > (cycle_time * 0.5):
+            # 更新时间戳保护的"上一次"状态（守卫内）
+            ego._last_phi_offense = phi_offense
+            ego._last_phi_crank = phi_crank
+            ego._last_phi_defense = phi_defense
+            ego._last_phi_speed = phi_speed
+            ego._last_phi_t = self.t
+
+            # 上一步敌方受到的威胁距离
+            ego._last_enm_threat_dist = enm_states["threat"][3]
+            
+            # 更新势能计算独立时间戳
+            self.last_phi_record_t = self.t
 
 
         # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
@@ -307,7 +386,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # r_event -= 20*np.tanh( \
             #     (
             #         (distance/100e3)**2 +\
-            #         max(0, 1-missile_time_since_shoot/100)**2 +\
+            #         max(0, 1-time_since_last_shoot/100)**2 +\
             #         (1 - abs(AA_hor)/pi)**2 +\
             #         (abs(delta_psi)/pi)**2 +\
             #         (max(1.0-ego.speed/340, 0)/(target_mach - 0.7))**2 +\
@@ -317,35 +396,45 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
             # r_event -= 20 *(
             #     3 * (distance/100e3)**2 +
-            #     5 * max(0, 1-missile_time_since_shoot/100)**2 +
+            #     5 * max(0, 1-time_since_last_shoot/100)**2 +
             #     5 * (1 - abs(AA_hor)/pi) +
             #     5 * (abs(delta_psi)/pi) +
             #     3 * (max(1.0-ego.speed/340, 0)/(target_mach - 0.7)) +
             #     3 * (max(-1 + np.exp(ego.theta/pi*2), -1))
             # ) / 24
 
-            r_event -= 15 * fire_reward_rate * \
+            # 从 ego.launch_times 读取上次开火间隔（而非 states["weapon"]，避免能观性问题）
+            launch_times = getattr(ego, 'launch_times', [])
+            if len(launch_times) <= 1:
+                time_since_last_shoot = 120.0
+            else:
+                time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
+
+            r_event -= 10 * fire_reward_weight * (1.0 + \
             np.tanh(
                 sum(
-                    fire_inside_rate * \
+                    fire_inside_weight * \
                     np.array([
-                        5 * (distance/100e3),
-                        # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))),
-                        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))),
-                        2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
-                        3 * (-1 + np.exp(2*np.abs(delta_psi) / np.pi)),
-                        2 * np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
-                        3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -1),
+                        1 * 1, # (distance/100e3),
+                        20 * (-1 + np.exp(2*np.maximum(0, 1 - (time_since_last_shoot) / 120))),
+                        5 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
+                        1 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)), # * (len(alive_ally_missiles)<=1) +
+                            # (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
+                        2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
+                        4 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
+                            # 4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
                     ])
-                )/20
-            )
+                )/40 # 20
+            ))
 
+            # if len(alive_ally_missiles) > 1:
+            #     r_event -= 5 # 重复开火有额外惩罚
 
 
             # r_event -= 5 * shoot
             
             # # if len(alive_ally_missiles) > 1: # 重复开火惩罚
-            # #     r_event -= 10 * max(1-missile_time_since_shoot/60, 0) # 20
+            # #     r_event -= 10 * max(1-time_since_last_shoot/60, 0) # 20
             
             # # # 发射时的态势惩罚/奖励（归类为资源使用的约束，防止乱射）
             # if not ego.dead:
@@ -356,7 +445,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             #     # r_event += 1.0 * (abs(AA_hor)/pi - 1) # 鼓励对头射击，惩罚追尾射击
             #     r_event += 1.3 * (np.clip(ego.theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
             #     # r_event -= 0.7 * max(1.0-ego.speed/340, 0)  # 开火时候的速度不能太低
-                
+            
+            # print("状态空间里记录到的间隔时间", ego_states["weapon"])
+            # print("新记录方式记录到的间隔时间", time_since_last_shoot)
+            # print("在途导弹数量", len(alive_ally_missiles))
+            # print()
+
 
         # 逃脱导弹，做三九线和置尾机动才算是逃脱而非对手打偏
         if ego.escape_once:
@@ -364,7 +458,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 导弹脱靶
         if enm.escape_once:
-            r_event -= 5 * (1-enm.dead) * fire_reward_rate # 20
+            r_event -= 5 * (1-enm.dead) * fire_reward_weight # 20
 
 
         # # 死了也当剩下导弹全被逃脱处理 (自杀代价追加)
@@ -377,9 +471,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 180 * end_reward_rate # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
             elif ego_lose:
-                r_event -= 180 * end_reward_rate # 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
             elif ego_draw:
@@ -400,11 +494,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     # self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
-                    r_event2 += 180 * end_reward_rate # 双杀当做赢
-                    r_event3 -= 180 * end_reward_rate # 双杀当做输
+                    r_event2 += 180 * end_reward_weight # 双杀当做赢
+                    r_event3 -= 180 * end_reward_weight # 双杀当做输
                 else:
-                    r_event2 -= 180 * end_reward_rate # 神风队无法接受双存活
-                    r_event3 += 180 * end_reward_rate # 求生者可以把双存活作为胜利
+                    r_event2 -= 180 * end_reward_weight # 神风队无法接受双存活
+                    r_event3 += 180 * end_reward_weight # 求生者可以把双存活作为胜利
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
