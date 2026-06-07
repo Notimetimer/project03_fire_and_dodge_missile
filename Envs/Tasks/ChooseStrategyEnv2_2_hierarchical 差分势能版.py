@@ -48,7 +48,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
         end_reward_rate=1.0, 
-        fire_reward_rate=0.2,
+        fire_reward_rate=1.0,
         fire_inside_rate = np.array([
             1, # distance
             1, # time
@@ -257,26 +257,49 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 1. 计算三个势能（无守卫，每次调用都执行当前状态）
         
         # 进攻引导, 如果没有存活导弹，或者导弹射错了方向，按瞄准误差给分
-        phi_offense = 9 * sigmoid((
-            2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-            1*np.clip(ego.vu/100, -1, 1) +
-            1*(1-np.exp(delta_theta/pi*3)) # (1-np.exp(-ego.theta/pi*3))  or (1-np.exp(delta_theta/pi*3))
-        )/8)
+        # phi_offense = \
+        #     9 * sigmoid((
+        #         2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
+        #         1*np.clip(ego.vu/100, -1, 1) +
+        #         1*(1-np.exp(-ego.theta/pi*3)) # (1-np.exp(-ego.theta/pi*3))  or (1-np.exp(delta_theta/pi*3))
+        #     )/8)
+        phi_offense = \
+            (
+                2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
+                1*np.clip(ego.vu/100, -1, 1) +
+                1*(1-np.exp(-ego.theta/pi*3))
+            )
         
         # crank引导，如果导弹飞在正确的方向上，做crank下高
         i_can_guide = - np.tanh(8*(abs(ATA)-pi/3))
-        phi_crank = 4 * sigmoid((
-            1.0 * i_can_guide +
-            0.5 - 3*abs(abs(delta_psi)-pi/3) +
-            1.5 * ((-ego.theta) / (pi/2))
-        )/(3.4))
+        # phi_crank = \
+        #     4 * sigmoid((
+        #         1.0 * i_can_guide +
+        #         0.5 - 3*abs(abs(delta_psi)-pi/3) +
+        #         1.5 * ((-ego.theta) / (pi/2))
+        #     )/(3.4))
+        phi_crank = \
+            (
+                1.0 * i_can_guide +
+                0.5 - 3*abs(abs(delta_psi)-pi/3) + 
+                1.5 * ((-ego.theta) / (pi/2))
+            )
+
         
         # RWR防御引导，如果有告警，不论如何都置尾下高
-        phi_defense = 2 * sigmoid((
-            -2 * np.exp(2*ego.theta/(pi/2)) * (delta_theta_threat>=0)+
-            -5 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
-            4 * (-1+(abs(delta_psi_threat)/(pi/2)))
-        )/(5))
+        # phi_defense = \
+        #     2 * sigmoid((
+        #         -2 * np.exp(2*ego.theta/(pi/2)) * (delta_theta_threat>=0)+
+        #         -5 * np.exp(1.2*(ego.theta*2/pi)**2) * (delta_theta_threat<0)+
+        #         4 * (-1+(abs(delta_psi_threat)/(pi/2)))
+        #     )/(5))
+        phi_defense = \
+            (
+                8 +
+                -3 * np.exp(1.2*ego.theta/(pi/2)) + #  * np.where(delta_theta_threat>=0, 1, 0)+
+                # -3 * np.exp(1.2*(ego.theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
+                4 * (-1+(abs(delta_psi)/(pi/2)))
+            )
         
         # 速度势能（替代原速度惩罚）
         target_mach = 1.0
