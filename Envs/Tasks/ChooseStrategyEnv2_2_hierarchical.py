@@ -335,6 +335,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         gamma = 1.0 # 0.997
         
         if self.t % 10 < 0.1 and not ego.dead:
+            print(ego.side)
             print("进攻势变化率", (gamma*phi_attack - ego._last_phi_attack)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
             print("crank势变化率", (gamma*phi_crank - ego._last_phi_crank)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
             print("防御势变化率", (gamma * phi_defense - ego._last_phi_defense)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
