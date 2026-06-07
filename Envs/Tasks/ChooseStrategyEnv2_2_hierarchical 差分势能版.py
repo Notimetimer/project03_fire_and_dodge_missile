@@ -390,10 +390,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     fire_inside_weight * \
                     np.array([
                         1 * 1, # (distance/100e3),
-                        # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))),
-                        6 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 100))),
+                        4 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 100))),
                         5 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
-                        1 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)),
+                        1 * ((-1 + np.exp(1*np.abs(delta_psi) / np.pi)) * (len(alive_ally_missiles)<=1) +
+                            (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
                         2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
                         2 * (max(-1 + np.exp(-2 * ego.theta/pi*2), -50) * (len(alive_ally_missiles)<=1) +
                             4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
