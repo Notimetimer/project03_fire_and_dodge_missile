@@ -47,9 +47,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_rate=1.0, 
-        fire_reward_rate=1.0,
-        fire_inside_rate = np.array([
+        end_reward_weight=1.0, 
+        fire_reward_weight=1.0,
+        fire_inside_weight = np.array([
             1, # distance
             1, # time
             1, # AA
@@ -238,7 +238,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 把导弹送得越近，分数就越高
         if enm_threat_dist <= threat_start_dist:
             r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
-            #  * fire_reward_rate 被拿掉
+            #  * fire_reward_weight 被拿掉
 
         # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
         # if threat_distance <= threat_start_dist:
@@ -384,10 +384,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             else:
                 time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
 
-            r_event -= 15 * fire_reward_rate * \
+            r_event -= 15 * fire_reward_weight * \
             np.tanh(
                 sum(
-                    fire_inside_rate * \
+                    fire_inside_weight * \
                     np.array([
                         1 * 1, # (distance/100e3),
                         # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))),
@@ -427,7 +427,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 导弹脱靶
         if enm.escape_once:
-            r_event -= 5 * (1-enm.dead) * fire_reward_rate # 20
+            r_event -= 5 * (1-enm.dead) * fire_reward_weight # 20
 
 
         # # 死了也当剩下导弹全被逃脱处理 (自杀代价追加)
@@ -449,9 +449,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 180 * end_reward_rate # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
             elif ego_lose:
-                r_event -= 180 * end_reward_rate # 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
             elif ego_draw:
@@ -472,11 +472,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     # self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
-                    r_event2 += 180 * end_reward_rate # 双杀当做赢
-                    r_event3 -= 180 * end_reward_rate # 双杀当做输
+                    r_event2 += 180 * end_reward_weight # 双杀当做赢
+                    r_event3 -= 180 * end_reward_weight # 双杀当做输
                 else:
-                    r_event2 -= 180 * end_reward_rate # 神风队无法接受双存活
-                    r_event3 += 180 * end_reward_rate # 求生者可以把双存活作为胜利
+                    r_event2 -= 180 * end_reward_weight # 神风队无法接受双存活
+                    r_event3 += 180 * end_reward_weight # 求生者可以把双存活作为胜利
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
