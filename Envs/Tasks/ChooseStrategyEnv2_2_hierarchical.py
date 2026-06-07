@@ -86,14 +86,14 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         cycle_time = self.dt_maneuver * action_cycle_multiplier
         step_idx = round(self.t / cycle_time)
         
-        # 允许极小的误差，并通过 last_record_t 避免在一帧内被两个智能体调用时重复记录
-        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_record_t) > (cycle_time * 0.5):
-            # 原有记录逻辑（距离序列）
-            r_dist = np.linalg.norm(np.array([self.RUAV.pos_[0] - self.horizontal_center[0], self.RUAV.pos_[2] - self.horizontal_center[1]]))
-            b_dist = np.linalg.norm(np.array([self.BUAV.pos_[0] - self.horizontal_center[0], self.BUAV.pos_[2] - self.horizontal_center[1]]))
-            self.r_dist_seq.append(r_dist)
-            self.b_dist_seq.append(b_dist)
-            self.last_record_t = self.t
+        # # 允许极小的误差，并通过 last_record_t 避免在一帧内被两个智能体调用时重复记录
+        # if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_record_t) > (cycle_time * 0.5):
+        #     # 原有记录逻辑（距离序列）
+        #     r_dist = np.linalg.norm(np.array([self.RUAV.pos_[0] - self.horizontal_center[0], self.RUAV.pos_[2] - self.horizontal_center[1]]))
+        #     b_dist = np.linalg.norm(np.array([self.BUAV.pos_[0] - self.horizontal_center[0], self.BUAV.pos_[2] - self.horizontal_center[1]]))
+        #     self.r_dist_seq.append(r_dist)
+        #     self.b_dist_seq.append(b_dist)
+        #     self.last_record_t = self.t
 
         self.close_range_kill() # 允许跑刀
         self.update_missile_state()
@@ -360,21 +360,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_constraint += np.clip((delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'], -3, 3) * (1-ego.dead)
         
         # 4. 时间戳保护：旧势能更新（守卫内）
-        if not hasattr(self, 'last_phi_record_t'):
-            self.last_phi_record_t = -cycle_time
-        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_phi_record_t) > (cycle_time * 0.5):
+        # 注意：时间戳必须挂在 ego 上，而非 self，否则红蓝双方共享同一个时间戳，
+        # 导致第二个调用方（如蓝方）的 _last_phi_* 永远不被更新，产生巨大累积误差
+        if not hasattr(ego, '_last_phi_record_t'):
+            ego._last_phi_record_t = -cycle_time
+        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_record_t) > (cycle_time * 0.5):
             # 更新时间戳保护的"上一次"状态（守卫内）
             ego._last_phi_attack = phi_attack
             ego._last_phi_crank = phi_crank
             ego._last_phi_defense = phi_defense
             ego._last_phi_speed = phi_speed
             ego._last_phi_t = self.t
+            ego._last_phi_record_t = self.t
 
             # 上一步敌方受到的威胁距离
             ego._last_enm_threat_dist = enm_states["threat"][3]
-            
-            # 更新势能计算独立时间戳
-            self.last_phi_record_t = self.t
 
 
         # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
