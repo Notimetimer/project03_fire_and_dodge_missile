@@ -771,7 +771,7 @@ class Battle(object):
             ego.last_locked_by_target_time = self.t
             out_locked_time = 0.0
         else:
-            out_locked_time = self.t - ego.last_locked_by_target_time
+            out_locked_time = 0.0 # self.t - ego.last_locked_by_target_time
 
         
         # 原先将所有量打包成一个 numpy array，这里改为 dict 结构
@@ -1411,6 +1411,11 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
             # 记录导弹发射瞬间的 ATA、distance 和 AA_hor
             uav.launch_states_order = ['ATA', 'distance', 'AA_hor', 'target_locked', 't_go']
             uav.launch_states.append(np.array([ATA, distance, AA_hor, target_locked, ego_state["weapon"]]))
+
+            # 记录发射时刻，用于开火间隔计算
+            if not hasattr(uav, 'launch_times'):
+                uav.launch_times = []
+            uav.launch_times.append(env.t)
 
             new_missile.side = 'r' if side == 'r' else 'b'
             new_missile_id = new_missile.id

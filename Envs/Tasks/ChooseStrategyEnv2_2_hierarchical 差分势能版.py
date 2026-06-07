@@ -281,8 +281,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         phi_crank = \
             (
                 1.0 * i_can_guide +
-                0.5 - 3*abs(abs(delta_psi)-pi/3) + 
-                1.5 * ((-ego.theta) / (pi/2))
+                0.5 - 3.5*abs(abs(delta_psi)-pi/3)*(abs(delta_psi)<pi/3) + 
+                - 2 * abs(abs(delta_psi)-pi/3) *(abs(delta_psi)>=pi/3) +
+                2.0 * ((-ego.theta) / (pi/2))
             )
 
         
@@ -376,22 +377,32 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             #     3 * (max(-1 + np.exp(ego.theta/pi*2), -1))
             # ) / 24
 
+            # 从 ego.launch_times 读取上次开火间隔（而非 states["weapon"]，避免能观性问题）
+            launch_times = getattr(ego, 'launch_times', [])
+            if len(launch_times) <= 1:
+                time_since_last_shoot = 120.0
+            else:
+                time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
+
             r_event -= 15 * fire_reward_rate * \
             np.tanh(
                 sum(
                     fire_inside_rate * \
                     np.array([
-                        3 * 1, # (distance/100e3),
+                        1 * 1, # (distance/100e3),
                         # 4 * (-1 + np.exp(np.maximum(0, 1 - missile_time_since_shoot / 100))),
-                        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 100))),
+                        6 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 100))),
                         5 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
-                        3 * 1, # (-1 + np.exp(2*np.abs(delta_psi) / np.pi)),
+                        1 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)),
                         2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
-                        8 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50),
+                        2 * (max(-1 + np.exp(-2 * ego.theta/pi*2), -50) * (len(alive_ally_missiles)<=1) +
+                            4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
                     ])
                 )/20
             )
 
+            if len(alive_ally_missiles) > 1:
+                r_event -= 5 # 重复开火有额外惩罚
 
 
             # r_event -= 5 * shoot
