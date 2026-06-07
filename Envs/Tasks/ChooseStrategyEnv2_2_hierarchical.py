@@ -262,8 +262,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
         # 战术引导奖励
-        reward_weights['angle_advantage']= 5 # 0.2 # 0.08 # 0.05
-        reward_weights['speed_penalty']= 2 # 0.1 # 0.03 # 0.005 # 慢速惩罚
+        reward_weights['angle_advantage']= 10 # 0.2 # 0.08 # 0.05
+        reward_weights['speed_penalty']= 4 # 0.1 # 0.03 # 0.005 # 慢速惩罚
 
         enm_threat_dist = enm_states["threat"][3]
         "所有引导奖励的除去权重，都缩放到-1~1之间，避免agent利用奖励差值刷分"
