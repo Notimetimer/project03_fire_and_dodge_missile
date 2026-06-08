@@ -5,8 +5,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"PFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260605-085921")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"PFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260605-085921")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -17,7 +17,7 @@ mission_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 50
+IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -141,6 +141,7 @@ if __name__=='__main__':
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0,
+        adj_r_w=0, # 奖励函数权重可调
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
