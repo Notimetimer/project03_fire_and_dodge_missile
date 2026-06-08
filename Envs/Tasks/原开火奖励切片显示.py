@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
+from math import *
 import numpy as np
-from math import pi
 import matplotlib.pyplot as plt
 import sys
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -17,30 +17,30 @@ VAR_DEFS = {
     'speed': (100, 340, 220),
     'theta': (-np.pi/2, np.pi/2, 0)
 }
-zmin, zmax = -20, 0
+zmin, zmax = None, None
 
 # --- 2. 向量化的奖励函数 ---
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, speed, theta):
-    # 使用 np.maximum 替代 max 以支持矩阵运算
-    # term1 = (distance / 100e3)**2
-    # term2 = np.maximum(0, 1 - missile_time_since_shoot / 100)**2
-    # term3 = (1 - np.abs(AA_hor) / np.pi)
-    # term4 = (np.abs(delta_psi) / np.pi)
-    # term5 = (np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.7))
-    # term6 = np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -1)
+    r_event = -5
+    r_event -= 20 * np.where(missile_time_since_shoot < 60.0, 1.0, 0.0)
+    r_event += 1.0 * (pi/3 - abs(delta_psi))/(pi/3) # 鼓励抛射就得把alpha解耦出来
+    r_event += 1.0 * (abs(AA_hor)/pi - 1) # 0.6 鼓励对头射击，惩罚追尾射击
+    r_event += 1.3 * (np.clip(theta/(pi/3), -1, 1) - 1)  # 鼓励抛射 # 1.0 # 高抛项太多了，都忽视速度了
+    r_event -= 0.7 * np.maximum(1.0-speed/340, 0)  # 开火时候的速度不能太低
+                
     
-    inner = - 5 + (
-        0 * (distance / 100e3)**2 +
-        -10 * np.maximum(0, 1 - missile_time_since_shoot / 60) +
-        1.0 * (abs(AA_hor)/pi - 1) +
-        - 1.0 * abs(delta_psi)/(pi/3) +
-        - 0.7 * np.maximum(1.0-speed/340, 0) +
-        1.3 * (np.clip(theta/(pi/3), -1, 1) - 1)
-    )
-    r_event = inner # np.tanh(inner)
+    # inner = (
+    #     1 * 1 + # 3  (distance / 100e3) +
+    #     3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 120))) + # 至关重要
+    #     3 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
+    #     3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
+    #     2 * 1 + # np.exp(np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.6)) +
+    #     3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -50) # 相当重要
+    # )/10
+    # r_event =  - 10 * (1.0 + np.tanh(inner))
     return r_event
 
 # --- 3. GUI 与 可视化逻辑 ---
@@ -75,10 +75,11 @@ class RewardVisualizer:
         self._build_control_panel()
         self.update_plot() # 初次渲染
         # Apply a one-time default Z limit; interactive zoom/pan can still change it
-        try:
-            self.ax.set_zlim(zmin, zmax)
-        except Exception:
-            pass
+        if zmin is not None or zmax is not None:
+            try:
+                self.ax.set_zlim(zmin, zmax)
+            except Exception:
+                pass
 
     def _build_control_panel(self):
         ttk.Label(self.ctrl_frame, text="X轴", font=('Arial', 10, 'bold')).grid(row=0, column=1)
@@ -241,10 +242,11 @@ class RewardVisualizer:
         self.ax.set_title(f"Z = Reward  (Fixed vars sliced via sliders)")
         # Enforce global Z limits on every redraw so user interactions or
         # switching variables won't change the displayed Z range.
-        try:
-            self.ax.set_zlim(zmin, zmax)
-        except Exception:
-            pass
+        if zmin is not None or zmax is not None:
+            try:
+                self.ax.set_zlim(zmin, zmax)
+            except Exception:
+                pass
 
         self.canvas.draw_idle()
 

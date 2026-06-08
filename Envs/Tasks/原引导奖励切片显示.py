@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
-from math import pi
+from math import *
 import matplotlib.pyplot as plt
 import sys
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -10,62 +10,38 @@ from mpl_toolkits.mplot3d import Axes3D
 # --- 1. 定义变量范围和初始值 ---
 # 格式: '变量名': (最小值, 最大值, 初始值)
 VAR_DEFS = {
-    'ATA': (-pi, pi, 0),
+    'ATA': (0, pi, 0),
     'theta': (-pi/2, pi/2, 0),
     'delta_psi': (-np.pi, np.pi, 0),
     'vu': (-100, 100, 0),
     'delta_theta_threat': (-pi/2, pi/2, 0),
 }
-zmin, zmax = -5, 5
+zmin, zmax = None, None
 
 # --- 2. 向量化的奖励函数 ---
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
+    r_constraint = 0
+
     "attack"
-    # inner = (
-    #     2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-    #     1*np.clip(vu/100, -1, 1) +
-    #     1*(1-np.exp(-theta/pi*3))
-    # )
-    # # inner = 2*(9 * sigmoid((
-    # #             2-0.7*np.exp(1.2*abs(delta_psi)*2/pi) +
-    # #             1*np.clip(vu/100, -1, 1) +
-    # #             1*(1-np.exp(-theta/pi*3)) # (1-np.exp(-theta/pi*3))  or (1-np.exp(delta_theta/pi*3))
-    # #         )/8)-0.5)
+    # # 瞄准奖励
+    # r_constraint += np.cos(delta_psi) * 0.01
+    # # 爬高奖励
+    # # r_constraint += 0.5 * (ego.alt/1e5) * 0.01
+    # r_constraint += 0.5 * np.minimum(theta/(pi/4), 1) * 0.01
 
     "crank"
-    i_can_guide =  - np.tanh(8*(abs(delta_psi)-pi/3)) # ATA
-    inner = (
-        1.0 * i_can_guide +
-        0.5 - 3.5*abs(abs(delta_psi)-pi/3) *(abs(delta_psi)<pi/3) + 
-        -2*abs(abs(delta_psi)-pi/3) *(abs(delta_psi)>=pi/3)+
-        2 * ((-theta) / (pi/2)) +
-        1 * np.clip(-vu/100, -1, 1)
-    )
-    # inner = 2*(4 * sigmoid((
-    #             1.0 * i_can_guide +
-    #             0.5 - 3*abs(abs(delta_psi)-pi/3) +
-    #             1.5 * ((-theta) / (pi/2))
-    #         )/(3.4))-0.5)
+    missile_in_mid_term = np.where(ATA < pi/3, 1, 0)
+    r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * 0.01 * missile_in_mid_term
+    r_constraint += 5 * (1 - abs(-pi/4 - theta) / (pi/4)) * 0.01 * missile_in_mid_term
 
     "escape"
-    # inner = (
-    #     8 +
-    #     -3 * np.exp(1.2*theta/(pi/2)) + # * np.where(delta_theta_threat>=0, 1, 0)+
-    #     # -3 * np.exp(1.2*(theta*2/pi)**2) * np.where(delta_theta_threat<0, 1, 0) +
-    #     4 * (-1+(abs(delta_psi)/(pi/2))) + 
-    #     2 * np.clip(-vu/100, -1, 1) # 遇到威胁要降高度
-    # )
-    # # inner = 2 * sigmoid((
-    # #             -2 * np.exp(2*theta/(pi/2)) * (delta_theta_threat>=0)+
-    # #             -5 * np.exp(1.2*(theta*2/pi)**2) * (delta_theta_threat<0)+
-    # #             4 * (-1+(abs(delta_psi)/(pi/2)))
-    # #         )/(5))
+    # r_constraint += np.minimum(abs(delta_psi), pi/2)/(pi/2) * 0.01 #  * np.where(abs(delta_psi) < pi/2, 1, 0)
+    # r_constraint += (-theta)/(pi/2) * 0.01
 
-    r_event = inner
-    return r_event
+    return r_constraint
 
 # --- 3. GUI 与 可视化逻辑 ---
 class RewardVisualizer:
