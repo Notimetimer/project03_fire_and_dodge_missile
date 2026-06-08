@@ -251,7 +251,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         threat_distance_threshold = 13e3
         if ego._last_enm_threat_dist > threat_distance_threshold and enm_states["threat"][3] <= threat_distance_threshold:
-            r_constraint += 8 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+            r_constraint += 10 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
 
 
         # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
@@ -417,7 +417,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
                             # 4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
                     ])
-                )/10 # 20
+                )/15 # 10 # 20
             ))
 
             # if len(alive_ally_missiles) > 1:

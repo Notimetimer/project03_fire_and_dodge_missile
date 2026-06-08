@@ -31,7 +31,7 @@ def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, speed,
         3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
         2 * 1 + # np.exp(np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.6)) +
         3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -50) # 相当重要
-    )/10
+    )/15  # 10
     r_event =  - 10 * (1.0 + np.tanh(inner))
     return r_event
 
