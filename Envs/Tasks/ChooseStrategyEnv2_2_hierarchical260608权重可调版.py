@@ -345,21 +345,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # if len(alive_ally_missiles) == 0:
             if not missile_in_mid_term:
                 delta_phi = gamma*phi_attack - ego._last_phi_attack
-                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
+                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
             
             # crank期：如果导弹飞在正确的方向上，做crank下高
             else:
                 delta_phi = gamma*phi_crank - ego._last_phi_crank
-                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
+                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
         
         # 防御期：如果有告警，不论如何都置尾下高
         elif warning:
             delta_phi = gamma * phi_defense - ego._last_phi_defense
-            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
+            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
         
         # 速度奖励（速度势能变化）
         delta_phi_speed = gamma * phi_speed - ego._last_phi_speed
-        r_constraint += np.clip((delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'], -3, 3) * (1-ego.dead)
+        r_constraint += np.clip((delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'], -6, 6) * (1-ego.dead)
         
         # 4. 时间戳保护：旧势能更新（守卫内）
         # 注意：时间戳必须挂在 ego 上，而非 self，否则红蓝双方共享同一个时间戳，
