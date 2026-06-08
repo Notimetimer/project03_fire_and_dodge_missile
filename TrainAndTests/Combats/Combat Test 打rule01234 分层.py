@@ -50,7 +50,7 @@ if __name__ == "__main__":
    
 
     # 次要
-    experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+    experiment_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
     
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 
@@ -169,7 +169,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.04,
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.04,
                             temperature={'cat':1.0, 'bern':1.0}
                             ) # check_obs=r_check_obs, check_obs=None
                         
@@ -198,7 +198,7 @@ if __name__ == "__main__":
                     print("Shoot")
                     print()
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', tabu=0, action_label=b_action_label) # b_action_label)
+                    launch_missile_immediately(env, 'b', tabu=0, action_label=None) # b_action_label)
                     
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态

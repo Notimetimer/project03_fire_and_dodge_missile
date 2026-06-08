@@ -50,6 +50,7 @@ from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch import test_worker
+from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
 
@@ -537,12 +538,15 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 使用从master传来的出生状态
                 red_birth = settings['red_birth']
                 blue_birth = settings['blue_birth']
-                end_reward_rate = settings['end_reward_rate']
+                end_reward_weight = settings['end_reward_weight']
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
                 # r_min, r_max = settings.get('R_cage_range', (55.00e3, 55.00e3))
                 fire_mask = settings.get('fire_mask', 1)
                 # env.R_cage = np.random.uniform(r_min, r_max)
+
+                fire_inside_weight = settings.get('fire_inside_weight', None)
+                fire_reward_weight = settings.get('fire_reward_weight', None)
                 
                 # 进场瞬间给全信息
                 red_init_ammo=6
@@ -714,9 +718,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     steps_run += 1
                     
                     # 4. 奖励计算
-                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_rate=end_reward_rate)
-                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_rate=end_reward_rate)
-                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_rate=0)
+                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
+                                                            action_cycle_multiplier, end_reward_weight=end_reward_weight,
+                                                            fire_reward_weight=fire_reward_weight,
+                                                            fire_inside_weight=fire_inside_weight)
+                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
+                                                            fire_reward_weight=fire_reward_weight,
+                                                            fire_inside_weight=fire_inside_weight)
+                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_weight=0,
+                                                            fire_reward_weight=fire_reward_weight,
+                                                            fire_inside_weight=fire_inside_weight)
 
                     reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
                     reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
@@ -734,7 +745,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 # 6. 存储最后一步经验 (Terminal State)
                 # 强制做一次终局判定
-                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier, end_reward_rate=end_reward_rate)
+                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier, end_reward_weight=end_reward_weight,
+                                                            fire_reward_weight=fire_reward_weight,
+                                                            fire_inside_weight=fire_inside_weight)
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
@@ -964,6 +977,7 @@ def run_MLP_simulation(
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
+    adj_r_w = 0, # 是否允许奖励函数权重浮动
 ):
 
     actor_lr0 = actor_lr
@@ -1053,6 +1067,22 @@ def run_MLP_simulation(
     save_meta_once(actor_meta_path, student_agent.actor.state_dict())
     save_meta_once(critic_meta_path, student_agent.critic.state_dict())
 
+    # [新增] （训练方）蓝方开火策略指标的 EMA 变量（指数=0.2，即 1-0.8）
+    ema_fire_interval = None # 50
+    ema_fire_delta_psi = None # 30
+    ema_fire_distance = None # 50e3
+    ema_fire_AA_hor = None # 145
+    ema_fire_theta = None # -5
+    ema_ATA = None # 37
+    ema_delta_psi_threat = None # 135
+    ema_delta_theta = None # 4
+    EMA_ALPHA = 0.2
+    
+    fire_inside_weight = None
+    fire_reward_weight = None
+
+    RWController = FireRewardWeightController(initial_fire_reward_weight=1.0)
+
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
         if collape_recover["collapsed"]:
@@ -1090,6 +1120,25 @@ def run_MLP_simulation(
                 print("Loaded optimizer states.")
             except Exception as e:
                 print(f"Failed to load optimizers: {e}")
+        
+        # [新增] 恢复 special EMA 状态和控制器状态
+        special_json_path = os.path.join(log_dir, "special.json")
+        if os.path.exists(special_json_path):
+            with open(special_json_path, "r", encoding="utf-8") as f:
+                special_data = json.load(f)
+            ema_fire_interval = special_data.get("ema_fire_interval", None)
+            ema_fire_delta_psi = special_data.get("ema_fire_delta_psi", None)
+            ema_fire_distance = special_data.get("ema_fire_distance", None)
+            ema_fire_AA_hor = special_data.get("ema_fire_AA_hor", None)
+            ema_fire_theta = special_data.get("ema_fire_theta", None)
+            ema_ATA = special_data.get("ema_ATA", None)
+            ema_delta_psi_threat = special_data.get("ema_delta_psi_threat", None)
+            ema_delta_theta = special_data.get("ema_delta_theta", None)
+            # [新增] 恢复控制器状态
+            if "controller_state" in special_data:
+                RWController.load_state_dict(special_data["controller_state"])
+                print(f"Loaded controller state from: {special_json_path}")
+            print(f"Loaded special EMA states from: {special_json_path}")
     
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
@@ -1510,7 +1559,27 @@ def run_MLP_simulation(
                 trigger += trigger_delta
 
             # --- 2. 准备训练 Batch (Synchronous) ---
+            # 改变环境奖励权重，超过100轮采样再更新权重，每次权重维持5轮采样
+            if adj_r_w and batch_idx > 10:
+                fire_inside_weight, fire_reward_weight = RWController.update({
+                    'ema_fire_interval': ema_fire_interval,
+                    'ema_fire_delta_psi': ema_fire_delta_psi,
+                    'ema_fire_theta': ema_fire_theta,
+                    'ema_ATA': ema_ATA,
+                    'ema_delta_psi_threat': ema_delta_psi_threat,
+                    'ema_delta_theta': ema_delta_theta
+                })
+                logger.add(f"SPECIAL/开火权重", fire_reward_weight, total_steps)
+                logger.add(f"SPECIAL/0 W_d_fire", fire_inside_weight[0], total_steps)
+                logger.add(f"SPECIAL/1 W_t_since_fire", fire_inside_weight[1], total_steps)
+                logger.add(f"SPECIAL/2 W_AA_fire", fire_inside_weight[2], total_steps)
+                logger.add(f"SPECIAL/3 W_psi_fire", fire_inside_weight[3], total_steps)
+                logger.add(f"SPECIAL/4 W_v_fire", fire_inside_weight[4], total_steps)
+                logger.add(f"SPECIAL/5 W_theta_fire", fire_inside_weight[5], total_steps)
             
+            if not adj_r_w:
+                fire_inside_weight = None
+                fire_reward_weight = None
 
             # A. 获取当前策略权重 (CPU)
             current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
@@ -1640,7 +1709,9 @@ def run_MLP_simulation(
                     'blue_birth': bb,
                     # 'R_cage_range': R_cage_range, # 将范围传给Worker
                     'fire_mask': fire_mask,
-                    'end_reward_rate': 0.1 # np.clip(total_steps/5e3, 0, 1)
+                    'end_reward_weight': 0.556, # np.clip(total_steps/5e3, 0, 0.5),
+                    'fire_inside_weight': fire_inside_weight,
+                    'fire_reward_weight': fire_reward_weight,
                 }
                 
                 # 发送指令 pipe.send
@@ -1856,6 +1927,20 @@ def run_MLP_simulation(
             batch_blue_avg_delta_psi_threat = float(np.mean(batch_blue_delta_psi_threats)) if batch_blue_delta_psi_threats else None
             batch_blue_avg_delta_theta = float(np.mean(batch_blue_delta_thetas)) if batch_blue_delta_thetas else None
 
+            # [新增] 用 EMA(指数=0.2) 平滑批次均值
+            def _ema_update(ema_val, batch_val, alpha=EMA_ALPHA):
+                if batch_val is None:
+                    return ema_val
+                return batch_val if ema_val is None else (1 - alpha) * ema_val + alpha * batch_val
+            ema_fire_interval = _ema_update(ema_fire_interval, batch_blue_avg_fire_interval)
+            ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi)
+            ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance)
+            ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi)
+            ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi)
+            ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi)
+            ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi)
+            ema_delta_theta = _ema_update(ema_delta_theta, batch_blue_avg_delta_theta*180/pi)
+
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
                 print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
@@ -1885,7 +1970,7 @@ def run_MLP_simulation(
             # 记录导弹发射平均数量或总数
             logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
             
-            # 记录开火策略指标 - 蓝方（本方）
+            # 记录开火策略指标 - 蓝方（本方），使用原始批次均值
             if batch_blue_avg_fire_interval is not None:
                 logger.add("special/1 蓝方平均开火间隔时长", batch_blue_avg_fire_interval, total_steps)
             if batch_blue_avg_fire_delta_psi is not None:
@@ -1902,6 +1987,21 @@ def run_MLP_simulation(
                 logger.add("special/7 蓝方平均delta_psi_threat", batch_blue_avg_delta_psi_threat*180/pi, total_steps)
             if batch_blue_avg_delta_theta is not None:
                 logger.add("special/8 蓝方平均delta_theta", batch_blue_avg_delta_theta*180/pi, total_steps)
+            
+            # [新增] 保存 EMA 状态和控制器状态到 special.json
+            special_data = {
+                "ema_fire_interval": ema_fire_interval,
+                "ema_fire_delta_psi": ema_fire_delta_psi,
+                "ema_fire_distance": ema_fire_distance,
+                "ema_fire_AA_hor": ema_fire_AA_hor,
+                "ema_fire_theta": ema_fire_theta,
+                "ema_ATA": ema_ATA,
+                "ema_delta_psi_threat": ema_delta_psi_threat,
+                "ema_delta_theta": ema_delta_theta,
+                "controller_state": RWController.state_dict(),  # [新增] 保存控制器状态
+            }
+            with open(os.path.join(log_dir, "special.json"), "w", encoding="utf-8") as f:
+                json.dump(special_data, f, ensure_ascii=False, indent=2)
             
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)

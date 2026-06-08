@@ -9,7 +9,7 @@ import numpy as np
 """
 
 class FireRewardWeightController:
-    def __init__(self, initial_fire_reward_weight=0.5, lr_internal=0.1, lr_external=0.1):
+    def __init__(self, initial_fire_reward_weight=1.0, lr_internal=0.05, lr_external=0.05):
         """
         带误差归一化与抗积分饱和的开火权重控制器
         """
@@ -29,7 +29,7 @@ class FireRewardWeightController:
             # 'k_out_lin': 1.0,     # 外部线性误差增益 (替代原线性 gamma)
             # 'k_out_sq': 2.5,      # 外部二次误差增益 (替代原平方 gamma)
             
-            'weight_min': 0.1, 'weight_max': 2.0  # 外部限幅
+            'weight_min': 0.05, 'weight_max': 5.0  # 外部限幅
         }
 
     def _softmax(self, x):
@@ -50,7 +50,7 @@ class FireRewardWeightController:
         theta        = ema_vars['ema_fire_theta']
         ata          = ema_vars['ema_ATA']
         psi_threat   = ema_vars['ema_delta_psi_threat']
-        d_theta      = ema_vars['ema_delta_theta']
+        delta_theta      = ema_vars['ema_delta_theta']
         
         p = self.params
         d_logits = np.zeros(6)
@@ -67,23 +67,27 @@ class FireRewardWeightController:
             err = (t_interval - 60) / 40.0
             d_logits[1] -= p['k_in_sq'] * min(err, 1.0) * 0.7
             
-        # # 需求 2：偏角控制 -> logits[3] (缩放分母: 180)
-        # abs_d_psi = abs(d_psi)
-        # if abs_d_psi > 30:
-        #     err = (abs_d_psi - 30) / 180.0
-        #     d_logits[3] += p['k_in_sq'] * (err ** 2)
-        # else:
-        #     if self.logits[3] > 0:
-        #         d_logits[3] -= p['k_in_decay'] * self.logits[3]
-                
+        # 需求 2：开火偏角控制 -> logits[3] (缩放分母: 180)
+        abs_d_psi = abs(d_psi)
+        if abs_d_psi > 30:
+            err = (abs_d_psi - 30) / 30.0
+            d_logits[3] += p['k_in_sq'] * err
+        else:
+            d_logits[3] -= p['k_in_sq'] * 0.2
+
         # 需求 3：俯仰角控制 -> logits[5] (缩放分母: 90)
         if theta < 0: # 往地上开火，加大开火的俯仰惩罚
             err = (-theta) / 15.0
             d_logits[5] += p['k_in_sq'] * err
         elif theta > 10: # 会高抛，可以给其它成分奖励机会
             d_logits[5] -= p['k_in_sq'] * 0.2 # 慢慢降下来
-            # if self.logits[5] > 0:
-            #     d_logits[5] -= p['k_in_decay'] * self.logits[5]
+        
+        # 学不会开火后下高，降低高抛奖励权重
+        if delta_theta < 0:
+            d_logits[5] -= p['k_in_sq'] * 0.1
+        # 学会开火后下高，慢慢回复高抛奖励权重
+        else: # 开火后知道要下高了，慢慢把开火惩罚加回来
+            d_logits[5] += p['k_in_sq'] * 0.05
 
         # 初步计算下一步的 logits 并去均值
         logits_next = self.logits + self.lr_in * d_logits
@@ -94,8 +98,8 @@ class FireRewardWeightController:
             other_indices = [j for j in range(6) if j != i]
             S_minus_i = np.sum(np.exp(logits_next[other_indices]))
             
-            z_max = np.log(5.0) + np.log(S_minus_i)
-            z_min = np.log(1.0 / 29.0) + np.log(S_minus_i)
+            z_max = np.log(7.0) + np.log(S_minus_i)
+            z_min = np.log(1.0 / (6 * 7.0 - 1)) + np.log(S_minus_i)
             
             logits_next[i] = np.clip(logits_next[i], z_min, z_max)
 
@@ -108,29 +112,45 @@ class FireRewardWeightController:
         multiplier = 1.0
         
         # 需求 4：ATA (缩放分母: 180)
-        if ata < 40: # 开火后不知道要crank，关小开火奖励
-            multiplier *= 0.9
-        elif ata > 50: # 学会crank了，慢慢加回开火奖励
-            multiplier *= 1.1
+        if ata < 55: # 开火后不知道要crank，关小开火奖励
+            multiplier *= 0.99
+        elif ata > 55: # 学会crank了，慢慢加回开火奖励
+            multiplier *= 1.01
             
         # 需求 5：psi_threat (缩放分母: 180)
         if psi_threat < 90: # 被威胁了还不知道要躲，缩小开火奖励让机动奖励显现出来
-            multiplier *= 0.9
+            multiplier *= 0.995
         elif psi_threat > 120: # 学会规避了，慢慢加回开火引导
-            multiplier *= 1.1
+            multiplier *= 1.002
             
-        # 需求 6：d_theta (缩放分母: 90)
-        if d_theta < -5: # 开火后还在爬升，这个时候应该弱化开火惩罚，让机动奖励教它低头
-            multiplier *= 0.9
-        elif -5 <= d_theta < 0: # 开火后轻微爬升，没学会，依然弱化开火惩罚
-            multiplier *= 0.95
+        # 需求 6：delta_theta (缩放分母: 90)
+        if delta_theta < 0: # 开火后还在爬升，这个时候应该弱化开火惩罚，让机动奖励教它低头
+            multiplier *= 0.995
+        elif 0 <= delta_theta < 15: # 开火后轻微低头，没学会，依然弱化开火惩罚
+            multiplier *= 0.998
         else: # 开火后知道要下高了，慢慢把开火惩罚加回来
-            multiplier *= 1.1
+            multiplier *= 1.002
 
         # 外部执行硬限幅
         self.fire_reward_weight = np.clip(self.fire_reward_weight * multiplier, p['weight_min'], p['weight_max'])
         
         return fire_inside_weight, self.fire_reward_weight
+
+    def state_dict(self):
+        """返回可序列化的状态字典"""
+        return {
+            'logits': self.logits.tolist(),
+            'fire_reward_weight': float(self.fire_reward_weight),
+            'lr_in': float(self.lr_in),
+            'lr_out': float(self.lr_out),
+        }
+
+    def load_state_dict(self, state_dict):
+        """从字典恢复状态"""
+        self.logits = np.array(state_dict['logits'], dtype=np.float64)
+        self.fire_reward_weight = float(state_dict['fire_reward_weight'])
+        self.lr_in = float(state_dict.get('lr_in', 0.1))
+        self.lr_out = float(state_dict.get('lr_out', 0.1))
 
 # ==========================================
 # 验证脚本
@@ -139,12 +159,12 @@ if __name__ == "__main__":
     controller = FireRewardWeightController(initial_fire_reward_weight=0.5, lr_internal=0.1, lr_external=0.1)
     
     mock_ema_vars = {
-        'ema_fire_interval': 25.0,
-        'ema_fire_delta_psi': 45.0,
-        'ema_fire_theta': -5.0,
-        'ema_ATA': 35.0,
-        'ema_delta_psi_threat': 85.0,
-        'ema_delta_theta': -6.0
+        'ema_fire_interval': 60,
+        'ema_fire_delta_psi': 30,
+        'ema_fire_theta': -4.0,
+        'ema_ATA': 40,
+        'ema_delta_psi_threat': 135,
+        'ema_delta_theta': 6.0
     }
     
     inside_rate, reward_rate = controller.update(mock_ema_vars)
