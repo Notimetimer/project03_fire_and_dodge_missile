@@ -252,7 +252,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if not hasattr(ego, '_last_enm_threat_dist'):
             ego._last_enm_threat_dist = enm_states["threat"][3]
 
-        threat_distance_threshold = 5e3
+        threat_distance_threshold = 13e3
         if ego._last_enm_threat_dist > threat_distance_threshold and enm_states["threat"][3] <= threat_distance_threshold:
             r_constraint += 8 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
 
@@ -282,8 +282,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     )/8)
         phi_attack = (
             2.0 * (1.0 - abs(delta_psi) / pi) +            # 偏角越小，势能越高 (线性)
-            0.1 * np.clip(ego.vu / 100, -1, 1) +           # 爬升率势函数(线性)
-            1.0 * np.clip(ego.theta / (pi/2), -1, 1)       # 俯仰角优势 (线性)
+            0.5 * np.clip(ego.alt / 100, -1, 1) +           # 爬升率势函数(线性)
+            2.0 * np.clip(ego.theta / (pi/2), -1, 1)       # 俯仰角优势 (线性)
         )
         
         # crank引导，如果导弹飞在正确的方向上，做crank下高
@@ -298,7 +298,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         phi_crank = (
             2.0 * i_can_guide +                            # 引导夹角
             -2.0 * abs(abs(delta_psi) - np.radians(55)) / (np.radians(55)) +   # 偏角逼近 60度
-            0.1 * np.clip(-ego.vu / 100, -1, 1)            # Crank 必须伴随降高
+            0.5 * np.clip(-ego.alt / 100, -1, 1)            # Crank 必须伴随降高
         )
 
         
@@ -310,12 +310,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #         4 * (-1+(abs(delta_psi_threat)/(pi/2)))
         #     )/(5))
         phi_defense = (
-            4.0 * (abs(delta_psi_threat) / pi) +           # 导弹在后半球势能最高
-            3.0 * np.clip(-ego.theta / (pi/2), 0, 1) +     # 严厉逼迫俯冲下高
-            0.2 * np.clip(-ego.vu / 100, -1, 1)            # 速度势能倾向于掉高加速
+            2.0 * (abs(delta_psi_threat) / pi) +           # 导弹在后半球势能最高
+            2.0 * np.clip(-ego.theta / (pi/2), 0, 1) +     # 严厉逼迫俯冲下高
+            0.8 * np.clip(-ego.alt / 100, -1, 1)           # 降高度增加阻力
         )
         
-        # 速度势能（替代原速度惩罚）
+        # 速度势函数（替代原速度惩罚）
         target_mach = 1.0
         if ego.speed < target_mach*340:
             phi_speed = -((target_mach-ego.speed/340)/(target_mach - 0.8) + max(ego.theta, 0)/(pi/2))
@@ -413,15 +413,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     fire_inside_weight * \
                     np.array([
                         1 * 1, # (distance/100e3),
-                        20 * (-1 + np.exp(2*np.maximum(0, 1 - (time_since_last_shoot) / 120))),
-                        5 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
-                        1 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)), # * (len(alive_ally_missiles)<=1) +
+                        3 * (-1 + np.exp(2*np.maximum(0, 1 - (time_since_last_shoot) / 120))),
+                        3 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
+                        3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)), # * (len(alive_ally_missiles)<=1) +
                             # (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
                         2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
-                        4 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
+                        3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
                             # 4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
                     ])
-                )/40 # 20
+                )/10 # 20
             ))
 
             # if len(alive_ally_missiles) > 1:
