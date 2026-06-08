@@ -87,7 +87,7 @@ class FireRewardWeightController:
             d_logits[5] -= p['k_in_sq'] * 0.1
         # 学会开火后下高，慢慢回复高抛奖励权重
         else: # 开火后知道要下高了，慢慢把开火惩罚加回来
-            d_logits[5] += p['k_in_sq'] * 0.05
+            d_logits[5] += p['k_in_sq'] * 0.1  # 0.05
 
         # 初步计算下一步的 logits 并去均值
         logits_next = self.logits + self.lr_in * d_logits

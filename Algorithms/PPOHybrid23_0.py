@@ -378,17 +378,17 @@ class HybridActorWrapper(nn.Module):
                 # time_cond    = (t_since_launch >= 20) | ((dist < 30e3) & (t_since_launch >= 10))
                 dist_cond    = (dist < 105e3)
                 delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
-                cont_plus_1  = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0))
-                low_alt_no_chase_fire = ~((dist > 25e3) & (torch.abs(AA_hor) < 120.0 * pi / 180.0))
-                alt_dist_fire_ok = ~(
-                    ((alt < 4000.0) & (dist > 35e3)) |
-                    ((alt < 5000.0) & (dist > 45e3)) |
-                    ((alt < 6000.0) & (dist > 65e3)) |
-                    ((alt < 7000.0) & (dist > 75e3)) |
-                    ((alt < 8000.0) & (dist > 85e3))
-                )
+                # cont_plus_1  = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0))
+                # low_alt_no_chase_fire = ~((dist > 25e3) & (torch.abs(AA_hor) < 120.0 * pi / 180.0))
+                # alt_dist_fire_ok = ~(
+                #     ((alt < 4000.0) & (dist > 35e3)) |
+                #     ((alt < 5000.0) & (dist > 45e3)) |
+                #     ((alt < 6000.0) & (dist > 65e3)) |
+                #     ((alt < 7000.0) & (dist > 75e3)) |
+                #     ((alt < 8000.0) & (dist > 85e3))
+                # )
                 can_fire_full = (ata_cond & locked_cond & dist_cond
-                                 & delta_theta_cond & cont_plus_1 & low_alt_no_chase_fire & alt_dist_fire_ok)
+                                 & delta_theta_cond) #  & cont_plus_1 & low_alt_no_chase_fire) & alt_dist_fire_ok)
                 _deploy_can_fire = can_fire_full.all().item()  # 转成 bool
 
         # 调用网络（net 内部只施加弹药+冷却 mask）
