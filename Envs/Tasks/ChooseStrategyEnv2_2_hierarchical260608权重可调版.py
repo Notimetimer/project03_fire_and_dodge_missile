@@ -320,7 +320,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             phi_speed = 0.0
 
         # 2. 初始化上一时刻势能（首次进入）
-        if not hasattr(ego, '_last_phi_attack'):
+        if not hasattr(ego, '_last_phi_t'):
             ego._last_phi_attack = phi_attack
             ego._last_phi_crank = phi_crank
             ego._last_phi_defense = phi_defense
@@ -360,16 +360,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 4. 时间戳保护：旧势能更新（守卫内）
         # 注意：时间戳必须挂在 ego 上，而非 self，否则红蓝双方共享同一个时间戳，
         # 导致第二个调用方（如蓝方）的 _last_phi_* 永远不被更新，产生巨大累积误差
-        if not hasattr(ego, '_last_phi_record_t'):
-            ego._last_phi_record_t = -cycle_time
-        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_record_t) > (cycle_time * 0.5):
+        if not hasattr(ego, '_last_phi_t'):
+            ego._last_phi_t = -cycle_time
+        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             # 更新时间戳保护的"上一次"状态（守卫内）
             ego._last_phi_attack = phi_attack
             ego._last_phi_crank = phi_crank
             ego._last_phi_defense = phi_defense
             ego._last_phi_speed = phi_speed
             ego._last_phi_t = self.t
-            ego._last_phi_record_t = self.t
 
             # 上一步敌方受到的威胁距离
             ego._last_enm_threat_dist = enm_states["threat"][3]
@@ -411,7 +410,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     np.array([
                         1 * 1, # (distance/100e3),
                         3 * (-1 + np.exp(2*np.maximum(0, 1 - (time_since_last_shoot) / 120))),
-                        3 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
+                        1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
                         3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)), # * (len(alive_ally_missiles)<=1) +
                             # (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
                         2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
