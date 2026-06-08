@@ -170,7 +170,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
         missile_in_mid_term = ego_states["missile_in_mid_term"]
-        # missile_time_since_shoot = ego_states["weapon"] # 无法用在奖励函数里面，会随着执行顺序被覆盖掉
+        missile_time_since_shoot = ego_states["weapon"] 
+        # ↑无法用在开火奖励函数里面，会随着执行顺序被覆盖掉
+        # ↑但是可以用在机动奖励函数里面，不论如何，只要刚发射导弹就应该crank
         
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
@@ -338,15 +340,17 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             print("防御势变化率", (gamma * phi_defense - ego._last_phi_defense)/(dt_phi + 1e-6) * reward_weights['angle_advantage'])
             print()
 
-        # 进攻期：如果没有存活导弹，按瞄准误差给分
-        if len(alive_ally_missiles) == 0 and not warning:
-            delta_phi = gamma*phi_attack - ego._last_phi_attack
-            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
-        
-        # crank期：如果导弹飞在正确的方向上，做crank下高
-        elif len(alive_ally_missiles) > 0 and not warning:
-            delta_phi = gamma*phi_crank - ego._last_phi_crank
-            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
+        if not warning:
+            # 进攻期：如果没有存活导弹，按瞄准误差给分
+            # if len(alive_ally_missiles) == 0:
+            if not missile_in_mid_term:
+                delta_phi = gamma*phi_attack - ego._last_phi_attack
+                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
+            
+            # crank期：如果导弹飞在正确的方向上，做crank下高
+            else:
+                delta_phi = gamma*phi_crank - ego._last_phi_crank
+                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -3, 3) * (1-ego.dead)
         
         # 防御期：如果有告警，不论如何都置尾下高
         elif warning:

@@ -418,6 +418,7 @@ if __name__=='__main__':
                 r_guide_list.append(np.array([env.t + t_bias, env.r_can_guide]))
                 b_guide_list.append(np.array([env.t + t_bias, env.b_can_guide]))
                 done, b_reward_event, b_reward_constraint, b_reward_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire)
+                _, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire)
                 b_reward = b_reward_event + b_reward_constraint + b_reward_shaping
 
                 # Accumulate rewards between agent decisions
