@@ -221,51 +221,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         r_constraint *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
-        # 开火代价控制
-        wasted = 0
-        now_dead = ego.dead or self.out_cage(ego)
-        if not getattr(ego, 'last_dead', False):
-            if now_dead:
-                shoot = ego.ammo # 死亡瞬间，记录清仓惩罚
-                wasted = ego.ammo
-                ego.last_dead = True
-            else:
-                shoot = action_shoot # 还在飞，正常记录
-        else:
-            shoot = 0 # 死后不再记录任何幻影开火
-            wasted = 0
-
-
-        # --- 态势辅助奖励 ---
-        # threat_distance_threshold = 20e3
-        # # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御
-        # enm_threat_dist = enm_states["threat"][3]
-        # # 把导弹送得越近，分数就越高
-        # if enm_threat_dist <= threat_distance_threshold:
-        #     r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_distance_threshold) * fire_reward_weight # * self.dt_maneuver * action_cycle_multiplier # 0.001
-            
-        #     if abs(self.t % 2) < 0.1:
-        #         print("威胁奖励：", 1.0 * np.exp(-2*enm_threat_dist/threat_distance_threshold) * fire_reward_weight)
-        #         print()
-
-        if not hasattr(ego, '_last_enm_threat_dist'):
-            ego._last_enm_threat_dist = enm_states["threat"][3]
-
-        threat_distance_threshold = 13e3
-        if ego._last_enm_threat_dist > threat_distance_threshold and enm_states["threat"][3] <= threat_distance_threshold:
-            r_constraint += 10 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
-
-
-        # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
-        # if threat_distance <= threat_distance_threshold:
-        #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_distance_threshold) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
         # 战术引导奖励
         reward_weights['angle_advantage']= 10 # 0.2 # 0.08 # 0.05
         reward_weights['speed_penalty']= 4 # 0.1 # 0.03 # 0.005 # 慢速惩罚
 
-        enm_threat_dist = enm_states["threat"][3]
-        "所有引导奖励的除去权重，都缩放到-1~1之间，避免agent利用奖励差值刷分"
+        "所有引导奖励的除去权重，都缩放到有限区间，避免agent利用奖励差值刷分"
 
         # ==========================================
         # Delta 势能奖励计算（替代原引导奖励）
@@ -321,13 +282,14 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         else:
             phi_speed = 0.0
 
-        # 2. 初始化上一时刻势能（首次进入）
+        # 2. 统一初始化上一时刻状态（首次进入）
         if not hasattr(ego, '_last_phi_t'):
+            ego._last_phi_t = -cycle_time
             ego._last_phi_attack = phi_attack
             ego._last_phi_crank = phi_crank
             ego._last_phi_defense = phi_defense
             ego._last_phi_speed = phi_speed
-            ego._last_phi_t = self.t
+            ego._last_enm_threat_dist = enm_states["threat"][3]
         
         # 3. 计算 Delta 奖励（无守卫，每次调用都执行）
         dt_phi = cycle_time # self.t - ego._last_phi_t
@@ -364,8 +326,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 4. 时间戳保护：旧势能更新（守卫内）
         # 注意：时间戳必须挂在 ego 上，而非 self，否则红蓝双方共享同一个时间戳，
         # 导致第二个调用方（如蓝方）的 _last_phi_* 永远不被更新，产生巨大累积误差
-        if not hasattr(ego, '_last_phi_t'):
-            ego._last_phi_t = -cycle_time
         if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             # 更新时间戳保护的"上一次"状态（守卫内）
             ego._last_phi_attack = phi_attack
@@ -379,6 +339,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
 
         # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
+        # 开火代价控制
+        wasted = 0
+        now_dead = ego.dead or self.out_cage(ego)
+        if not getattr(ego, 'last_dead', False):
+            if now_dead:
+                shoot = ego.ammo # 死亡瞬间，记录清仓惩罚
+                wasted = ego.ammo
+                ego.last_dead = True
+            else:
+                shoot = action_shoot # 还在飞，正常记录
+        else:
+            shoot = 0 # 死后不再记录任何幻影开火
+            wasted = 0
         if shoot >= 1:
             # r_event -= 20*np.tanh( \
             #     (
@@ -449,14 +422,33 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # print()
 
 
-        # 逃脱导弹，做三九线和置尾机动才算是逃脱而非对手打偏
-        if ego.escape_once:
-            r_event += 5 * (abs(delta_psi_threat)>pi/2) * (1-ego.dead) # 20 活着才算逃脱，否则只是游戏机制 
-
         # 导弹脱靶
         if enm.escape_once:
             r_event -= 5 * (1-enm.dead) * fire_reward_weight # 20
 
+        # 导弹威胁奖励
+        threat_distance_threshold = 13e3
+        if ego._last_enm_threat_dist > threat_distance_threshold and enm_states["threat"][3] <= threat_distance_threshold:
+            r_constraint += 10 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+
+        # --- 态势辅助奖励 ---
+        # threat_distance_threshold = 20e3
+        # # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御(破坏开火惩罚数量级关系，别用！！)
+        # enm_threat_dist = enm_states["threat"][3]
+        # # 把导弹送得越近，分数就越高
+        # if enm_threat_dist <= threat_distance_threshold:
+        #     r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_distance_threshold) * fire_reward_weight # * self.dt_maneuver * action_cycle_multiplier # 0.001
+            
+        #     if abs(self.t % 2) < 0.1:
+        #         print("威胁奖励：", 1.0 * np.exp(-2*enm_threat_dist/threat_distance_threshold) * fire_reward_weight)
+        #         print()
+        # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重（可能有用，但是与机动引导有所重复）
+        # if threat_distance <= threat_distance_threshold:
+        #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_distance_threshold) # * self.dt_maneuver * action_cycle_multiplier # 0.001
+        
+        # 逃脱导弹，做三九线和置尾机动才算是逃脱而非对手打偏
+        if ego.escape_once:
+            r_event += 5 * (abs(delta_psi_threat)>pi/2) * (1-ego.dead) # 20 活着才算逃脱，否则只是游戏机制 
 
         # # 死了也当剩下导弹全被逃脱处理 (自杀代价追加)
         # if wasted > 0:
