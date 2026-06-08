@@ -181,9 +181,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
-        r_event1 = r_event
-        r_event2 = r_event
-        r_event3 = r_event
         
         r_constraint = 0.0 # 约束与代价
         r_shaping = 0.0    # 战术引导
@@ -462,17 +459,28 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # if wasted > 0:
         #     r_event -= 20 * wasted
 
-        if done:
+        "not done" # 胜负未分，所有偏好的奖励都一样
+        r_event1 = r_event
+        r_event2 = r_event
+        r_event3 = r_event
+
+        if done: # 胜负已分，所有类型各自有结果奖励
             time_left = self.game_time_limit - self.t
             steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
                 r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event1 = r_event
+                r_event2 = r_event
+                r_event3 = r_event
             elif ego_lose:
                 r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
+                r_event1 = r_event
+                r_event2 = r_event
+                r_event3 = r_event
             elif ego_draw:
                 # # [修改] 不再使用常数-50奖励，而是根据平均态势分来结算
                 # if len(self.r_dist_seq) > 0 and len(self.b_dist_seq) > 0:
@@ -491,11 +499,13 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     # self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
-                    r_event2 += 180 * end_reward_weight # 双杀当做赢
-                    r_event3 -= 180 * end_reward_weight # 双杀当做输
+                    r_event1 = r_event + 0 * end_reward_weight
+                    r_event2 = r_event + 180 * end_reward_weight # 双杀当做赢
+                    r_event3 = r_event - 180 * end_reward_weight # 双杀当做输
                 else:
-                    r_event2 -= 180 * end_reward_weight # 神风队无法接受双存活
-                    r_event3 += 180 * end_reward_weight # 求生者可以把双存活作为胜利
+                    r_event1 = r_event + 0 * end_reward_weight
+                    r_event2 = r_event - 180 * end_reward_weight # 双杀策略
+                    r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
             
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")

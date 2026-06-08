@@ -351,4 +351,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
-        return done, r_event, r_constraint, r_shaping
+        return done, \
+                    r_event+r_constraint+r_shaping, \
+                        r_event+r_constraint+r_shaping, \
+                            r_event+r_constraint+r_shaping
