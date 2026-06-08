@@ -47,7 +47,7 @@ def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
 class RewardVisualizer:
     def __init__(self, root):
         self.root = root
-        self.root.title("多维奖励函数切片可视化")
+        self.root.title("原引导奖励函数切片可视化")
         self.root.geometry("1100x700")
         
         # 布局：左侧控制面板，右侧绘图区

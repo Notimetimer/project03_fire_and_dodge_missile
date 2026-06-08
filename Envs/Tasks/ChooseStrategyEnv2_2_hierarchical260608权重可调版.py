@@ -235,15 +235,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
 
         # --- 态势辅助奖励 ---
-        threat_start_dist = 20e3
+        # threat_distance_threshold = 20e3
         # # 1. 进攻态势：我方导弹是否进入敌机周围20km，并迫使对手进入防御
         # enm_threat_dist = enm_states["threat"][3]
         # # 把导弹送得越近，分数就越高
-        # if enm_threat_dist <= threat_start_dist:
-        #     r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) * fire_reward_weight # * self.dt_maneuver * action_cycle_multiplier # 0.001
+        # if enm_threat_dist <= threat_distance_threshold:
+        #     r_constraint += 1.0 * np.exp(-2*enm_threat_dist/threat_distance_threshold) * fire_reward_weight # * self.dt_maneuver * action_cycle_multiplier # 0.001
             
         #     if abs(self.t % 2) < 0.1:
-        #         print("威胁奖励：", 1.0 * np.exp(-2*enm_threat_dist/threat_start_dist) * fire_reward_weight)
+        #         print("威胁奖励：", 1.0 * np.exp(-2*enm_threat_dist/threat_distance_threshold) * fire_reward_weight)
         #         print()
 
         if not hasattr(ego, '_last_enm_threat_dist'):
@@ -255,8 +255,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
 
         # # 2. 防御态势：敌方导弹是否进入我机周围20km，并被迫进入防御，导弹离我越近，越指向导弹，惩罚越重
-        # if threat_distance <= threat_start_dist:
-        #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_start_dist) # * self.dt_maneuver * action_cycle_multiplier # 0.001
+        # if threat_distance <= threat_distance_threshold:
+        #     r_constraint -= 1.0 * (1.2-abs(delta_psi_threat)/pi)/1.2 * np.exp(-2*threat_distance/threat_distance_threshold) # * self.dt_maneuver * action_cycle_multiplier # 0.001
 
         # 战术引导奖励
         reward_weights['angle_advantage']= 10 # 0.2 # 0.08 # 0.05
