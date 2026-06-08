@@ -33,13 +33,13 @@ def compute_reward(ATA, theta, delta_psi, vu, delta_theta_threat):
     # r_constraint += 0.5 * np.minimum(theta/(pi/4), 1) * 0.01
 
     "crank"
-    missile_in_mid_term = np.where(ATA < pi/3, 1, 0)
-    r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * 0.01 * missile_in_mid_term
-    r_constraint += 5 * (1 - abs(-pi/4 - theta) / (pi/4)) * 0.01 * missile_in_mid_term
+    # missile_in_mid_term = np.where(ATA < pi/3, 1, 0)
+    # r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * 0.01 * missile_in_mid_term
+    # r_constraint += 5 * (1 - abs(-pi/4 - theta) / (pi/4)) * 0.01 * missile_in_mid_term
 
     "escape"
-    # r_constraint += np.minimum(abs(delta_psi), pi/2)/(pi/2) * 0.01 #  * np.where(abs(delta_psi) < pi/2, 1, 0)
-    # r_constraint += (-theta)/(pi/2) * 0.01
+    r_constraint += np.minimum(abs(delta_psi), pi/2)/(pi/2) * 0.01 #  * np.where(abs(delta_psi) < pi/2, 1, 0)
+    r_constraint += (-theta)/(pi/2) * 0.01
 
     return r_constraint
 

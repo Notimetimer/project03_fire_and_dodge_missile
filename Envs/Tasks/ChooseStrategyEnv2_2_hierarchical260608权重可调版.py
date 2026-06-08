@@ -390,9 +390,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)),
                         3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)), # * (len(alive_ally_missiles)<=1) +
                             # (-1+np.e)*(len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有瞄准收益
-                        2 * 1, # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
-                        3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
-                            # 4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
+                        4 * np.clip(10e3 - ego.alt, 0, 10e3)/10e3, # 速度改高度 # np.exp((max(1.0-ego.speed/340, 0)/(target_mach - 0.6))),
+                        5 * (-ego.theta/pi*2), # 线性化高抛奖励
+                        # 3 * max(-1 + np.exp(-2 * ego.theta/pi*2), -50), #  * (len(alive_ally_missiles)<=1) +
+                        #     # 4 * (len(alive_ally_missiles)>1)), # 敢重复开火，砍掉所有高抛收益
                     ])
                 )/15 # 10 # 20
             ))
@@ -427,9 +428,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_event -= 5 * (1-enm.dead) * fire_reward_weight # 20
 
         # 导弹威胁奖励
-        threat_distance_threshold = 13e3
-        if ego._last_enm_threat_dist > threat_distance_threshold and enm_states["threat"][3] <= threat_distance_threshold:
-            r_constraint += 10 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+        threat_distance_threshold1 = 13e3
+        threat_distance_threshold2 = 5e3
+        if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
+            r_constraint += 4 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+        if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
+            r_constraint += 8 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
 
         # --- 态势辅助奖励 ---
         # threat_distance_threshold = 20e3
