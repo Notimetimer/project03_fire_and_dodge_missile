@@ -124,7 +124,7 @@ if __name__=='__main__':
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
-        opp_greedy_rate = 0.5, # 对手贪婪率
+        opp_greedy_rate = 0, # 对手贪婪率
         num_runs = 3, # 测试回合重复次数
         device = device,
         R_cage_range = (R_cage, R_cage), # 固定场地大小

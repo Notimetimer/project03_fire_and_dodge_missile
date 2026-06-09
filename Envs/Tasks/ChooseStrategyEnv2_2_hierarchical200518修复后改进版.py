@@ -177,7 +177,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         alpha = ego_states["target_information"][4]
         # 严格被锁判定
         locked_by_target = ego_states["locked_by_target"] #  and (dist_enm2ego <= 80e3) and (ATA_enm <= self.RUAV.max_radar_angle_rad)
-        
+        target_locked = ego_states["target_locked"]
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
         missile_in_mid_term = ego_states["missile_in_mid_term"]
@@ -282,6 +282,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if ego.speed < slow_mach*340:
             r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
+        # 被目标锁定
+        if locked_by_target:
+            r_constraint -= 1.0
+        # 锁定目标
+        if target_locked:
+            r_constraint += 1.0
         
         # 密集奖励只有在agent活着的时候有意义
         # r_constraint *= (1-ego.dead)
@@ -297,29 +303,38 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
             r_event -= 10 * fire_reward_weight * (1.0 +np.tanh(
                 1 * 1 + # 3  (distance / 100e3) +
-                3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 120))) + # 至关重要
-                1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
-                3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
-                2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
-                5 * (max(-ego.theta / np.pi * 3), - 1.0)
+                fire_inside_weight[0] * 3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 80))) + # 至关重要
+                fire_inside_weight[1] * 1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
+                fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
+                fire_inside_weight[3] * 2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
+                fire_inside_weight[4] * 5 * np.maximum(-ego.theta / np.pi * 3, - 1.0)
                 # 3 * np.maximum(-1 + np.exp(- 2 * ego.theta / np.pi * 2), -50) # 相当重要
-            )/10
+            )/15 # 10
             )
 
         # 导弹脱靶
         if enm.escape_once:
-            r_event -= 10 * (1-enm.dead) * fire_reward_weight # 20
+            if len(fire_inside_weight) > 5:
+                r_event -= 8 * (1-enm.dead) * fire_reward_weight * fire_inside_weight[5] # 10
+            else:
+                r_event -= 8 * (1-enm.dead) * fire_reward_weight # 20 # 10
 
         if not hasattr(ego, '_last_phi_t'):
             ego._last_phi_t = -cycle_time
             ego._last_enm_threat_dist = enm_states["threat"][3]
 
-        threat_distance_threshold1 = 13e3
-        threat_distance_threshold2 = 5e3
+        # 威胁目标
+        threat_distance_threshold1 = 12e3
+        threat_distance_threshold2 = 4e3
+        if len(fire_inside_weight) > 6:
+            print("fire_inside_weight", fire_inside_weight)
+            weight_temp = fire_inside_weight[6]
+        else:
+            weight_temp = 1
         if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
-            r_constraint += 5 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
+            r_constraint += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
         if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
-            r_constraint += 5 * fire_reward_weight # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+            r_constraint += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
 
         if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             ego._last_phi_t = self.t

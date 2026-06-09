@@ -74,16 +74,16 @@ class FireRewardWeightController:
         abs_d_psi = abs(d_psi)
         if abs_d_psi > 30:
             err = (abs_d_psi - 30) / 30.0
-            d_logits[2] += p['k_in_sq'] * err
+            d_logits[2] += p['k_in_sq'] * 0.2 # err
         else:
             d_logits[2] -= p['k_in_sq'] * 0.2
 
         # 需求 3：俯仰角控制 -> logits[5] (缩放分母: 90)
         if theta < 0: # 往地上开火，加大开火的俯仰惩罚
-            err = (-theta) / 15.0
-            d_logits[4] += p['k_in_sq'] * err
+            # err = (-theta) / 15.0
+            d_logits[4] += p['k_in_sq'] * 0.1
         elif theta > 10: # 会高抛，可以给其它成分奖励机会
-            d_logits[4] -= p['k_in_sq'] * 0.2 # 慢慢降下来
+            d_logits[4] -= p['k_in_sq'] * 0.1 # 慢慢降下来
         
         # 学不会开火后下高，降低高抛奖励权重
         if delta_theta < 0:
@@ -135,7 +135,7 @@ class FireRewardWeightController:
             multiplier *= 1.002
 
         # 外部执行硬限幅
-        self.fire_reward_weight = np.clip(self.fire_reward_weight * multiplier, p['weight_min'], p['weight_max'])
+        self.fire_reward_weight = np.clip(self.fire_reward_weight * multiplier, 1.0, 1.0) # p['weight_min'], p['weight_max'])
         
         return fire_inside_weight, self.fire_reward_weight
 
