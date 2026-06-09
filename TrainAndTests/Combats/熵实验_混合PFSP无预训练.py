@@ -5,14 +5,14 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260607-094458")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项_旧版奖励函数-run-20260608-114549")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -122,14 +122,14 @@ if __name__=='__main__':
             'Rule_4': 1200,
             'Rule_5': 1200,
             },
-        self_play_type = 'FSP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈
+        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 150,  # 300
-        rule_actor_rate = 0.2, # “复习”概率
+        MAX_HISTORY_SIZE = 50, # 150  # 300
+        compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
@@ -141,7 +141,7 @@ if __name__=='__main__':
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0,
-        adj_r_w=1, # 奖励函数权重可调
+        adj_r_w=0, # 奖励函数权重可调
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
