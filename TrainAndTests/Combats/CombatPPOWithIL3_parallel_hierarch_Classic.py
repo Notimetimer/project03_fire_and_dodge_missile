@@ -1950,7 +1950,7 @@ def run_MLP_simulation(
             # 计算蓝方开火策略指标的批次平均值
             batch_blue_avg_fire_interval = float(np.mean(batch_blue_fire_intervals)) if batch_blue_fire_intervals else None
             batch_blue_avg_fire_delta_psi = float(np.mean(batch_blue_fire_delta_psis)) if batch_blue_fire_delta_psis else None
-            batch_blue_avg_fire_distance = float(np.mean(batch_blue_fire_distances)) if batch_blue_fire_distances else None
+            batch_blue_avg_fire_distance = float(max(batch_blue_fire_distances)) if batch_blue_fire_distances else None
             batch_blue_avg_fire_AA_hor = float(np.mean(batch_blue_fire_AA_hors)) if batch_blue_fire_AA_hors else None
             batch_blue_avg_fire_altitude = float(np.mean(batch_blue_fire_alts)) if batch_blue_fire_alts else None
             batch_blue_avg_fire_theta = float(np.mean(batch_blue_fire_thetas)) if batch_blue_fire_thetas else None
