@@ -281,11 +281,13 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
 
 def get_opponent_probabilities(WinRates=None, Elite_WinRates=None, 
                                SP_type='PFSP_classic', 
-                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
+                               compete_old_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5,
+                               hall_of_fame=None):
     """
     经典 PFSP 采样逻辑：
     WinRates: dict, 记录 Learner 对阵各对手的胜率 P
     p_factor: 经典公式 (1-P)^p 中的指数，通常取 1.0~3.0，越高越针对强敌
+    hall_of_fame: dict, 名人堂 key->elo；compete_old_rate 分支也会从中挑选不在 Elite 池的历史对手
     """
     # 合并池子以便查询
     if WinRates is None:
@@ -297,11 +299,13 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
     
     if not keys: return np.array([]), []
 
-    # 1. 规则复习分支 (保持不变)
+    # 1. 规则 + 名人堂历史对手 复习分支
     rule_keys = [k for k in keys if k.startswith('Rule')]
-    if np.random.rand() < rule_rate and rule_keys:
-        probs = np.ones(len(rule_keys)) / len(rule_keys)
-        return probs, rule_keys
+    hof_outside_elite = [k for k in (hall_of_fame or {}) if k not in (Elite_WinRates or {})]
+    old_pool = rule_keys + hof_outside_elite
+    if np.random.rand() < compete_old_rate and old_pool:
+        probs = np.ones(len(old_pool)) / len(old_pool)
+        return probs, old_pool
 
     # 2. 经典 PFSP 采样核心
     # 正确判断不同 SP_type，PFSP 核心在 SP_type 为这两者之一时生效
@@ -310,14 +314,16 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
         ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
         
         # 计算权重：(1 - P)^p
-        # 解释：胜率越低（越打不过），权重越高，但太强太弱的对手被过滤掉
+        # 解释：胜率越低（越打不过），权重越高
         opponent_mask = np.ones_like(ps)
-        for i in range(len(ps)):
-            if ps[i] > 0.2 and ps[i] < 0.8:
-                opponent_mask[i] = 1.0
-            else:
-                opponent_mask[i] = 0.01
-        weights = np.power((1.0 - ps), p_factor)
+        # # 太强太弱的对手被过滤掉
+        # for i in range(len(ps)):
+        #     if ps[i] > 0.2 and ps[i] < 0.8:
+        #         opponent_mask[i] = 1.0
+        #     else:
+        #         opponent_mask[i] = 0.01
+        # weights = np.power((1.0 - ps), p_factor)
+        weights = np.exp(-0.5*((400*np.log10(1/(ps+1e-8) - 1 + 2e-8) - 200)/450)**2)
         weights = weights * opponent_mask
         
         # 防止全为 0 的情况（例如胜率全是 1）
@@ -332,15 +338,17 @@ def get_opponent_probabilities(WinRates=None, Elite_WinRates=None,
         # 获取所有候选对手的胜率 P
         ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
         
-        # 计算权重：((1 - P)*P)^(p/2)
-        # 解释：胜率越低（越打不过），权重越高，但太强太弱的对手被过滤掉
+        # # 计算权重：((1 - P)*P)^(p/2)
+        # 解释：胜率越低（越打不过），权重越高
         opponent_mask = np.ones_like(ps)
-        for i in range(len(ps)):
-            if ps[i] > 0.2 and ps[i] < 0.8:
-                opponent_mask[i] = 1.0
-            else:
-                opponent_mask[i] = 0.01
-        weights = np.power((1.0 - ps)*ps, p_factor/2)
+        # # 太强太弱的对手被过滤掉
+        # for i in range(len(ps)):
+        #     if ps[i] > 0.2 and ps[i] < 0.8:
+        #         opponent_mask[i] = 1.0
+        #     else:
+        #         opponent_mask[i] = 0.01
+        # weights = np.power((1.0 - ps)*ps, p_factor)
+        weights = np.exp(-0.5*((400*np.log10(1/(ps+1e-8) - 1 + 2e-8))/450)**2)
         weights = weights * opponent_mask
         
         # 防止全为 0 的情况（例如胜率全是 1）
@@ -975,7 +983,7 @@ def run_MLP_simulation(
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 50, # 300 # 100
     deltaFSP_epsilon = 0.8,
-    rule_actor_rate = 0.2,
+    compete_old_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
     save_interval = 1, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
@@ -1621,9 +1629,10 @@ def run_MLP_simulation(
                     WinRates,
                     Elite_WinRates,
                     SP_type="PFSP_classic",
-                    rule_rate=rule_actor_rate,
+                    compete_old_rate=compete_old_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
+                    hall_of_fame=hall_of_fame,
                 )
                 
                 # 提取候选对手的行为偏好向量 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi] 并进行分维度归一化
@@ -1680,9 +1689,10 @@ def run_MLP_simulation(
                     WinRates,
                     Elite_WinRates,
                     SP_type=self_play_type,
-                    rule_rate=rule_actor_rate,
+                    compete_old_rate=compete_old_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
+                    hall_of_fame=hall_of_fame,
                 )
                 selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
             
@@ -2192,20 +2202,27 @@ def run_MLP_simulation(
                         # 新的门槛规则：候选 NN 必须比"排除Rule0后最弱的Rule"更难
                         # 这样可以过滤掉那些"以逃为胜，仅比Rule0强一点"的智能体
                         rule_keys_present = [k for k in WinRates.keys() if k.startswith('Rule')]
-                        # 排除 Rule0，在其余 Rule 中取最大胜率作为门槛
-                        rule_keys_excluding_rule0 = [k for k in rule_keys_present if k != 'Rule0']
-                        max_rule_win = None
-                        if rule_keys_excluding_rule0:
-                            max_rule_win = max([WinRates[k] for k in rule_keys_excluding_rule0])
+                        # 用 ADMISSION_THRESHOLD 作为 Rule 胜率的分位数门槛
+                        # ADMISSION_THRESHOLD < 0 时不设门槛
+                        quantile_win_thres = None
+                        if ADMISSION_THRESHOLD < 0:
+                            quantile_win_thres = None  # 无门槛，所有 NN 均通过
+                        elif rule_keys_present:
+                            # 降序（高到低）：rule_wins[0]=最高胜率（最弱对手），rule_wins[-1]=最低胜率（最强对手）
+                            # threshold=0 → idx=0 → 最弱 Rule；threshold=1 → idx=n-1 → 最强 Rule
+                            rule_wins = sorted([WinRates[k] for k in rule_keys_present], reverse=True) # 降序
+                            t = np.clip(ADMISSION_THRESHOLD, 0, 1)
+                            idx = np.clip(int(t * (len(rule_wins) - 1) + 0.5), 0, len(rule_wins) - 1)
+                            quantile_win_thres = rule_wins[idx]
 
-                        # 过滤出满足硬性门槛的 agents（如果有 rule 则必须使 Learner 胜率小于 rules 中的最高值）
+                        # 过滤出满足门槛的 agents
                         qualified_agents = []
                         for a in sorted_agents:
-                            if max_rule_win is None:
+                            if quantile_win_thres is None:
                                 qualified_agents.append(a)
                             else:
-                                # 要求：Learner 对 agent 的胜率 < rules 中的最高 Learner 胜率
-                                if WinRates.get(a, 1.0) < float(max_rule_win):
+                                # 要求：Learner 对 agent 的胜率 < Rule 胜率的分位数
+                                if WinRates.get(a, 1.0) < float(quantile_win_thres):
                                     qualified_agents.append(a)
 
                         toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
@@ -2283,14 +2300,16 @@ def run_MLP_simulation(
                     min_elo = np.min(list(valid_elos.values()))
                     max_elo = np.max(list(valid_elos.values()))
                     
-                    rule_elos = [v for k, v in elite_elo_ratings.items() if k.startswith("Rule")]
+                    # 升序：Elo 低（弱对手）在前。threshold=0 取最弱 Rule Elo（最低），=1 取最强 Rule Elo（最高）
+                    rule_elos = sorted([v for k, v in elite_elo_ratings.items() if k.startswith("Rule")], reverse=False) # 升序排列
                     if not rule_elos:
-                        min_rule_elo, max_rule_elo = main_agent_elo, main_agent_elo
+                        rule_elo_thres = main_agent_elo
+                    elif ADMISSION_THRESHOLD < 0:
+                        rule_elo_thres = main_agent_elo  # 无门槛，差值仅供参考
                     else:
-                        min_rule_elo = np.min(rule_elos)
-                        max_rule_elo = np.max(rule_elos)
-                    rule_elo_thres = ADMISSION_THRESHOLD * max_rule_elo +\
-                        (1-ADMISSION_THRESHOLD) * min_rule_elo
+                        t = np.clip(ADMISSION_THRESHOLD, 0, 1)
+                        idx = np.clip(int(t * (len(rule_elos) - 1) + 0.5), 0, len(rule_elos) - 1)
+                        rule_elo_thres = rule_elos[idx]  # =0 取最低 Rule Elo，=0.5 取中位数，=1 取最高 Rule Elo
 
                     # 记录与 Rule 阈值的差值 (维持旧指标名)
                     elo_diff_to_thres = main_agent_elo - rule_elo_thres

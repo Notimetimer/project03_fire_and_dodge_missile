@@ -944,7 +944,7 @@ def run_MLP_simulation(
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 50, # 300 # 100
     deltaFSP_epsilon = 0.8,
-    rule_actor_rate = 0.2,
+    compete_old_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
     save_interval = 1, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
@@ -1530,7 +1530,7 @@ def run_MLP_simulation(
                     WinRates,
                     Elite_WinRates,
                     SP_type="PFSP_classic",
-                    rule_rate=rule_actor_rate,
+                    rule_rate=compete_old_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
@@ -1589,7 +1589,7 @@ def run_MLP_simulation(
                     WinRates,
                     Elite_WinRates,
                     SP_type=self_play_type,
-                    rule_rate=rule_actor_rate,
+                    rule_rate=compete_old_rate,
                     p_factor=p_factor,
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )

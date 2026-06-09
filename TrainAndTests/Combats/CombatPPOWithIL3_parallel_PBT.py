@@ -585,7 +585,7 @@ def run_MLP_simulation(
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 50, # 300 # 100
     deltaFSP_epsilon = 0.8,
-    rule_actor_rate = 0.2,
+    compete_old_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
     randomized_birth = 1,
     save_interval = 1, # 注意：现在的含义是经过多少次 Batch (每Batch = num_workers个回合)
@@ -985,7 +985,7 @@ def run_MLP_simulation(
                     target_elo = max_elo,  
                     SP_type= 'PFSP_challenge', 
                     sigma=population[current_member_id].sigma_elo,
-                    rule_rate=rule_actor_rate,
+                    rule_rate=compete_old_rate,
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
                 selected_opponent_name = np.random.choice(opponent_keys, p=probs)
