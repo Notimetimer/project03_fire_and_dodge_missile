@@ -301,7 +301,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
                 3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
                 2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
-                5 * (np.maximum(-ego.theta / np.pi * 3), - 1.0)
+                5 * np.maximum(-ego.theta / np.pi * 3, - 1.0)
                 # 3 * np.maximum(-1 + np.exp(- 2 * ego.theta / np.pi * 2), -50) # 相当重要
             )/10
             )
