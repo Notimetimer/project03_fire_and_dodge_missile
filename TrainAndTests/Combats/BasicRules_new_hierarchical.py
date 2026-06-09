@@ -56,7 +56,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     case1 = distance < 95e3 and (sin_theta >= sin(30*pi/180) or alt >= 9e3) # 105, 30
     case2 = distance < 80e3 # 75e3
     if (case1 or case2) and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
-        if t_fired >= 40 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
+        if t_fired >= 40 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 90*pi/180): # 30
             fire_missile = True
 
     # # # 2. 根据目标相对高度选择基础进攻机动
