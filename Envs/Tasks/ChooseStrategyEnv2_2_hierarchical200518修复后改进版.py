@@ -261,21 +261,26 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if not missile_in_mid_term:
                 # if len(alive_ally_missiles) == 0:
                 # 瞄准奖励
-                r_constraint += cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_constraint += 2 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
+                # r_constraint += 2 * cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
                 # 爬高奖励
-                r_constraint += 0.05 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
-                r_constraint += 0.5 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_constraint += 1 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+                r_constraint += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
             # crank引导
             else:
                 # if len(alive_ally_missiles) > 0:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-                r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_constraint += 4 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                # r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
                 r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_constraint += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
         # 防御引导
         if warning:
             # 受到威胁应该三九线/置尾和下高
-            r_constraint += min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            r_constraint += (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += 2 * min(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # r_constraint += 2 * min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += 2 * (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_constraint += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
         
         # 速度惩罚
         slow_mach = 0.7
@@ -303,11 +308,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
             r_event -= 10 * fire_reward_weight * (1.0 +np.tanh(
                 1 * 1 + # 3  (distance / 100e3) +
-                fire_inside_weight[0] * 3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 80))) + # 至关重要
+                fire_inside_weight[0] * 3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 60))) + # 至关重要
                 fire_inside_weight[1] * 1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
-                fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
+                fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) / np.pi)) + # 至关重要
+                # fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
                 fire_inside_weight[3] * 2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
-                fire_inside_weight[4] * 5 * np.maximum(-ego.theta / np.pi * 3, - 1.0)
+                fire_inside_weight[4] * 5 * (-ego.vu/100) # np.maximum(-ego.theta / np.pi * 3, - 1.0)
                 # 3 * np.maximum(-1 + np.exp(- 2 * ego.theta / np.pi * 2), -50) # 相当重要
             )/15 # 10
             )
@@ -315,9 +321,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 导弹脱靶
         if enm.escape_once:
             if len(fire_inside_weight) > 5:
-                r_event -= 8 * (1-enm.dead) * fire_reward_weight * fire_inside_weight[5] # 10
+                r_event -= 10 * (1-enm.dead) * fire_reward_weight * fire_inside_weight[5] # 10
             else:
-                r_event -= 8 * (1-enm.dead) * fire_reward_weight # 20 # 10
+                r_event -= 10 * (1-enm.dead) * fire_reward_weight # 20 # 10
 
         if not hasattr(ego, '_last_phi_t'):
             ego._last_phi_t = -cycle_time
