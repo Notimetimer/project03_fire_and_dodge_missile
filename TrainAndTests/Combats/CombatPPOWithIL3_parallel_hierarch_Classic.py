@@ -524,6 +524,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 episode_blue_fire_delta_psis = [] # 开火瞬间的abs(delta_psi)
                 episode_blue_fire_distances = []  # 开火距离
                 episode_blue_fire_AA_hors = []    # 开火瞬间的abs(AA_hor)
+                episode_blue_fire_alts = []           # 开火瞬间高度
                 
                 # 记录上次开火时间用于计算间隔
                 last_blue_fire_time = -1.0
@@ -684,6 +685,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 记录蓝方（本方）开火俯仰角
                         blue_fire_theta = float(env.BUAV.theta)
                         episode_blue_fire_thetas.append(blue_fire_theta)
+                        
+                        # 记录开火瞬间高度
+                        blue_fire_alt = float(env.BUAV.alt)
+                        episode_blue_fire_alts.append(blue_fire_alt)
                         
                         # 记录蓝方开火策略指标
                         current_time = steps_run * dt_maneuver
@@ -859,6 +864,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     ep_blue_avg_fire_AA_hor = float(np.mean(episode_blue_fire_AA_hors))
                 else:
                     ep_blue_avg_fire_AA_hor = None
+                
+                if len(episode_blue_fire_alts) > 0:
+                    ep_blue_avg_fire_altitude = float(np.mean(episode_blue_fire_alts))
+                else:
+                    ep_blue_avg_fire_altitude = None
 
                 
                 # 7. 打包结果
@@ -892,7 +902,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ep_blue_avg_fire_interval': ep_blue_avg_fire_interval,
                     'ep_blue_avg_fire_delta_psi': ep_blue_avg_fire_delta_psi,
                     'ep_blue_avg_fire_distance': ep_blue_avg_fire_distance,
-                    'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor
+                    'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor,
+                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude
                 }
                 
                 # 8. 发送回 Master
@@ -962,7 +973,7 @@ def run_MLP_simulation(
     p_factor = 0.3,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
-    MAX_HISTORY_SIZE = 300,  # 100
+    MAX_HISTORY_SIZE = 50, # 300 # 100
     deltaFSP_epsilon = 0.8,
     rule_actor_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了
@@ -1074,6 +1085,7 @@ def run_MLP_simulation(
     ema_fire_delta_psi = None # 30
     ema_fire_distance = None # 50e3
     ema_fire_AA_hor = None # 145
+    ema_fire_altitude = None # 3e3
     ema_fire_theta = None # -5
     ema_ATA = None # 37
     ema_delta_psi_threat = None # 135
@@ -1132,6 +1144,7 @@ def run_MLP_simulation(
             ema_fire_delta_psi = special_data.get("ema_fire_delta_psi", None)
             ema_fire_distance = special_data.get("ema_fire_distance", None)
             ema_fire_AA_hor = special_data.get("ema_fire_AA_hor", None)
+            ema_fire_altitude = special_data.get("ema_fire_altitude", None)
             ema_fire_theta = special_data.get("ema_fire_theta", None)
             ema_ATA = special_data.get("ema_ATA", None)
             ema_delta_psi_threat = special_data.get("ema_delta_psi_threat", None)
@@ -1359,7 +1372,7 @@ def run_MLP_simulation(
             WinRates[k] = 0.5
         # 初始对手Elo一律当1200
         for k in init_elo_ratings.keys():
-            elo_ratings[k] = main_agent_elo    
+            elo_ratings[k] = main_agent_elo
 
         # 自博弈开启时的初始分值填充
         if hist_agent_as_opponent:
@@ -1565,6 +1578,8 @@ def run_MLP_simulation(
             if adj_r_w and batch_idx > 10:
                 fire_inside_weight, fire_reward_weight = RWController.update({
                     'ema_fire_interval': ema_fire_interval,
+                    'ema_fire_distance': ema_fire_distance,
+                    'ema_fire_altitude': ema_fire_altitude,
                     'ema_fire_delta_psi': ema_fire_delta_psi,
                     'ema_fire_theta': ema_fire_theta,
                     'ema_ATA': ema_ATA,
@@ -1753,6 +1768,7 @@ def run_MLP_simulation(
             batch_blue_fire_delta_psis = []
             batch_blue_fire_distances = []
             batch_blue_fire_AA_hors = []
+            batch_blue_fire_alts = []
             batch_blue_fire_thetas = []
             batch_blue_ATAs = []
             batch_blue_delta_psi_threats = []
@@ -1836,6 +1852,7 @@ def run_MLP_simulation(
                 ep_blue_avg_fire_delta_psi = res.get('ep_blue_avg_fire_delta_psi')
                 ep_blue_avg_fire_distance = res.get('ep_blue_avg_fire_distance')
                 ep_blue_avg_fire_AA_hor = res.get('ep_blue_avg_fire_AA_hor')
+                ep_blue_avg_fire_altitude = res.get('ep_blue_avg_fire_altitude')
                 ep_blue_avg_fire_theta = res.get('ep_blue_avg_fire_theta')
                 
                 if ep_blue_avg_fire_interval is not None:
@@ -1846,6 +1863,8 @@ def run_MLP_simulation(
                     batch_blue_fire_distances.append(ep_blue_avg_fire_distance)
                 if ep_blue_avg_fire_AA_hor is not None:
                     batch_blue_fire_AA_hors.append(ep_blue_avg_fire_AA_hor)
+                if ep_blue_avg_fire_altitude is not None:
+                    batch_blue_fire_alts.append(ep_blue_avg_fire_altitude)
                 if ep_blue_avg_fire_theta is not None:
                     batch_blue_fire_thetas.append(ep_blue_avg_fire_theta)
                 
@@ -1924,6 +1943,7 @@ def run_MLP_simulation(
             batch_blue_avg_fire_delta_psi = float(np.mean(batch_blue_fire_delta_psis)) if batch_blue_fire_delta_psis else None
             batch_blue_avg_fire_distance = float(np.mean(batch_blue_fire_distances)) if batch_blue_fire_distances else None
             batch_blue_avg_fire_AA_hor = float(np.mean(batch_blue_fire_AA_hors)) if batch_blue_fire_AA_hors else None
+            batch_blue_avg_fire_altitude = float(np.mean(batch_blue_fire_alts)) if batch_blue_fire_alts else None
             batch_blue_avg_fire_theta = float(np.mean(batch_blue_fire_thetas)) if batch_blue_fire_thetas else None
             batch_blue_avg_ATA = float(np.mean(batch_blue_ATAs)) if batch_blue_ATAs else None
             batch_blue_avg_delta_psi_threat = float(np.mean(batch_blue_delta_psi_threats)) if batch_blue_delta_psi_threats else None
@@ -1938,6 +1958,7 @@ def run_MLP_simulation(
             ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi)
             ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance)
             ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi)
+            ema_fire_altitude = _ema_update(ema_fire_altitude, batch_blue_avg_fire_altitude)
             ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi)
             ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi)
             ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi)
@@ -1969,26 +1990,25 @@ def run_MLP_simulation(
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
             logger.add("train_plus/target_p1", target_p1, total_steps)
 
-            # 记录导弹发射平均数量或总数
-            logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
-            
             # 记录开火策略指标 - 蓝方（本方），使用原始批次均值
             if batch_blue_avg_fire_interval is not None:
-                logger.add("special/1 蓝方平均开火间隔时长", batch_blue_avg_fire_interval, total_steps)
+                logger.add("special/1 开火间隔时长", batch_blue_avg_fire_interval, total_steps)
             if batch_blue_avg_fire_delta_psi is not None:
-                logger.add("special/2 蓝方平均开火abs(delta_psi)", batch_blue_avg_fire_delta_psi*180/pi, total_steps)
+                logger.add("special/2 开火abs(delta_psi)", batch_blue_avg_fire_delta_psi*180/pi, total_steps)
             if batch_blue_avg_fire_distance is not None:
-                logger.add("special/3 蓝方平均开火距离", batch_blue_avg_fire_distance, total_steps)
+                logger.add("special/3 开火距离", batch_blue_avg_fire_distance, total_steps)
             if batch_blue_avg_fire_AA_hor is not None:
-                logger.add("special/4 蓝方平均开火abs(AA_hor)", batch_blue_avg_fire_AA_hor*180/pi, total_steps)
+                logger.add("special/4 开火abs(AA_hor)", batch_blue_avg_fire_AA_hor*180/pi, total_steps)
+            if batch_blue_avg_fire_altitude is not None:
+                logger.add("special/0 开火高度", batch_blue_avg_fire_altitude, total_steps)
             if batch_blue_avg_fire_theta is not None:
-                logger.add("special/5 蓝方平均fire_theta", batch_blue_avg_fire_theta*180/pi, total_steps)
+                logger.add("special/5 fire_theta", batch_blue_avg_fire_theta*180/pi, total_steps)
             if batch_blue_avg_ATA is not None:
-                logger.add("special/6 蓝方平均ATA", batch_blue_avg_ATA*180/pi, total_steps)
+                logger.add("special/6 ATA30", batch_blue_avg_ATA*180/pi, total_steps)
             if batch_blue_avg_delta_psi_threat is not None:
-                logger.add("special/7 蓝方平均delta_psi_threat", batch_blue_avg_delta_psi_threat*180/pi, total_steps)
+                logger.add("special/7 delta_psi_threat", batch_blue_avg_delta_psi_threat*180/pi, total_steps)
             if batch_blue_avg_delta_theta is not None:
-                logger.add("special/8 蓝方平均delta_theta", batch_blue_avg_delta_theta*180/pi, total_steps)
+                logger.add("special/8 delta_theta30", batch_blue_avg_delta_theta*180/pi, total_steps)
             
             # [新增] 保存 EMA 状态和控制器状态到 special.json
             special_data = {
@@ -1996,6 +2016,7 @@ def run_MLP_simulation(
                 "ema_fire_delta_psi": ema_fire_delta_psi,
                 "ema_fire_distance": ema_fire_distance,
                 "ema_fire_AA_hor": ema_fire_AA_hor,
+                "ema_fire_altitude": ema_fire_altitude,
                 "ema_fire_theta": ema_fire_theta,
                 "ema_ATA": ema_ATA,
                 "ema_delta_psi_threat": ema_delta_psi_threat,

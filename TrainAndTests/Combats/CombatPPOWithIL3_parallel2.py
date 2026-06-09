@@ -571,7 +571,7 @@ def run_MLP_simulation(
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
-    MAX_HISTORY_SIZE = 300,  # 100
+    MAX_HISTORY_SIZE = 50, # 300 # 100
     deltaFSP_epsilon = 0.8,
     rule_actor_rate = 0.2,
     K_FACTOR = 16,  # 32 原先振荡太大了

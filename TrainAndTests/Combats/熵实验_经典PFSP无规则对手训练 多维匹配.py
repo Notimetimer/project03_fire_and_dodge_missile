@@ -121,7 +121,7 @@ if __name__=='__main__':
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 300,  # 100
+        MAX_HISTORY_SIZE = 50, # 300 # 100
         rule_actor_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,

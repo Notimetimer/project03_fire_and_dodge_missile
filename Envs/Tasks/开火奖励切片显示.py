@@ -25,7 +25,7 @@ def sigmoid(x):
 
 def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, height, theta):
     inner = (
-        1 * 1 + # 3  (distance / 100e3) +
+        # 1 * 1 + # 3  (distance / 100e3) +
         3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 120))) + # 至关重要
         1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
         3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要

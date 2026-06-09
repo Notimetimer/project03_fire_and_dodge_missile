@@ -118,7 +118,7 @@ if __name__=='__main__':
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 0, # 纯自博弈应该一开始就开始存
         ADMISSION_THRESHOLD = 0.5, # 纯自博弈的时候只要<=1都行
-        MAX_HISTORY_SIZE = 300,  # 100
+        MAX_HISTORY_SIZE = 50, # 300 # 100
         rule_actor_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,

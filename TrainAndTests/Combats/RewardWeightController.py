@@ -9,12 +9,13 @@ import numpy as np
 """
 
 class FireRewardWeightController:
-    def __init__(self, initial_fire_reward_weight=1.0, lr_internal=0.05, lr_external=0.05):
+    def __init__(self, initial_fire_reward_weight=1.0, fire_internal_weights_num=5, lr_internal=0.05, lr_external=0.05):
         """
         带误差归一化与抗积分饱和的开火权重控制器
         """
-        # 1. 内部 6 维 Logits: [distance, time, AA, delta_psi, v, theta]
-        self.logits = np.zeros(6)
+        # 1. 内部 self.fire_internal_weights_num 维 Logits: [distance, time, AA, delta_psi, v, theta]
+        self.fire_internal_weights_num = fire_internal_weights_num
+        self.logits = np.zeros(fire_internal_weights_num)
         self.lr_in = lr_internal
         
         # 2. 外部独立权重
@@ -39,13 +40,15 @@ class FireRewardWeightController:
     def update(self, ema_vars):
         # 前置检查：所有键必须存在且值不能为 None，任一缺失/None 都拒绝更新
         required_keys = {
-            'ema_fire_interval', 'ema_fire_delta_psi', 'ema_fire_theta',
+            'ema_fire_interval', 'ema_fire_distance', 'ema_fire_altitude', 'ema_fire_delta_psi', 'ema_fire_theta',
             'ema_ATA', 'ema_delta_psi_threat', 'ema_delta_theta'
         }
         if not required_keys.issubset(ema_vars.keys()) or None in ema_vars.values():
-            return np.ones(6), self.fire_reward_weight
+            return np.ones(self.fire_internal_weights_num), self.fire_reward_weight
 
         t_interval   = ema_vars['ema_fire_interval']
+        dist         = ema_vars['ema_fire_distance']
+        altitude     = ema_vars['ema_fire_altitude']
         d_psi        = ema_vars['ema_fire_delta_psi']
         theta        = ema_vars['ema_fire_theta']
         ata          = ema_vars['ema_ATA']
@@ -53,58 +56,58 @@ class FireRewardWeightController:
         delta_theta      = ema_vars['ema_delta_theta']
         
         p = self.params
-        d_logits = np.zeros(6)
+        d_logits = np.zeros(self.fire_internal_weights_num)
         
         # ==========================================
-        # 一、 内部 6 维权重积分逻辑 (带误差缩放)
+        # 一、 内部 self.fire_internal_weights_num 维权重积分逻辑 (带误差缩放)
         # ==========================================
         
         # 需求 1：时间控制 -> logits[1] (缩放分母: 100)
         if t_interval < 60: # 开火太密集，应该加大等待惩罚比例
             err = (60 - t_interval)/40.0
-            d_logits[1] += p['k_in_sq'] * min(err, 1.0)
+            d_logits[0] += p['k_in_sq'] * min(err, 1.0)
         elif t_interval > 60: # 开火比较稀疏，可以降低这部分惩罚的比重
             err = (t_interval - 60) / 40.0
-            d_logits[1] -= p['k_in_sq'] * min(err, 1.0) * 0.7
+            d_logits[0] -= p['k_in_sq'] * min(err, 1.0) * 0.7
             
         # 需求 2：开火偏角控制 -> logits[3] (缩放分母: 180)
         abs_d_psi = abs(d_psi)
         if abs_d_psi > 30:
             err = (abs_d_psi - 30) / 30.0
-            d_logits[3] += p['k_in_sq'] * err
+            d_logits[2] += p['k_in_sq'] * err
         else:
-            d_logits[3] -= p['k_in_sq'] * 0.2
+            d_logits[2] -= p['k_in_sq'] * 0.2
 
         # 需求 3：俯仰角控制 -> logits[5] (缩放分母: 90)
         if theta < 0: # 往地上开火，加大开火的俯仰惩罚
             err = (-theta) / 15.0
-            d_logits[5] += p['k_in_sq'] * err
+            d_logits[4] += p['k_in_sq'] * err
         elif theta > 10: # 会高抛，可以给其它成分奖励机会
-            d_logits[5] -= p['k_in_sq'] * 0.2 # 慢慢降下来
+            d_logits[4] -= p['k_in_sq'] * 0.2 # 慢慢降下来
         
         # 学不会开火后下高，降低高抛奖励权重
         if delta_theta < 0:
-            d_logits[5] -= p['k_in_sq'] * 0.1
+            d_logits[4] -= p['k_in_sq'] * 0.1
         # 学会开火后下高，慢慢回复高抛奖励权重
         else: # 开火后知道要下高了，慢慢把开火惩罚加回来
-            d_logits[5] += p['k_in_sq'] * 0.1  # 0.05
+            d_logits[4] += p['k_in_sq'] * 0.1  # 0.05
 
         # 初步计算下一步的 logits 并去均值
         logits_next = self.logits + self.lr_in * d_logits
         logits_next -= np.mean(logits_next)
 
-        # Anti-Windup 反向压制: 限制开火内部相对权重在 [1/30, 5/6]
-        for i in range(6):
-            other_indices = [j for j in range(6) if j != i]
+        # Anti-Windup 反向压制: 限制开火内部相对权重在 [1/30, 5/self.fire_internal_weights_num]
+        for i in range(self.fire_internal_weights_num):
+            other_indices = [j for j in range(self.fire_internal_weights_num) if j != i]
             S_minus_i = np.sum(np.exp(logits_next[other_indices]))
             
             z_max = np.log(7.0) + np.log(S_minus_i)
-            z_min = np.log(1.0 / (6 * 7.0 - 1)) + np.log(S_minus_i)
+            z_min = np.log(1.0 / (self.fire_internal_weights_num * 7.0 - 1)) + np.log(S_minus_i)
             
             logits_next[i] = np.clip(logits_next[i], z_min, z_max)
 
         self.logits = logits_next
-        fire_inside_weight = self._softmax(self.logits) * 6.0
+        fire_inside_weight = self._softmax(self.logits) * self.fire_internal_weights_num
 
         # ==========================================
         # 二、 外部独立权重积分逻辑 (带误差缩放)
@@ -164,11 +167,11 @@ if __name__ == "__main__":
         'ema_fire_theta': -4.0,
         'ema_ATA': 40,
         'ema_delta_psi_threat': 135,
-        'ema_delta_theta': 6.0
+        'ema_delta_theta': 7.0
     }
     
     inside_rate, reward_rate = controller.update(mock_ema_vars)
     
-    print("【内部 6 维权重】(distance, time, AA, d_psi, v, theta):\n", inside_rate)
+    print("【内部 self.fire_internal_weights_num 维权重】(distance, time, AA, d_psi, v, theta):\n", inside_rate)
     print("内部权重总和 (保持为6.0):", inside_rate.sum())
     print("\n【外部独立总权重】(fire_reward_weight):\n", reward_rate)

@@ -123,7 +123,7 @@ if __name__=='__main__':
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 0, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 1.0,
-        MAX_HISTORY_SIZE = 300,  # 100
+        MAX_HISTORY_SIZE = 50, # 300 # 100
         rule_actor_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
