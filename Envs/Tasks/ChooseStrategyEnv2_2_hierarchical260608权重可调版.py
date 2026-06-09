@@ -242,7 +242,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     )/8)
         phi_attack = (
             2.0 * (1.0 - abs(delta_psi) / pi) +            # 偏角越小，势能越高 (线性)
-            0.5 * np.clip(ego.alt / 100, -1, 1) +           # 爬升率势函数(线性)
+            0.5 * np.clip(ego.vu / 100, -1, 1) +           # 爬升率势函数(线性)
             2.0 * np.clip(ego.theta / (pi/2), -1, 1)       # 俯仰角优势 (线性)
         )
         
@@ -258,7 +258,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         phi_crank = (
             2.0 * i_can_guide +                            # 引导夹角
             -2.0 * abs(abs(delta_psi) - np.radians(55)) / (np.radians(55)) +   # 偏角逼近 60度
-            0.5 * np.clip(-ego.alt / 100, -1, 1)            # Crank 必须伴随降高
+            0.5 * np.clip(-ego.vu / 100, -1, 1)            # Crank 必须伴随降高
         )
 
         
@@ -270,9 +270,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #         4 * (-1+(abs(delta_psi_threat)/(pi/2)))
         #     )/(5))
         phi_defense = (
-            2.0 * (abs(delta_psi_threat) / pi) +           # 导弹在后半球势能最高
+            2.0 * (abs(delta_psi_threat) / pi*2) +           # 导弹在后半球最好躲
             2.0 * np.clip(-ego.theta / (pi/2), 0, 1) +     # 严厉逼迫俯冲下高
-            0.8 * np.clip(-ego.alt / 100, -1, 1)           # 降高度增加阻力
+            0.8 * np.clip(-ego.vu / 100, -1, 1)           # 降高度增加阻力
         )
         
         # 速度势函数（替代原速度惩罚）

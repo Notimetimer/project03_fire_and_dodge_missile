@@ -29,7 +29,7 @@ class FireRewardWeightController:
             # 'k_out_lin': 1.0,     # 外部线性误差增益 (替代原线性 gamma)
             # 'k_out_sq': 2.5,      # 外部二次误差增益 (替代原平方 gamma)
             
-            'weight_min': 0.05, 'weight_max': 5.0  # 外部限幅
+            'weight_min': 0.3, 'weight_max': 3.0  # 外部限幅
         }
 
     def _softmax(self, x):
