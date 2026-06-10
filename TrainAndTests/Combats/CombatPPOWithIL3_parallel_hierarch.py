@@ -49,7 +49,7 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training_hierarch import test_worker
+from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
@@ -844,7 +844,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 else:
                     ep_blue_avg_fire_altitude = None
 
-                
+                WVR = env.close_range_kill()
+                BVR_perish_together = (not WVR) and env.draw
+
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
@@ -1443,22 +1445,36 @@ def run_MLP_simulation(
                 test_results_no_random = [t.get() for t in test_tasks_no_random]
 
                 # 记录第一种测试结果
-                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
-                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
+                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes_perish = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
                     # logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
 
+                # 记录第一种测试的平均指标（所有对手的平均Score和超视距双杀率）
+                avg_score = np.mean(list(outcomes.values()))
+                avg_perish_together = np.mean(list(outcomes_perish.values()))
+                logger.add("test/avg_score", avg_score, total_steps)
+                logger.add("test/BVR perish together", avg_perish_together, total_steps)
+
                 # 记录第二种测试结果 (test_No_random)
-                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results_no_random}
-                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_perish_nr = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
 
                 for r_num, score in outcomes_nr.items():
                     logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
                     # logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
+
+                # 记录第二种测试的平均指标（所有对手的平均Score和超视距双杀率）
+                avg_score_nr = np.mean(list(outcomes_nr.values()))
+                avg_perish_together_nr = np.mean(list(outcomes_perish_nr.values()))
+                logger.add("test_No_random/avg_score", avg_score_nr, total_steps)
+                logger.add("test_No_random/BVR perish together", avg_perish_together_nr, total_steps)
 
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score > 0.5 for score in outcomes_nr.values()): # 原先为outcomes.values()
@@ -1604,6 +1620,7 @@ def run_MLP_simulation(
             batch_wins = 0
             batch_loss_cnt = 0
             batch_draw_cnt = 0        # 新增统计
+            batch_bvr_perish_together_cnt = 0 # 新增统计
             batch_total_return = 0    # 新增统计
             batch_total_dense_return = 0
             batch_total_m_fired = 0   # 新增统计
@@ -1722,7 +1739,10 @@ def run_MLP_simulation(
 
                 if metrics['win']: batch_wins += 1
                 elif metrics['lose']: batch_loss_cnt += 1
-                else: batch_draw_cnt += 1
+                else: 
+                    batch_draw_cnt += 1
+                    if metrics.get('BVR_perish_together', False):
+                        batch_bvr_perish_together_cnt += 1
                 
                 # 3.1 聚合 PPO 数据到全局 Buffer
                 for k in transition_dict:
@@ -1862,6 +1882,7 @@ def run_MLP_simulation(
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
+            logger.add("train/2 BVR perish together", batch_bvr_perish_together_cnt / num_workers, total_steps)
             # 找最好的智能体
             logger.add("agent/ episode_step", batch_idx * num_workers, total_steps)
             logger.add("agent/ batch_step", batch_idx, total_steps)
@@ -1917,8 +1938,8 @@ def run_MLP_simulation(
                 critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
                 # 梯度监控
-                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
-                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
+                # logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
+                # logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 # 损失函数监控
                 logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
                 logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
@@ -1929,15 +1950,15 @@ def run_MLP_simulation(
                 logger.add("train_plus/max_fire_prob", student_agent.max_fire_prob, total_steps)
                 logger.add("train_plus/min_fire_prob", student_agent.min_fire_prob, total_steps)
 
-                logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+                # logger.add("train/10 advantage", student_agent.advantage, total_steps) 
                 # 强化学习
-                logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
-                logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
-                logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+                # logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
+                # logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
+                # logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
                 # [新增] 诊断监控
                 logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
-                logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
+                # logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
                 
                 # IL-PPO信号强度对比
                 # 错误做法，更新强度数量级和样本数无关

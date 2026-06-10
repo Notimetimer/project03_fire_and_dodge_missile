@@ -341,6 +341,7 @@ class ChooseStrategyEnv(Battle):
 
     # 重写近距杀方法（加了print）
     def close_range_kill(self,):
+        WVR = 0
         for RUAV in self.RUAVs:
             if RUAV.dead:
                 continue
@@ -361,10 +362,12 @@ class ChooseStrategyEnv(Battle):
                         BUAV.dead = True
                         # BUAV.got_hit = True
                         print('近距单杀')
+                        WVR = 1
                     elif cos_ATA_r < cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
                         # RUAV.got_hit = True
                         print('近距单杀')
+                        WVR = 1
                     # 都在可攻击角度
                     elif cos_ATA_r >= cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
@@ -372,6 +375,7 @@ class ChooseStrategyEnv(Battle):
                         # RUAV.got_hit = True
                         # BUAV.got_hit = True
                         print('近距双杀')
+                        WVR = 1
 
                     # 更复杂，但不一定好用的判定逻辑
                     #     # 看高度
@@ -404,9 +408,9 @@ class ChooseStrategyEnv(Battle):
                         
                     else: # 都不在可攻击角度
                         pass  # 无法杀
+        return WVR
 
-                        
-                    
+
 # # 水平跟踪
 # if action == 0:
 #     delta_psi_cmd = np.clip(delta_psi, -pi/2, pi/2)

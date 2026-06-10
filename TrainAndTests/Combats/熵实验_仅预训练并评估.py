@@ -1,4 +1,6 @@
-from CombatPPOWithIL3_parallel_hierarch_Classic import *
+import os, sys
+# from CombatPPOWithIL3_parallel_hierarch_Classic import *
+from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
@@ -11,14 +13,14 @@ mission_name = '预训练评估'
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 70 # 180
+IL_epoches= 30 # 180
 max_steps = 0
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_batch_size2= 1e4 # il_batch_size 2e4
@@ -26,7 +28,7 @@ mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
 label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
-dt_decide = 2 # 6
+dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
@@ -116,7 +118,7 @@ if __name__=='__main__':
             'Rule_5': 1200,
             },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1,
+        hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
