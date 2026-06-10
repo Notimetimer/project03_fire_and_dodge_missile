@@ -309,7 +309,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_event -= 10 * fire_reward_weight * (1.0 +np.tanh(
                 1 * 1 + # 3  (distance / 100e3) +
                 fire_inside_weight[0] * 3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 60))) + # 至关重要
-                fire_inside_weight[1] * 1 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi)) +
+                fire_inside_weight[1] * 2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi * 2)) +
                 fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) / np.pi)) + # 至关重要
                 # fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
                 fire_inside_weight[3] * 2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
