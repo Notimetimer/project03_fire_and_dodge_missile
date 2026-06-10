@@ -283,9 +283,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
         
         # 速度惩罚
-        slow_mach = 0.7
+        slow_mach = 0.8 # 0.7
         if ego.speed < slow_mach*340:
-            r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
+            r_constraint += 2 * ego.acceleration/9.8 * reward_weights['speed_penalty'] * (1-ego.dead)
+            # r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
         # 被目标锁定
         if locked_by_target:
