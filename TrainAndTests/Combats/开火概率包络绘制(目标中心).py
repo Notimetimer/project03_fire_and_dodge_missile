@@ -13,42 +13,37 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 from Math_calculates.sub_of_angles import sub_of_radian
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
 
-def create_initial_states(red_height, blue_height, distance, delta_psi, AA_hor=0):
+def create_initial_states(red_height, blue_height, distance, AA_hor):
     """
-    创建初始状态配置，借用BasicRules_new_hierarchical找攻击区.py的初始化方法
+    目标中心视角：以蓝方(目标)为中心，红方(我机)绕转一圈
     
     Args:
         red_height: 红方高度 (m)
-        blue_height: 蓝方高度 (m) 
+        blue_height: 蓝方高度 (m)
         distance: 水平距离 (m)
-        delta_psi: 目标方位角偏移 (rad) - 这是我机-目标视线方位角和初始我机航向角之间的差值
-        AA_hor: 水平进入角偏移 (rad)
+        AA_hor: 红方相对于目标的水平方位角 (rad), 0=北, 顺时针为正
     
     说明：
-    - delta_psi = 目标视线方位角 - 我机航向角
-    - 红方(我机)初始位置：[0, h, 0]，航向角0 (向北)
-    - 蓝方(目标)初始位置：[distance*cos(delta_psi), h, distance*sin(delta_psi)]
-      航向角 = 0 + AA_hor (基础向东 + 进入角偏移)
-    - 通过调整蓝方的横向位置来实现不同的delta_psi，而不是调整航向角
+    - 蓝方(目标)固定在原点[0, h, 0]，航向角=0 (朝北)
+    - 红方(我机)位于 [distance*cos(-AA_hor), h, distance*sin(-AA_hor)]，
+      面向目标，即航向角 = AA_hor + pi (朝向目标)
+    - delta_psi固定为0 (我机始终正对目标)
     """
-    # 红方在西边[0, h, 0]面向东
-    DEFAULT_RED_BIRTH_STATE = {
-        'position': np.array([0.0, red_height, 0.0]),
-        'psi': 0,  # 面向北
+    # 蓝方(目标)固定在原点，朝北
+    DEFAULT_BLUE_BIRTH_STATE = {
+        'position': np.array([0.0, blue_height, 0.0]),
+        'psi': 0,  # 朝北
         'e2e': False
     }
     
-    # 蓝方在东边，航向角 = 基础向东(0) + AA_hor(进入角偏移)
-    # delta_psi通过调整蓝方位置来实现，而不是航向角
-    blue_psi = sub_of_radian(delta_psi + AA_hor, 0)
+    # 红方(我机)在目标周围，面向目标
+    red_N = distance * cos(-AA_hor)
+    red_E = distance * sin(-AA_hor)
+    red_psi = sub_of_radian(-AA_hor + pi, 0)  # 朝向目标
     
-    # 根据delta_psi调整蓝方的横向位置，实现不同的视线角度
-    blue_N = distance * cos(delta_psi)  # 横向偏移
-    blue_E = distance * sin(delta_psi)  # 纵向距离
-    
-    DEFAULT_BLUE_BIRTH_STATE = {
-        'position': np.array([blue_N, blue_height, blue_E]),
-        'psi': blue_psi,
+    DEFAULT_RED_BIRTH_STATE = {
+        'position': np.array([red_N, red_height, red_E]),
+        'psi': red_psi,
         'e2e': False
     }
     
@@ -74,17 +69,16 @@ def load_trained_actor(model_path, device='cpu'):
     
     return actor
 
-def run_single_step_firing_probability(actor, red_height, blue_height, distance, delta_psi, AA_hor=0, device='cpu'):
+def run_single_step_firing_probability(actor, red_height, blue_height, distance, AA_hor, device='cpu'):
     """
-    运行单步并获取开火概率
+    运行单步并获取开火概率（目标中心视角）
     
     Args:
         actor: 策略网络
         red_height: 红方高度 (m)
         blue_height: 蓝方高度 (m)
         distance: 水平距离 (m)
-        delta_psi: 目标方位角偏移 (rad)
-        AA_hor: 水平进入角偏移 (rad)
+        AA_hor: 红方相对目标的水平方位角 (rad)
         device: 计算设备
     """
     # 创建环境
@@ -102,7 +96,6 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
         red_height=red_height, 
         blue_height=blue_height, 
         distance=distance, 
-        delta_psi=delta_psi, 
         AA_hor=AA_hor
     )
     
@@ -122,56 +115,45 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     # 获取动作和开火概率
     with torch.no_grad():
         actions_exec, actions_raw, _, actions_dist_check = actor.get_action(
-            r_obs_tensor, explore=False, check_obs=r_check_obs, temperature=1.0
-        )
+            r_obs_tensor, explore=False, check_obs=None, temperature=1.0
+        ) # check_obs=r_check_obs, None
     
     # 提取开火概率
     firing_probability = actions_dist_check['bern'][0] if 'bern' in actions_dist_check else 0.0
     
     return firing_probability
 
-def plot_firing_probability_heatmap_polar(delta_psis, distances, probabilities):
+def plot_firing_probability_heatmap_polar(AA_hors, distances, probabilities):
     """
-    在极坐标中绘制开火概率热图（扇形）
+    在极坐标中绘制开火概率热图（完整圆盘，目标中心视角）
     
     Args:
-        delta_psis: 角度数组 (rad)
+        AA_hors: 方位角数组 (rad), 0到2π
         distances: 距离数组 (m)
-        probabilities: 概率矩阵，形状为 (delta_psi_count, distance_count)
+        probabilities: 概率矩阵，形状为 (AA_hor_count, distance_count)
     """
-    # 创建扇形极坐标网格
-    Theta, R = np.meshgrid(delta_psis, distances/1000)
+    # 创建完整圆盘极坐标网格
+    Theta, R = np.meshgrid(AA_hors, distances/1000)
     
     # 转置probabilities以匹配网格形状
-    # probabilities形状: (delta_psi_count, distance_count)
-    # 网格形状: (distance_count, delta_psi_count)
+    # probabilities形状: (AA_hor_count, distance_count)
+    # 网格形状: (distance_count, AA_hor_count)
     probabilities_plot = probabilities.T
     
-    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'), figsize=(12, 10))
+    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'), figsize=(10, 10))
     
     # 绘制热图
-    c = ax.contourf(Theta, R, probabilities_plot, levels=20, cmap='Blues_r') # RdYlBu_r
+    c = ax.contourf(Theta, R, probabilities_plot, levels=30, cmap='Blues_r')
     
     # 添加颜色条
     cbar = plt.colorbar(c, ax=ax, pad=0.1)
     cbar.set_label('Firing Probability', rotation=270, labelpad=20)
     
     # 设置标签
-    ax.set_theta_zero_location('N')  # 0度在北边（正前方）
-    ax.set_theta_direction(-1)  # 顺时针方向
-    ax.set_title('Firing Probability Heatmap (Sector View)', pad=20)
-    ax.set_rlabel_position(45)  # 径向标签位置
-    
-    # 设置角度范围只显示数据范围
-    ax.set_thetamin(-60)  # 最小角度 -60°
-    ax.set_thetamax(60)   # 最大角度 +60°
-    
-    # 设置角度标签
-    theta_ticks = np.linspace(-pi/3, pi/3, 30)  # -60°到+60°，每20度一个标签
-    ax.set_thetagrids(np.degrees(theta_ticks), [f'{int(np.degrees(t))}°' for t in theta_ticks])
-    
-    # 添加中心线标记
-    ax.axvline(0, color='black', linestyle='-', alpha=0.3, linewidth=1)
+    ax.set_theta_zero_location('N')  # 0度在北边
+    ax.set_theta_direction(-1)       # 顺时针方向
+    ax.set_title('Firing Probability Heatmap\n(Target-Centered, delta_psi=0)', pad=20)
+    ax.set_rlabel_position(45)
     
     plt.tight_layout()
     return fig, ax
@@ -196,7 +178,7 @@ def plot_firing_probability_heatmap_cartesian(delta_psis, distances, probabiliti
     probabilities_plot = probabilities.T
     
     # 绘制热图
-    c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=20, cmap='Blues_r') # RdYlBu_r
+    c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=30, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
     
     # 添加颜色条
     cbar = plt.colorbar(c, ax=ax)
@@ -219,19 +201,18 @@ def plot_firing_probability_heatmap_cartesian(delta_psis, distances, probabiliti
 
 def main():
     # 固定参数
-    red_height = 8000  # 红方高度 8km
+    red_height = 8000   # 红方高度 8km
     blue_height = 8000  # 蓝方高度 8km
-    AA_hor = np.radians(180)  # 水平进入角
     device = 'cpu'
     
     # 网格搜索参数
-    distances = np.arange(8e3, 101e3, 15e3)  # 8km到100km，间隔5km
-    delta_psis = np.arange(-pi/3, pi/3 + np.radians(5), np.radians(5))  # ±π/3，间隔2度
+    distances = np.arange(8e3, 101e3, 15e3)  # 8km到100km，间隔15km
+    AA_hors = np.arange(0, 2*pi + np.radians(20), np.radians(20))  # 0到360°，间隔5度
     
-    print(f"开始计算开火概率...")
-    print(f"距离范围: {distances[0]/1000:.0f}km - {distances[-1]/1000:.0f}km, 间隔: 5km")
-    print(f"角度范围: {np.degrees(delta_psis[0]):.0f}° - {np.degrees(delta_psis[-1]):.0f}°, 间隔: 2°")
-    print(f"总计算点数: {len(distances) * len(delta_psis)}")
+    print(f"开始计算开火概率（目标中心视角）...")
+    print(f"距离范围: {distances[0]/1000:.0f}km - {distances[-1]/1000:.0f}km")
+    print(f"方位角范围: 0° - 360°, 间隔: 5°")
+    print(f"总计算点数: {len(distances) * len(AA_hors)}")
     
     # 查找并加载训练好的模型
     # 优先使用dir_name，如果没有则使用experiment_name
@@ -275,12 +256,12 @@ def main():
         return
     
     # 计算开火概率网格
-    probabilities = np.zeros((len(delta_psis), len(distances)))
+    probabilities = np.zeros((len(AA_hors), len(distances)))
     
-    total_points = len(distances) * len(delta_psis)
+    total_points = len(distances) * len(AA_hors)
     current_point = 0
     
-    for i, delta_psi in enumerate(delta_psis):
+    for i, AA_hor in enumerate(AA_hors):
         for j, distance in enumerate(distances):
             current_point += 1
             print(f"进度: {current_point}/{total_points} ({100*current_point/total_points:.1f}%)", end='\r')
@@ -291,13 +272,12 @@ def main():
                     red_height=red_height, 
                     blue_height=blue_height, 
                     distance=distance, 
-                    delta_psi=delta_psi, 
                     AA_hor=AA_hor, 
                     device=device
                 )
                 probabilities[i, j] = prob
             except Exception as e:
-                print(f"\n计算错误 (距离={distance/1000:.0f}km, 角度={np.degrees(delta_psi):.0f}°): {e}")
+                print(f"\n计算错误 (距离={distance/1000:.0f}km, 方位角={np.degrees(AA_hor):.0f}°): {e}")
                 probabilities[i, j] = 0.0
     
     print(f"\n计算完成！")
@@ -305,32 +285,23 @@ def main():
     # 保存结果
     results = {
         'distances_km': distances / 1000,
-        'delta_psis_rad': delta_psis,
-        'delta_psis_deg': np.degrees(delta_psis),
+        'AA_hors_rad': AA_hors,
+        'AA_hors_deg': np.degrees(AA_hors),
         'probabilities': probabilities
     }
     
-    np.savez('firing_probability_results.npz', **results)
-    print("结果已保存至: firing_probability_results.npz")
+    np.savez('firing_probability_target_center.npz', **results)
+    print("结果已保存至: firing_probability_target_center.npz")
     
     # 绘制图形
-    print("绘制极坐标热图...")
+    print("绘制极坐标热图（圆盘）...")
     fig1, ax1 = plot_firing_probability_heatmap_polar(
-        delta_psis=delta_psis, 
+        AA_hors=AA_hors, 
         distances=distances, 
         probabilities=probabilities
     )
-    plt.savefig('firing_probability_polar.png', dpi=300, bbox_inches='tight')
+    plt.savefig('firing_probability_target_center.png', dpi=300, bbox_inches='tight')
     plt.show()
-    
-    # print("绘制直角坐标热图...")
-    # fig2, ax2 = plot_firing_probability_heatmap_cartesian(
-    #     delta_psis=delta_psis, 
-    #     distances=distances, 
-    #     probabilities=probabilities
-    # )
-    # plt.savefig('firing_probability_cartesian.png', dpi=300, bbox_inches='tight')
-    # plt.show()
     
     print("图形已保存！")
 
