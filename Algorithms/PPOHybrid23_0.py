@@ -16,6 +16,9 @@ sys.path.append(project_root)
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
 from Algorithms.MLP_heads import ValueNet
 
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+
 # =============================================================================
 # 1. 神经网络定义 (保持不变，只负责 forward 计算)
 # =============================================================================
@@ -600,7 +603,7 @@ class HybridActorWrapper(nn.Module):
                     # Label Smoothing 逻辑
                     n_classes = probs.size(1)
                     one_hot = torch.zeros_like(probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
-                    smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / n_classes)
+                    smooth_target = one_hot * (1.0 - label_smoothing) + (1.0 - one_hot) * (label_smoothing / (n_classes - 1 + 1e-8))
                     # CrossEntropy: - sum(target * log_p)
                     ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
                 else:
@@ -630,28 +633,14 @@ class HybridActorWrapper(nn.Module):
                 probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
                 target = expert_actions['bern'] # (Batch, 1)
                 
-                "开火头不要动作平滑"
-                # # Label Smoothing
-                # if label_smoothing > 0:
-                #     target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+                "开火头适度动作平滑"
+                max_target = sigmoid(3.0)
+                min_target = sigmoid(-3.0)
+                target = torch.clamp(target, min_target, max_target)
 
-                # === 方案2：Focal Loss (针对敏感度问题) ===
-                # alpha: 平衡因子，类似于 pos_weight 的作用，但范围是 0-1
-                # gamma: 聚焦因子，通常设为 2.0。值越大，越忽视简单背景，越关注难分类的发射瞬间
-                
-                # 建议参数组合：
-                # alpha = 0.75 (意味着正样本本身权重是 0.75，负样本是 0.25，自带 3:1 的加权)
-                # gamma = 2.0 (标准设置)
-                
-                alpha = 0.75
-                gamma = 2.0
-                
-                # Focal Loss 公式
-                # 对于正样本 (target=1): -alpha * (1-p)^gamma * log(p)
-                # 对于负样本 (target=0): -(1-alpha) * p^gamma * log(1-p)
-                
-                loss_pos = -alpha * torch.pow(1.0 - probs, gamma) * torch.log(probs) * target
-                loss_neg = -(1 - alpha) * torch.pow(probs, gamma) * torch.log(1.0 - probs) * (1.0 - target)
+                # 交叉熵公式
+                loss_pos = - torch.log(probs) * target
+                loss_neg = - torch.log(1.0 - probs) * (1.0 - target)
                 
                 bce_loss = loss_pos + loss_neg
                 
@@ -1611,6 +1600,7 @@ class PPOHybrid:
     # =========================================================================
     #  [New Helper] 提取出的 MSE 计算逻辑 (供 mixed_update 和 BC_update 复用)
     # =========================================================================
+    "离散空间的动作损失函数不对，暂不使用该函数"
     def _compute_mse_loss_with_f(self, actor_input_batch, actions_batch, returns_batch, 
                                  critic_s_batch, # 用于计算 V
                                  max_weight=100.0, use_F=True):

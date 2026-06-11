@@ -1,6 +1,6 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
-from CombatPPOWithIL3_parallel_hierarchWhatIf import *
+from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
@@ -8,7 +8,7 @@ from prepare_il_datas_hierarchical import run_rules
 resume_target_dir = None 
 # resume_target_dir = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260516-235226"
 
-mission_name = '预训练评估WhatIf'
+mission_name = '预训练评估'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
