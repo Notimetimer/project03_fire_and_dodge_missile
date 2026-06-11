@@ -218,7 +218,7 @@ def main():
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
     # dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask-run-20260531-233800"
-    experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
+    experiment_name = '预训练评估WhatIf'
 
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
     

@@ -393,52 +393,57 @@ def run_MLP_simulation(
                 fire_indices = np.where(bern_arr[:, 0] > 0.5)[0]
                 print(f"[Data Augment] Found {len(fire_indices)} fire instances to augment.")
                 
+                # 统计开火样本中 delta_psi 的原始范围
+                if len(fire_indices) > 0:
+                    fire_cos = states_arr[fire_indices, 6]
+                    fire_sin = states_arr[fire_indices, 7]
+                    fire_delta_psi = np.arctan2(fire_sin, fire_cos)
+                    print(f"[Data Augment] Fire samples delta_psi range: {np.degrees(fire_delta_psi.min()):.1f}° to {np.degrees(fire_delta_psi.max()):.1f}°")
+                
                 expanded_states_list = []
                 expanded_returns_list = []
                 expanded_cats_list = []
                 expanded_berns_list = []
                 
-                t_intervals = np.arange(0, 80/120, 0.3)
                 # 索引位[6] cos_delta_psi：delta_psi 从 0 到 60度，步长5度
-                delta_psi_vals = np.arange(0, np.pi/3, np.radians(20))
-                cos_delta_psi_vals = np.cos(delta_psi_vals)
-                sin_delta_psi_vals = np.sin(delta_psi_vals)
-                # 索引位[8] delta_theta：从 -60度 到 60度，步长10度
-                delta_theta_vals = np.arange(-np.pi/3, np.pi/3, np.radians(20))
-                
-                for idx in fire_indices:
+                # 索引位[7] sin_delta_psi
+
+                # 全样本镜像：对所有样本生成镜像样本（delta_psi和AA_hor符号翻转）
+                # # 原方案：仅对开火样本镜像
+                # for idx in fire_indices:
+                #     pass
+
+                # 现方案：全样本对称翻转
+                for idx in range(len(states_arr)):
                     orig_state = states_arr[idx]
                     orig_return = returns_arr[idx] if returns_arr is not None else 0.0
                     orig_cat = cat_arr[idx]
-                    
-                    for val_t in t_intervals:
-                        t_since_launch_sec = val_t * 120.0
-                        
-                        for cos_dp, sin_dp in zip(cos_delta_psi_vals, sin_delta_psi_vals):
-                            for delta_theta in delta_theta_vals:
-                                # 复制并修改观测量
-                                new_state = orig_state.copy()
-                                new_state[21] = val_t # 索引位21（t_since_launch / 120）
-                                new_state[6] = cos_dp  # 索引位6 cos_delta_psi
-                                new_state[7] = sin_dp  # 索引位7 sin_delta_psi
-                                new_state[8] = delta_theta      # 索引位8 delta_theta
-                                
-                                if t_since_launch_sec < 70.0:
-                                    new_state[3] = 1.0  # 索引位3导弹中制导置为1
-                                    new_bern = 0.0      # 动作开火置为0
-                                else:
-                                    new_state[3] = 0.0  # 索引位3导弹中制导置为0
-                                    # 同时满足 delta_theta<0 且 cos_delta_psi > cos(20°) 才允许开火
-                                    if delta_theta < 0 and cos_dp > np.cos(np.radians(20)):
-                                        new_bern = 1.0
-                                    else:
-                                        new_bern = 0.0
-                                    
-                                expanded_states_list.append(new_state)
-                                if returns_arr is not None:
-                                    expanded_returns_list.append(orig_return)
-                                expanded_cats_list.append(orig_cat)
-                                expanded_berns_list.append([new_bern])
+                    # 索引位[6] cos_delta_psi：delta_psi 从 0 到 60度，步长5度
+                    # 索引位[7] sin_delta_psi
+                    # 索引位[8] delta_theta
+                    # 索引号[10] ATA: 需要根据几何关系重算
+                    # 索引位[12] AA_hor: 跟着delta_psi一起变换正负
+                    # 索引号[17] sin_theta
+                    orig_bern = bern_arr[idx, 0]  # 维持原动作
+                    orig_cat = cat_arr[idx].copy()  # 复制cat动作
+
+                    # 复制并镜像
+                    new_state = orig_state.copy()
+                    # delta_psi 取反: cos(-x)=cos(x)不变, sin(-x)=-sin(x)取反
+                    new_state[7] = -orig_state[7]  # 索引位7 sin_delta_psi 取反
+                    # AA_hor 取反（索引位12）
+                    new_state[12] = -orig_state[12]
+
+                    # cat动作镜像：第一列直接复制，第二列按规则变换
+                    # cat[:, 1]: 0和6保持不变，1-5变为6-x
+                    if orig_cat[1] > 0 and orig_cat[1] < 6:
+                        orig_cat[1] = 6 - orig_cat[1]
+
+                    expanded_states_list.append(new_state)
+                    if returns_arr is not None:
+                        expanded_returns_list.append(orig_return)
+                    expanded_cats_list.append(orig_cat)
+                    expanded_berns_list.append([orig_bern])
                 
                 if len(expanded_states_list) > 0:
                     expanded_states = np.array(expanded_states_list, dtype=np.float32)
