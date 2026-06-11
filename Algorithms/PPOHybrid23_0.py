@@ -629,9 +629,12 @@ class HybridActorWrapper(nn.Module):
                 probs = torch.sigmoid(bern_logits)
                 probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
                 target = expert_actions['bern'] # (Batch, 1)
-                # Label Smoothing
-                if label_smoothing > 0:
-                    target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+                
+                "开火头不要动作平滑"
+                # # Label Smoothing
+                # if label_smoothing > 0:
+                #     target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+
                 # === 方案2：Focal Loss (针对敏感度问题) ===
                 # alpha: 平衡因子，类似于 pos_weight 的作用，但范围是 0-1
                 # gamma: 聚焦因子，通常设为 2.0。值越大，越忽视简单背景，越关注难分类的发射瞬间

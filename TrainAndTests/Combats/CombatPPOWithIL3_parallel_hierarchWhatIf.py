@@ -378,6 +378,7 @@ def run_MLP_simulation(
             original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
         print(f"IL dataset processed. Samples: {len(original_il_transition_dict['states'] if original_il_transition_dict['states'] is not None else [])}")
         
+        "反事实数据增强"
         # === 针对开火（'fire' / 'bern'）瞬间的数据集扩增 ===
         if 'states' in original_il_transition_dict and 'actions' in original_il_transition_dict:
             states_arr = original_il_transition_dict['states']
@@ -397,7 +398,13 @@ def run_MLP_simulation(
                 expanded_cats_list = []
                 expanded_berns_list = []
                 
-                t_intervals = np.arange(0, 80/120, 0.02) # [0.0, 0.02, ..., 1.0]
+                t_intervals = np.arange(0, 80/120, 0.3)
+                # 索引位[6] cos_delta_psi：delta_psi 从 0 到 60度，步长5度
+                delta_psi_vals = np.arange(0, np.pi/3, np.radians(20))
+                cos_delta_psi_vals = np.cos(delta_psi_vals)
+                sin_delta_psi_vals = np.sin(delta_psi_vals)
+                # 索引位[8] delta_theta：从 -60度 到 60度，步长10度
+                delta_theta_vals = np.arange(-np.pi/3, np.pi/3, np.radians(20))
                 
                 for idx in fire_indices:
                     orig_state = states_arr[idx]
@@ -407,22 +414,31 @@ def run_MLP_simulation(
                     for val_t in t_intervals:
                         t_since_launch_sec = val_t * 120.0
                         
-                        # 复制并修改观测量
-                        new_state = orig_state.copy()
-                        new_state[21] = val_t # 索引位21（t_since_launch / 120）
-                        
-                        if t_since_launch_sec < 70.0:
-                            new_state[3] = 1.0  # 索引位3导弹中制导置为1
-                            new_bern = 0.0      # 动作开火置为0
-                        else:
-                            new_state[3] = 0.0  # 索引位3导弹中制导置为0
-                            new_bern = 1.0      # 动作开火置为1
-                            
-                        expanded_states_list.append(new_state)
-                        if returns_arr is not None:
-                            expanded_returns_list.append(orig_return)
-                        expanded_cats_list.append(orig_cat)
-                        expanded_berns_list.append([new_bern])
+                        for cos_dp, sin_dp in zip(cos_delta_psi_vals, sin_delta_psi_vals):
+                            for delta_theta in delta_theta_vals:
+                                # 复制并修改观测量
+                                new_state = orig_state.copy()
+                                new_state[21] = val_t # 索引位21（t_since_launch / 120）
+                                new_state[6] = cos_dp  # 索引位6 cos_delta_psi
+                                new_state[7] = sin_dp  # 索引位7 sin_delta_psi
+                                new_state[8] = delta_theta      # 索引位8 delta_theta
+                                
+                                if t_since_launch_sec < 70.0:
+                                    new_state[3] = 1.0  # 索引位3导弹中制导置为1
+                                    new_bern = 0.0      # 动作开火置为0
+                                else:
+                                    new_state[3] = 0.0  # 索引位3导弹中制导置为0
+                                    # 同时满足 delta_theta<0 且 cos_delta_psi > cos(20°) 才允许开火
+                                    if delta_theta < 0 and cos_dp > np.cos(np.radians(20)):
+                                        new_bern = 1.0
+                                    else:
+                                        new_bern = 0.0
+                                    
+                                expanded_states_list.append(new_state)
+                                if returns_arr is not None:
+                                    expanded_returns_list.append(orig_return)
+                                expanded_cats_list.append(orig_cat)
+                                expanded_berns_list.append([new_bern])
                 
                 if len(expanded_states_list) > 0:
                     expanded_states = np.array(expanded_states_list, dtype=np.float32)
@@ -633,6 +649,10 @@ def run_MLP_simulation(
             no_bern = 0, # 0
         )
         
+        # 为了临时中断marwil
+        int_agent_name = "actor_rein0"
+        torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{int_agent_name}.pt"))
+
         # 记录
         if epoch % 1 == 0:
             logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)

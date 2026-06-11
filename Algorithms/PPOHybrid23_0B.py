@@ -101,14 +101,14 @@ class PolicyNetHybrid(torch.nn.Module):
             # 初始化为 0 (即 temperature=1.0)，保持原网络特性，让网络自己学去增大熵
             # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
 
-        # [新增] 针对索引3和21的embedding层，用于bern头的旁路输入
-        # 输入维度为2（索引3和21），输出维度为bern_dim（与bern_logits维度相同）
-        bern_dim = self.action_dims.get('bern', 1)
-        self.bern_feature_embed = nn.Sequential(
-            nn.Linear(2, 16),
-            nn.ReLU(),
-            nn.Linear(16, bern_dim)
-        )
+        # # [新增] 针对索引3和21的embedding层，用于bern头的旁路输入
+        # # 输入维度为2（索引3和21），输出维度为bern_dim（与bern_logits维度相同）
+        # bern_dim = self.action_dims.get('bern', 1)
+        # self.bern_feature_embed = nn.Sequential(
+        #     nn.Linear(2, 16),
+        #     nn.ReLU(),
+        #     nn.Linear(16, bern_dim)
+        # )
 
         # 3. 伯努利动作头 (Bernoulli)
         # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
@@ -211,18 +211,18 @@ class PolicyNetHybrid(torch.nn.Module):
             #     bern_logits = self.fc_bern(shared_features)
             bern_logits = self.fc_bern(shared_features)
 
-            # [新增] 提取索引3和21的特征，通过embedding层，直接加到bern_logits输出端
-            # 确保x是2维的 (batch_size, state_dim)
-            x_2d = x if x.dim() > 1 else x.unsqueeze(0)
-            # 提取特征索引3和21
-            selected_features = x_2d[:, [3, 21]]  # shape: (batch, 2)
-            # 通过embedding层，输出维度与bern_dim相同
-            embedded_logits = self.bern_feature_embed(selected_features)  # shape: (batch, bern_dim)
-            # 确保维度匹配
-            if embedded_logits.size(0) != bern_logits.size(0):
-                embedded_logits = embedded_logits.expand(bern_logits.size(0), -1)
-            # 直接加到bern_logits上
-            bern_logits = bern_logits + embedded_logits
+            # # [新增] 提取索引3和21的特征，通过embedding层，直接加到bern_logits输出端
+            # # 确保x是2维的 (batch_size, state_dim)
+            # x_2d = x if x.dim() > 1 else x.unsqueeze(0)
+            # # 提取特征索引3和21
+            # selected_features = x_2d[:, [3, 21]]  # shape: (batch, 2)
+            # # 通过embedding层，输出维度与bern_dim相同
+            # embedded_logits = self.bern_feature_embed(selected_features)  # shape: (batch, bern_dim)
+            # # 确保维度匹配
+            # if embedded_logits.size(0) != bern_logits.size(0):
+            #     embedded_logits = embedded_logits.expand(bern_logits.size(0), -1)
+            # # 直接加到bern_logits上
+            # bern_logits = bern_logits + embedded_logits
 
             # Compute can_fire mask from flattened observation x (always applied)
             xb = x
@@ -651,9 +651,12 @@ class HybridActorWrapper(nn.Module):
                 probs = torch.sigmoid(bern_logits)
                 probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
                 target = expert_actions['bern'] # (Batch, 1)
-                # Label Smoothing
-                if label_smoothing > 0:
-                    target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+                
+                "开火头不要动作平滑"
+                # # Label Smoothing
+                # if label_smoothing > 0:
+                #     target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
+
                 # === 方案2：Focal Loss (针对敏感度问题) ===
                 # alpha: 平衡因子，类似于 pos_weight 的作用，但范围是 0-1
                 # gamma: 聚焦因子，通常设为 2.0。值越大，越忽视简单背景，越关注难分类的发射瞬间
