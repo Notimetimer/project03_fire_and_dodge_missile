@@ -378,7 +378,7 @@ def run_MLP_simulation(
             original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
         print(f"IL dataset processed. Samples: {len(original_il_transition_dict['states'] if original_il_transition_dict['states'] is not None else [])}")
         
-        "反事实数据增强"
+        "镜像数据增强"
         # === 针对开火（'fire' / 'bern'）瞬间的数据集扩增 ===
         if 'states' in original_il_transition_dict and 'actions' in original_il_transition_dict:
             states_arr = original_il_transition_dict['states']
@@ -433,6 +433,9 @@ def run_MLP_simulation(
                     new_state[7] = -orig_state[7]  # 索引位7 sin_delta_psi 取反
                     # AA_hor 取反（索引位12）
                     new_state[12] = -orig_state[12]
+                    
+                    # sin_phi取反(索引位19)
+                    new_state[19] = -orig_state[19]
 
                     # cat动作镜像：第一列直接复制，第二列按规则变换
                     # cat[:, 1]: 0和6保持不变，1-5变为6-x
