@@ -1934,7 +1934,8 @@ def run_MLP_simulation(
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
-                #====================
+                if use_sil:
+                    student_agent.ADPC_update(il_transition_buffer.read(), batch_size=512, alpha=0.01, bottom_quantile=0.2, no_bern=True)
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码

@@ -549,7 +549,7 @@ class HybridActorWrapper(nn.Module):
         # [修改] 返回 actor_outputs 以便外部访问 logits
         return log_probs, entropy, entropy_details, actor_outputs, None
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3, no_bern=False, mask_on=0):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3, no_bern=False, mask_on=0, good_samples=1):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         
@@ -580,7 +580,11 @@ class HybridActorWrapper(nn.Module):
             
             # 计算 log_prob，维度求和保持 (Batch, 1) -> squeeze 为 (Batch, )
             # Loss = - log_prob
-            cont_loss = -dist.log_prob(0, u_expert).sum(dim=-1)
+            if good_samples: # 如果传入的是好样本，减小距离
+                cont_loss = -dist.log_prob(0, u_expert).sum(dim=-1)
+            else: # 如果传入的是差样本，要么增大距离，要么别动
+                pass
+                # cont_loss = +dist.log_prob(0, u_expert).sum(dim=-1)
             total_loss_per_sample += cont_loss
 
         # --- 2. 离散/多离散动作 (Categorical) ---
@@ -2091,3 +2095,116 @@ class PPOHybrid:
         }
         
         return stirred_state_dict, entropy_info
+
+    def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0,
+                    shuffled=1, bottom_quantile=0.2, no_bern=True):
+        """
+        Adversarial Demonstration Policy Correction (ADPC) 更新。
+        仅筛选 advantage 最差的 bottom_quantile 分位数样本，
+        以 label_smoothing=0.99 构造 one-cold 反向标签，对其做反向标签交叉熵训练，
+        权重截断在 [0, 1] 防止放大。
+        """
+        if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
+            obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
+            use_obs = True
+        else:
+            use_obs = False
+
+        states_all  = torch.tensor(np.array(il_transition_dict['states']),  dtype=torch.float).to(self.device)
+        returns_all = torch.tensor(np.array(il_transition_dict['returns']),  dtype=torch.float).view(-1, 1).to(self.device)
+
+        raw_actions = il_transition_dict['actions']
+        actions_all = {}
+        if isinstance(raw_actions, list):
+            keys = raw_actions[0].keys()
+            temp_dict = {}
+            for k in keys:
+                temp_dict[k] = np.stack([d[k] for d in raw_actions], axis=0)
+            raw_actions = temp_dict
+        if isinstance(raw_actions, dict):
+            for k, v in raw_actions.items():
+                if k == 'cat':
+                    actions_all[k] = torch.tensor(v, dtype=torch.long).to(self.device)
+                else:
+                    actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
+
+        # --- 计算全量 advantage，筛选最差的 bottom_quantile 分位数 ---
+        with torch.no_grad():
+            values_all = self.critic(states_all)
+            residual_all = returns_all - values_all
+            if not hasattr(self, 'c_sq'):
+                self.c_sq = torch.tensor(1.0, device=self.device)
+            c = torch.sqrt(self.c_sq)
+            advantage_all = (residual_all / (c + 1e-8)).squeeze(-1)  # (N,)
+
+            threshold = torch.quantile(advantage_all, bottom_quantile)
+            bad_mask = advantage_all <= threshold
+            bad_indices = bad_mask.nonzero(as_tuple=False).squeeze(-1)
+
+        if bad_indices.numel() == 0:
+            return 0.0, 0.0
+
+        # 筛选后的子集
+        bad_states   = states_all[bad_indices]
+        bad_adv      = advantage_all[bad_indices]
+        bad_actions  = {k: v[bad_indices] for k, v in actions_all.items()}
+        if use_obs:
+            bad_obs = obs_all[bad_indices]
+
+        total_actor_loss  = 0.0
+        total_critic_loss = 0.0
+        batch_count = 0
+
+        sub_size = bad_indices.size(0)
+        sub_indices = np.arange(sub_size)
+        if shuffled:
+            np.random.shuffle(sub_indices)
+
+        for start in range(0, sub_size, batch_size):
+            end = min(start + batch_size, sub_size)
+            bidx = sub_indices[start:end]
+
+            s_batch   = bad_states[bidx]
+            adv_batch = bad_adv[bidx]
+
+            if use_obs:
+                actor_input_batch = bad_obs[bidx]
+            else:
+                actor_input_batch = s_batch
+
+            a_batch = {k: v[bidx] for k, v in bad_actions.items()}
+
+            with torch.no_grad():
+                # 权重 = exp(beta * advantage)，截断到 [0, 1]（不允许超过1放大）
+                raw_weights = torch.exp(beta * adv_batch).unsqueeze(-1)
+                weights = torch.clamp(raw_weights, max=1.0)
+
+            # 反向标签：label_smoothing=0.99 => 正确类别目标≈0.01，其余类别平分0.99/(n-1)
+            raw_il_loss = self.actor.compute_il_loss(
+                actor_input_batch, a_batch,
+                label_smoothing=0.99,
+                no_bern=no_bern
+            )
+            actor_loss = torch.mean(alpha * weights * raw_il_loss)
+
+            v_pred = self.critic(s_batch)
+            r_batch = returns_all[bad_indices[bidx]]
+            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
+
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            actor_loss.backward()
+            critic_loss.backward()
+            nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=self.actor_max_grad)
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            total_actor_loss  += actor_loss.item()
+            total_critic_loss += critic_loss.item()
+            batch_count += 1
+
+        avg_actor_loss  = total_actor_loss  / batch_count if batch_count > 0 else 0.0
+        avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0.0
+
+        return avg_actor_loss, avg_critic_loss
