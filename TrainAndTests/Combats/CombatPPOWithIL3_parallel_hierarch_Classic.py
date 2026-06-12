@@ -893,7 +893,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         'win': env.win,
                         'lose': env.lose,
                         'draw': env.draw,
-                        'm_fired': m_fired
+                        'm_fired': m_fired,
+                        'BVR_perish_together': BVR_perish_together
                     },
                     'opp_name': opp_name,
                     # 新增: 本回合红方（对手）开火角度参数统计 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
@@ -1872,6 +1873,8 @@ def run_MLP_simulation(
                 batch_total_return += metrics['return']
                 batch_total_dense_return += metrics['dense_return']
                 batch_total_m_fired += metrics['m_fired']
+                if metrics.get('BVR_perish_together', False):
+                    batch_bvr_perish_together_cnt += 1
 
                 # 收集蓝方开火策略指标
                 ep_blue_avg_fire_interval = res.get('ep_blue_avg_fire_interval')
@@ -2062,6 +2065,7 @@ def run_MLP_simulation(
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
             logger.add("train/2 BVR perish together", batch_bvr_perish_together_cnt / num_workers, total_steps)
+            logger.add("train/2 BVR not end", (batch_draw_cnt-batch_bvr_perish_together_cnt) / num_workers, total_steps)
             # 找最好的智能体
             logger.add("agent/ episode_step", batch_idx * num_workers, total_steps)
             logger.add("agent/ batch_step", batch_idx, total_steps)
