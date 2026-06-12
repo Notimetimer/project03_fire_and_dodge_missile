@@ -1744,8 +1744,6 @@ def run_MLP_simulation(
                 elif metrics['lose']: batch_loss_cnt += 1
                 else: 
                     batch_draw_cnt += 1
-                    if metrics.get('BVR_perish_together', False):
-                        batch_bvr_perish_together_cnt += 1
                 
                 # 3.1 聚合 PPO 数据到全局 Buffer
                 for k in transition_dict:
