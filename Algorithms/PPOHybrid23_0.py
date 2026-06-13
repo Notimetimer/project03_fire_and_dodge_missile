@@ -2097,10 +2097,10 @@ class PPOHybrid:
         return stirred_state_dict, entropy_info
 
     def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0,
-                    shuffled=1, bottom_quantile=0.2, no_bern=True):
+                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1):
         """
         Adversarial Demonstration Policy Correction (ADPC) 更新。
-        仅筛选 advantage 最差的 bottom_quantile 分位数样本，
+        仅筛选 advantage 最好或者最差的 分位数样本，
         以 label_smoothing=0.99 构造 one-cold 反向标签，对其做反向标签交叉熵训练，
         权重截断在 [0, 1] 防止放大。
         """
@@ -2128,7 +2128,7 @@ class PPOHybrid:
                 else:
                     actions_all[k] = torch.tensor(v, dtype=torch.float).to(self.device)
 
-        # --- 计算全量 advantage，筛选最差的 bottom_quantile 分位数 ---
+        # --- 计算全量 advantage，筛选 最好或最差的 分位数 ---
         with torch.no_grad():
             values_all = self.critic(states_all)
             residual_all = returns_all - values_all
@@ -2137,9 +2137,15 @@ class PPOHybrid:
             c = torch.sqrt(self.c_sq)
             advantage_all = (residual_all / (c + 1e-8)).squeeze(-1)  # (N,)
 
-            threshold = torch.quantile(advantage_all, bottom_quantile)
-            bad_mask = advantage_all <= threshold
-            bad_indices = bad_mask.nonzero(as_tuple=False).squeeze(-1)
+            if dark_side:
+                # 取最差的 chosen_quantile 样本
+                threshold = torch.quantile(advantage_all, chosen_quantile)
+                selected_mask = advantage_all <= threshold
+            else:
+                # 取最好的 chosen_quantile 样本
+                threshold = torch.quantile(advantage_all, 1.0 - chosen_quantile)
+                selected_mask = advantage_all >= threshold
+            bad_indices = selected_mask.nonzero(as_tuple=False).squeeze(-1)
 
         if bad_indices.numel() == 0:
             return 0.0, 0.0
@@ -2179,26 +2185,33 @@ class PPOHybrid:
                 raw_weights = torch.exp(beta * adv_batch).unsqueeze(-1)
                 weights = torch.clamp(raw_weights, max=1.0)
 
-            # 反向标签：label_smoothing=0.99 => 正确类别目标≈0.01，其余类别平分0.99/(n-1)
+            # dark_side=1: 反向标签(0.99) + good_samples=0
+            # dark_side=0: 正向模仿(0.01) + good_samples=1
+            ls = 0.99 if dark_side else 0.01
+            gs = 0 if dark_side else 1
             raw_il_loss = self.actor.compute_il_loss(
                 actor_input_batch, a_batch,
-                label_smoothing=0.99,
-                no_bern=no_bern
+                label_smoothing=ls,
+                no_bern=no_bern,
+                good_samples=gs
             )
-            actor_loss = torch.mean(alpha * weights * raw_il_loss)
-
+            
             v_pred = self.critic(s_batch)
             r_batch = returns_all[bad_indices[bidx]]
+
+            actor_loss = torch.mean(alpha * weights * raw_il_loss)
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=self.actor_max_grad)
+            self.actor_optimizer.step()
+            
             critic_loss = F.mse_loss(v_pred, r_batch) * c_v
 
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            actor_loss.backward()
-            critic_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-            self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            if not actor_only:
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+                self.critic_optimizer.step()
 
             total_actor_loss  += actor_loss.item()
             total_critic_loss += critic_loss.item()

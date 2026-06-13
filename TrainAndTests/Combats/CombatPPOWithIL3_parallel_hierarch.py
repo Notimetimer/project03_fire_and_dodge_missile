@@ -919,7 +919,7 @@ def run_MLP_simulation(
     k_entropy=None,
     alpha_il=1.0,
     il_batch_size=128,
-    il_batch_size2=1e4,
+    il_batch_size2=None,
     il_buffer_max_size=2e4,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
@@ -1933,7 +1933,7 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
                 if use_sil:
-                    student_agent.ADPC_update(il_transition_buffer.read(), batch_size=512, alpha=0.01, bottom_quantile=0.2, no_bern=True)
+                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=512, alpha=0.02, chosen_quantile=0.2, no_bern=True)
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
