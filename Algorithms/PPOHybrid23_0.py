@@ -2147,11 +2147,11 @@ class PPOHybrid:
 
             if dark_side:
                 # 取最差的 chosen_quantile 样本，且归一化优势度 < 0
-                threshold = torch.quantile(advantage_all, chosen_quantile)
+                threshold = torch.quantile(advantage_all, chosen_quantile) # 从低到高排位
                 selected_mask = (advantage_all <= threshold) & (advantage_all < 0)
             else:
                 # 取最好的 chosen_quantile 样本，且归一化优势度 > 0
-                threshold = torch.quantile(advantage_all, 1.0 - chosen_quantile)
+                threshold = torch.quantile(advantage_all, 1.0 - chosen_quantile) # 从低到高排位
                 selected_mask = (advantage_all >= threshold) & (advantage_all > 0)
             bad_indices = selected_mask.nonzero(as_tuple=False).squeeze(-1)
 

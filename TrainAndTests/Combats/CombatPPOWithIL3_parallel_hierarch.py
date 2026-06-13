@@ -961,6 +961,8 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
+    chosen_quantile = 0.2, 
+    DARK_SIDE = 1,  # sil默认找最差
     p_factor = None, # 无效接口
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
@@ -1952,7 +1954,7 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
                 if use_sil:
-                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=512, alpha=0.05, chosen_quantile=0.2, no_bern=True)
+                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=512, alpha=0.05, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码

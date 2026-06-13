@@ -6,14 +6,14 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL'
+mission_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_正向SILDPC'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -126,8 +126,8 @@ if __name__=='__main__':
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 1,
-        chosen_quantile = 0.2, #  
-        DARK_SIDE = 1, # 自模仿差动作
+        chosen_quantile = 1.0, #  
+        DARK_SIDE = 0, # 自模仿好动作
         p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = 0.5,
