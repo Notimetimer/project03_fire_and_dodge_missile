@@ -264,6 +264,20 @@ class IL_transition_buffer:
         for k in self.addon_dict:
             self.addon_dict[k] = []
         print("[IL_transition_buffer] Buffer cleared.")
+
+    def save(self, path):
+        """直接序列化整个 buffer 实例"""
+        torch.save(self, path)
+        print(f"[IL_transition_buffer] Saved to {path}. Size: {len(self.addon_dict['states'])}")
+
+    @staticmethod # 静态方法调用,不需要实例化
+    def load(path):
+        """从磁盘加载 buffer 实例"""
+        if not os.path.exists(path):
+            return None
+        buffer = torch.load(path, map_location='cpu')
+        print(f"[IL_transition_buffer] Loaded from {path}. Size: {len(buffer.addon_dict['states'])}")
+        return buffer
         
 
 
@@ -1248,8 +1262,13 @@ def run_MLP_simulation(
     il_transition_buffer = None
     if IL_epoches + use_sil > 0:  # 只要出现模仿学习就得准备好初始的模仿池
         print("Initializing IL Transition Buffer...")
-        original_data_input = original_il_transition_dict0 if use_init_data else None
-        il_transition_buffer = IL_transition_buffer(original_data_input, max_size=il_buffer_max_size)
+        il_buffer_path = os.path.join(log_dir, "il_buffer.pt")
+        if os.path.exists(il_buffer_path):
+            # 中断续训时优先加载已保存的 buffer
+            il_transition_buffer = IL_transition_buffer.load(il_buffer_path)
+        else:
+            original_data_input = original_il_transition_dict0 if use_init_data else None
+            il_transition_buffer = IL_transition_buffer(original_data_input, max_size=il_buffer_max_size)
 
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -1933,7 +1952,7 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
                 if use_sil:
-                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=512, alpha=0.02, chosen_quantile=0.2, no_bern=True)
+                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=512, alpha=0.05, chosen_quantile=0.2, no_bern=True)
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
@@ -2162,6 +2181,8 @@ def run_MLP_simulation(
                     'actor_optimizer': student_agent.actor_optimizer.state_dict(),
                     'critic_optimizer': student_agent.critic_optimizer.state_dict(),
                 }, os.path.join(log_dir, "optimizers_state.pt"))
+                if il_transition_buffer is not None:
+                    il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx

@@ -2136,15 +2136,17 @@ class PPOHybrid:
                 self.c_sq = torch.tensor(1.0, device=self.device)
             c = torch.sqrt(self.c_sq)
             advantage_all = (residual_all / (c + 1e-8)).squeeze(-1)  # (N,)
+            # 优势函数归一化（标准化）
+            advantage_all = (advantage_all - advantage_all.mean()) / (advantage_all.std() + 1e-8)
 
             if dark_side:
-                # 取最差的 chosen_quantile 样本
+                # 取最差的 chosen_quantile 样本，且归一化优势度 < 0
                 threshold = torch.quantile(advantage_all, chosen_quantile)
-                selected_mask = advantage_all <= threshold
+                selected_mask = (advantage_all <= threshold) & (advantage_all < 0)
             else:
-                # 取最好的 chosen_quantile 样本
+                # 取最好的 chosen_quantile 样本，且归一化优势度 > 0
                 threshold = torch.quantile(advantage_all, 1.0 - chosen_quantile)
-                selected_mask = advantage_all >= threshold
+                selected_mask = (advantage_all >= threshold) & (advantage_all > 0)
             bad_indices = selected_mask.nonzero(as_tuple=False).squeeze(-1)
 
         if bad_indices.numel() == 0:
