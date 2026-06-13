@@ -643,10 +643,16 @@ class HybridActorWrapper(nn.Module):
                 target = torch.clamp(target, min_target, max_target)
 
                 # 交叉熵公式
-                loss_pos = - torch.log(probs) * target
-                loss_neg = - torch.log(1.0 - probs) * (1.0 - target)
-                
-                bce_loss = loss_pos + loss_neg
+                # 正向模仿学习，增加样本中的动作概率
+                if good_samples:
+                    loss_pos = - torch.log(probs) * target
+                    loss_neg = - torch.log(1.0 - probs) * (1.0 - target)
+                    bce_loss = loss_pos + loss_neg
+                # 负向模仿学习 / 互补标签学习，减少样本中的动作概率
+                else:
+                    loss_pos = - torch.log(probs) * (1.0 - target)
+                    loss_neg = - torch.log(1.0 - probs) * target
+                    bce_loss = loss_pos + loss_neg
                 
                 total_loss_per_sample += bce_loss.sum(dim=-1)
         
