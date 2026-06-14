@@ -6,14 +6,14 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL'
+mission_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL拉高倍率'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -26,7 +26,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
-alpha_il = 0.0  # 设置为0就是纯强化学习
+alpha_il = 0.5 # 0.05  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
