@@ -233,10 +233,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             shoot = 0 # 死后不再记录任何幻影开火
             wasted = 0
 
-
+        # 被锁定惩罚
         if locked_by_target:
             r_constraint -= 2
 
+        # 锁定敌机奖励
         if target_locked:
             r_constraint += 2
 
