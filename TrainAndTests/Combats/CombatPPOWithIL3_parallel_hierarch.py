@@ -1946,7 +1946,7 @@ def run_MLP_simulation(
                 else:
                     freeze_actor = 0
                 # # critic先收敛
-                # if total_steps < 50e3:
+                # if total_steps < 5e3:
                 #     freeze_actor = 1
                 
                 max_fire_logits = 4.0
