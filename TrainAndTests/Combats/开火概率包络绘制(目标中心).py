@@ -222,7 +222,7 @@ def main():
 
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
     
-    'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项_旧版奖励函数'
+    'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
     
     logs_root_dir = os.path.join(project_root, "logs/combat")
     latest_log_dir = os.path.join(logs_root_dir, dir_name) if dir_name else \

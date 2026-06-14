@@ -236,8 +236,9 @@ def main():
     # 查找并加载训练好的模型
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    # dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask-run-20260531-233800"
-    experiment_name = '预训练评估WhatIf'
+    dir_name = "PFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260609-164656"
+    experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+    # experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
     
@@ -318,7 +319,7 @@ def main():
     fig1, ax1 = plot_firing_probability_heatmap_polar(
         delta_psis=delta_psis, 
         distances=distances, 
-        probabilities=probabilities
+        probabilities=1-np.power(1-probabilities, 5)
     )
     plt.savefig('firing_probability_polar.png', dpi=300, bbox_inches='tight')
     plt.show()
