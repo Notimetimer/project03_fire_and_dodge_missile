@@ -549,7 +549,7 @@ class HybridActorWrapper(nn.Module):
         # [修改] 返回 actor_outputs 以便外部访问 logits
         return log_probs, entropy, entropy_details, actor_outputs, None
     
-    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3, no_bern=False, mask_on=0, good_samples=1):
+    def compute_il_loss(self, states, expert_actions, label_smoothing=0.3, no_bern=False, mask_on=0, good_samples=1, pre_training=1):
         """
         计算模仿学习 Loss (MARWIL / BC)。
         
@@ -600,21 +600,7 @@ class HybridActorWrapper(nn.Module):
             for i, probs in enumerate(cat_logits_list):
                 # probs: (Batch, N_Class)
                 expert_idx = expert_cat[:, i] # (Batch, )
-                
-                log_probs = torch.log(probs + 1e-10)
-                
-                if label_smoothing > 0:
-                    # Label Smoothing 逻辑
-                    n_classes = probs.size(1)
-                    one_hot = torch.zeros_like(probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
-                    smooth_target = one_hot * (1.0 - label_smoothing) + (1.0 - one_hot) * (label_smoothing / (n_classes - 1 + 1e-8))
-                    # CrossEntropy: - sum(target * log_p)
-                    ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
-                else:
-                    # 标准 CE: - log_p[target]
-                    # gather 需要 index 维度为 (Batch, 1)
-                    ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
-                    '''
+                '''
                     log_probs.gather()
                     从所有动作的概率分布 log_probs 中，精准地抽取出“实际执行了的那个动作” expert_idx 对应的概率值。
                     - 1 (第一个参数)：表示在第 1 维（列维度）进行选取。
@@ -622,8 +608,29 @@ class HybridActorWrapper(nn.Module):
                      这是因为 gather 要求索引的维度必须和原张量一致。
                     - .squeeze(1)：取完值后，形状还是(Batch, 1)用 squeeze 把那个多余的维度删掉，
                     变成平铺的 (Batch,)，方便后续算 Loss。
-                    '''
-                
+                '''
+                if pre_training:
+                    "预训练使用钉子分布和正向信号"
+                    log_probs = torch.log(probs + 1e-10)
+                    # Label Smoothing 逻辑
+                    n_classes = probs.size(1)
+                    one_hot = torch.zeros_like(probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
+                    smooth_target = one_hot * (1.0 - label_smoothing) + (1.0 - one_hot) * (label_smoothing / (n_classes - 1 + 1e-8))
+                    # CrossEntropy: - sum(target * log_p)
+                    ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
+                else:
+                    "混合在线训练不再使用钉子分布，仅对采样动作对应的动作头操作"
+                    # 设定平滑目标 t
+                    # label_smoothing = 0.01 -> t = 0.99 (正向监督，拉升该动作概率)
+                    # label_smoothing = 0.99 -> t = 0.01 (负向监督，压低该动作概率)
+                    # 从经过 Softmax 的 probs 中，精准提取实际执行动作的概率 x
+                    # 注意：这里是对 probs 进行 gather，而不是 log_probs
+                    act_probs = probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
+                    # 数值稳定性保护，严防 log(0) 导致 NaN
+                    act_probs = torch.clamp(act_probs, min=1e-8, max=1.0 - 1e-8)
+                    # 完美的统一损失函数形式： g(x) = -t*ln(x) - (1-t)*ln(1-x)
+                    ce_loss = -(1.0 - label_smoothing) * torch.log(act_probs) - (label_smoothing) * torch.log(1.0 - act_probs)
+                    
                 total_loss_per_sample += ce_loss
 
         # --- 3. 伯努利动作 (Bernoulli) ---
@@ -1898,7 +1905,14 @@ class PPOHybrid:
                 total_adv_mean += adv.mean().item()
 
             # B. Actor Loss
-            raw_il_loss = self.actor.compute_il_loss(actor_input_batch, actions_batch, label_smoothing, no_bern=no_bern)
+            raw_il_loss = self.actor.compute_il_loss(
+                actor_input_batch,
+                actions_batch,
+                label_smoothing,
+                no_bern=no_bern,
+                good_samples=1,
+                pre_training=1,
+            )
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
 
             # C. Critic Loss
@@ -2198,10 +2212,12 @@ class PPOHybrid:
             ls = 0.99 if dark_side else 0.01
             gs = 0 if dark_side else 1
             raw_il_loss = self.actor.compute_il_loss(
-                actor_input_batch, a_batch,
+                actor_input_batch,
+                a_batch,
                 label_smoothing=ls,
                 no_bern=no_bern,
-                good_samples=gs
+                good_samples=gs,
+                pre_training=0,
             )
             
             v_pred = self.critic(s_batch)
