@@ -2217,7 +2217,7 @@ class PPOHybrid:
                 label_smoothing=ls,
                 no_bern=no_bern,
                 good_samples=gs,
-                pre_training=0,
+                pre_training=1, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
             )
             
             v_pred = self.critic(s_batch)
