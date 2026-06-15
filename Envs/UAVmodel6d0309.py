@@ -365,7 +365,7 @@ class UAVModel(object):
         # self.y = alt * 0.3048 # 高度转米
         # self.z = (lon - start_lon) * 111320 # 纬度差转米（近似）
         v = self.sim["velocities/vt-fps"] * 0.3048  # ego_vc (unit: m/s)
-        self.acceleration = (v-self.speed)/(dt+1e-8) # 差分计算切向加速度
+        self.acceleration = (v - self.speed) / (self.dt + 1e-8) if self.speed is not None else 0.0
         self.speed = v
 
         # 取姿态角度
