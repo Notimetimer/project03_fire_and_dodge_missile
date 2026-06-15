@@ -2167,23 +2167,23 @@ class PPOHybrid:
                 # 取最好的 chosen_quantile 样本，且归一化优势度 > 0
                 threshold = torch.quantile(advantage_all, 1.0 - chosen_quantile) # 从低到高排位
                 selected_mask = (advantage_all >= threshold) & (advantage_all > 0)
-            bad_indices = selected_mask.nonzero(as_tuple=False).squeeze(-1)
+            chosen_indices = selected_mask.nonzero(as_tuple=False).squeeze(-1)
 
-        if bad_indices.numel() == 0:
+        if chosen_indices.numel() == 0:
             return 0.0, 0.0
 
         # 筛选后的子集
-        bad_states   = states_all[bad_indices]
-        bad_adv      = advantage_all[bad_indices]
-        bad_actions  = {k: v[bad_indices] for k, v in actions_all.items()}
+        bad_states   = states_all[chosen_indices]
+        bad_adv      = advantage_all[chosen_indices]
+        bad_actions  = {k: v[chosen_indices] for k, v in actions_all.items()}
         if use_obs:
-            bad_obs = obs_all[bad_indices]
+            bad_obs = obs_all[chosen_indices]
 
         total_actor_loss  = 0.0
         total_critic_loss = 0.0
         batch_count = 0
 
-        sub_size = bad_indices.size(0)
+        sub_size = chosen_indices.size(0)
         sub_indices = np.arange(sub_size)
         if shuffled:
             np.random.shuffle(sub_indices)
@@ -2219,11 +2219,11 @@ class PPOHybrid:
                 label_smoothing=ls,
                 no_bern=no_bern,
                 good_samples=gs,
-                pre_training=1, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
+                pre_training=0, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
             )
             
             v_pred = self.critic(s_batch)
-            r_batch = returns_all[bad_indices[bidx]]
+            r_batch = returns_all[chosen_indices[bidx]]
 
             actor_loss = torch.mean(alpha * weights * raw_il_loss)
             self.actor_optimizer.zero_grad()
