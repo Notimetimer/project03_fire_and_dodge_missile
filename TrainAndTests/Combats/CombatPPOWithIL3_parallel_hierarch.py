@@ -854,7 +854,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     ep_blue_avg_fire_AA_hor = None
                 
                 if len(episode_blue_fire_alts) > 0:
-                    ep_blue_avg_fire_altitude = float(np.mean(episode_blue_fire_alts))
+                    ep_blue_avg_fire_altitude = float(max(episode_blue_fire_alts)) # 不再记录平均开火高度，改为记录最大开火高度
                 else:
                     ep_blue_avg_fire_altitude = None
 
