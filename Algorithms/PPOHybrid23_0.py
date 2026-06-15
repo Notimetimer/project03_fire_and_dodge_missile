@@ -2152,8 +2152,8 @@ class PPOHybrid:
         with torch.no_grad():
             values_all = self.critic(states_all)
             residual_all = returns_all - values_all
-            if not hasattr(self, 'c_sq'):
-                self.c_sq = torch.tensor(1.0, device=self.device)
+            # if not hasattr(self, 'c_sq'):
+            self.c_sq = torch.tensor(1.0, device=self.device)
             c = torch.sqrt(self.c_sq)
             advantage_all = (residual_all / (c + 1e-8)).squeeze(-1)  # (N,)
             # 优势函数归一化（标准化）
@@ -2203,8 +2203,10 @@ class PPOHybrid:
             a_batch = {k: v[bidx] for k, v in bad_actions.items()}
 
             with torch.no_grad():
-                # 权重 = exp(beta * advantage)，截断到 [0, 1]（不允许超过1放大）
-                raw_weights = torch.exp(beta * adv_batch).unsqueeze(-1)
+                # 权重 = advantage^2，与 beta 无关，恒非负，截断到 [0, 1]（不允许超过1放大）
+                # 非负权重确保：好/差样本的交叉熵误差恒为正向梯度，
+                # 避免负权重与互补交叉熵负负得正形成"接近差动作"的错误更新方向
+                raw_weights = torch.pow(adv_batch, 2).unsqueeze(-1)
                 weights = torch.clamp(raw_weights, max=1.0)
 
             # dark_side=1: 反向标签(0.99) + good_samples=0
