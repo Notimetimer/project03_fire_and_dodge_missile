@@ -1,24 +1,10 @@
-# from abc import ABC
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
 import numpy as np
 from math import *
-# from typing import Literal
-# import matplotlib.pyplot as plt
-# from abc import ABC, abstractmethod
 import sys
 import os
-# import matplotlib
-# matplotlib.use('Qt5Agg')
-# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# import socket
-# import threading
 import time
 import jsbsim
-# import matplotlib.pyplot as plt
 import numpy as np
-# from simple_pid import PID
 from numpy.linalg import norm
 
 
@@ -35,14 +21,17 @@ class PositionPID(object):
         self._pre_error = 0  # t-1 时刻误差值
         self._integral = 0  # 误差积分值
 
-    def calculate(self, error, dt):
+    def calculate(self, error, dt, d_error=None, i_error=None):
         """
         计算t时刻PID输出值cur_val
         """
         # 比例项
         p_out = self.k_p * error
         # 积分项
-        self._integral += (error * dt)
+        if i_error is None: # 不可直接获取，再做积分
+            self._integral += (error * dt)
+        else:
+            self._integral = i_error
 
         # 仿照simple_pid，将积分项整项预先限幅
         self._integral = np.clip(self._integral, self._min/self.k_i, self._max/self.k_i) \
@@ -50,7 +39,10 @@ class PositionPID(object):
         
         i_out = self.k_i * self._integral
         # 微分项
-        derivative = (error - self._pre_error) / dt
+        if d_error is None: # 不可直接获取，再做差分
+            derivative = (error - self._pre_error) / dt
+        else:
+            derivative = d_error
         d_out = self.k_d * derivative
         # t 时刻pid输出
         output = p_out + i_out + d_out
@@ -90,14 +82,14 @@ def active_rotation(vector,heading,theta,gamma):
     return vector@Rgamma.T@Rtheta.T@Rpsi.T
 
 
-def sub_of_radian(input1, input2):
+def sub_of_radian(input1, input2=0):
     # 计算两个弧度的差值，范围为[-pi, pi]
     diff = input1 - input2
     diff = (diff + pi) % (2 * pi) - pi
     return diff
 
 
-def sub_of_degree(input1, input2):
+def sub_of_degree(input1, input2=0):
     # 计算两个角度的差值，范围为[-180, 180]
     diff = input1 - input2
     diff = (diff + 180) % 360 - 180
@@ -117,9 +109,9 @@ class F15PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=16 / pi, i=0 / pi, d=0 / pi)  # 16, 0.3, 8
+        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=2 / pi)  # 10 / pi, i=0 / pi, d=0.5 / pi
         self.r_pid = None
-        self.t_pid = PositionPID(max=1, min=-1, p=1, i=0.3, d=0.2)
+        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -134,7 +126,7 @@ class F15PIDController:
         error_h = np.clip(target_height_devided - current_height_devided, -1, 1)
 
         if error_h >= 0:
-            kh = pi / 3
+            kh = pi / 2 # pi / 3
         else:
             kh = pi / 2 # + pi/8
 
@@ -151,16 +143,30 @@ class F15PIDController:
         theta = state_input[3]
         alpha = state_input[6] * 180 / pi
         q = state_input[9]
-        # # 迎角限制器
-        if -8 < alpha < 13:
-            k_alpha_air = 0.03
-        else:
-            k_alpha_air = 0.4
 
-        if theta * 180 / pi < -70:
+        if len(state_input)>14:
+            Ny = state_input[14]
+        else:
+            Ny = 0
+
+        k_alpha_air = 0
+        # # 迎角限制器 -8~13
+        if alpha<=-1.2:
+            k_alpha_air = 0.5
+        elif alpha>17:
+            k_alpha_air = 0.3 # 0.2
+        else:
+            if alpha>=0:
+                k_alpha_air = 0.01
+            else:
+                k_alpha_air = 0.01
+        if theta * 180 / pi < -70: # 大俯仰机动时降低迎角干预
             k_alpha_air = 0
 
+        # # 改成级联的指数滑动平均 (EMA) 形式，确保始终保持限制且系数归一化
+        # 迎角限制
         norm_act[1] = (1 - k_alpha_air) * norm_act[1] + k_alpha_air * (alpha / 20)
+        
         norm_act[1] = np.clip(norm_act[1], -1, 1)
 
         return norm_act
@@ -186,35 +192,63 @@ class F15PIDController:
         # abs_psi = state_input[15]
 
         # 油门控制
+        # t_pid.setpoint = v_req
+        # throttle = 0.5 + 0.5 * t_pid(v, dt)
+
         v_error = v_req-v
-        throttle = 1.0 + 1.0 * t_pid.calculate(v_error, dt)
+        throttle = t_pid.calculate(v_error, dt)
 
         # # 方向舵控制
         # rudder=0 # abaaba
-        rudder = -beta_air / (5 * pi / 180) * 0.1
+        rudder = 0 # -beta_air / (5 * pi / 180)
+        # rudder = -beta_air / (5 * pi / 180) * 0.5 - r * 0.9
 
         # 升降舵控制
-        L_ = 1 * np.array(
-            [np.cos(theta_req) * np.cos(delta_heading_req), np.sin(theta_req),
-             np.cos(theta_req) * np.sin(delta_heading_req)])
-        v_ = 1 * np.array(
-            [np.cos(climb_rad) * np.cos(delta_course_rad), np.sin(climb_rad),
-             np.cos(climb_rad) * np.sin(delta_course_rad)])
-        x_b_ = 1 * np.array(
-            [np.cos(theta) * np.cos(0), np.sin(theta), np.cos(theta) * np.sin(0)])
+        L_ = np.array([
+            np.cos(theta_req)*np.cos(delta_heading_req),
+            np.sin(theta_req),
+            np.cos(theta_req)*np.sin(delta_heading_req)
+            ])
+        L_ /= (norm(L_)+1e-8)
+        v_ = 1 * np.array([
+            np.cos(climb_rad) * np.cos(delta_course_rad), 
+            np.sin(climb_rad),
+            np.cos(climb_rad) * np.sin(delta_course_rad)
+            ])
+        x_b_ = 1 * np.array([
+            np.cos(theta) * np.cos(0), 
+            np.sin(theta), 
+            np.cos(theta) * np.sin(0)
+            ])
+
+        ny_actual = state_input[14]   # 需你把法向过载塞进状态
 
         # 将期望航向投影到体轴xy平面上，后根据与体轴x夹角设定升降舵量的大小
         # 体轴系的两个基当做向量转到“转过一个航向角的惯性系”
         y_b_ = active_rotation(np.array([0, 1, 0]), 0, theta, phi)
         z_b_ = active_rotation(np.array([0, 0, 1]), 0, theta, phi)
-        L_xy_b_ = L_ - np.dot(L_, z_b_) * z_b_ / norm(z_b_)
-        x_b_2L_xy_b_ = np.cross(x_b_, L_xy_b_) / norm(L_xy_b_)
-        x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, z_b_)
-        x_b_2L_xy_b_cos = np.dot(x_b_, L_xy_b_) / norm(L_xy_b_)
-        delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
+
+        AO_control = np.arccos(np.dot(L_, x_b_))
+        L_on_yz_ = L_- np.dot(L_, x_b_) * x_b_ / (norm(x_b_)+1e-8)
+        delta_z_angle = AO_control * (
+            np.dot(L_on_yz_, y_b_) / (norm(L_on_yz_)+1e-8)
+        )
+
+        # 根据当前过载缩放delta_z_angle
+        if ny_actual > 0:
+            delta_z_angle *= (1-ny_actual / 9.5) * 1.5 # 过载限制
+        else:
+            delta_z_angle *= (1+ny_actual / 2.5)
+
+
+        # L_xy_b_ = L_ - np.dot(L_, z_b_) * z_b_ / (norm(z_b_)+1e-8)
+        # x_b_2L_xy_b_ = np.cross(x_b_, L_xy_b_) / (norm(L_xy_b_)+1e-8)
+        # x_b_2L_xy_b_sin = np.dot(x_b_2L_xy_b_, z_b_)
+        # x_b_2L_xy_b_cos = np.dot(x_b_, L_xy_b_) / (norm(L_xy_b_)+1e-8)
+        # delta_z_angle = np.arctan2(x_b_2L_xy_b_sin, x_b_2L_xy_b_cos)
 
         # 重写的位置式pid
-        elevator = -e_pid.calculate(delta_z_angle, dt=dt)
+        elevator = -e_pid.calculate(delta_z_angle, dt=dt, d_error=-q)
         elevator = np.clip(elevator, -1, 1)
 
         # 特例：大坡度时不允许推杆
@@ -223,58 +257,34 @@ class F15PIDController:
 
         # 副翼战术机动控制
         # combat flight
-        L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / norm(x_b_)
-        y_b_2L_yz_b_ = np.cross(y_b_, L_yz_b_) / norm(L_yz_b_)
+        L_yz_b_ = L_ - np.dot(L_, x_b_) * x_b_ / (norm(x_b_)+1e-8)
+        y_b_2L_yz_b_ = np.cross(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
         y_b_2L_yz_b_sin = np.dot(y_b_2L_yz_b_, x_b_)
-        y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / norm(L_yz_b_)
+        y_b_2L_yz_b_cos = np.dot(y_b_, L_yz_b_) / (norm(L_yz_b_)+1e-8)
         delta_x_angle = np.arctan2(y_b_2L_yz_b_sin, y_b_2L_yz_b_cos)
-
-        # 特例：压机头能够得着的，就不翻转机身
-        if abs(delta_x_angle) > 5 / 6 * pi and -pi / 6 < delta_z_angle < 0 and abs(theta) < 80 * pi / 180:
-            delta_x_angle = sub_of_radian(delta_x_angle + pi, 0)
-            # print('push')
-        # else:
-        # print('pull')
 
         # 通用
         roll_error = delta_x_angle
-        aileron = roll_error / pi * 3 - p / pi * 1 # 1
-        # aileron = roll_error/pi*3 - p/pi * 2
-
-        # # debug
-        # if alpha_air*180/pi<-5:
-        #     print('strange')
-        #     print('delta_x_angle', delta_x_angle * 180 / pi)
-        #     aileron = (roll_error / pi * 6 - p / pi * 8) / 4
-        #     if 0.9 < abs(delta_x_angle / (pi / 2)) < 1.1:
-        #         elevator = 0
+        aileron = roll_error / pi * 2 - p / pi * 2 # 1
 
         # steady filght
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
-        steady_switch_angle = 15  # 20 15 30
+        steady_switch_angle = 20  # 20 15 30
 
-        self.check_switch1 = acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi
+        self.check_switch1 = acos(np.dot(L_, v_) / (norm(L_) * norm(v_) + 1e-8)) * 180 / pi
         self.check_switch2 = abs(theta_req)*180/pi
 
-        if acos(np.dot(L_, v_) / norm(L_) / norm(v_)) * 180 / pi < steady_switch_angle and \
+        if acos(np.dot(L_, v_) / (norm(L_)*norm(v_)+1e-8)) * 180 / pi < steady_switch_angle and \
                 abs(theta_req) < 60 * pi / 180:
             k_steady_yaw = 3 / steady_switch_angle
-            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3)
+            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3) #   /2 #debug
             roll_error = phi_req - phi
             # aileron = (roll_error / pi * 6 - p / pi * 3) / 2
-            aileron = (roll_error / pi * 6 - p / pi * 3) / 2
+            aileron = (roll_error / pi * 6 /2 - p / pi * 3) / 2
 
             self.type = 0  # steady
         else:
             self.type = 1  # fast
-
-        # print(self.check_switch1)
-        # print(self.check_switch2)
-        # input("Press any key to continue...")
-        
-        # if alpha_air*180/pi<-5:
-        #     print('?')
-        #     pass
 
         aileron = np.clip(aileron, -1, 1)
         norm_act = np.array([aileron, elevator, rudder, throttle])
@@ -291,7 +301,8 @@ if __name__ == '__main__':
         print('please prepare tacview')
         # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from Visualize.tacview_visualize import Tacview
-
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
         tacview = Tacview()
 
     # 记录轨迹和状态数据
@@ -328,7 +339,7 @@ if __name__ == '__main__':
     # target_theta = 1 # 测试姿态控制
     target_height = 10e3  # m # 测试飞行控制器
     target_heading = 20  # 度 to rad
-    target_speed = 340 * 2  # m/s
+    target_speed = 340 * 3  # m/s
     t_last = 60 * 5
 
     # 设置初始状态（单位：英尺、节、角度）
@@ -368,7 +379,7 @@ if __name__ == '__main__':
 
         # target_heading = np.random.rand()*10
 
-        # # ### 逗猫
+        # # 舞狮
         # if current_t < 15:
         #     target_height = 5000  # m
         #     target_heading = 90  # 度 to rad
@@ -419,7 +430,7 @@ if __name__ == '__main__':
         course_angle = atan2(ve, vn) * 180 / pi  # 航迹角 地面航向（度）速度矢量在地面投影与北方向的夹角
 
         # 构建观测向量
-        obs_jsbsim = np.zeros(14)
+        obs_jsbsim = np.zeros(15)
         # obs_jsbsim[0] = target_theta * pi / 180  # 期望俯仰角 # 测试姿态控制器
         obs_jsbsim[0] = target_height / 5000  # 期望高度 # 测试飞行控制器
         obs_jsbsim[1] = delta_heading * pi / 180  # 期望相对航向角
@@ -435,7 +446,7 @@ if __name__ == '__main__':
         obs_jsbsim[11] = gamma_angle * pi / 180  # 爬升角
         obs_jsbsim[12] = sub_of_degree(target_heading, course_angle) * pi / 180  # 相对航迹角
         obs_jsbsim[13] = sim["position/h-sl-ft"] * 0.3048 / 5000  # 高度/5000（英尺转米）
-        # obs_jsbsim[14] = target_heading * pi / 180  # test
+        obs_jsbsim[14] = ny_g
         # obs_jsbsim[15] = psi * pi / 180  # test
 
         # 输出姿态控制指令
@@ -452,8 +463,8 @@ if __name__ == '__main__':
             throttle_cmd_ = norm_act  # .tolist()  # 设置控制量
         
         # 明确设置两个引擎的初始油门
-        sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd_  # 2
-        sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd_  # 2
+        sim["fcs/throttle-cmd-norm[0]"] = 2 # throttle_cmd_
+        sim["fcs/throttle-cmd-norm[1]"] = 2 # throttle_cmd_
 
         # # 记录控制量
         aileron_cmd.append(sim["fcs/aileron-cmd-norm"])
@@ -492,9 +503,16 @@ if __name__ == '__main__':
             send_t = f"{current_time:.2f}"
             name_R = '001'
             loc_r = [float(lon), float(lat), float(alt)]
-            # data_to_send = f"#{send_t:.2f}\n{name_R},T={loc_r[0]:.6f}|{loc_r[1]:.6f}|{loc_r[2]:.6f},Name=F15,Color=Red\n"
+            # 画飞机
             data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F15,Color=Red\n" % (
                 float(send_t), name_R, loc_r[0], loc_r[1], loc_r[2], phi, theta, psi)
+            # # 画绣球
+            # data_to_send += (
+            #                 # f"#{send_t:.2f}\n"
+            #                 f"{'002'},T={(lon_T):.6f}|{(lat_T):.6f}|{delta_H:.6f},"
+            #                 f"Name=Target,Color=Orange\n"
+            #             )
+
             tacview.send_data_to_client(data_to_send)
             # time.sleep(0.001)
 
