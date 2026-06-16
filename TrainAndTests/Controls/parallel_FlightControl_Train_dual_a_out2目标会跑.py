@@ -357,11 +357,15 @@ if __name__=='__main__':
 
             # [重构] 平滑衰减逻辑：
             # 当 mean_ao_batch 从 20 减小到 5 时，线性地压制 max_std (0.2 -> 0.1) 和 k_entropy (0.5 -> 1e-5)
-            # 因子 alpha: 5->0.0, 20->1.0
-            alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
-            
-            # 平滑调整 max_std
-            agent.max_std = 0.1 + (0.2 - 0.1) * alpha_decay
+            "线性调标准差"
+            # # 因子 alpha: 5->0.0, 20->1.0
+            # alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
+            # # 平滑调整 max_std
+            # agent.max_std = 0.1 + (0.2 - 0.1) * alpha_decay
+            "非线性调标准差"
+            alpha_decay = (mean_ao_batch - 0.0) / (20.0 - 0.0)
+            agent.max_std = 0.06 * np.log(alpha_decay+1) + 0.0
+
             agent.actor.net.clamp_log_std(agent.max_std)
             
             # 平滑调整熵系数 (假设初始 cont 熵为 0.5)
