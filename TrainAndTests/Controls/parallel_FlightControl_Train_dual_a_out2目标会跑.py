@@ -361,10 +361,16 @@ if __name__=='__main__':
             # # 因子 alpha: 5->0.0, 20->1.0
             # alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
             # # 平滑调整 max_std
-            # agent.max_std = 0.1 + (0.2 - 0.1) * alpha_decay
+            # agent.max_std = 0.1 + (0.3 - 0.1) * alpha_decay
+            
+            # 因子 alpha: 5->0.0, 20->1.0
+            alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
+            # 平滑调整 max_std
+            agent.max_std = 0.1 + (0.2 - 0.1) * alpha_decay
+
             "非线性调标准差"
-            alpha_decay = (mean_ao_batch - 0.0) / (20.0 - 0.0)
-            agent.max_std = 0.06 * np.log(alpha_decay+1) + 0.0
+            # alpha_decay = (mean_ao_batch - 0.0) / (20.0 - 0.0)
+            # agent.max_std = 0.06 * np.log(alpha_decay+1) + 0.0
 
             agent.actor.net.clamp_log_std(agent.max_std)
             
