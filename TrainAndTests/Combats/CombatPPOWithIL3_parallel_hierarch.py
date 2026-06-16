@@ -2068,6 +2068,23 @@ def run_MLP_simulation(
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
                 
+                # -----------------------------------------------------------
+                # 逻辑分支 B: 定期重刷精英池 (每 1M step)
+                # -----------------------------------------------------------
+                if total_steps > 0 and total_steps % 1e6 == 0:
+                    print(f"\n>>> [Elite Pool Refresh] Refreshing elite_elo_ratings at {total_steps} steps...")
+                    # 从 elo_ratings 中选出 Elo 最高的 min(当前非Rule数量, MAX_HISTORY_SIZE) 个非 Rule 智能体
+                    non_rule_elo = {k: v for k, v in elo_ratings.items() if not k.startswith("Rule") and not k.startswith("__")}
+                    current_non_rule_count = len([k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")])
+                    refresh_size = min(current_non_rule_count, MAX_HISTORY_SIZE)
+                    sorted_non_rule = sorted(non_rule_elo.items(), key=lambda x: x[1], reverse=True)
+                    top_non_rule = dict(sorted_non_rule[:refresh_size])
+                    # 加上所有 Rule
+                    rule_elo = {k: v for k, v in elo_ratings.items() if k.startswith("Rule")}
+                    # 重置 elite_elo_ratings
+                    elite_elo_ratings = {**rule_elo, **top_non_rule}
+                    print(f"  [Elite Pool Refresh] Refreshed: {len(rule_elo)} Rules + {len(top_non_rule)} top agents (size={refresh_size})")
+
                 # 5. 保存全量日志
                 with open(full_json_path, "w", encoding="utf-8") as f:
                     json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
