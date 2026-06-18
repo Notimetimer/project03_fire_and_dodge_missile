@@ -331,8 +331,9 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
             actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
         else: # 默认通用的 'PFSP' 逻辑
-            # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
-            actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
+            actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
+            # # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
+            # actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
         
         diffs = elos - actual_target
         scores = np.exp(-0.5 * (diffs / float(sigma))**2)
