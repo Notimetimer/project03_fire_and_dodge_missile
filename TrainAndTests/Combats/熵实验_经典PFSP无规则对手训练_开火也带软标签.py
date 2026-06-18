@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项2'
+mission_name = 'PurePFSP_分阶段_混规则对手_挑战_并行_开火也带软标签'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -31,7 +31,7 @@ il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.1 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -43,7 +43,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.1 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+dt_move = 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier

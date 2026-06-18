@@ -645,8 +645,15 @@ class HybridActorWrapper(nn.Module):
                 target = expert_actions['bern'] # (Batch, 1)
                 
                 "开火头适度动作平滑"
+
+                # 开火头保持硬标签
                 max_target = sigmoid(3.0)
                 min_target = sigmoid(-3.0)
+
+                # 对比实验，临时使用软标签给开火头
+                # max_target = 1.0-label_smoothing
+                # min_target = label_smoothing
+                
                 target = torch.clamp(target, min_target, max_target)
 
                 # 交叉熵公式
@@ -2258,7 +2265,7 @@ class PPOHybrid:
                     label_smoothing=ls,
                     no_bern=no_bern,
                     good_samples=gs,
-                    pre_training=0, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
+                    pre_training=1, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
                 ) # shape: (Batch, )
                 
                 v_pred = self.critic(s_batch)
