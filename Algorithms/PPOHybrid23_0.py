@@ -2199,10 +2199,10 @@ class PPOHybrid:
 
         sub_size = chosen_indices.size(0)
         sub_indices = np.arange(sub_size)
-        if shuffled:
-            np.random.shuffle(sub_indices)
 
         for epoch in range(epochs):
+            if shuffled:
+                np.random.shuffle(sub_indices)
             for start in range(0, sub_size, batch_size):
                 end = min(start + batch_size, sub_size)
                 bidx = sub_indices[start:end]
