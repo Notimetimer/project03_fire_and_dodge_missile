@@ -213,10 +213,11 @@ if __name__ == "__main__":
 
     # 2s
     mission_names = [
-        'PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415',
-        'PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿-run-20260616-130304',
-        'NoILand_PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260615-234324',
-        'NoILPFSP_分阶段_混规则对手_挑战_并行-run-20260614-163906',
+        'SLWSPFSP-run-20260616-171415',
+        'HLWSPFSP-run-20260616-130304',
+        'CSPFSP-run-20260615-234324',
+        'CSVersusRules-run-20260614-163906',
+        'SLWSDPC-PFSP-run-20260614-000523'
     ]
     
     # team_labels = range(len(mission_names))

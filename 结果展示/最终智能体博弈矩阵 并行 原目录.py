@@ -131,23 +131,33 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             with torch.no_grad():
                 explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
                 # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
-                temp_dict = {'cat': 0.1, 'bern': 1.0}
+                temp_dict = {'cat': 0.2, 'bern': 1.0}
                 # 不再向网络传入 check_obs 执行强力动作屏蔽
-                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temperature=temp_dict)
-                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temperature=temp_dict)
-            # 交给环境物理函数使用 tabu=1 (相对宽松的条件) 拦截无效开火
-            if r_act['bern'][0]: launch_missile_immediately(env, 'r', tabu=1)
-            if b_act['bern'][0]: launch_missile_immediately(env, 'b', tabu=1)
-            r_label, b_label = r_act['cat'][0], b_act['cat'][0]
+                r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temperature=temp_dict, check_obs=r_check)
+                b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temperature=temp_dict, check_obs=b_check)
+            r_label = r_act['cat']
+            b_label = b_act['cat']
+            # 用 about_to_fire 标志位控制发射，与 VsBaseline 保持一致
+            if r_act['bern'][0]: env.RUAV.about_to_fire = 1
+            if b_act['bern'][0]: env.BUAV.about_to_fire = 1
+
+        # 尝试发射，用导弹 id 是否为 None 来判断是否实际发射
+        r_m_id = None
+        b_m_id = None
+        if getattr(env.RUAV, 'about_to_fire', 0):
+            r_m_id = launch_missile_immediately(env, 'r', action_label=r_label, tabu=1)
+        if getattr(env.BUAV, 'about_to_fire', 0):
+            b_m_id = launch_missile_immediately(env, 'b', action_label=b_label, tabu=1)
 
         r_maneuver = env.maneuver14LR(env.RUAV, r_label)
         b_maneuver = env.maneuver14LR(env.BUAV, b_label)
         env.step(r_maneuver, b_maneuver)
-        done, _, _, _ = env.combat_terminate_and_reward('b', b_label, b_act['bern'][0], action_cycle_multiplier)
+        # action_shoot 传 bool，避免传 numpy.int32 scalar 引发解包错误
+        done, _, _, _ = env.combat_terminate_and_reward('b', b_label, b_m_id is not None, action_cycle_multiplier)
     
-    if env.win: return 1.0   # 蓝胜
-    if env.lose: return 0.0  # 红胜
-    return 0.5               # 平局
+    if env.win: return float(1.0)   # 蓝胜
+    if env.lose: return float(0.0)  # 红胜
+    return float(0.5)               # 平局
 
 # --- 并行工作函数 ---
 def worker_process_battle(args_pack):
@@ -198,14 +208,11 @@ if __name__ == "__main__":
 
     # 2s
     mission_names = [
-        'IL_and_MixedPFSP_分阶段_挑战_并行_分层2s-run-20260408-175230',
-        'IL_and_MixedPFSP_低门槛_挑战_并行_分层2s-run-20260410-091105',
-        'IL_and_MixedPFSP_高门槛_挑战_并行_分层2s-run-20260410-203506',
-        'IL_and_PFSP_挑战_并行_分层2s-run-20260409-090711',
-        '纯Rule4训练_分层_挑战2s-run-20260410-090534',
-        'NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s-run-20260409-095656',
-        'NoILPFSP_分阶段_挑战_并行_分层2s-run-20260410-090800',
-        'IL_and_deltaFSP_挑战_并行_分层2s-run-20260410-201949',
+        'SLWSPFSP-run-20260616-171415',
+        'HLWSPFSP-run-20260616-130304',
+        'CSPFSP-run-20260615-234324',
+        'CSVersusRules-run-20260614-163906',
+        # 'SLWSDPC-PFSP-run-20260614-000523'
     ]
     
     # team_labels = range(len(mission_names))
