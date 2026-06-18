@@ -477,7 +477,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 local_agent.actor.load_state_dict(actor_weights)
                 
                 # B. 配置对手
-                opp_name, opp_type, opp_data = opponent_info
+                opp_name, opp_type, opp_data, opp_temperature = opponent_info
                 adv_is_rule = (opp_type == 'rule')
                 rule_num = 0
                 if adv_is_rule:
@@ -639,7 +639,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, mask_on=fire_mask)
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
+                                                        mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
                                 # r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
@@ -1597,7 +1598,8 @@ def run_MLP_simulation(
                         opp_type = 'rule'
                         opp_data = 0
                 
-                opp_info = (selected_opponent_name, opp_type, opp_data)
+                opp_temperature = np.random.uniform(0.99, 1.0) # 0.8, 1.0
+                opp_info = (selected_opponent_name, opp_type, opp_data, opp_temperature)
                 
                 # 初始位置配置
                 rb, bb = create_initial_state_worker(randomized_birth)

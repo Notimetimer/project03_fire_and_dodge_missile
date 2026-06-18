@@ -2117,13 +2117,17 @@ class PPOHybrid:
         return stirred_state_dict, entropy_info
 
     def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0,
-                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1):
+                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1, epochs=4):
         """
         Adversarial Demonstration Policy Correction (ADPC) 更新。
         仅筛选 advantage 最好或者最差的 分位数样本，
         以 label_smoothing=0.99 构造 one-cold 反向标签，对其做反向标签交叉熵训练，
         权重截断在 [0, 1] 防止放大。
         """
+        # 用 alpha 调整学习率而非损失权重
+        current_lr = self.actor_optimizer.param_groups[0]['lr']
+        self.actor_optimizer.param_groups[0]['lr'] = current_lr * alpha
+
         if 'obs' in il_transition_dict and len(il_transition_dict['obs']) > 0:
             obs_all = torch.tensor(np.array(il_transition_dict['obs']), dtype=torch.float).to(self.device)
             use_obs = True
@@ -2198,80 +2202,86 @@ class PPOHybrid:
         if shuffled:
             np.random.shuffle(sub_indices)
 
-        for start in range(0, sub_size, batch_size):
-            end = min(start + batch_size, sub_size)
-            bidx = sub_indices[start:end]
+        for epoch in range(epochs):
+            for start in range(0, sub_size, batch_size):
+                end = min(start + batch_size, sub_size)
+                bidx = sub_indices[start:end]
 
-            s_batch   = bad_states[bidx]
-            adv_batch = bad_adv[bidx]
+                s_batch   = bad_states[bidx]
+                adv_batch = bad_adv[bidx]
 
-            if use_obs:
-                actor_input_batch = bad_obs[bidx]
-            else:
-                actor_input_batch = s_batch
+                if use_obs:
+                    actor_input_batch = bad_obs[bidx]
+                else:
+                    actor_input_batch = s_batch
 
-            a_batch = {k: v[bidx] for k, v in bad_actions.items()}
+                a_batch = {k: v[bidx] for k, v in bad_actions.items()}
 
-            # 取出当前 batch 对应的旧策略锚点
-            mb_anchor_log_probs = anchor_log_probs[bidx]
+                # 取出当前 batch 对应的旧策略锚点
+                mb_anchor_log_probs = anchor_log_probs[bidx]
 
-            with torch.no_grad():
-                # 权重 = advantage^2，与 beta 无关，恒非负，截断到 [0, 1]（不允许超过1放大）
-                # 非负权重确保：好/差样本的交叉熵误差恒为正向梯度，
-                # 避免负权重与互补交叉熵负负得正形成"接近差动作"的错误更新方向
-                raw_weights = torch.pow(adv_batch, 2) # .unsqueeze(-1) # ？？？之前为啥会有unsqueeze？？？
-                weights = torch.clamp(raw_weights, max=1.0)
+                with torch.no_grad():
+                    # 权重 = advantage^2，与 beta 无关，恒非负，截断到 [0, 1]（不允许超过1放大）
+                    # 非负权重确保：好/差样本的交叉熵误差恒为正向梯度，
+                    # 避免负权重与互补交叉熵负负得正形成"接近差动作"的错误更新方向
+                    raw_weights = torch.pow(adv_batch, 2) # .unsqueeze(-1) # ？？？之前为啥会有unsqueeze？？？
+                    weights = torch.clamp(raw_weights, max=1.0)
+
+                    # =====================================================================
+                    # [新增 2]：计算当前网络的新 log_probs，并构造布尔掩码 (Mask)
+                    # =====================================================================
+                    new_log_probs, _, _, _, _ = self.actor.evaluate_actions(
+                        actor_input_batch, a_batch, max_std=self.max_std, mask_on=0
+                    )
+                    ratio = torch.exp(new_log_probs - mb_anchor_log_probs)
+
+                    # 如果新旧策略比超出 PPO 的容忍范围，mask 对应位置为 0.0，否则为 1.0
+                    clip_mask = ((ratio >= 1.0 - self.eps) & (ratio <= 1.0 + self.eps)).float().squeeze(-1) # shape: (Batch, )
+
+                # dark_side=1: 反向标签(0.99) + good_samples=0
+                # dark_side=0: 正向模仿(0.01) + good_samples=1
+                ls = 0.99 if dark_side else 0.01
+                gs = 0 if dark_side else 1
+                raw_il_loss = self.actor.compute_il_loss(
+                    actor_input_batch,
+                    a_batch,
+                    label_smoothing=ls,
+                    no_bern=no_bern,
+                    good_samples=gs,
+                    pre_training=0, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
+                ) # shape: (Batch, )
+                
+                v_pred = self.critic(s_batch)
+                r_batch = returns_all[chosen_indices[bidx]]
 
                 # =====================================================================
-                # [新增 2]：计算当前网络的新 log_probs，并构造布尔掩码 (Mask)
+                # [新增 3]：将 clip_mask 乘入最终的 Loss。
+                # 一旦触发截断，clip_mask=0，整个式子值为0，梯度在这一步被物理抹杀。
                 # =====================================================================
-                new_log_probs, _, _, _, _ = self.actor.evaluate_actions(
-                    actor_input_batch, a_batch, max_std=self.max_std, mask_on=0
-                )
-                ratio = torch.exp(new_log_probs - mb_anchor_log_probs)
+                actor_loss = torch.mean(weights * raw_il_loss * clip_mask)
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=self.actor_max_grad)
+                self.actor_optimizer.step()
 
-                # 如果新旧策略比超出 PPO 的容忍范围，mask 对应位置为 0.0，否则为 1.0
-                clip_mask = ((ratio >= 1.0 - self.eps) & (ratio <= 1.0 + self.eps)).float().squeeze(-1) # shape: (Batch, )
+                
+                
+                critic_loss = F.mse_loss(v_pred, r_batch) * c_v
 
-            # dark_side=1: 反向标签(0.99) + good_samples=0
-            # dark_side=0: 正向模仿(0.01) + good_samples=1
-            ls = 0.99 if dark_side else 0.01
-            gs = 0 if dark_side else 1
-            raw_il_loss = self.actor.compute_il_loss(
-                actor_input_batch,
-                a_batch,
-                label_smoothing=ls,
-                no_bern=no_bern,
-                good_samples=gs,
-                pre_training=0, # 0 原本只是负向交叉熵，但效果还不如构造one-cold分布
-            ) # shape: (Batch, )
-            
-            v_pred = self.critic(s_batch)
-            r_batch = returns_all[chosen_indices[bidx]]
+                if not actor_only:
+                    self.critic_optimizer.zero_grad()
+                    critic_loss.backward()
+                    nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+                    self.critic_optimizer.step()
 
-            # =====================================================================
-            # [新增 3]：将 clip_mask 乘入最终的 Loss。
-            # 一旦触发截断，clip_mask=0，整个式子值为0，梯度在这一步被物理抹杀。
-            # =====================================================================
-            actor_loss = torch.mean(alpha * weights * raw_il_loss * clip_mask)
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=self.actor_max_grad)
-            self.actor_optimizer.step()
-            
-            critic_loss = F.mse_loss(v_pred, r_batch) * c_v
-
-            if not actor_only:
-                self.critic_optimizer.zero_grad()
-                critic_loss.backward()
-                nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
-                self.critic_optimizer.step()
-
-            total_actor_loss  += actor_loss.item()
-            total_critic_loss += critic_loss.item()
-            batch_count += 1
+                total_actor_loss  += actor_loss.item()
+                total_critic_loss += critic_loss.item()
+                batch_count += 1
 
         avg_actor_loss  = total_actor_loss  / batch_count if batch_count > 0 else 0.0
         avg_critic_loss = total_critic_loss / batch_count if batch_count > 0 else 0.0
+
+        # 还原学习率
+        self.actor_optimizer.param_groups[0]['lr'] = current_lr
 
         return avg_actor_loss, avg_critic_loss
