@@ -122,7 +122,7 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,0,0]), action_cycle_multipl
                     b_action = env.maneuver14LR(env.BUAV, b_action_label)
 
                     env.step(r_action, b_action) # Environment updates every dt_maneuver
-                    done, b_reward_event, b_reward_constraint, b_reward_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire, end_reward_weight=0.1)
+                    done, b_reward_event, b_reward_constraint, b_reward_shaping = env.combat_terminate_and_reward('b', b_action_label, b_fire, end_reward_weight=0.556)
                     
                     b_reward = sum(np.array([b_reward_event, b_reward_constraint, b_reward_shaping]) * weight_reward)
 
@@ -186,6 +186,6 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,0,0]), action_cycle_multipl
 
 
 if __name__=='__main__':
-    for current_rule in [1,4]:
+    for current_rule in [2]:
         run_rules(current_rule=current_rule)
 

@@ -1956,8 +1956,11 @@ def run_MLP_simulation(
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
-                if use_sil and len(il_transition_buffer.addon_dict['states']) >= il_transition_buffer.max_size:
-                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
+
+                alpha_il_real = alpha_il * np.clip(1 - total_steps/5e6, 0.1, 1)
+
+                if use_sil:  #  and len(il_transition_buffer.addon_dict['states']) >= il_transition_buffer.max_size:
+                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码

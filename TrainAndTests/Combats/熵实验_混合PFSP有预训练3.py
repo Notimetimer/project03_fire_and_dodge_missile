@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_正向SILDPC'
+mission_name = 'PurePFSP_挑战_并行_训练满熵项_正向SILDPC'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -26,7 +26,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
-alpha_il = 0.05  # 设置为0就是纯强化学习
+alpha_il = 0.1 # 0.05  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
@@ -116,23 +116,24 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
-            'Rule_5': 1200,
+            # 'Rule_0': 1200, # debug
+            # "Rule_1": 1200,
+            # "Rule_2": 1200,
+            # 'Rule_3': 1200,
+            # 'Rule_4': 1200,
+            # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 1,
+        sil_only_maneuver = 1, # 1 自模仿只包含机动， 0表示开火动作也参与自模仿
         chosen_quantile = 1.0, #  
         DARK_SIDE = 0, # 自模仿好动作
         p_factor = 0.23,
-        WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
+        WARM_UP_STEPS = 0e3, # 500e3, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = -1, # 0.5,
         MAX_HISTORY_SIZE = 50, # 150  # 300
-        compete_old_rate = 0.2, # “复习”概率
+        compete_old_rate = 0.0, # 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
