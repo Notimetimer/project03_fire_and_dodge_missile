@@ -2117,7 +2117,7 @@ class PPOHybrid:
         return stirred_state_dict, entropy_info
 
     def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=4096, alpha=1.0, c_v=1.0,
-                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1, epochs=4):
+                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1, epochs=4, target_entropy_cat=None):
         """
         Adversarial Demonstration Policy Correction (ADPC) 更新。
         仅筛选 advantage 最好或者最差的 分位数样本，
@@ -2200,7 +2200,17 @@ class PPOHybrid:
         sub_size = chosen_indices.size(0)
         sub_indices = np.arange(sub_size)
 
-        for epoch in range(epochs):
+        for _ in range(epochs):
+            # 目标熵检查：若当前 cat 熵已超出上限，直接终止所有后续 epoch
+            if target_entropy_cat is not None:
+                with torch.no_grad():
+                    _, _, entropy_details_now, _, _ = self.actor.evaluate_actions(
+                        bad_obs, bad_actions, max_std=self.max_std, mask_on=0
+                    )
+                    current_cat_entropy = entropy_details_now['cat'].mean().item()
+                if current_cat_entropy > target_entropy_cat:
+                    break
+
             if shuffled:
                 np.random.shuffle(sub_indices)
             for start in range(0, sub_size, batch_size):
