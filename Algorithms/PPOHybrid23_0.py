@@ -2116,7 +2116,7 @@ class PPOHybrid:
         
         return stirred_state_dict, entropy_info
 
-    def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0,
+    def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=4096, alpha=1.0, c_v=1.0,
                     shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1, epochs=4):
         """
         Adversarial Demonstration Policy Correction (ADPC) 更新。
