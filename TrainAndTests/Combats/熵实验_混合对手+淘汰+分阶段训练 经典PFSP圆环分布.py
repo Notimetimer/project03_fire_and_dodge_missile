@@ -1,4 +1,4 @@
-from CombatPPOWithIL3_parallel_hierarch_ClassicCircular import *
+from CombatPPOWithIL3_parallel_hierarch_Circular import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
