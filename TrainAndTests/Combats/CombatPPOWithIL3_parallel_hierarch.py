@@ -2175,8 +2175,9 @@ def run_MLP_simulation(
                             print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
                         
                         # --- 正式入池 ---
-                        elite_elo_ratings[actor_key] = main_agent_elo
-                        print(f"Accepted {actor_key} into Elite Pool.")
+                        if hist_agent_as_opponent:
+                            elite_elo_ratings[actor_key] = main_agent_elo
+                            print(f"Accepted {actor_key} into Elite Pool.")
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
