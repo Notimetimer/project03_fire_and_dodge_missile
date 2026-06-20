@@ -1777,12 +1777,12 @@ def run_MLP_simulation(
                 if use_sil:
                     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
                     il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
+                    # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
 
                     # if not metrics['lose']: # 赢或平，学自己
                     #     # 计算回报 (Master 端计算)
                     #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
                     #     il_transition_buffer.add(ego_tr)
-                    
                     # if not metrics['win']: # 输或平，学对手
                     #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
                     #     il_transition_buffer.add(enm_tr)
@@ -1959,7 +1959,7 @@ def run_MLP_simulation(
 
                 alpha_il_real = alpha_il * np.clip(1 - total_steps/5e6, 0.1, 1)
 
-                if use_sil:  #  and len(il_transition_buffer.addon_dict['states']) >= il_transition_buffer.max_size:
+                if use_sil:
                     student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
                 # 记录 Log
 
