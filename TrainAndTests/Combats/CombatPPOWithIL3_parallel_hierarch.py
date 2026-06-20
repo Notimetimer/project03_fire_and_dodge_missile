@@ -1377,6 +1377,7 @@ def run_MLP_simulation(
     # 训练循环变量
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
     batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
+    last_il_update_batch_idx = batch_idx
     if collape_recover["collapsed"]:
         actor_freeze_until = batch_idx + int(collape_recover["actor_frozen_batchs"])
         student_agent.reset_optimizer() # 恢复训练清除动量
@@ -1775,17 +1776,17 @@ def run_MLP_simulation(
                 
                 # 3.2 SIL 数据收集 (需计算 return)
                 if use_sil:
-                    ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
+                    # ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    # il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
                     # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
 
-                    # if not metrics['lose']: # 赢或平，学自己
-                    #     # 计算回报 (Master 端计算)
-                    #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    #     il_transition_buffer.add(ego_tr)
-                    # if not metrics['win']: # 输或平，学对手
-                    #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                    #     il_transition_buffer.add(enm_tr)
+                    if not metrics['lose']: # 赢或平，学自己
+                        # 计算回报 (Master 端计算)
+                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                        il_transition_buffer.add(ego_tr)
+                    if not metrics['win']: # 输或平，学对手
+                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                        il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1957,10 +1958,15 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
 
+
                 alpha_il_real = alpha_il * np.clip(1 - total_steps/5e6, 0.1, 1)
 
                 if use_sil:
-                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
+                    if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
+                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
+                        # 不可以自模仿得过于频繁
+                        last_il_update_batch_idx = batch_idx
+                
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
