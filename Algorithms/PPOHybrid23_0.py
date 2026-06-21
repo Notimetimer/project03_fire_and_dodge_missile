@@ -2124,7 +2124,8 @@ class PPOHybrid:
         return stirred_state_dict, entropy_info
 
     def ADPC_update(self, il_transition_dict, beta=1.0, batch_size=4096, alpha=1.0, c_v=1.0,
-                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1, epochs=4, target_entropy_cat=None):
+                    shuffled=1, chosen_quantile=0.2, no_bern=True, dark_side=1, actor_only=1, epochs=4, 
+                    target_entropy_cat=None, ppo_grad_val=None):
         """
         Adversarial Demonstration Policy Correction (ADPC) 更新。
         仅筛选 advantage 最好或者最差的 分位数样本，
@@ -2278,7 +2279,9 @@ class PPOHybrid:
                 actor_loss = torch.mean(weights * raw_il_loss * clip_mask)
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=self.actor_max_grad)
+                # 动态梯度裁剪：若传入了 ppo_grad_val，则上限使用它，否则使用默认的 self.actor_max_grad
+                max_g = ppo_grad_val if ppo_grad_val is not None else self.actor_max_grad
+                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=max_g)
                 self.actor_optimizer.step()
 
                 

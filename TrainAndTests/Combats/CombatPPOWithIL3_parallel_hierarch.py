@@ -1395,6 +1395,7 @@ def run_MLP_simulation(
     ema_score = 0.5
     ema_step = 0
     target_p1 = 0.65
+    ppo_grad_ema = None  # [新增] 初始化 PPO 梯度 EMA 缓存
 
     # =========================================================
     # 主循环 (Master Process)
@@ -1958,12 +1959,21 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
 
+                # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
+                current_ppo_grad = student_agent.pre_clip_actor_grad
+                if current_ppo_grad is not None and not np.isnan(current_ppo_grad):
+                    if ppo_grad_ema is None:
+                        ppo_grad_ema = current_ppo_grad
+                    else:
+                        ppo_grad_ema = 0.95 * ppo_grad_ema + 0.05 * current_ppo_grad
 
-                alpha_il_real = alpha_il * np.clip(1 - total_steps/5e6, 0.1, 1)
+                alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
 
-                if use_sil:
+                if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
                     if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
+                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
+                                                  chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
+                                                  ppo_grad_val=ppo_grad_ema)
                         # 不可以自模仿得过于频繁
                         last_il_update_batch_idx = batch_idx
                 
