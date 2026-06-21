@@ -22,10 +22,27 @@ def sigmoid(x):
 
 class ReplayBufferHybrid:
     def __init__(self, capacity):
-        self.buffer = collections.deque(maxlen=capacity)
+        self.capacity = int(capacity)
+        self.buffer = collections.deque(maxlen=self.capacity)
 
     def add(self, state, action_dict, reward, next_state, done):
         self.buffer.append((state, action_dict, reward, next_state, done))
+
+    def save(self, path):
+        """持久化经验池内容，支持中断续训。"""
+        torch.save({'capacity': self.capacity, 'data': list(self.buffer)}, path)
+        print(f"[ReplayBufferHybrid] Saved to {path}. Size: {len(self.buffer)}")
+
+    @staticmethod
+    def load(path, map_location='cpu'):
+        """从磁盘读取经验池，找不到则返回 None。"""
+        if not os.path.exists(path):
+            return None
+        ckpt = torch.load(path, map_location=map_location)
+        buf = ReplayBufferHybrid(ckpt['capacity'])
+        buf.buffer = collections.deque(ckpt['data'], maxlen=ckpt['capacity'])
+        print(f"[ReplayBufferHybrid] Loaded from {path}. Size: {len(buf.buffer)}")
+        return buf
 
     def sample(self, batch_size):
         # 1. 随机抽样
@@ -813,11 +830,21 @@ class SACHybrid:
                  actor_lr, critic_lr, alpha_lr, action_dims_dict, gamma, tau, device,
                  k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
         self.actor = actor
-        self.critic_temp = critic_temp # 仅给预训练使用
+        # MARWIL_update 内部引用 self.critic，这里让其指向预训练用的 ValueNet
+        self.critic = critic_temp # 仅给预训练(MARWIL)使用，在线SAC阶段弃置不用
         self.critic_1 = critic_1
         self.critic_2 = critic_2
         self.target_critic_1 = target_critic_1
         self.target_critic_2 = target_critic_2
+
+        # 保存超参，供学习率调整 / 梯度裁剪 / 重建优化器使用
+        self.actor_lr = actor_lr
+        self.critic_lr = critic_lr
+        self.alpha_lr = alpha_lr
+        self.k_entropy = k_entropy
+        self.max_std = max_std
+        self.actor_max_grad = actor_max_grad
+        self.critic_max_grad = critic_max_grad
         
         # 初始化目标网络
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
@@ -826,6 +853,8 @@ class SACHybrid:
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=critic_lr)
         self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=critic_lr)
+        # 预训练 (MARWIL) 阶段优化 ValueNet 的优化器
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
         
         # 自动调节温度参数 Alpha
         # 针对 Hybrid，可以设一个全局 Alpha，也可以为 cont, cat, bern 各设一个。这里用一个全局的演示。
@@ -840,9 +869,74 @@ class SACHybrid:
         self.tau = tau
         self.device = device
 
-    def take_action(self, state, explore=True, check_obs=None):
+    def take_action(self, state, explore=True, check_obs=None, **kwargs):
         # 推理时仍然使用你原来的 get_action，因为原来的 get_action 用于环境交互，包含了动作还原
-        return self.actor.get_action(state, explore=explore, check_obs=check_obs)
+        # 透传 mask_on / temperature 等额外参数给 wrapper
+        return self.actor.get_action(state, explore=explore, check_obs=check_obs, **kwargs)
+
+    def set_learning_rate(self, actor_lr=None, critic_lr=None):
+        """动态调整学习率，兼容主训练脚本的调用接口。"""
+        if actor_lr is not None:
+            self.actor_lr = actor_lr
+            for g in self.actor_optimizer.param_groups:
+                g['lr'] = actor_lr
+        if critic_lr is not None:
+            self.critic_lr = critic_lr
+            for opt in (self.critic_1_optimizer, self.critic_2_optimizer, self.critic_optimizer):
+                for g in opt.param_groups:
+                    g['lr'] = critic_lr
+
+    def reset_optimizer(self):
+        """重建优化器以清除动量（中断续训/恢复崩溃时使用）。"""
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=self.actor_lr)
+        self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=self.critic_lr)
+        self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=self.critic_lr)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.critic_lr)
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=self.alpha_lr)
+
+    def save_critics(self, path):
+        """保存在线SAC的Q网络与温度参数（弃置ValueNet）。"""
+        torch.save({
+            'critic_1': self.critic_1.state_dict(),
+            'critic_2': self.critic_2.state_dict(),
+            'target_critic_1': self.target_critic_1.state_dict(),
+            'target_critic_2': self.target_critic_2.state_dict(),
+            'log_alpha': self.log_alpha.detach().cpu(),
+        }, path)
+
+    def load_critics(self, path, map_location='cpu'):
+        ckpt = torch.load(path, map_location=map_location)
+        # 兼容旧的 ValueNet critic.pt（只有 state_dict，没有Q网络键）
+        if not isinstance(ckpt, dict) or 'critic_1' not in ckpt:
+            print(f"[SACHybrid] {path} 不是SAC critic格式，跳过加载Q网络。")
+            return
+        self.critic_1.load_state_dict(ckpt['critic_1'])
+        self.critic_2.load_state_dict(ckpt['critic_2'])
+        self.target_critic_1.load_state_dict(ckpt['target_critic_1'])
+        self.target_critic_2.load_state_dict(ckpt['target_critic_2'])
+        if 'log_alpha' in ckpt:
+            with torch.no_grad():
+                self.log_alpha.copy_(ckpt['log_alpha'].to(self.log_alpha.device))
+
+    def save_optimizers(self, path):
+        torch.save({
+            'actor_optimizer': self.actor_optimizer.state_dict(),
+            'critic_1_optimizer': self.critic_1_optimizer.state_dict(),
+            'critic_2_optimizer': self.critic_2_optimizer.state_dict(),
+            'alpha_optimizer': self.alpha_optimizer.state_dict(),
+        }, path)
+
+    def load_optimizers(self, path, map_location='cpu'):
+        s = torch.load(path, map_location=map_location)
+        try:
+            self.actor_optimizer.load_state_dict(s['actor_optimizer'])
+            if 'critic_1_optimizer' in s:
+                self.critic_1_optimizer.load_state_dict(s['critic_1_optimizer'])
+                self.critic_2_optimizer.load_state_dict(s['critic_2_optimizer'])
+            if 'alpha_optimizer' in s:
+                self.alpha_optimizer.load_state_dict(s['alpha_optimizer'])
+        except Exception as e:
+            print(f"[SACHybrid] Failed to load optimizers: {e}")
 
     def soft_update(self, net, target_net):
         for param_target, param in zip(target_net.parameters(), net.parameters()):
@@ -902,6 +996,8 @@ class SACHybrid:
         self.critic_1_optimizer.zero_grad()
         self.critic_2_optimizer.zero_grad()
         critic_loss.backward()
+        critic_grad = nn.utils.clip_grad_norm_(
+            list(self.critic_1.parameters()) + list(self.critic_2.parameters()), self.critic_max_grad)
         self.critic_1_optimizer.step()
         self.critic_2_optimizer.step()
 
@@ -917,6 +1013,7 @@ class SACHybrid:
         
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        actor_grad = nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
         self.actor_optimizer.step()
 
         # 3. 更新 Alpha (熵系数)
@@ -930,10 +1027,36 @@ class SACHybrid:
         self.soft_update(self.critic_1, self.target_critic_1)
         self.soft_update(self.critic_2, self.target_critic_2)
         
-        # 保存监控指标
+        # --- 监控指标（兼容主训练脚本的 logger 字段） ---
         self.last_actor_loss = actor_loss.item()
         self.last_critic_loss = critic_loss.item()
         self.last_entropy = -curr_log_probs.mean().item()
+        self.actor_loss = self.last_actor_loss
+        self.critic_loss = self.last_critic_loss
+        self.entropy_mean = self.last_entropy
+        self.alpha = self.log_alpha.exp().item()
+        self.pre_clip_actor_grad = float(actor_grad)
+        self.pre_clip_critic_grad = float(critic_grad)
+        self.td_error_var = (y_target - q1_pred).detach().var().item()
+
+        # 各动作头熵 / 开火概率（基于当前策略分布，便于监控）
+        with torch.no_grad():
+            outs = self.actor.net(states)
+            self.entropy_cat = 0.0
+            self.entropy_bern = 0.0
+            self.max_fire_prob = 0.0
+            self.min_fire_prob = 0.0
+            if outs.get('cat') is not None:
+                ent_c = 0.0
+                for probs in outs['cat']:
+                    ent_c += Categorical(probs=probs).entropy().mean().item()
+                self.entropy_cat = ent_c
+            if outs.get('bern') is not None:
+                bern_logits = outs['bern'].clamp(min=-1e8)
+                self.entropy_bern = Bernoulli(logits=bern_logits).entropy().sum(-1).mean().item()
+                fire_probs = torch.sigmoid(bern_logits)
+                self.max_fire_prob = fire_probs.max().item()
+                self.min_fire_prob = fire_probs.min().item()
 
     # --- 修改后的 MARWIL_update， 注意原先是0 ---
     def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.3, max_weight=100.0,

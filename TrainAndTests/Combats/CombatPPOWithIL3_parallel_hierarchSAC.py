@@ -19,33 +19,13 @@ from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 import traceback # [新增]
 import random
-# 必须在任何 sklearn 导入之前执行！
-try:
-    import threadpoolctl
-    # 彻底让信息查询返回空列表
-    threadpoolctl.threadpool_info = lambda *args, **kwargs: []
-    # 核心修复：直接将 threadpool_limits 变为一个什么都不做的空上下文管理器
-    class DummyContextManager:
-        def __init__(self, *args, **kwargs): pass
-        def __enter__(self): return self
-        def __exit__(self, exc_type, exc_val, exc_tb): pass
-        def _set_threadpool_limits(self): return []
-    threadpoolctl.threadpool_limits = DummyContextManager
-    # 针对 3.x 版本的控制器拦截
-    if hasattr(threadpoolctl, 'ThreadpoolController'):
-        threadpoolctl.ThreadpoolController.info = lambda self, *args, **kwargs: []
-        threadpoolctl.ThreadpoolController.limit = lambda self, *args, **kwargs: DummyContextManager()
-    print("[Patch] threadpoolctl 全版本上下文拦截补丁已成功强行注入。")
-except Exception as e:
-    print(f"[Patch] 补丁注入失败: {e}，尝试继续运行...")
-from sklearn.cluster import KMeans
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.SACHybrid import SACHybrid, PolicyNetHybrid, HybridActorWrapper, QNetHybrid, ReplayBufferHybrid
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
@@ -438,28 +418,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
+        # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
-        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        local_agent = PPOHybrid(
-            actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
-            critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
-            actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
-            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
-            device=device_worker 
-        )
+        local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
         
         # 初始化对手网络
         adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        # 【修改 2】同样为对手创建一个 dummy critic
-        adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        adv_agent = PPOHybrid(
-            actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
-            critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
-            actor_lr=0, critic_lr=0, 
-            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
-            device=device_worker
-        )
+        adv_agent = HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker)
 
         # --- 2. 循环等待阶段 ---
         while True:
@@ -475,7 +440,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 (actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
-                local_agent.actor.load_state_dict(actor_weights)
+                local_agent.load_state_dict(actor_weights)
                 
                 # B. 配置对手
                 opp_name, opp_type, opp_data, opp_temperature = opponent_info
@@ -484,7 +449,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 if adv_is_rule:
                     rule_num = opp_data
                 else:
-                    adv_agent.actor.load_state_dict(opp_data)
+                    adv_agent.load_state_dict(opp_data)
 
                 # C. 准备本回合容器
                 # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
@@ -626,8 +591,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         with torch.no_grad():
                             # Blue Decision
                             b_state_check = env.unscale_state(b_check_obs)
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
-                            # b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                            b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
+                            # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                             b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -640,9 +605,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
+                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
                                                         mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
-                                # r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -952,6 +917,11 @@ def run_MLP_simulation(
     R_cage = 62.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
+    replay_buffer_size=int(1e6),   # [SAC] 经验池容量
+    sac_tau=0.005,                 # [SAC] 目标网络软更新系数
+    sac_alpha_lr=3e-4,             # [SAC] 温度参数 alpha 的学习率
+    sac_updates_per_10_steps=1,    # [SAC] 每经过10个采样步执行的梯度更新次数
+    replay_buffer_save_interval=20,# [SAC] 每多少个 batch 持久化一次经验池
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
@@ -1041,21 +1011,32 @@ def run_MLP_simulation(
 
     # 3. 创建神经网络
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-    critic_net = ValueNet(state_dim, hidden_dim).to(device)
+    # 预训练 (MARWIL) 用的 ValueNet，在线 SAC 阶段弃置不用
+    critic_temp_net = ValueNet(state_dim, hidden_dim).to(device)
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
 
-    student_agent = PPOHybrid(
-        actor=actor_wrapper, 
-        critic=critic_net, 
-        actor_lr=actor_lr, 
+    # [SAC] 双 Q 网络 + 目标网络（输入为 actor 所见的 obs，与 actor 维度一致）
+    critic_1_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    critic_2_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    target_critic_1_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    target_critic_2_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+
+    student_agent = SACHybrid(
+        actor=actor_wrapper,
+        critic_temp=critic_temp_net,
+        critic_1=critic_1_net,
+        critic_2=critic_2_net,
+        target_critic_1=target_critic_1_net,
+        target_critic_2=target_critic_2_net,
+        actor_lr=actor_lr,
         critic_lr=critic_lr,
-        lmbda=lmbda, 
-        epochs=epochs, 
-        eps=eps, 
-        gamma=gamma, 
-        device=device, 
-        k_entropy=k_entropy, 
-        max_std=label_smoothing
+        alpha_lr=sac_alpha_lr,
+        action_dims_dict=action_dims_dict,
+        gamma=gamma,
+        tau=sac_tau,
+        device=device,
+        k_entropy=k_entropy,
+        max_std=label_smoothing,
     )
     
     
@@ -1116,20 +1097,17 @@ def run_MLP_simulation(
                 student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
                 print(f"Loaded actor from: {latest_actor}")
         
+        # [SAC] 加载在线 Q 网络（critic.pt 现为双Q网络+目标网络+log_alpha）
         critic_path = os.path.join(log_dir, "critic.pt")
         if os.path.exists(critic_path):
-            student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
-            print(f"Loaded critic from: {critic_path}")
+            student_agent.load_critics(critic_path, map_location=device)
+            print(f"Loaded SAC critics from: {critic_path}")
         
+        # [SAC] 加载优化器状态（actor / critic_1 / critic_2 / alpha）
         opt_path = os.path.join(log_dir, "optimizers_state.pt")
         if os.path.exists(opt_path):
-            try:
-                opt_states = torch.load(opt_path, map_location=device)
-                student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
-                student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
-                print("Loaded optimizer states.")
-            except Exception as e:
-                print(f"Failed to load optimizers: {e}")
+            student_agent.load_optimizers(opt_path, map_location=device)
+            print("Loaded optimizer states.")
         
         # [新增] 恢复 special EMA 状态和控制器状态
         special_json_path = os.path.join(log_dir, "special.json")
@@ -1387,9 +1365,14 @@ def run_MLP_simulation(
     
     current_max_steps = int(max_steps)
     
-    # 全局 Buffer (用于攒够 Batch 训练)
-    empty_transition_dict = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-    transition_dict = copy.deepcopy(empty_transition_dict)
+    # [SAC] 经验回放池（off-policy，数据不再用完即弃；支持中断续训）
+    replay_buffer_path = os.path.join(log_dir, "replay_buffer.pt")
+    replay_buffer = ReplayBufferHybrid.load(replay_buffer_path, map_location='cpu')
+    if replay_buffer is None:
+        replay_buffer = ReplayBufferHybrid(int(replay_buffer_size))
+        print(f"[SAC] Created new replay buffer (capacity={int(replay_buffer_size)})")
+    # 距离上次 SAC 更新累计的采样步数，用于决定本轮执行多少次梯度更新
+    steps_since_update = 0
 
     # 初始化基于胜率的在线 EMA 变量
     ema_score = 0.5
@@ -1771,23 +1754,25 @@ def run_MLP_simulation(
                 else: 
                     batch_draw_cnt += 1
                 
-                # 3.1 聚合 PPO 数据到全局 Buffer
-                for k in transition_dict:
-                    transition_dict[k].extend(l_tr[k])
+                # 3.1 [SAC] 把本回合经验逐条写入经验回放池（不再用完即弃）
+                # actor 仅观测 obs，故 SAC 的 state/next_state 统一使用 obs。
+                # 同一回合内，转移 i 的 next_obs = obs[i+1]；末步为终止(done=1)，next_obs 被 (1-done) 屏蔽，复用自身即可。
+                obs_seq = l_tr['obs']
+                act_seq = l_tr['actions']
+                rew_seq = l_tr['rewards']
+                done_seq = l_tr['dones']
+                N_tr = len(done_seq)
+                for i in range(N_tr):
+                    next_obs = obs_seq[i + 1] if (i + 1 < N_tr) else obs_seq[i]
+                    replay_buffer.add(
+                        np.asarray(obs_seq[i], dtype=np.float32),
+                        act_seq[i],
+                        float(rew_seq[i]),
+                        np.asarray(next_obs, dtype=np.float32),
+                        float(done_seq[i]),
+                    )
+                steps_since_update += N_tr
                 
-                # 3.2 SIL 数据收集 (需计算 return)
-                if use_sil:
-                    # ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    # il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
-                    # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
-
-                    if not metrics['lose']: # 赢或平，学自己
-                        # 计算回报 (Master 端计算)
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
-                    if not metrics['win']: # 输或平，学对手
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1916,13 +1901,9 @@ def run_MLP_simulation(
             logger.add("agent/ batch_step", batch_idx, total_steps)
 
             # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
+            # [SAC] 触发条件：经验池累计样本达到阈值（warm-up）即可开始 off-policy 更新
             if batch_idx % save_interval == 0 and \
-                len(transition_dict['dones']) >= transition_dict_threshold:
-                # # --- 4. 执行训练 (PPO Update) ---
-                # # 当收集的数据量超过 capacity 时更新
-                # if len(transition_dict['dones']) >= transition_dict_threshold:
-                # 重构 Action 结构 (List[Dict] -> Dict[Array])
-                transition_dict['actions'] = restructure_actions(transition_dict['actions'])
+                replay_buffer.size() >= transition_dict_threshold:
                 
                 '记录ELo相对位置'
                 # [新增] 调节alpha_il
@@ -1946,20 +1927,19 @@ def run_MLP_simulation(
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
-                if batch_idx <= actor_freeze_until:
-                    freeze_actor = 1
-                else:
-                    freeze_actor = 0
-                # # critic先收敛
-                # if total_steps < 5e3:
-                #     freeze_actor = 1
-                
-                max_fire_logits = 4.0
+                # [SAC] 统计自上次更新以来经过了多少采样步，off-policy 需要执行成比例的多次梯度更新
+                # 每经过 10 个采样步执行 sac_updates_per_10_steps 次更新（默认 steps/10 次）
+                num_sac_updates = max(1, int(steps_since_update // 10) * int(sac_updates_per_10_steps))
+                steps_since_update = 0
+                sac_batch_size = int(min(mini_batch_size_mixed, replay_buffer.size()))
+                for _ in range(num_sac_updates):
+                    sac_batch = replay_buffer.sample(sac_batch_size)
+                    student_agent.update(sac_batch)
+                logger.add("train_plus/num_sac_updates", num_sac_updates, total_steps)
+                logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
+                logger.add("train_plus/sac_alpha", student_agent.alpha, total_steps)
 
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
-                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
-
-                # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
+                # 计算/更新 actor pre-clip 梯度的 EMA 值
                 current_ppo_grad = student_agent.pre_clip_actor_grad
                 if current_ppo_grad is not None and not np.isnan(current_ppo_grad):
                     if ppo_grad_ema is None:
@@ -1967,16 +1947,7 @@ def run_MLP_simulation(
                     else:
                         ppo_grad_ema = 0.95 * ppo_grad_ema + 0.05 * current_ppo_grad
 
-                alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
 
-                if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
-                    if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
-                                                  chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
-                                                  ppo_grad_val=ppo_grad_ema)
-                        # 不可以自模仿得过于频繁
-                        last_il_update_batch_idx = batch_idx
-                
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
@@ -2006,12 +1977,6 @@ def run_MLP_simulation(
                 logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
                 # logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
                 
-                # IL-PPO信号强度对比
-                # 错误做法，更新强度数量级和样本数无关
-                # if use_sil:
-                #     logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
-                #     logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
-                    
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
                 # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
@@ -2019,56 +1984,17 @@ def run_MLP_simulation(
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
                 
-                if should_stir:
-                    # 策略搅拌：计算目标熵并执行搅拌
-                    # cat熵从0step的2到20Mstep的1.5线性退火
-                    max_steps_for_stir = 20 * 1e6  # 20M steps
-                    cat_entropy_start = 2.0
-                    cat_entropy_end = 1.5
-                    
-                    # 线性插值计算当前目标cat熵
-                    progress = min(total_steps / max_steps_for_stir, 1.0)
-                    target_cat_entropy = cat_entropy_start + (cat_entropy_end - cat_entropy_start) * progress
-                    
-                    target_entropies = {
-                        'cont': 0.0,  # 连续动作目标熵为0
-                        'cat': target_cat_entropy,  # 离散动作线性退火
-                        'bern': 0.0  # 伯努利动作目标熵为0
-                    }
-                    
-                    print(f"  [should_stir] Target cat entropy: {target_cat_entropy:.3f} (progress: {progress:.3f})")
-                    
-                    # 执行策略搅拌
-                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.01)
-                    
-                    # 保存搅拌后的模型参数
-                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}.pt"))
-                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                    
-                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                    
-                    # 记录搅拌后的熵值
-                    logger.add("stir/cat_entropy", entropy_info['cat_entropy'], total_steps)
-                    logger.add("stir/bern_entropy", entropy_info['bern_entropy'], total_steps)
-                    logger.add("stir/cont_entropy", entropy_info['cont_entropy'], total_steps)
-                    logger.add("stir/target_cat_entropy", target_cat_entropy, total_steps)
-                    
-                    print(f"  [should_stir] Actual cat entropy: {entropy_info['cat_entropy']:.3f}, bern entropy: {entropy_info['bern_entropy']:.3f}, cont entropy: {entropy_info['cont_entropy']:.3f}")
-                    
-                    print(f"Saved Stirred Checkpoint: {actor_key}")
-                    print(f"Saved Current Actor: current_actor.pt")
-                else:
-                    # 正常保存模型
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                    print(f"Saved Checkpoint: {actor_key}")
-                    print(f"Saved Current Actor: current_actor.pt")
                 
-                # 清空 Buffer（在搅拌之后）
-                transition_dict = copy.deepcopy(empty_transition_dict)
+                # 正常保存模型
+                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                # [SAC] critic.pt 现保存双Q网络+目标网络+log_alpha
+                student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
+                # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                print(f"Saved Checkpoint: {actor_key}")
+                print(f"Saved Current Actor: current_actor.pt")
+                
+                # [SAC] off-policy 经验池不再清空（用完不抛弃）
 
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
@@ -2219,12 +2145,13 @@ def run_MLP_simulation(
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", main_agent_elo - rule_elo, total_steps)
 
                 # --- 例行保存优化器状态和步数 ---
-                torch.save({
-                    'actor_optimizer': student_agent.actor_optimizer.state_dict(),
-                    'critic_optimizer': student_agent.critic_optimizer.state_dict(),
-                }, os.path.join(log_dir, "optimizers_state.pt"))
+                # [SAC] 保存 actor / critic_1 / critic_2 / alpha 优化器
+                student_agent.save_optimizers(os.path.join(log_dir, "optimizers_state.pt"))
                 if il_transition_buffer is not None:
                     il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))
+                # [SAC] 定期持久化经验池以支持中断续训（经验池较大，降低保存频率）
+                if batch_idx % max(1, int(replay_buffer_save_interval)) == 0:
+                    replay_buffer.save(replay_buffer_path)
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
@@ -2252,6 +2179,16 @@ def run_MLP_simulation(
         except ValueError:
             print("Invalid input (not a number). Exiting...")
             break
+
+    # [SAC] 退出前最后保存一次经验池/网络/优化器，确保续训完整
+    try:
+        replay_buffer.save(replay_buffer_path)
+        student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
+        student_agent.save_optimizers(os.path.join(log_dir, "optimizers_state.pt"))
+        torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+        print("[SAC] Final state (replay buffer / critics / optimizers / actor) saved.")
+    except Exception as e:
+        print(f"[SAC] Final save failed: {e}")
 
     # Cleanup
     print("Closing workers...")
