@@ -52,7 +52,7 @@ transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1
 
 # [SAC] off-policy 专用超参数
 # replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
-replay_buffer_size = 10000           # 经验回放池容量（测试用）
+replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（测试用）
 sac_tau = 0.005                      # 目标网络软更新系数
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）

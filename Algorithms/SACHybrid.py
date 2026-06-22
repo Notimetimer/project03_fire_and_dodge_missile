@@ -573,12 +573,15 @@ class HybridActorWrapper(nn.Module):
     def sample_for_sac(self, states, action_masks=None):
         """
         专门为 SAC 提供的采样方法。
-        返回可导的 actions，以及总的 log_prob。
+        返回可导的 actions，以及按动作头拆分的 log_prob 字典。
         """
         actor_outputs = self.net(states, action_masks=action_masks)
         
         actions_differentiable = {}
-        log_probs = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_total = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_cont = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_cat = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_bern = torch.zeros(states.size(0), 1).to(self.device)
 
         # --- Cont (连续动作，使用 rsample) ---
         if actor_outputs['cont'] is not None:
@@ -589,7 +592,9 @@ class HybridActorWrapper(nn.Module):
             a_norm = torch.tanh(u)
             # 计算 Squash 的 log_prob
             log_prob_cont = dist.log_prob(u) - torch.log(1 - a_norm.pow(2) + 1e-7)
-            log_probs += log_prob_cont.sum(-1, keepdim=True)
+            log_prob_cont_sum = log_prob_cont.sum(-1, keepdim=True)
+            log_probs_cont += log_prob_cont_sum
+            log_probs_total += log_prob_cont_sum
             
             actions_differentiable['cont'] = a_norm # 直接输出 -1~1 的范围给 Q 网络
 
@@ -597,6 +602,7 @@ class HybridActorWrapper(nn.Module):
         if actor_outputs['cat_logits'] is not None:
             cat_logits_list = actor_outputs['cat_logits'] # 使用未经过 softmax 的 logits
             cat_actions = []
+            log_p_cat_sum = torch.zeros(states.size(0), 1).to(self.device)
             for logits in cat_logits_list:
                 # hard=True 表示前向传播输出 One-hot(例如[0,1,0])，反向传播用 softmax 的梯度
                 gumbel_out = F.gumbel_softmax(logits, tau=1.0, hard=True)
@@ -607,8 +613,10 @@ class HybridActorWrapper(nn.Module):
                 dist = Categorical(probs=probs)
                 # 由于 hard=True 返回的是 one-hot，可以通过与 log_probs 相乘来提取选中项的 log_prob
                 log_p = torch.sum(torch.log(probs + 1e-8) * gumbel_out, dim=-1, keepdim=True)
-                log_probs += log_p
+                log_p_cat_sum += log_p
                 
+            log_probs_cat += log_p_cat_sum
+            log_probs_total += log_p_cat_sum
             actions_differentiable['cat'] = torch.cat(cat_actions, dim=-1)
 
         # --- Bern (伯努利动作，使用 Binary Gumbel-Softmax / 缓和的 Sigmoid) ---
@@ -622,10 +630,25 @@ class HybridActorWrapper(nn.Module):
             actions_differentiable['bern'] = bern_action
             
             probs = torch.sigmoid(bern_logits)
-            # 同样提取对应的 log_prob
-            log_p = torch.log(probs + 1e-8) * bern_action + torch.log(1 - probs + 1e-8) * (1 - bern_action)
-            log_probs += log_p.view(states.size(0), -1).sum(-1, keepdim=True)
+            # 计算每个 bern 维度的 log_prob
+            log_p_bern = torch.log(probs + 1e-8) * bern_action + torch.log(1 - probs + 1e-8) * (1 - bern_action)
+            
+            # 用 fire_mask 屏蔽被 can_fire=False 的位置：乘以 0 使其对梯度无贡献
+            # 这样被 mask 的位置既不影响 actor_loss、alpha_loss，也不影响 Q 目标中的熵正则项
+            fire_mask = actor_outputs.get('fire_mask', None)
+            if fire_mask is not None:
+                log_p_bern = log_p_bern * fire_mask  # shape: (batch, bern_dim)，masked 位置乘 0
+            
+            log_p_bern_sum = log_p_bern.view(states.size(0), -1).sum(-1, keepdim=True)
+            log_probs_bern += log_p_bern_sum
+            log_probs_total += log_p_bern_sum
 
+        log_probs = {
+            'cont': log_probs_cont,
+            'cat': log_probs_cat,
+            'bern': log_probs_bern,
+            'total': log_probs_total,
+        }
         return actions_differentiable, log_probs
         
     def compute_il_loss(self, states, expert_actions, label_smoothing=0.3, no_bern=False, mask_on=0, good_samples=1, pre_training=1):
@@ -861,9 +884,7 @@ class SACHybrid:
         self.log_alpha = torch.tensor(np.log(0.01), dtype=torch.float, requires_grad=True, device=device)
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
         
-        # Target Entropy: 启发式设为动作维度的负数
-        total_action_dim = sum(action_dims_dict.values()) if not isinstance(action_dims_dict['cat'], list) else action_dims_dict['cont'] + len(action_dims_dict['cat']) + action_dims_dict['bern']
-        self.target_entropy = -total_action_dim 
+        # target_entropy 由外部在 update() 中传入，此处不做预设
         
         self.gamma = gamma
         self.tau = tau
@@ -942,9 +963,11 @@ class SACHybrid:
         for param_target, param in zip(target_net.parameters(), net.parameters()):
             param_target.data.copy_(param_target.data * (1.0 - self.tau) + param.data * self.tau)
 
-    def update(self, batch):
+    def update(self, batch, target_entropy=2.0, alpha_clip=(0.001, 0.1)):
         """
         接收 ReplayBuffer 返回的字典 batch
+        target_entropy : 目标熵（正数，由外部传入）。None 则不更新 alpha。
+        alpha_clip      : (min, max) 对 alpha=exp(log_alpha) 的截断范围。
         """
         # --- A. 数据搬运与类型转换 (NumPy -> Tensor) ---
         device = self.device
@@ -982,7 +1005,10 @@ class SACHybrid:
             # 目标 Q 值
             q1_target = self.target_critic_1(next_states, next_actions_diff)
             q2_target = self.target_critic_2(next_states, next_actions_diff)
-            min_q_target = torch.min(q1_target, q2_target) - self.log_alpha.exp() * next_log_probs
+            alpha = self.log_alpha.exp()
+            k_bern = self.k_entropy.get('bern', 0.05)
+            entropy_reg = alpha * (next_log_probs['cont'] + next_log_probs['cat']) + k_bern * next_log_probs['bern']
+            min_q_target = torch.min(q1_target, q2_target) - entropy_reg
             
             # TD 目标
             y_target = rewards + self.gamma * (1 - dones) * min_q_target
@@ -1009,7 +1035,12 @@ class SACHybrid:
         q2_pi = self.critic_2(states, curr_actions_diff)
         min_q_pi = torch.min(q1_pi, q2_pi)
         
-        actor_loss = (self.log_alpha.exp().detach() * curr_log_probs - min_q_pi).mean()
+        alpha = self.log_alpha.exp().detach()
+        # 机动部分 (cont+cat) 使用自适应 alpha；开火部分 (bern) 使用固定初始熵系数
+        k_bern = self.k_entropy.get('bern', 0.05)
+        actor_loss = (alpha * (curr_log_probs['cont'] + curr_log_probs['cat'])
+                      + k_bern * curr_log_probs['bern']
+                      - min_q_pi).mean()
         
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -1017,11 +1048,22 @@ class SACHybrid:
         self.actor_optimizer.step()
 
         # 3. 更新 Alpha (熵系数)
-        alpha_loss = -(self.log_alpha * (curr_log_probs.detach() + self.target_entropy)).mean()
-        
-        self.alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+        if target_entropy is not None:
+            self.target_entropy = target_entropy
+            # alpha 只根据机动部分 (cont+cat) 的熵来调节
+            mobility_log_probs = curr_log_probs['cont'].detach() + curr_log_probs['cat'].detach()
+            alpha_loss = -(self.log_alpha * (mobility_log_probs - target_entropy)).mean()
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+            # 将 alpha 截断到合法范围
+            if alpha_clip is not None:
+                log_alpha_min = np.log(alpha_clip[0])
+                log_alpha_max = np.log(alpha_clip[1])
+                with torch.no_grad():
+                    self.log_alpha.clamp_(log_alpha_min, log_alpha_max)
+        else:
+            alpha_loss = torch.tensor(0.0)
 
         # 4. 目标网络软更新
         self.soft_update(self.critic_1, self.target_critic_1)
@@ -1030,11 +1072,14 @@ class SACHybrid:
         # --- 监控指标（兼容主训练脚本的 logger 字段） ---
         self.last_actor_loss = actor_loss.item()
         self.last_critic_loss = critic_loss.item()
-        self.last_entropy = -curr_log_probs.mean().item()
+        self.last_entropy = -curr_log_probs['total'].mean().item()
+        self.last_entropy_mobility = -(curr_log_probs['cont'] + curr_log_probs['cat']).mean().item()
+        self.last_entropy_bern = -curr_log_probs['bern'].mean().item()
         self.actor_loss = self.last_actor_loss
         self.critic_loss = self.last_critic_loss
         self.entropy_mean = self.last_entropy
         self.alpha = self.log_alpha.exp().item()
+        self.k_bern = self.k_entropy.get('bern', 0.003)
         self.pre_clip_actor_grad = float(actor_grad)
         self.pre_clip_critic_grad = float(critic_grad)
         self.td_error_var = (y_target - q1_pred).detach().var().item()
@@ -1053,10 +1098,30 @@ class SACHybrid:
                 self.entropy_cat = ent_c
             if outs.get('bern') is not None:
                 bern_logits = outs['bern'].clamp(min=-1e8)
-                self.entropy_bern = Bernoulli(logits=bern_logits).entropy().sum(-1).mean().item()
-                fire_probs = torch.sigmoid(bern_logits)
-                self.max_fire_prob = fire_probs.max().item()
-                self.min_fire_prob = fire_probs.min().item()
+                fire_mask = outs.get('fire_mask', None)
+                if fire_mask is not None:
+                    # fire_mask 由 PolicyNetHybrid.forward 内部计算，标记哪些样本位置允许开火（弹药充足+冷却到位+角度合理）
+                    # 只统计未被 mask 的有效位置，避免被强制压成 -1e8 的位置拉低 min_fire_prob 或 entropy_bern
+                    valid_mask = (fire_mask > 0.5)
+                    if valid_mask.any():
+                        valid_probs = torch.sigmoid(bern_logits)[valid_mask]
+                        valid_logits = bern_logits[valid_mask]
+                        # 熵只在有效位置内求平均，除以有效位置数
+                        self.entropy_bern = Bernoulli(logits=valid_logits).entropy().sum().item() / max(valid_mask.sum().item(), 1)
+                        # 最大/最小开火概率也只在有效位置内统计
+                        self.max_fire_prob = valid_probs.max().item()
+                        self.min_fire_prob = valid_probs.min().item()
+                    else:
+                        # 全 batch 都被 mask，无法开火
+                        self.entropy_bern = 0.0
+                        self.max_fire_prob = 0.0
+                        self.min_fire_prob = 0.0
+                else:
+                    # 兼容性分支：如果 net 没有返回 fire_mask（理论上不应该发生），则全量统计
+                    self.entropy_bern = Bernoulli(logits=bern_logits).entropy().sum(-1).mean().item()
+                    fire_probs = torch.sigmoid(bern_logits)
+                    self.max_fire_prob = fire_probs.max().item()
+                    self.min_fire_prob = fire_probs.min().item()
 
     # --- 修改后的 MARWIL_update， 注意原先是0 ---
     def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.3, max_weight=100.0,

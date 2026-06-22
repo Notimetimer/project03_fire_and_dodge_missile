@@ -957,6 +957,8 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
+    sac_target_entropy = None, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
+    sac_alpha_clip = (0.001, 0.1), # [SAC] alpha 截断范围
 ):
 
     actor_lr0 = actor_lr
@@ -1005,6 +1007,13 @@ def run_MLP_simulation(
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     del dummy_env
+
+    # [SAC] 若外部未指定目标熵，则只根据机动部分 (cat) 计算；bern 使用固定 k_entropy 不再参与 alpha 调节
+    if sac_target_entropy is None:
+        import math
+        _cat_max_ent = sum(math.log(d) for d in action_dims_dict['cat']) if action_dims_dict['cat'] else 0.0
+        sac_target_entropy = 2.3 # _cat_max_ent * 0.5  # 取最大熵的一半作为目标
+        # print(f"[SAC] Auto target_entropy (mobility only) = {sac_target_entropy:.4f}  (cat_max={_cat_max_ent:.4f})")
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
@@ -1934,7 +1943,7 @@ def run_MLP_simulation(
                 sac_batch_size = int(min(mini_batch_size_mixed, replay_buffer.size()))
                 for _ in range(num_sac_updates):
                     sac_batch = replay_buffer.sample(sac_batch_size)
-                    student_agent.update(sac_batch)
+                    student_agent.update(sac_batch, target_entropy=sac_target_entropy, alpha_clip=sac_alpha_clip)
                 logger.add("train_plus/num_sac_updates", num_sac_updates, total_steps)
                 logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
                 logger.add("train_plus/sac_alpha", student_agent.alpha, total_steps)
