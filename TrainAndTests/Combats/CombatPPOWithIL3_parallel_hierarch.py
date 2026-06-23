@@ -438,28 +438,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
+        # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
-        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        local_agent = PPOHybrid(
-            actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
-            critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
-            actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
-            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
-            device=device_worker 
-        )
+        local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
         
         # 初始化对手网络
         adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        # 【修改 2】同样为对手创建一个 dummy critic
-        adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        adv_agent = PPOHybrid(
-            actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
-            critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
-            actor_lr=0, critic_lr=0, 
-            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
-            device=device_worker
-        )
+        adv_agent = HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker)
 
         # --- 2. 循环等待阶段 ---
         while True:
@@ -475,7 +460,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 (actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
-                local_agent.actor.load_state_dict(actor_weights)
+                local_agent.load_state_dict(actor_weights)
                 
                 # B. 配置对手
                 opp_name, opp_type, opp_data, opp_temperature = opponent_info
@@ -484,7 +469,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 if adv_is_rule:
                     rule_num = opp_data
                 else:
-                    adv_agent.actor.load_state_dict(opp_data)
+                    adv_agent.load_state_dict(opp_data)
 
                 # C. 准备本回合容器
                 # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
@@ -626,8 +611,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         with torch.no_grad():
                             # Blue Decision
                             b_state_check = env.unscale_state(b_check_obs)
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
-                            # b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                            b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
+                            # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                             b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -640,9 +625,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
+                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
                                                         mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
-                                # r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -987,6 +972,7 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
+    use_RND = 0, # 好奇心机制
 ):
 
     actor_lr0 = actor_lr
@@ -1055,7 +1041,8 @@ def run_MLP_simulation(
         gamma=gamma, 
         device=device, 
         k_entropy=k_entropy, 
-        max_std=label_smoothing
+        max_std=label_smoothing,
+        rnd_state_dim=state_dim,
     )
     
     
@@ -1396,6 +1383,7 @@ def run_MLP_simulation(
     ema_step = 0
     target_p1 = 0.65
     ppo_grad_ema = None  # [新增] 初始化 PPO 梯度 EMA 缓存
+    rnd_mse = None       # RND 原始 MSE（上一批次的值，首批为 None）
 
     # =========================================================
     # 主循环 (Master Process)
@@ -1863,6 +1851,8 @@ def run_MLP_simulation(
 
             # 使用带有偏差修正的滤波值
             filtered_score = ema_score
+            if use_RND and rnd_mse is not None:
+                logger.add("train_plus/RND_mse", rnd_mse, total_steps)
             logger.add("train_plus/batch_score", batch_score, total_steps)
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
             logger.add("train_plus/target_p1", target_p1, total_steps)
@@ -1955,6 +1945,11 @@ def run_MLP_simulation(
                 #     freeze_actor = 1
                 
                 max_fire_logits = 4.0
+
+                if use_RND:
+                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=10)
+                else:
+                    rnd_mse = None
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)

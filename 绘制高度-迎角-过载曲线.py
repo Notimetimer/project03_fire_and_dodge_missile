@@ -5,7 +5,7 @@ import os
 # --- 路径设置 ---
 # 获取当前脚本所在目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(current_dir, "logs", "CombatLog_vs_Rule4.csv")
+csv_path = os.path.join(current_dir, "logs", "CombatLog_vs_Rule3.csv")
 
 if not os.path.exists(csv_path):
     print(f"错误：在以下路径未找到文件: {csv_path}")
