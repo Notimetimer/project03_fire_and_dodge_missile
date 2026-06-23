@@ -1115,6 +1115,15 @@ def run_MLP_simulation(
                 student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
                 student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
                 print("Loaded optimizer states.")
+                if student_agent.rnd_target is not None and 'rnd_target' in opt_states:
+                    student_agent.rnd_target.load_state_dict(opt_states['rnd_target'])
+                    print("Loaded RND target state.")
+                if student_agent.rnd_prediction is not None and 'rnd_prediction' in opt_states:
+                    student_agent.rnd_prediction.load_state_dict(opt_states['rnd_prediction'])
+                    print("Loaded RND prediction state.")
+                if student_agent.rnd_optimizer is not None and 'rnd_optimizer' in opt_states:
+                    student_agent.rnd_optimizer.load_state_dict(opt_states['rnd_optimizer'])
+                    print("Loaded RND optimizer state.")
             except Exception as e:
                 print(f"Failed to load optimizers: {e}")
         
@@ -1947,7 +1956,7 @@ def run_MLP_simulation(
                 max_fire_logits = 4.0
 
                 if use_RND:
-                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=10)
+                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=20) # 10
                 else:
                     rnd_mse = None
 
@@ -2217,6 +2226,9 @@ def run_MLP_simulation(
                 torch.save({
                     'actor_optimizer': student_agent.actor_optimizer.state_dict(),
                     'critic_optimizer': student_agent.critic_optimizer.state_dict(),
+                    'rnd_target': student_agent.rnd_target.state_dict() if student_agent.rnd_target is not None else None,
+                    'rnd_prediction': student_agent.rnd_prediction.state_dict() if student_agent.rnd_prediction is not None else None,
+                    'rnd_optimizer': student_agent.rnd_optimizer.state_dict() if student_agent.rnd_optimizer is not None else None,
                 }, os.path.join(log_dir, "optimizers_state.pt"))
                 if il_transition_buffer is not None:
                     il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))
