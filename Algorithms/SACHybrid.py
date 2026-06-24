@@ -963,11 +963,12 @@ class SACHybrid:
         for param_target, param in zip(target_net.parameters(), net.parameters()):
             param_target.data.copy_(param_target.data * (1.0 - self.tau) + param.data * self.tau)
 
-    def update(self, batch, target_entropy=2.0, alpha_clip=(0.001, 0.1)):
+    def update(self, batch, target_entropy=2.0, alpha_clip=(0.001, 0.1), freeze_actor=False):
         """
         接收 ReplayBuffer 返回的字典 batch
         target_entropy : 目标熵（正数，由外部传入）。None 则不更新 alpha。
         alpha_clip      : (min, max) 对 alpha=exp(log_alpha) 的截断范围。
+        freeze_actor   : True 时只更新 Q 网络，跳过 actor 和 alpha 更新（Q 预热阶段使用）。
         """
         # --- A. 数据搬运与类型转换 (NumPy -> Tensor) ---
         device = self.device
@@ -997,16 +998,52 @@ class SACHybrid:
 
         # --- B. SAC 计算逻辑 (逻辑保持不变，但变量名已对齐) ---
         
+        # [诊断] 统计当前 batch 中 replay buffer 存储的 bern 动作分布
+        if not hasattr(self, '_diag_update_count'):
+            self._diag_update_count = 0
+        self._diag_update_count += 1
+        
+        if self._diag_update_count % 200 == 1:
+            if 'bern' in raw_actions:
+                bern_buf = raw_actions['bern']  # shape: (batch, bern_dim)
+                n_fire = (bern_buf > 0.5).sum()
+                n_no_fire = (bern_buf <= 0.5).sum()
+                print(f"[SAC diag #{self._diag_update_count}] replay buffer bern: fire={n_fire}, no_fire={n_no_fire}, ratio={n_fire/(n_fire+n_no_fire+1e-8):.3f}")
+
         # 1. 更新 Q 网络 (Critic)
         with torch.no_grad():
             # 获取下一状态的动作 (可导采样) 和 log_prob
             next_actions_diff, next_log_probs = self.actor.sample_for_sac(next_states)
             
+            # [诊断] 统计 next_states 里被 mask 和未被 mask 的样本数
+            if self._diag_update_count % 200 == 1:
+                _outs_diag = self.actor.net(next_states)
+                _fm = _outs_diag.get('fire_mask', None)
+                if _fm is not None:
+                    n_can_fire = (_fm > 0.5).sum().item()
+                    n_masked = (_fm <= 0.5).sum().item()
+                    bern_lp = next_log_probs['bern']
+                    # 统计 sample_for_sac 采出的 bern_action 在 can_fire 位置的均值（接近1=偏开火，接近0=偏不开火）
+                    valid_mask_1d = (_fm > 0.5).view(-1)
+                    bern_act = next_actions_diff.get('bern', None)
+                    if bern_act is not None:
+                        bern_act_flat = bern_act.view(-1)
+                        canfire_mean = bern_act_flat[valid_mask_1d].mean().item() if valid_mask_1d.any() else float('nan')
+                    else:
+                        canfire_mean = float('nan')
+                    bern_logit_canfire = _outs_diag['bern_logits'].view(-1)[valid_mask_1d]
+                    logit_mean = bern_logit_canfire.mean().item() if valid_mask_1d.any() else float('nan')
+                    logit_max = bern_logit_canfire.max().item() if valid_mask_1d.any() else float('nan')
+                    print(f"[SAC diag #{self._diag_update_count}] next_states fire_mask: can_fire={n_can_fire}, masked={n_masked}, "
+                          f"bern_logprob mean={bern_lp.mean().item():.4f}, "
+                          f"bern_action[can_fire] mean={canfire_mean:.3f}, "
+                          f"bern_logit[can_fire] mean={logit_mean:.3f} max={logit_max:.3f}")
+            
             # 目标 Q 值
             q1_target = self.target_critic_1(next_states, next_actions_diff)
             q2_target = self.target_critic_2(next_states, next_actions_diff)
             alpha = self.log_alpha.exp()
-            k_bern = self.k_entropy.get('bern', 0.05)
+            k_bern = self.k_entropy.get('bern', 0.003)
             entropy_reg = alpha * (next_log_probs['cont'] + next_log_probs['cat']) + k_bern * next_log_probs['bern']
             min_q_target = torch.min(q1_target, q2_target) - entropy_reg
             
@@ -1027,42 +1064,51 @@ class SACHybrid:
         self.critic_1_optimizer.step()
         self.critic_2_optimizer.step()
 
-        # 2. 更新 策略网络 (Actor)
-        # 重新对当前状态采样
-        curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states)
-        
-        q1_pi = self.critic_1(states, curr_actions_diff)
-        q2_pi = self.critic_2(states, curr_actions_diff)
-        min_q_pi = torch.min(q1_pi, q2_pi)
-        
-        alpha = self.log_alpha.exp().detach()
-        # 机动部分 (cont+cat) 使用自适应 alpha；开火部分 (bern) 使用固定初始熵系数
-        k_bern = self.k_entropy.get('bern', 0.05)
-        actor_loss = (alpha * (curr_log_probs['cont'] + curr_log_probs['cat'])
-                      + k_bern * curr_log_probs['bern']
-                      - min_q_pi).mean()
-        
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        actor_grad = nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
-        self.actor_optimizer.step()
+        # 2. 更新 策略网络 (Actor) —— freeze_actor=True 时跳过
+        if not freeze_actor:
+            # 重新对当前状态采样
+            curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states)
+            
+            q1_pi = self.critic_1(states, curr_actions_diff)
+            q2_pi = self.critic_2(states, curr_actions_diff)
+            min_q_pi = torch.min(q1_pi, q2_pi)
+            
+            alpha = self.log_alpha.exp().detach()
+            # 机动部分 (cont+cat) 使用自适应 alpha；开火部分 (bern) 使用固定初始熵系数
+            k_bern = self.k_entropy.get('bern', 0.05)
+            actor_loss = (alpha * (curr_log_probs['cont'] + curr_log_probs['cat'])
+                          + k_bern * curr_log_probs['bern']
+                          - min_q_pi).mean()
+            
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            actor_grad = nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
+            self.actor_optimizer.step()
 
-        # 3. 更新 Alpha (熵系数)
-        if target_entropy is not None:
-            self.target_entropy = target_entropy
-            # alpha 只根据机动部分 (cont+cat) 的熵来调节
-            mobility_log_probs = curr_log_probs['cont'].detach() + curr_log_probs['cat'].detach()
-            alpha_loss = -(self.log_alpha * (mobility_log_probs - target_entropy)).mean()
-            self.alpha_optimizer.zero_grad()
-            alpha_loss.backward()
-            self.alpha_optimizer.step()
-            # 将 alpha 截断到合法范围
-            if alpha_clip is not None:
-                log_alpha_min = np.log(alpha_clip[0])
-                log_alpha_max = np.log(alpha_clip[1])
-                with torch.no_grad():
-                    self.log_alpha.clamp_(log_alpha_min, log_alpha_max)
+            # 3. 更新 Alpha (熵系数)
+            if target_entropy is not None:
+                self.target_entropy = target_entropy
+                # alpha 只根据机动部分 (cont+cat) 的熵来调节
+                # mobility_log_probs 是 log_prob（负数），熵 entropy = -log_prob（正数）
+                mobility_log_probs = curr_log_probs['cont'].detach() + curr_log_probs['cat'].detach()
+                mobility_entropy = -mobility_log_probs
+                alpha_loss = -(self.log_alpha * (mobility_entropy - target_entropy)).mean()
+                self.alpha_optimizer.zero_grad()
+                alpha_loss.backward()
+                self.alpha_optimizer.step()
+                # 将 alpha 截断到合法范围
+                if alpha_clip is not None:
+                    log_alpha_min = np.log(alpha_clip[0])
+                    log_alpha_max = np.log(alpha_clip[1])
+                    with torch.no_grad():
+                        self.log_alpha.clamp_(log_alpha_min, log_alpha_max)
+            else:
+                alpha_loss = torch.tensor(0.0)
         else:
+            # freeze_actor=True：用零值占位，不触碰 actor/alpha 参数
+            curr_log_probs = {'cont': torch.zeros(1), 'cat': torch.zeros(1), 'bern': torch.zeros(1), 'total': torch.zeros(1)}
+            actor_loss = torch.tensor(0.0)
+            actor_grad = torch.tensor(0.0)
             alpha_loss = torch.tensor(0.0)
 
         # 4. 目标网络软更新
