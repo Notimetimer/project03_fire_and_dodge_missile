@@ -1972,7 +1972,7 @@ def run_MLP_simulation(
                             teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
                             teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
                             teacher_wrapper.eval()
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=1.0, k=3, teacher_actor=teacher_wrapper)
+                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=0.5, k=3, teacher_actor=teacher_wrapper)
                             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
                         else:
                             RDistill_kl = None
