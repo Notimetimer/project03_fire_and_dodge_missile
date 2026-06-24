@@ -967,6 +967,90 @@ class PPOHybrid:
         mse_raw = i_mean.item()  # 归一化前的原始 MSE 均值，用于监控
         return new_dict, mse_raw
 
+    def RDistill(self, transition_dict, beta, k=1, teacher_actor=None):
+        """
+        计算 RDistill (Reward Shaping via Imitation Learning) 内在奖励并叠加到外在奖励上。
+
+        步骤：
+          1. 对 cat 和 bern 部分，让 teacher_actor 和 self.actor 对 transition_dict 中的 obs 进行前向传播
+          2. 以 teacher 的策略分布为 P，self.actor 的分布为 Q
+          3. 计算 KL 散度 D_KL = sum(P * (log(P) - log(Q))) 得到 D_KL 序列
+          4. 归一化 D_KL 序列（除以标准差，防除0错误）
+          5. 计算内在奖励 = beta * exp(-k * D_KL_normalized)
+          6. 叠加到外在奖励
+
+        Args:
+            transition_dict: 包含 'states', 'rewards' 等键的字典
+            beta: 内在奖励缩放倍率
+            k: KL 散度的缩放系数，默认为 1
+            teacher_actor: 已加载参数的 PolicyNetHybrid 实例（教师策略）
+
+        Returns:
+            new_dict: 奖励已被修改的新字典（浅拷贝，rewards 为新数组）
+            kl_mean: 归一化前的 KL 散度均值，用于监控
+        """
+        assert teacher_actor is not None, "teacher_actor 不能为空，请传入已加载参数的 PolicyNetHybrid 实例"
+
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+
+        with torch.no_grad():
+            # 1. 获取 teacher 和 student 的策略分布
+            teacher_outputs = teacher_actor.net(states)
+            student_outputs = self.actor.net(states)
+
+            # 2. 计算 KL 散度（仅针对 cat 和 bern）
+            kl_per_sample = torch.zeros(states.size(0), 1).to(self.device)
+
+            # --- Categorical 部分 ---
+            if teacher_outputs['cat'] is not None and student_outputs['cat'] is not None:
+                teacher_probs_list = teacher_outputs['cat']
+                student_probs_list = student_outputs['cat']
+
+                for teacher_probs, student_probs in zip(teacher_probs_list, student_probs_list):
+                    # KL(P||Q) = sum(P * (log(P) - log(Q)))
+                    # 添加小常数防止 log(0)
+                    teacher_log_probs = torch.log(teacher_probs + 1e-8)
+                    student_log_probs = torch.log(student_probs + 1e-8)
+                    kl_cat = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(dim=-1, keepdim=True)
+                    kl_per_sample += kl_cat
+
+            # --- Bernoulli 部分 ---
+            if teacher_outputs['bern'] is not None and student_outputs['bern'] is not None:
+                teacher_logits = teacher_outputs['bern']
+                student_logits = student_outputs['bern']
+
+                # 将 logits 转换为概率
+                teacher_probs = torch.sigmoid(teacher_logits)
+                student_probs = torch.sigmoid(student_logits)
+
+                # KL(P||Q) = sum(P * (log(P) - log(Q)) + (1-P) * (log(1-P) - log(1-Q)))
+                teacher_log_probs = torch.log(teacher_probs + 1e-8)
+                student_log_probs = torch.log(student_probs + 1e-8)
+                teacher_log_probs_inv = torch.log(1 - teacher_probs + 1e-8)
+                student_log_probs_inv = torch.log(1 - student_probs + 1e-8)
+
+                kl_bern = (teacher_probs * (teacher_log_probs - student_log_probs) +
+                           (1 - teacher_probs) * (teacher_log_probs_inv - student_log_probs_inv)).sum(dim=-1, keepdim=True)
+                kl_per_sample += kl_bern
+
+            # 3. 归一化 KL 散度（除以标准差）
+            kl_mean = kl_per_sample.mean()
+            kl_std = kl_per_sample.std() + 1e-8
+            kl_normalized = kl_per_sample / kl_std
+
+            # 4. 计算内在奖励 = beta * exp(-k * D_KL_normalized)
+            intrinsic = beta * torch.exp(-k * kl_normalized)
+
+            # 5. 叠加到外在奖励
+            rewards = np.array(transition_dict['rewards'], dtype=np.float32).reshape(-1, 1)
+            intrinsic_np = intrinsic.cpu().numpy()
+            rewards_aug = rewards + intrinsic_np
+
+        new_dict = dict(transition_dict)
+        new_dict['rewards'] = rewards_aug
+        kl_mean_raw = kl_mean.item()  # 归一化前的 KL 散度均值，用于监控
+        return new_dict, kl_mean_raw
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:

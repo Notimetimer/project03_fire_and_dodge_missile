@@ -973,6 +973,7 @@ def run_MLP_simulation(
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
+    use_RDistill = 0, # 温和蒸馏机制
 ):
 
     actor_lr0 = actor_lr
@@ -1954,6 +1955,27 @@ def run_MLP_simulation(
                 #     freeze_actor = 1
                 
                 max_fire_logits = 4.0
+
+                # 随机拜师法
+                if use_RDistill:
+                    # 从 elo_ratings 中筛选 actor_rein 开头的策略，取分值最高的前10个随机抽1个
+                    rein_elo_items = [(k, v) for k, v in elo_ratings.items()] #  if k.startswith('actor_rein')]
+                    if len(rein_elo_items) >= 1:
+                        rein_elo_items.sort(key=lambda x: x[1], reverse=True)
+                        top_candidates = rein_elo_items[:10]
+                        teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
+                        teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
+                        if os.path.exists(teacher_path):
+                            teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+                            teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
+                            teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
+                            teacher_wrapper.eval()
+                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=1.0, k=1, teacher_actor=teacher_wrapper)
+                            logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
+                        else:
+                            RDistill_kl = None
+                    else:
+                        RDistill_kl = None
 
                 if use_RND:
                     transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=20) # 10
