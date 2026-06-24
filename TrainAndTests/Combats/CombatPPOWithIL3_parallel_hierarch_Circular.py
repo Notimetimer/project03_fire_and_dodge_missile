@@ -717,9 +717,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         with torch.no_grad():
                             # Blue Decision
                             b_state_check = env.unscale_state(b_check_obs)
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
+                            b_action_exec, b_action_raw, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
                             # b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
-                            b_action_label = b_action_exec['cat'] # [0]
+                            # b_action_label = b_action_exec['cat'] # [0]
+                            b_action_v = b_action_exec['lin'][0] if isinstance(b_action_exec['lin'], (list, np.ndarray)) else b_action_exec['lin']
+                            b_action_h = b_action_exec['circ'][0] if isinstance(b_action_exec['circ'], (list, np.ndarray)) else b_action_exec['circ']
+                            b_action_radians = [b_action_v, b_action_h]
+                            b_action_label = np.array([0, 0])  # 占位，仅用于 combat_terminate_and_reward 签名
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
@@ -727,14 +731,17 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
-                                r_action_exec = {'cat': r_action_label, 'bern': np.array([r_fire], dtype=np.float32)}
+                                r_action_radians = None
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
-                                                        mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
+                                r_action_exec, r_action_raw, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'lin':adv_explore, 'circ':adv_explore, 'bern':1}, 
+                                                        mask_on=fire_mask, temperature={'lin':opp_temperature, 'circ':opp_temperature, 'bern':1.0})
                                 # r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
-                                r_action_label = r_action_exec['cat'] #[0]
+                                r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
+                                r_action_h = r_action_exec['circ'][0] if isinstance(r_action_exec['circ'], (list, np.ndarray)) else r_action_exec['circ']
+                                r_action_radians = [r_action_v, r_action_h]
+                                r_action_label = np.array([0, 0])  # 占位，仅用于 combat_terminate_and_reward 签名
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
@@ -748,9 +755,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             r_is_firing = env.has_ammo_to_fire('r')
                         
                         # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
-                        current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
-                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
+                        current_action = {'lin': b_action_raw['lin'][0], 'circ': b_action_raw['circ'][0], 'bern': b_action_raw['bern']}
+                        current_action_exec = {'lin': b_action_raw['lin'][0], 'circ': b_action_raw['circ'][0], 'bern': np.array([b_is_firing])}
+                        if adv_is_rule:
+                            current_enm_action_exec = {'lin': r_action_label[0:1], 'circ': r_action_label[1:2], 'bern': np.array([r_is_firing])}
+                        else:
+                            current_enm_action_exec = {'lin': r_action_raw['lin'][0], 'circ': r_action_raw['circ'][0], 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
@@ -797,11 +807,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         episode_red_fire_thetas.append(fire_theta)
                     
                     # debug
-                    if r_action_label[0] > 4:
+                    if adv_is_rule and r_action_label[0] > 4:
                         print("数值超出范围", r_action_label[0], r_action_label[1])
-
-                    r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
-                    b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
+                    if adv_is_rule:
+                        r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
+                    else:
+                        r_maneuver = env.maneuverContinuous(env.RUAV, r_action_radians)
+                    b_maneuver = env.maneuverContinuous(env.BUAV, b_action_radians)
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
                     
@@ -1948,15 +1960,15 @@ def run_MLP_simulation(
                 if batch_val is None:
                     return ema_val
                 return batch_val if ema_val is None else (1 - alpha) * ema_val + alpha * batch_val
-            ema_fire_interval = _ema_update(ema_fire_interval, batch_blue_avg_fire_interval)
-            ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi)
-            ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance)
-            ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi)
-            ema_fire_altitude = _ema_update(ema_fire_altitude, batch_blue_avg_fire_altitude)
-            ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi)
-            ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi)
-            ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi)
-            ema_delta_theta = _ema_update(ema_delta_theta, batch_blue_avg_delta_theta*180/pi)
+            ema_fire_interval = _ema_update(ema_fire_interval, batch_blue_avg_fire_interval if batch_blue_avg_fire_interval is not None else None)
+            ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi if batch_blue_avg_fire_delta_psi is not None else None)
+            ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance if batch_blue_avg_fire_distance is not None else None)
+            ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi if batch_blue_avg_fire_AA_hor is not None else None)
+            ema_fire_altitude = _ema_update(ema_fire_altitude, batch_blue_avg_fire_altitude if batch_blue_avg_fire_altitude is not None else None)
+            ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi if batch_blue_avg_fire_theta is not None else None)
+            ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi if batch_blue_avg_ATA is not None else None)
+            ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi if batch_blue_avg_delta_psi_threat is not None else None)
+            ema_delta_theta = _ema_update(ema_delta_theta, batch_blue_avg_delta_theta*180/pi if batch_blue_avg_delta_theta is not None else None)
 
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:

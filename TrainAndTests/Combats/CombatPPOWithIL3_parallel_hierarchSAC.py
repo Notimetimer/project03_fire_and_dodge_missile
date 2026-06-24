@@ -959,6 +959,7 @@ def run_MLP_simulation(
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     sac_target_entropy = None, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
     sac_alpha_clip = (0.001, 0.1), # [SAC] alpha 截断范围
+    q_warmup_batches = 20, # [SAC] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
 ):
 
     actor_lr0 = actor_lr
@@ -1911,8 +1912,8 @@ def run_MLP_simulation(
 
             # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
             # [SAC] 触发条件：经验池累计样本达到阈值（warm-up）即可开始 off-policy 更新
-            if batch_idx % save_interval == 0 and \
-                replay_buffer.size() >= transition_dict_threshold:
+            if batch_idx % save_interval == 0:# and \
+                # replay_buffer.size() >= transition_dict_threshold:
                 
                 '记录ELo相对位置'
                 # [新增] 调节alpha_il
@@ -1941,9 +1942,17 @@ def run_MLP_simulation(
                 num_sac_updates = max(1, int(steps_since_update // 10) * int(sac_updates_per_10_steps))
                 steps_since_update = 0
                 sac_batch_size = int(min(mini_batch_size_mixed, replay_buffer.size()))
+                # [做法5] 前 q_warmup_batches 个 batch 冻结 actor，只更新 Q 网络
+                # 让 Q 先在真实 replay buffer 数据上建立合理估值，再允许 actor 被梯度更新
+                _freeze_actor_now = (batch_idx <= q_warmup_batches)
+                if _freeze_actor_now and batch_idx == 1:
+                    print(f"[做法5] Actor冻结中，将在 batch_idx>{q_warmup_batches} 后解冻")
+                elif not _freeze_actor_now and batch_idx == q_warmup_batches + 1:
+                    print(f"[做法5] Actor已解冻，开始正常SAC更新")
                 for _ in range(num_sac_updates):
                     sac_batch = replay_buffer.sample(sac_batch_size)
-                    student_agent.update(sac_batch, target_entropy=sac_target_entropy, alpha_clip=sac_alpha_clip)
+                    student_agent.update(sac_batch, target_entropy=sac_target_entropy,
+                                        alpha_clip=sac_alpha_clip, freeze_actor=_freeze_actor_now)
                 logger.add("train_plus/num_sac_updates", num_sac_updates, total_steps)
                 logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
                 logger.add("train_plus/sac_alpha", student_agent.alpha, total_steps)

@@ -1319,7 +1319,7 @@ class PPOHybrid:
                     else:
                         fire_mask = (bern_logits > -1e6).float()
                     # 只对允许开火且存活的样本求平均，避免被 non-fireable 样本稀释
-                    fireable_sum = (mb_active_masks * bern_fire_mask).sum()
+                    fireable_sum = (mb_active_masks * fire_mask).sum()
                     logit_loss = ((over ** 2) * fire_mask * mb_active_masks).sum() / (fireable_sum + mask_eps)
                     actor_loss = actor_loss + alpha_logit_reg * logit_loss
                     

@@ -1959,13 +1959,15 @@ def run_MLP_simulation(
                 # 随机拜师法
                 if use_RDistill:
                     # 从 elo_ratings 中筛选 actor_rein 开头的策略，取分值最高的前10个随机抽1个
-                    rein_elo_items = [(k, v) for k, v in elo_ratings.items()] #  if k.startswith('actor_rein')]
+                    rein_elo_items = [(k, v) for k, v in elo_ratings.items() if k.startswith('actor_rein')]
                     if len(rein_elo_items) >= 1:
+                        print("有可调用teacher")
                         rein_elo_items.sort(key=lambda x: x[1], reverse=True)
                         top_candidates = rein_elo_items[:10]
                         teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
                         teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
                         if os.path.exists(teacher_path):
+                            print("teacher路径已获取")
                             teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
                             teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
                             teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
@@ -1978,7 +1980,7 @@ def run_MLP_simulation(
                         RDistill_kl = None
 
                 if use_RND:
-                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=20) # 10
+                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=1) # 10
                 else:
                     rnd_mse = None
 

@@ -32,7 +32,7 @@ il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.1 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -48,7 +48,7 @@ dt_move = 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常�
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
+transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1  # [调试] 原为 5*，临时改为 1* 让 update 更快启动
 
 # [SAC] off-policy 专用超参数
 # replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）

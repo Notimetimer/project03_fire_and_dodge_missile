@@ -1,0 +1,41 @@
+{
+  "baseline": "SLWSPFSP0.3",
+  "stats": {
+    "SLWSPFSP0.5": {
+      "win": 35,
+      "draw": 23,
+      "loss": 22,
+      "win_rate": 0.58125,
+      "score": 46.5
+    },
+    "HLWSPFSP": {
+      "win": 30,
+      "draw": 26,
+      "loss": 24,
+      "win_rate": 0.5375,
+      "score": 43.0
+    },
+    "CSPFSP": {
+      "win": 53,
+      "draw": 22,
+      "loss": 5,
+      "win_rate": 0.8,
+      "score": 64.0
+    },
+    "CSVersusRules": {
+      "win": 74,
+      "draw": 6,
+      "loss": 0,
+      "win_rate": 0.9625,
+      "score": 77.0
+    },
+    "SLWSDPC-PFSP": {
+      "win": 28,
+      "draw": 31,
+      "loss": 21,
+      "win_rate": 0.54375,
+      "score": 43.5
+    }
+  },
+  "total_rounds": 80
+}
