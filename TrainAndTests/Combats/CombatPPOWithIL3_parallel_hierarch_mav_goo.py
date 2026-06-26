@@ -439,7 +439,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
         # 初始化本地网络 (CPU) - maverick(cat-only)和goose(bern-only)
         action_dims_dict_mav_w = {'cont': 0, 'cat': action_dims_dict['cat'], 'bern': 0}
-        action_dims_dict_goo_w = {'cont': 0, 'cat': 0, 'bern': action_dims_dict['bern']}
+        action_dims_dict_goo_w = {'cont': 0, 'cat': [0], 'bern': action_dims_dict['bern']}
 
         local_mav_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict_mav_w).to(device_worker)
         local_mav_agent = HybridActorWrapper(local_mav_actor, action_dims_dict_mav_w, None, device_worker).to(device_worker)
@@ -1051,7 +1051,7 @@ def run_MLP_simulation(
     # maverick: 只负责cat机动动作
     action_dims_dict_mav = {'cont': 0, 'cat': fly_act_dim, 'bern': 0}
     # goose: 只负责bern开火动作
-    action_dims_dict_goo = {'cont': 0, 'cat': 0, 'bern': fire_dim}
+    action_dims_dict_goo = {'cont': 0, 'cat': [0], 'bern': fire_dim}
 
     mav_actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict_mav).to(device)
     mav_critic_net = ValueNet(state_dim, hidden_dim).to(device)
