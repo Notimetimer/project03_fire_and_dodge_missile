@@ -72,7 +72,7 @@ def run_single_episode(episode_id):
         env.psi_req = sub_of_radian(psi_req)
         
         v_req += np.random.randn() * 3 * dt_decide
-        env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)  # 这个虚高的速度输入边界是导致速度基准误差偏大的原因
+        env.v_req = np.clip(v_req, 0.5 * 340, 1.3 * 340)  # 这个虚高的速度输入边界是导致速度基准误差偏大的原因
         
         # PID 计算决策
         obs, obs_check = env.get_obs()

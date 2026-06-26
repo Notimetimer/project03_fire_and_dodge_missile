@@ -84,7 +84,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 # 使用传入的 warm_up 调整难度
                 height_req = np.clip(init_height + 1 * np.random.uniform(-1, 1) * 5000, 1000, 15000)
                 psi_req = np.random.uniform(-pi, pi) # * warm_up
-                v_req = np.random.uniform(0.5, 2.5) * 340  # 根本不可能跑到2.5Ma, 1.1 就封顶了，但是在训练的时候就要处理好这个数据.
+                v_req = np.random.uniform(0.5, 1.3) * 340  # 根本不可能跑到2.5Ma, 1.1 就封顶了，但是在训练的时候就要处理好这个数据.
 
                 env.reset(birth_state=birth_state, height_req=height_req, psi_req=psi_req, v_req=v_req, dt_report=dt_decide)
                 
@@ -108,7 +108,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                     psi_req += np.random.randn() * 10 *pi/180 * dt_decide # 每秒动10°
                     env.psi_req = sub_of_radian(psi_req)
                     v_req += np.random.randn() * 3 * dt_decide # 速度目标也在动
-                    env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)
+                    # env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)
+                    env.v_req = np.clip(v_req, 0.5 * 340, 1.3 * 340)
 
                     obs, obs_check = env.get_obs()
                     action, u, _, _ = local_agent.take_action(obs, explore=True)
@@ -356,12 +357,16 @@ if __name__=='__main__':
             logger.add("train_plus/0 avg AO", mean_ao_batch, rl_steps)
 
             # [重构] 平滑衰减逻辑：
-            # 当 mean_ao_batch 从 20 减小到 5 时，线性地压制 max_std (0.2 -> 0.1) 和 k_entropy (0.5 -> 1e-5)
             # 因子 alpha: 5->0.0, 20->1.0
-            alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
+            # alpha_decay = np.clip((mean_ao_batch - 5.0) / (20.0 - 5.0), 0.0, 1.0)
+            alpha_decay = np.clip((mean_ao_batch - 0.0) / (90.0 - 0.0), 0.0, 1.0)
+            
+            if i_episode<100:
+                agent.actor.net.clamp_log_std(0.3)
             
             # 平滑调整熵系数 (假设初始 cont 熵为 0.5)
-            agent.k_entropy['cont'] = 1e-5 + (0.5 - 1e-5) * alpha_decay
+            # agent.k_entropy['cont'] = 1e-5 + (0.5 - 1e-5) * alpha_decay
+            agent.k_entropy['cont'] = min(1e-5 + (0.5 - 1e-5) * alpha_decay, 1e-3)
             
             # [新增] 动态调整学习率：从初始 lr 下降到 1/4
             current_actor_lr = actor_lr * (1/4 + (3/4) * alpha_decay)

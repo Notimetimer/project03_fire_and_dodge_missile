@@ -428,6 +428,36 @@ class track_env():
 
         self.get_done()
 
+        # 存活奖励
+        reward_alive = 0.01 + 0.5 # 10
+
+        # 失败惩罚
+        reward_end = 0
+        if self.fail:
+            steps_wasted = (self.time_limit-self.t)/self.dt_report
+            reward_end -= 800 # 400 + steps_wasted * 1 
+        # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
+        reward_alpha = 0.0 # 0.5
+        if alpha_air >= 15:
+            reward_alpha -= (alpha_air-15) * 5/(26-15) # 10 可能有些大，没有把大迎角的全部优势拿出来
+        if alpha_air < -2:
+            reward_alpha -= ((-2) - alpha_air) * 15/((-2) - (-5))
+        ny = self.RUAV.Ny
+        if ny<=-1:
+            reward_alpha -= 3 + ((-1)-ny)*6 *2
+        if ny >= 7:
+            reward_alpha -= 3 + (ny-7)*3 *2
+        
+        # 侧滑角惩罚（尽量少侧滑）
+        # 原有写法
+        # reward_beta = - 1.2 * abs(beta_air/5) # 1可能有些小，2可能大了
+        # 平方项修改
+        reward_beta = - 1.2 * abs(beta_air/5)**2
+        reward_beta -= abs(rudder) * 0.3  # 方向舵在稳定的的时候尽量少打 0.1 可能小了
+
+        basic_reward = reward_end + reward_alpha + reward_beta
+        basic_reward /= 20 # 数量级匹配
+
         # ====================================================================
         # 完全复现前人研究的控制器训练奖励函数
         # ====================================================================
@@ -462,7 +492,7 @@ class track_env():
             R_ph = 0.0
 
         # 5. 公式 (13)：总奖励 Rs
-        reward = R_c + R_ph
+        reward = R_c + R_ph    + basic_reward
 
         # ====================================================================
         # 以下部分仅用于 Tensorboard 日志可视化和计算监控指标，不参与奖励计算

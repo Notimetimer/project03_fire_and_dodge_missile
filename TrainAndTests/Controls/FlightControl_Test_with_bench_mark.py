@@ -32,7 +32,7 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "超控标准差"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel目标会动_不超控std_动态lr"
