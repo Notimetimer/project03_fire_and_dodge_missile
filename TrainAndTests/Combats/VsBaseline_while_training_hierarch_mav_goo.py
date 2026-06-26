@@ -41,7 +41,7 @@ def test_worker(model_state_dict, rule_num,
 
     # 2. 初始化双agent网络并加载权重
     action_dims_dict_mav = {'cont': 0, 'cat': action_dims_dict['cat'], 'bern': 0}
-    action_dims_dict_goo = {'cont': 0, 'cat': 0, 'bern': action_dims_dict['bern']}
+    action_dims_dict_goo = {'cont': 0, 'cat': [0], 'bern': action_dims_dict['bern']}
 
     mav_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict_mav).to(device)
     mav_actor = HybridActorWrapper(mav_net, action_dims_dict_mav, None, device).to(device)
