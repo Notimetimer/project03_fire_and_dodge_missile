@@ -1,5 +1,6 @@
 import os, sys
-from CombatPPOWithIL3_parallel_hierarch_Classic import *
+# from CombatPPOWithIL3_parallel_hierarch_Classic import *
+from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
@@ -12,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行'
+mission_name = 'NoILPFSP_分阶段_混规则对手_挑战_并行2'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -127,7 +128,7 @@ if __name__=='__main__':
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
+        ADMISSION_THRESHOLD = -1,
         MAX_HISTORY_SIZE = 50, # 150  # 300
         compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了

@@ -105,6 +105,14 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     
     # 获取观测
     r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
+
+    # 验证开火等待时间和中制导标志位是否起到效果
+    t_since_launch = r_obs[21]
+    missile_in_mid_term = r_obs[3]
+    
+    # 修改数值
+    r_obs[21] = 80 /120 # 35.0  # 设置等待时间
+    r_obs[3] = 0.0    # 设置中制导标志位
     
     # 转换为tensor
     if isinstance(r_obs, np.ndarray):
@@ -217,12 +225,19 @@ def main():
     # 查找并加载训练好的模型
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    # dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_rule3_无mask-run-20260531-233800"
-    experiment_name = '预训练评估WhatIf'
+    dir_name = "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
+    
+    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
+    "PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿-run-20260616-130304"
+    "预训练评估-run-20260614-205839"
+
+
+    experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+    # experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
     
-    'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+    'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项_旧版奖励函数'
     
     logs_root_dir = os.path.join(project_root, "logs/combat")
     latest_log_dir = os.path.join(logs_root_dir, dir_name) if dir_name else \

@@ -112,6 +112,14 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     
     # 获取观测
     r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
+
+    # 验证开火等待时间和中制导标志位是否起到效果
+    t_since_launch = r_obs[21]
+    missile_in_mid_term = r_obs[3]
+    
+    # 修改数值
+    r_obs[21] = 35 /120 # 35.0  # 设置等待时间
+    r_obs[3] = 1.0    # 设置中制导标志位
     
     # 转换为tensor
     if isinstance(r_obs, np.ndarray):
@@ -150,8 +158,8 @@ def plot_firing_probability_heatmap_polar(delta_psis, distances, probabilities):
     fig, ax = plt.subplots(subplot_kw=dict(projection='polar'), figsize=(12, 10))
     
     # 绘制热图
-    c = ax.contourf(Theta, R, probabilities_plot, levels=30, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
-    
+    # c = ax.contourf(Theta, R, probabilities_plot, levels=20, cmap='Blues_r', norm=plt.Normalize(vmin=0, vmax=0.5)) # RdYlBu_r, levels是颜色层数
+    c = ax.contourf(Theta, R, probabilities_plot, levels=18, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
     # 添加颜色条
     cbar = plt.colorbar(c, ax=ax, pad=0.1)
     cbar.set_label('Firing Probability', rotation=270, labelpad=20)
@@ -196,7 +204,8 @@ def plot_firing_probability_heatmap_cartesian(delta_psis, distances, probabiliti
     probabilities_plot = probabilities.T
     
     # 绘制热图
-    c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=30, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
+    c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=30, cmap='Blues_r', norm=plt.Normalize(vmin=0, vmax=0.5)) # RdYlBu_r, levels是颜色层数
+    # c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=30, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
     
     # 添加颜色条
     cbar = plt.colorbar(c, ax=ax)
@@ -236,7 +245,15 @@ def main():
     # 查找并加载训练好的模型
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "PFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260609-164656"
+    dir_name = "PurePFSP_分阶段_SAC-run-20260621-193555"
+    
+    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
+    
+    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
+    "PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿-run-20260616-130304"
+    "预训练评估-run-20260614-205839"
+
+
     experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
     # experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 

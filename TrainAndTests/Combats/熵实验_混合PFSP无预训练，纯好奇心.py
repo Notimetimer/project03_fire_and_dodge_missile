@@ -13,12 +13,12 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = '无IL有好奇心'
+mission_name = 'IL有好奇心'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0
+IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -116,20 +116,20 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
-            'Rule_5': 1200,
+            # 'Rule_0': 1200, # debug
+            # "Rule_1": 1200,
+            # "Rule_2": 1200,
+            # 'Rule_3': 1200,
+            # 'Rule_4': 1200,
+            # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 50, # 300 # 100
+        ADMISSION_THRESHOLD = -1,  # 0.5,
+        MAX_HISTORY_SIZE = 50, # 150  # 300
         compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
@@ -143,6 +143,7 @@ if __name__=='__main__':
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0,
         use_RND = 1, # 内在奖励机制
+        beta_RND = 0.01,
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

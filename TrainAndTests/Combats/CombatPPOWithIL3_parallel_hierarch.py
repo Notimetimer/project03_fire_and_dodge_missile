@@ -973,7 +973,9 @@ def run_MLP_simulation(
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
+    beta_RND = 0.3,
     use_RDistill = 0, # 温和蒸馏机制
+    beta_distill = 0.2,
 ):
 
     actor_lr0 = actor_lr
@@ -1972,7 +1974,7 @@ def run_MLP_simulation(
                             teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
                             teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
                             teacher_wrapper.eval()
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=0.5, k=3, teacher_actor=teacher_wrapper)
+                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper)
                             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
                         else:
                             RDistill_kl = None
@@ -1980,7 +1982,7 @@ def run_MLP_simulation(
                         RDistill_kl = None
 
                 if use_RND:
-                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=1) # 10
+                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
                 else:
                     rnd_mse = None
 
