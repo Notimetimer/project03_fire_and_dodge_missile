@@ -14,7 +14,7 @@ def load_combat_stats(json_path):
 def plot_combat_results(data, output_dir):
     """绘制对抗结果条形图"""
     stats = data['stats']
-    sota = data['baseline']
+    sota = data['sota']
     total_rounds = data['total_rounds']
     
     labels = list(stats.keys())
@@ -33,10 +33,11 @@ def plot_combat_results(data, output_dir):
     ax.set_ylabel('Rate (%)')
     # ax.set_title(f'Combat Results vs sota: {sota}')
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=15, ha='right')
+    ax.set_xticklabels(labels, rotation=0, ha='center') # rotation 控制倾斜度数
     ax.legend()
     ax.set_ylim(0, 105)
     ax.grid(axis='y', alpha=0.3)
+    plt.subplots_adjust(top=0.9, bottom=0.15)
     
     # 在柱子上标注数值
     for rects in [rects1, rects2, rects3]:
@@ -57,7 +58,7 @@ def plot_combat_results(data, output_dir):
 def plot_win_rate_comparison(data, output_dir):
     """绘制胜率对比图"""
     stats = data['stats']
-    sota = data['baseline']
+    sota = data['sota']
     total_rounds = data['total_rounds']
     
     labels = list(stats.keys())
@@ -69,10 +70,12 @@ def plot_win_rate_comparison(data, output_dir):
     
     ax.set_ylabel('Win Rate (%)')
     # ax.set_title(f'Win Rate Comparison vs sota: {sota}')
-    ax.set_xticklabels(labels, rotation=15, ha='right')
+    # ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=0, ha='center')
     ax.set_ylim(0, 105)
     ax.grid(axis='y', alpha=0.3)
     ax.axhline(y=50, color='gray', linestyle='--', alpha=0.5, label='50%')
+    plt.subplots_adjust(top=0.9, bottom=0.15)
     
     # 在柱子上标注数值
     for bar, wr in zip(bars, win_rates):
@@ -92,7 +95,7 @@ def plot_win_rate_comparison(data, output_dir):
 def export_to_csv(data, output_dir):
     """导出数据到CSV"""
     stats = data['stats']
-    sota = data['baseline']
+    sota = data['sota']
     total_rounds = data['total_rounds']
     
     # 准备数据
@@ -120,7 +123,7 @@ if __name__ == "__main__":
     output_dir = os.path.join(project_root, "结果展示", "outputs")
     os.makedirs(output_dir, exist_ok=True)
     
-    json_path = os.path.join(output_dir, "combat_stats.json")
+    json_path = os.path.join(output_dir, "combat_stats_progress100.json")
     
     if not os.path.exists(json_path):
         print(f"错误: 未找到数据文件 {json_path}")
@@ -130,7 +133,7 @@ if __name__ == "__main__":
         print(f"正在加载数据: {json_path}")
         data = load_combat_stats(json_path)
         
-        print(f"\n基准任务 (Red): {data['baseline']}")
+        print(f"\n基准任务 (Red): {data['sota']}")
         print(f"总轮数: {data['total_rounds']}")
         print(f"\n对抗统计:")
         for label, s in data['stats'].items():

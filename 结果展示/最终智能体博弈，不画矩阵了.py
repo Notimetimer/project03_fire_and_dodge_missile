@@ -20,98 +20,59 @@ from read_n_draw_inter_experiment_tests import draw_combat_matrix
 # --- 1. 配置参数 ---
 action_cycle_multiplier = 10
 dt_maneuver = 0.2
-TOTAL_ROUNDS = 80    # 每对任务之间对抗 100 场
-TEAM_SIZE = 30        # 每队从 Elo 排行中取前 50 名
+TOTAL_ROUNDS =  80    # 每对任务之间对抗 100 场
+TEAM_SIZE =     30        # 每队从 Elo 排行中取前 50 名
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
+
+# 训练进度
+progress = 1.0
 
 # --- 2. 核心辅助函数 ---
 
-def get_top_elo_agents(log_dir, top_n=50):
+def get_top_elo_agents(log_dir, top_n=50, prog=1.0):
     """
-    修改后的筛选逻辑 (参考 find_top_agents2.py)：
-    1. 优先从 Hall of Fame (hall_of_fame.json) 中选择
-    2. 不够则从 Elite Pool (elite_elo_ratings.json) 中补充
-    3. 如果还不够，从全局 Elo (elo_ratings.json) 中补充
-    4. 排除 Rule 开头的，去重
+    只从 elo_ratings.json 里找 actor_rein{N} 格式的 key，
+    筛掉编号超过 max_idx * prog 的（按训练进度截断），
+    再按编号升序取前 top_n 个存在的 .pt 文件。
     """
-    # 路径准备
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
-    elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
-    hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
+    if not os.path.exists(full_json_path):
+        print(f"注意：{log_dir} 不存在 elo_ratings.json，返回空队列。")
+        return []
 
-    # 1. 加载所有池子数据
-    def load_json_safe(p, default):
-        if os.path.exists(p):
-            with open(p, 'r', encoding='utf-8') as f:
-                try:
-                    return json.load(f)
-                except:
-                    return default
-        return default
+    with open(full_json_path, 'r', encoding='utf-8') as f:
+        try:
+            elo_dict = json.load(f)
+        except Exception:
+            print(f"注意：{log_dir} elo_ratings.json 解析失败，返回空队列。")
+            return []
 
-    # 加载数据
-    global_elo_dict = load_json_safe(full_json_path, {})
-    elite_elo_ratings = load_json_safe(elite_json_path, {})
-    hall_of_fame_keys = load_json_safe(hof_json_path, [])
+    # 只保留 actor_rein{整数} 格式
+    rein_pattern = re.compile(r'^actor_rein(\d+)$')
+    rein_keys = [(k, int(m.group(1))) for k in elo_dict if (m := rein_pattern.match(k))]
 
-    selected_agents = []
-    seen_keys = set()
+    if not rein_keys:
+        print(f"注意：{log_dir} elo_ratings.json 中没有 actor_rein 条目。")
+        return []
 
-    # 辅助过滤函数：只保留 'actor_rein' 开头的文件名 (排除 'Rule_' 和 '__CURRENT_MAIN__' 等)
-    def is_valid_agent(k):
-        return k.startswith('actor_rein')
+    max_idx = max(idx for _, idx in rein_keys)
+    cutoff  = int(max_idx * prog)
 
-    # --- 策略 A: 优先检索名人堂 (HoF) ---
-    # 兼容 HoF 是 list 或 dict 的情况
-    if isinstance(hall_of_fame_keys, dict):
-        hof_iterable = hall_of_fame_keys.keys()
-    elif isinstance(hall_of_fame_keys, list):
-        hof_iterable = hall_of_fame_keys
-    else:
-        hof_iterable = []
+    # 按进度截断后，按编号降序排列
+    filtered = [(k, idx) for k, idx in rein_keys if idx <= cutoff]
+    filtered.sort(key=lambda x: x[1], reverse=True) # 按编号降序排
+    # filtered.sort(key=lambda x: elo_dict[x[0]], reverse=True) # 按Elo分值排
 
-    # 过滤无效的和没有 Elo 记录的
-    hof_candidates = [k for k in hof_iterable if k in global_elo_dict and is_valid_agent(k)]
-    # 按 Elo 分数降序排列
-    hof_sorted = sorted(hof_candidates, key=lambda k: global_elo_dict[k], reverse=True)
-
-    for k in hof_sorted:
-        if len(selected_agents) < top_n:
-            selected_agents.append(k)
-            seen_keys.add(k)
-
-    # --- 策略 B: 补充精英池 (Elite) ---
-    # 同样过滤 Rule 开头的
-    elite_candidates = [k for k in elite_elo_ratings.keys() if is_valid_agent(k)]
-    # 使用 global_elo_dict 的分数来排序 (通常更全)
-    elite_sorted = sorted(elite_candidates, key=lambda k: global_elo_dict.get(k, elite_elo_ratings[k]), reverse=True)
-
-    for k in elite_sorted:
-        if k not in seen_keys and len(selected_agents) < top_n:
-            selected_agents.append(k)
-            seen_keys.add(k)
-
-    # --- 策略 C: 如果还不够，从全局 Elo 表中兜底 ---
-    if len(selected_agents) < top_n:
-        global_candidates = [k for k in global_elo_dict.keys() if is_valid_agent(k)]
-        global_sorted = sorted(global_candidates, key=lambda k: global_elo_dict[k], reverse=True)
-        for k in global_sorted:
-            if k not in seen_keys and len(selected_agents) < top_n:
-                selected_agents.append(k)
-                seen_keys.add(k)
-
-    # 3. 构造完整文件路径
+    # 构造完整路径，只保留文件实际存在的
     top_agents_paths = []
-    for k in selected_agents:
-        # 拼接 .pt 后缀
+    for k, _ in filtered:
         full_path = os.path.join(log_dir, f"{k}.pt")
-        # 确保文件实际存在
         if os.path.exists(full_path):
             top_agents_paths.append(full_path)
-    
-    if len(top_agents_paths) < top_n:
-        print(f"注意：{log_dir} 仅找到 {len(top_agents_paths)} 个有效智能体，不足 {top_n} 个。")
-        
+            if len(top_agents_paths) >= top_n:
+                break
+
+    print(f"  [{os.path.basename(log_dir)}] 进度截断 {cutoff}/{max_idx}，找到 {len(top_agents_paths)} 个智能体。")
     return top_agents_paths
 
 def run_battle(env, blue_wrapper, red_wrapper, device):
@@ -122,16 +83,17 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
 
     done = False
     r_label, b_label = 0, 0
-    steps = 0
-
-    while not done and env.running:
-        r_obs, r_check = env.obs_1v1('r', pomdp=1)
-        b_obs, b_check = env.obs_1v1('b', pomdp=1)
-
-        if steps % action_cycle_multiplier == 0:
+    
+    for count in range(int(20*60/env.dt_maneuver)):
+        if done: break
+        if count % action_cycle_multiplier == 0:
+            r_obs, r_check = env.obs_1v1('r', pomdp=1)
+            b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
                 explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
+                # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
                 temp_dict = {'cat': 0.2, 'bern': 1.0}
+                # 不再向网络传入 check_obs 执行强力动作屏蔽
                 r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temperature=temp_dict, check_obs=r_check)
                 b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temperature=temp_dict, check_obs=b_check)
             r_label = r_act['cat']
@@ -153,24 +115,18 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
         env.step(r_maneuver, b_maneuver)
         # action_shoot 传 bool，避免传 numpy.int32 scalar 引发解包错误
         done, _, _, _ = env.combat_terminate_and_reward('b', b_label, b_m_id is not None, action_cycle_multiplier)
-        steps += 1
-
-        if steps * env.dt_maneuver > 20 * 60:
-            break
-
+    
     if env.win: return float(1.0)   # 蓝胜
     if env.lose: return float(0.0)  # 红胜
     return float(0.5)               # 平局
 
 # --- 并行工作函数 ---
-def worker_process_battle(task):
+def worker_process_battle(args_pack):
     """
-    子进程执行函数，接收 (blue_path, red_path) tuple
+    子进程执行函数
     """
-    blue_path, red_path = task
-    assert isinstance(blue_path, str) and isinstance(red_path, str), \
-        f"路径类型错误: blue={type(blue_path)}, red={type(red_path)}"
-
+    blue_path, red_path = args_pack
+    
     # 强制在 Worker 中使用 CPU
     device = torch.device("cpu")
     torch.set_num_threads(1) 
@@ -248,14 +204,35 @@ if __name__ == "__main__":
             
         if not log_dir:
             raise FileNotFoundError(f"未找到任务目录: {name}")
-        teams.append(get_top_elo_agents(log_dir, TEAM_SIZE))
+        teams.append(get_top_elo_agents(log_dir, TEAM_SIZE, prog=progress))
 
     num_teams = len(teams)
-    base_idx = 0  # 第一个 mission 固定作为红方基准
+    sota_idx = 0  # 第一个 mission 固定作为蓝方 sota
+
+    # --- 预览各队伍成员范围，等待确认 ---
+    print(f"\n{'='*65}")
+    print(f"队伍预览  (训练进度截断 progress={progress:.0%})")
+    print(f"SOTA任务 (Blue): {team_labels[sota_idx]}")
+    print(f"{'='*65}")
+    for idx, (name, team) in enumerate(zip(mission_names, teams)):
+        # 从路径名还原 actor_rein 编号范围
+        idxs = []
+        for p in team:
+            m = re.search(r'actor_rein(\d+)\.pt$', p)
+            if m:
+                idxs.append(int(m.group(1)))
+        if idxs:
+            range_str = f"编号 {min(idxs)} ~ {max(idxs)}，共 {len(idxs)} 个"
+        else:
+            range_str = f"共 {len(team)} 个（无法解析编号）"
+        print(f"  [{idx}] {team_labels[idx]}")
+        print(f"       {range_str}")
+    print(f"{'='*65}")
+    input("\n确认以上信息无误，按 Enter 开始对抗...")
 
     # 并行配置
     num_processes = min(cpu_count(), 20)
-    print(f"\n开始各任务挑战基准任务 [{team_labels[base_idx]}] ...")
+    print(f"\n开始SOTA任务 [{team_labels[sota_idx]}] 对抗其他任务 (progress={progress:.0%})...")
     print(f"并行进程数: {num_processes}")
     start_time = time.time()
 
@@ -263,22 +240,17 @@ if __name__ == "__main__":
 
     # 创建进程池
     with Pool(processes=num_processes) as pool:
-        for i in range(1, num_teams):  # 其余 mission 作为蓝方依次挑战 base_idx
-            print(f"正在对抗: {team_labels[base_idx]} (Blue/实验1) vs {team_labels[i]} (Red)...")
+        for i in range(1, num_teams):  # 其余 mission 作为红方依次挑战 sota_idx
+            print(f"正在对抗: {team_labels[sota_idx]} (Blue/SOTA) vs {team_labels[i]} (Red)...")
 
-            # --- DEBUG: 检查 teams 实际内容 ---
-            print(f"  [DEBUG] teams[{i}] length={len(teams[i])}, sample={teams[i][:2] if teams[i] else 'EMPTY'}")
-            print(f"  [DEBUG] teams[{base_idx}] length={len(teams[base_idx])}, sample={teams[base_idx][:2] if teams[base_idx] else 'EMPTY'}")
-            if not teams[i] or not teams[base_idx]:
+            if not teams[i] or not teams[sota_idx]:
                 print(f"  [SKIP] 某队智能体列表为空，跳过本轮对抗")
                 continue
 
             battle_tasks = []
             for _ in range(TOTAL_ROUNDS):
-                blue_path = random.choice(teams[base_idx])  # 实验1作蓝方
+                blue_path = random.choice(teams[sota_idx])  # SOTA作蓝方
                 red_path  = random.choice(teams[i])         # 其余实验作红方
-                assert isinstance(blue_path, str), f"blue_path 类型错误: {type(blue_path)} = {blue_path}"
-                assert isinstance(red_path, str),  f"red_path 类型错误: {type(red_path)} = {red_path}"
                 battle_tasks.append((blue_path, red_path))
 
             results = pool.map(worker_process_battle, battle_tasks)
@@ -297,7 +269,7 @@ if __name__ == "__main__":
                 'score': score
             }
 
-            print(f"  -> {team_labels[i]} vs {team_labels[base_idx]}: "
+            print(f"  -> {team_labels[sota_idx]} vs {team_labels[i]}: "
                   f"胜 {wins}, 平 {draws}, 负 {losses} | "
                   f"胜率: {win_rate:.2f} ({score:.1f}/{TOTAL_ROUNDS})")
 
@@ -306,7 +278,7 @@ if __name__ == "__main__":
     # 打印汇总统计
     print(f"\n{'='*70}")
     print("对抗统计汇总（蓝方 vs 红方）")
-    print(f"基准任务 (Red): {team_labels[base_idx]}")
+    print(f"SOTA任务 (Blue): {team_labels[sota_idx]} (progress={progress:.0%})")
     print(f"{'-'*70}")
     for label, s in stats.items():
         print(f"{label:30s}: 胜 {s['win']:3d}, 平 {s['draw']:3d}, 负 {s['loss']:3d} | 胜率 {s['win_rate']:.2%}")
@@ -314,12 +286,14 @@ if __name__ == "__main__":
 
     # 可选：保存为 JSON
     os.makedirs(os.path.join(project_root, "结果展示", "outputs"), exist_ok=True)
-    json_path = os.path.join(project_root, "结果展示", "outputs", "combat_stats.json")
+    progress_tag = f"progress{int(progress*100):03d}"
+    json_path = os.path.join(project_root, "结果展示", "outputs", f"combat_stats_{progress_tag}.json")
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump({
-            'baseline': team_labels[base_idx],
+            'sota': team_labels[sota_idx],
             'stats': stats,
-            'total_rounds': TOTAL_ROUNDS
+            'total_rounds': TOTAL_ROUNDS,
+            'progress': progress
         }, f, ensure_ascii=False, indent=2)
     print(f"统计结果已保存到: {json_path}")
 
@@ -338,12 +312,13 @@ if __name__ == "__main__":
     rects3 = ax.bar(x + width, loss_rates, width, label='Loss', color='#e74c3c')
 
     ax.set_ylabel('Rate (%)')
-    ax.set_title(f'Combat Results vs Baseline: {team_labels[base_idx]}')
+    ax.set_title(f'Combat Results (SOTA: {team_labels[sota_idx]}) (progress={progress:.0%})')
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=15, ha='right')
+    ax.set_xticklabels(labels, rotation=0, ha='right')
     ax.legend()
     ax.set_ylim(0, 105)
     ax.grid(axis='y', alpha=0.3)
+    plt.subplots_adjust(top=0.9, bottom=0.15)
 
     # 在柱子上标注数值
     for rects in [rects1, rects2, rects3]:
@@ -356,7 +331,7 @@ if __name__ == "__main__":
                             ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
-    bar_path = os.path.join(project_root, "结果展示", "outputs", "combat_stats_bar.png")
+    bar_path = os.path.join(project_root, "结果展示", "outputs", f"combat_stats_bar_{progress_tag}.png")
     plt.savefig(bar_path, dpi=300, bbox_inches='tight')
     print(f"条形图已保存到: {bar_path}")
     plt.show()

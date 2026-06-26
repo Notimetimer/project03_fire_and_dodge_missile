@@ -260,7 +260,7 @@ class ChooseStrategyEnv(Battle):
 
         # 垂直方向指令
         if action_v == 0: # 比目标高50°
-            theta_desired = np.clip(theta+delta_theta+np.radians(50), -pi/2, pi/2)
+            theta_desired = np.clip(theta+delta_theta+np.radians(45), -pi/2, pi/2)
         if action_v == 1: # 比目标高20°
             theta_desired = np.clip(theta+delta_theta+np.radians(20), -pi/2, pi/2)
         if action_v == 2: # 纯追踪
@@ -323,10 +323,11 @@ class ChooseStrategyEnv(Battle):
         ])
         
         ATA_estimated = np.arccos(np.dot(desired_point_, target_delta_point_)*0.999)
-        if ATA_estimated > np.radians(59):
+        crank_angle = 53 # 59 # 偏置机动角度
+        if ATA_estimated > np.radians(crank_angle):
             axis_ = np.cross(target_delta_point_, desired_point_)
             axis_ = axis_ / (norm(axis_) + 1e-6)
-            target_delta_point_ = RodRot(target_delta_point_, axis_, np.radians(59))
+            target_delta_point_ = RodRot(target_delta_point_, axis_, np.radians(crank_angle))
             
             if action_h in[1,5]:
                 theta_desired = np.arcsin(target_delta_point_[1])

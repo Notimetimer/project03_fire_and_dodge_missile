@@ -157,6 +157,12 @@ class Battle(object):
                                          'e2e': False
                                          }
         self.tacview_show = tacview_show
+
+        # 动作平滑参数
+        self.action_ema_beta = 0.05 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至5%
+        self.r_actions_ema = None
+        self.b_actions_ema = None
+        
         if tacview_show:
             self.tacview = Tacview()
             self.tacview.handshake()
@@ -180,6 +186,10 @@ class Battle(object):
         self.r_dist_seq = []
         self.b_dist_seq = []
         self.last_record_t = -1.0
+
+        # 重置动作 EMA 变量
+        self.r_actions_ema = None
+        self.b_actions_ema = None
         
         # [新增] 如果需要支持随机种子控制，可以在这里设置
         if seed is not None:
@@ -332,6 +342,20 @@ class Battle(object):
         self.t = round(self.t, 3)  # 保留3位小数
 
         actions = [r_actions] + [b_actions]
+
+        # # 动作 EMA 平滑
+        # if self.r_actions_ema is None:
+        #     self.r_actions_ema = r_actions.copy()
+        # else:
+        #     self.r_actions_ema = self.action_ema_beta * self.r_actions_ema + (1 - self.action_ema_beta) * r_actions
+        # if self.b_actions_ema is None:
+        #     self.b_actions_ema = b_actions.copy()
+        # else:
+        #     self.b_actions_ema = self.action_ema_beta * self.b_actions_ema + (1 - self.action_ema_beta) * b_actions
+        # # 使用平滑后的动作执行
+        # actions = [self.r_actions_ema] + [self.b_actions_ema]
+
+        # 保存原始动作（用于记录或分析）
         self.r_actions = r_actions.copy()
         self.b_actions = b_actions.copy()
 

@@ -14,7 +14,7 @@ VAR_DEFS = {
     'missile_time_since_shoot': (0, 120, 60),
     'AA_hor': (-np.pi, np.pi, 0),
     'delta_psi': (-np.pi, np.pi, 0),
-    'height': (0, 15e3, 3e3),
+    'vu': (-100, 100, 10),
     'theta': (-np.pi/2, np.pi/2, 0)
 }
 zmin, zmax = None, None
@@ -23,15 +23,15 @@ zmin, zmax = None, None
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
-def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, height, theta):
+def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, vu, theta):
     inner = (
         # 1 * 1 + # 3  (distance / 100e3) +
-        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 120))) + # 至关重要
+        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 60))) + # 至关重要
         2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi *2)) +
-        3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
+        8 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
         # 2 * 1 + # np.exp(np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.6)) +
-        4 * np.clip(10e3-height, 0, 10e3)/10e3 +
-        5 * (-theta/pi*2)
+        2 + 
+        5 * (-vu/100)
         # 3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -50) # 相当重要
     )/15  # 10
     r_event =  - 10 * (1.0 + np.tanh(inner))

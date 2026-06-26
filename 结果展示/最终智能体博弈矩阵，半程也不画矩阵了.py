@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 import random
 import pandas as pd
+import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count # 引入多进程库
 
 from _context import * # 包含 project_root
@@ -19,8 +20,8 @@ from read_n_draw_inter_experiment_tests import draw_combat_matrix
 # --- 1. 配置参数 ---
 action_cycle_multiplier = 10
 dt_maneuver = 0.2
-TOTAL_ROUNDS = 80    # 每对任务之间对抗 100 场
-TEAM_SIZE = 30        # 每队从 Elo 排行中取前 50 名
+TOTAL_ROUNDS =  80    # 每对任务之间对抗 100 场
+TEAM_SIZE =     30        # 每队从 Elo 排行中取前 50 名
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
 # 训练进度
@@ -32,7 +33,7 @@ def get_top_elo_agents(log_dir, top_n=50, prog=1.0):
     """
     只从 elo_ratings.json 里找 actor_rein{N} 格式的 key，
     筛掉编号超过 max_idx * prog 的（按训练进度截断），
-    再按 Elo 降序取前 top_n 个存在的 .pt 文件。
+    再按编号升序取前 top_n 个存在的 .pt 文件。
     """
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
     if not os.path.exists(full_json_path):
@@ -57,9 +58,10 @@ def get_top_elo_agents(log_dir, top_n=50, prog=1.0):
     max_idx = max(idx for _, idx in rein_keys)
     cutoff  = int(max_idx * prog)
 
-    # 按进度截断后，按 Elo 降序排列
+    # 按进度截断后，按编号降序排列
     filtered = [(k, idx) for k, idx in rein_keys if idx <= cutoff]
-    filtered.sort(key=lambda x: elo_dict[x[0]], reverse=True)
+    filtered.sort(key=lambda x: x[1], reverse=True) # 按编号降序排
+    # filtered.sort(key=lambda x: elo_dict[x[0]], reverse=True) # 按Elo分值排
 
     # 构造完整路径，只保留文件实际存在的
     top_agents_paths = []
@@ -73,9 +75,8 @@ def get_top_elo_agents(log_dir, top_n=50, prog=1.0):
     print(f"  [{os.path.basename(log_dir)}] 进度截断 {cutoff}/{max_idx}，找到 {len(top_agents_paths)} 个智能体。")
     return top_agents_paths
 
-# --- 保持原样，完全不改动 ---
 def run_battle(env, blue_wrapper, red_wrapper, device):
-    """仿真逻辑 (保持与文件 1 一致)"""
+    """仿真逻辑（参考 VsBaseline_while_training_hierarch.py 的正确写法）"""
     env.reset(red_init_ammo=6, blue_init_ammo=6, ego_side='b')
     env.shielded = 1 # 测试时开启防撞地
     env.no_out = 0 # 测试时防止出界
@@ -168,11 +169,12 @@ if __name__ == "__main__":
 
     # 2s
     mission_names = [
-        'SLWSPFSP-run-20260616-171415',
+        'SLWSPFSP0.3-run-20260618-221044',
+        'SLWSPFSP0.5-run-20260620-211720',
         'HLWSPFSP-run-20260616-130304',
         'CSPFSP-run-20260615-234324',
         'CSVersusRules-run-20260614-163906',
-        # 'SLWSDPC-PFSP-run-20260614-000523'
+        'SLWSDPC-PFSP-run-20260614-000523',
     ]
     
     # team_labels = range(len(mission_names))
@@ -205,12 +207,12 @@ if __name__ == "__main__":
         teams.append(get_top_elo_agents(log_dir, TEAM_SIZE, prog=progress))
 
     num_teams = len(teams)
-    results_matrix = np.zeros((num_teams, num_teams))
-    np.fill_diagonal(results_matrix, 0.5)
+    sota_idx = 0  # 第一个 mission 固定作为蓝方 sota
 
     # --- 预览各队伍成员范围，等待确认 ---
     print(f"\n{'='*65}")
     print(f"队伍预览  (训练进度截断 progress={progress:.0%})")
+    print(f"SOTA任务 (Blue): {team_labels[sota_idx]}")
     print(f"{'='*65}")
     for idx, (name, team) in enumerate(zip(mission_names, teams)):
         # 从路径名还原 actor_rein 编号范围
@@ -229,56 +231,107 @@ if __name__ == "__main__":
     input("\n确认以上信息无误，按 Enter 开始对抗...")
 
     # 并行配置
-    num_processes = min(cpu_count(), 20)  # 限制最大进程数，防止卡死
-    print(f"\n开始跨任务博弈矩阵计算 ({num_teams}x{num_teams})...")
+    num_processes = min(cpu_count(), 20)
+    print(f"\n开始SOTA任务 [{team_labels[sota_idx]}] 对抗其他任务 (progress={progress:.0%})...")
     print(f"并行进程数: {num_processes}")
     start_time = time.time()
-    
+
+    stats = {}  # {team_label: {'win': int, 'draw': int, 'loss': int, 'win_rate': float}}
+
     # 创建进程池
     with Pool(processes=num_processes) as pool:
-        for i in range(num_teams):      # 行 i 为蓝方 (Evaluated)
-            for j in range(num_teams):  # 列 j 为红方 (Opponent)
-                if i == j: continue
-                
-                # 同样使用对称性，只跑 i > j
-                if i > j:
-                    print(f"正在对抗: [Row]{team_labels[i]} (Blue) vs [Col]{team_labels[j]} (Red)...")
-                    
-                    # 准备 100 场对局的任务参数
-                    battle_tasks = []
-                    for _ in range(TOTAL_ROUNDS):
-                        blue_path = random.choice(teams[i])
-                        red_path = random.choice(teams[j])
-                        battle_tasks.append((blue_path, red_path))
-                    
-                    # 并行执行
-                    # map 会按顺序返回结果列表 [1.0, 0.0, 0.5, ...]
-                    results = pool.map(worker_process_battle, battle_tasks)
-                    
-                    total_score = sum(results)
-                    win_rate = total_score / TOTAL_ROUNDS
-                    
-                    results_matrix[i, j] = win_rate       # i 打赢 j 的胜率
-                    results_matrix[j, i] = 1.0 - win_rate # j 打赢 i 的胜率
-                    print(f"  -> {team_labels[i]} 对阵 {team_labels[j]} 胜率: {win_rate:.2f}")
+        for i in range(1, num_teams):  # 其余 mission 作为红方依次挑战 sota_idx
+            print(f"正在对抗: {team_labels[sota_idx]} (Blue/SOTA) vs {team_labels[i]} (Red)...")
 
-    print(f"\n矩阵计算完成！总耗时: {time.time() - start_time:.2f}s")
+            if not teams[i] or not teams[sota_idx]:
+                print(f"  [SKIP] 某队智能体列表为空，跳过本轮对抗")
+                continue
 
-    # 保存博弈矩阵为 CSV 以便后续分析/绘图
+            battle_tasks = []
+            for _ in range(TOTAL_ROUNDS):
+                blue_path = random.choice(teams[sota_idx])  # SOTA作蓝方
+                red_path  = random.choice(teams[i])         # 其余实验作红方
+                battle_tasks.append((blue_path, red_path))
+
+            results = pool.map(worker_process_battle, battle_tasks)
+
+            wins   = sum(1 for r in results if r == 1.0)
+            draws  = sum(1 for r in results if r == 0.5)
+            losses = sum(1 for r in results if r == 0.0)
+            score = sum(results)
+            win_rate = score / TOTAL_ROUNDS
+
+            stats[team_labels[i]] = {
+                'win': wins,
+                'draw': draws,
+                'loss': losses,
+                'win_rate': win_rate,
+                'score': score
+            }
+
+            print(f"  -> {team_labels[sota_idx]} vs {team_labels[i]}: "
+                  f"胜 {wins}, 平 {draws}, 负 {losses} | "
+                  f"胜率: {win_rate:.2f} ({score:.1f}/{TOTAL_ROUNDS})")
+
+    print(f"\n对抗计算完成！总耗时: {time.time() - start_time:.2f}s")
+
+    # 打印汇总统计
+    print(f"\n{'='*70}")
+    print("对抗统计汇总（蓝方 vs 红方）")
+    print(f"SOTA任务 (Blue): {team_labels[sota_idx]} (progress={progress:.0%})")
+    print(f"{'-'*70}")
+    for label, s in stats.items():
+        print(f"{label:30s}: 胜 {s['win']:3d}, 平 {s['draw']:3d}, 负 {s['loss']:3d} | 胜率 {s['win_rate']:.2%}")
+    print(f"{'='*70}")
+
+    # 可选：保存为 JSON
     os.makedirs(os.path.join(project_root, "结果展示", "outputs"), exist_ok=True)
     progress_tag = f"progress{int(progress*100):03d}"
-    csv_path = os.path.join(project_root, "结果展示", "outputs", f"combat_matrix_{progress_tag}.csv")
-    df = pd.DataFrame(results_matrix, index=team_labels, columns=team_labels)
-    df.to_csv(csv_path, float_format="%.4f", encoding="utf-8-sig")
-    print(f"博弈矩阵已保存到: {csv_path}")
+    json_path = os.path.join(project_root, "结果展示", "outputs", f"combat_stats_{progress_tag}.json")
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            'sota': team_labels[sota_idx],
+            'stats': stats,
+            'total_rounds': TOTAL_ROUNDS,
+            'progress': progress
+        }, f, ensure_ascii=False, indent=2)
+    print(f"统计结果已保存到: {json_path}")
 
-    # 4. [修改] 调用外部函数进行绘图
-    print("正在调用 read_n_draw_inter_experiment_tests 进行绘图...")
-    draw_combat_matrix(
-        csv_path, 
-        team_labels, 
-        title=f"Combat Matrix (progress={progress:.0%})",
-        xlabel="Opponent / Column",
-        ylabel="Evaluated / Row",
-        cbar_label="Win Rate"
-    )
+    # --- 绘制分组条形图 ---
+    labels = list(stats.keys())
+    win_rates  = [stats[k]['win']  / TOTAL_ROUNDS * 100 for k in labels]
+    draw_rates = [stats[k]['draw'] / TOTAL_ROUNDS * 100 for k in labels]
+    loss_rates = [stats[k]['loss'] / TOTAL_ROUNDS * 100 for k in labels]
+
+    x = np.arange(len(labels))
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(max(8, len(labels)*2), 6))
+    rects1 = ax.bar(x - width, win_rates,  width, label='Win',  color='#2ecc71')
+    rects2 = ax.bar(x,         draw_rates, width, label='Draw', color='#f39c12')
+    rects3 = ax.bar(x + width, loss_rates, width, label='Loss', color='#e74c3c')
+
+    ax.set_ylabel('Rate (%)')
+    ax.set_title(f'Combat Results (SOTA: {team_labels[sota_idx]}) (progress={progress:.0%})')
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=0, ha='right')
+    ax.legend()
+    ax.set_ylim(0, 105)
+    ax.grid(axis='y', alpha=0.3)
+    plt.subplots_adjust(top=0.9, bottom=0.15)
+
+    # 在柱子上标注数值
+    for rects in [rects1, rects2, rects3]:
+        for rect in rects:
+            height = rect.get_height()
+            if height > 0:
+                ax.annotate(f'{height:.0f}',
+                            xy=(rect.get_x() + rect.get_width() / 2, height),
+                            xytext=(0, 3), textcoords="offset points",
+                            ha='center', va='bottom', fontsize=8)
+
+    plt.tight_layout()
+    bar_path = os.path.join(project_root, "结果展示", "outputs", f"combat_stats_bar_{progress_tag}.png")
+    plt.savefig(bar_path, dpi=300, bbox_inches='tight')
+    print(f"条形图已保存到: {bar_path}")
+    plt.show()
