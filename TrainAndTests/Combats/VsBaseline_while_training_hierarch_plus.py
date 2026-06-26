@@ -26,9 +26,9 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 # ==========================================
 # [修改] 并行测试 Worker 函数 (增加了 dt_maneuver_val 参数)
 # ==========================================
-def test_worker(model_state_dict, rule_num, 
-                env_args, state_dim, hidden_dim, 
-                action_dims_dict, dt_maneuver_val, 
+def test_worker(model_state_dict, rule_num,
+                env_args, state_dim, hidden_dim,
+                action_dims_dict, dt_maneuver_val,
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
                 no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0, Temperature=None):
     seed = 42
@@ -102,7 +102,7 @@ def test_worker(model_state_dict, rule_num,
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=None)
 
                     b_action_label = b_act_exec['cat'] # [0]
-                    if b_act_exec['bern'][0]: 
+                    if b_act_exec['bern'][0]:
                         test_env.BUAV.about_to_fire = 1
 
             # 尝试发射
