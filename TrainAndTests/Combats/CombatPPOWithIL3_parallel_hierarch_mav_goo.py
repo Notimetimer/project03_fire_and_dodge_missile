@@ -2039,12 +2039,12 @@ def run_MLP_simulation(
                 # 记录 Log
                 logger.add("mav/actor_loss", maverick.actor_loss, total_steps)
                 logger.add("mav/critic_loss", maverick.critic_loss, total_steps)
-                logger.add("mav/entropy_cat", maverick.entropy_cat, total_steps) # train/
+                logger.add("train/entropy_cat", maverick.entropy_cat, total_steps) # train/
                 logger.add("goo/actor_loss", goose.actor_loss, total_steps)
                 logger.add("goo/critic_loss", goose.critic_loss, total_steps)
-                logger.add("goo/entropy_bern", goose.entropy_bern, total_steps)  # train/
-                logger.add("goo/max_fire_prob", goose.max_fire_prob, total_steps) # train_plus/
-                logger.add("goo/min_fire_prob", goose.min_fire_prob, total_steps) # train_plus/
+                logger.add("train/entropy_bern", goose.entropy_bern, total_steps)  # train/
+                logger.add("train_plus/max_fire_prob", goose.max_fire_prob, total_steps) # train_plus/
+                logger.add("train_plus/min_fire_prob", goose.min_fire_prob, total_steps) # train_plus/
                 logger.add("train_plus/td_error_var", maverick.td_error_var, total_steps)
 
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")

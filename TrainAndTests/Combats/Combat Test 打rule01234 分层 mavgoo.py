@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "PFSP_分阶段_混规则对手_平衡_并行_训练满熵项0.2-run-20260622-185856"
+    dir_name = "Mav_Goo纯Rule-run-20260626-120716"
 
     "PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557"
     
@@ -107,12 +107,27 @@ if __name__ == "__main__":
     print(f"Loading agent weights from: {agent_path}")
     print()
 
-    # 实例化模型结构并加载权重
-    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-    # 注意：测试时只需要 Actor Wrapper，不需要完整的 PPO agent
-    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
-    actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
-    actor_wrapper.eval() # **非常重要**：设置为评估模式
+    # 实例化模型结构并加载权重 - 使用maverick+goose双actor
+    # 直接使用环境维度，参考 CombatPPOWithIL3_parallel_hierarch_mav_goo.py 的加载方式
+    action_dims_dict_mav = {'cont': 0, 'cat': env.fly_act_dim, 'bern': 0}
+    action_dims_dict_goo = {'cont': 0, 'cat': [0], 'bern': env.fire_dim}
+    
+    # 加载checkpoint
+    checkpoint = torch.load(agent_path, map_location=device, weights_only=True)
+    
+    # 创建maverick网络
+    mav_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict_mav).to(device)
+    mav_actor = HybridActorWrapper(mav_net, action_dims_dict_mav, None, device).to(device)
+    mav_actor.load_state_dict(checkpoint['maverick'], strict=False)
+    mav_actor.eval()
+    
+    # 创建goose网络
+    goo_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict_goo).to(device)
+    goo_actor = HybridActorWrapper(goo_net, action_dims_dict_goo, None, device).to(device)
+    goo_actor.load_state_dict(checkpoint['goose'], strict=False)
+    goo_actor.eval()
+    
+    print(f"模型加载成功 - state_dim={state_dim}, fly_act_dim={env.fly_act_dim}, fire_dim={env.fire_dim}")
 
 
     # if env.tacview_show:
@@ -161,17 +176,24 @@ if __name__ == "__main__":
 
                 # 决策
                 if count % action_cycle_multiplier == 0:
-                    # --- 红方 (RL 智能体) ---
+                    # --- 红方 (RL 智能体 - maverick+goose) ---
                     with torch.no_grad():
-                        r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.04,
-                            temperature={'cat':0.3, 'bern':1}
-                            ) # check_obs=r_check_obs, check_obs=None
+                        # maverick负责机动动作（cat）
+                        r_mav_exec, _, _, _ = mav_actor.get_action(
+                            r_obs, explore={'cont': 0, 'cat': 1, 'bern': 1}, check_obs=None,
+                            temperature={'cat': 0.3, 'bern': 1}
+                        )
+                        # goose负责开火动作（bern）
+                        r_goo_exec, _, _, r_goo_check = goo_actor.get_action(
+                            r_obs, explore={'cont': 0, 'cat': 1, 'bern': 1}, check_obs=r_check_obs,
+                            temperature={'cat': 1, 'bern': 1}
+                        )
                         
-                    r_action_label = r_action_exec['cat'] # [0]
-                    r_fire = r_action_exec['bern'][0]
+                    # r_mav_exec['cat'] 是包含两个值的数组 [action_v, action_h]，需要保持数组形式
+                    r_action_label = r_mav_exec['cat'] if isinstance(r_mav_exec['cat'], (list, np.ndarray)) else r_mav_exec['cat'].cpu().numpy()
+                    r_fire = r_goo_exec['bern'][0].item() if hasattr(r_goo_exec['bern'][0], 'item') else r_goo_exec['bern'][0]
                     last_r_action_label = r_action_label
-                    print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
+                    print(f"红方(RL) 开火概率: {r_goo_check['bern'][0]:.4f}")
 
                     if r_fire:
                         env.RUAV.about_to_fire = 1
