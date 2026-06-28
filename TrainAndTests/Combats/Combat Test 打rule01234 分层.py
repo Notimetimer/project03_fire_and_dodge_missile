@@ -46,19 +46,13 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "PFSP_分阶段_混规则对手_平衡_并行_训练满熵项0.2-run-20260622-185856"
-
-    "PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557"
-    
-    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
-    
-    "PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿-run-20260616-130304"
+    dir_name = "HLWSPFSP-run-20260616-130304"
    
 
     # 次要
-    experiment_name = None
-    
+    experiment_name = None    
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -79,6 +73,7 @@ if __name__ == "__main__":
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
     env.dt_move = 0.025 # 0.05 # 0.04 # 25
+
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -124,7 +119,8 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3,4] # [0,1,2]
+    rule_opponents = [0,1,2,3,4] # [3]
+
     t_bias = 0
 
     try:
@@ -151,6 +147,8 @@ if __name__ == "__main__":
                 'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
             }
 
+            fire_time = -120
+
             # 回合仿真循环
             for count in range(round(env_args.max_episode_len / dt_maneuver)):
                 if not env.running or done:
@@ -164,10 +162,10 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.04,
-                            temperature={'cat':0.3, 'bern':1}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.04,
+                            temperature={'cat':0.5, 'bern':1.0}
                             ) # check_obs=r_check_obs, check_obs=None
-                        
+                    # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
                     last_r_action_label = r_action_label
@@ -175,6 +173,9 @@ if __name__ == "__main__":
 
                     if r_fire:
                         env.RUAV.about_to_fire = 1
+                        
+                        print("开火瞬间状态观测", r_check_obs)
+                        print("开火瞬间动作", r_action_label)
 
                     # --- 蓝方 (规则智能体) ---
                     b_state_check = env.unscale_state(b_check_obs)
@@ -192,9 +193,16 @@ if __name__ == "__main__":
                     launch_missile_immediately(env, 'r', tabu=1, action_label=None) # r_action_label)
                     print("Shoot")
                     print()
+                    fire_time = env.t
                 if getattr(env.BUAV, 'about_to_fire', 0):
                     launch_missile_immediately(env, 'b', tabu=1, action_label=None) # b_action_label)
-                    
+                
+
+                if (action_cycle_multiplier-1) * env.dt_maneuver <= env.t-fire_time < 2 * action_cycle_multiplier * env.dt_maneuver:
+                    print("开火后瞬间观测", r_check_obs)
+                    print("开火后动作", r_action_label)
+                    print()
+
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
                 done, b_r1, b_r2, b_r3 = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
@@ -226,55 +234,55 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             
-            # # --- 保存作战记录到 CSV ---
-            # try:
-            #     df_history = pd.DataFrame(history)
-            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-            #     save_path = os.path.join(project_root, "logs", save_name)
-            #     df_history.to_csv(save_path, index=False)
-            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            # except Exception as e:
-            #     print(f"Failed to save CSV: {e}")
+            # --- 保存作战记录到 CSV ---
+            try:
+                df_history = pd.DataFrame(history)
+                save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+                save_path = os.path.join(project_root, "logs", save_name)
+                df_history.to_csv(save_path, index=False)
+                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            except Exception as e:
+                print(f"Failed to save CSV: {e}")
 
-            # # --- 绘制曲线 ---
-            # plt.figure(figsize=(10, 10))
-            # plt.subplot(4, 1, 1)
-            # plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
-            # plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
-            # plt.ylabel('Ny (g)')
-            # plt.title(f'Test vs Rule {rule_num}: Metrics')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            # --- 绘制曲线 ---
+            plt.figure(figsize=(10, 10))
+            plt.subplot(4, 1, 1)
+            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
+            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
+            plt.ylabel('Ny (g)')
+            plt.title(f'Test vs Rule {rule_num}: Metrics')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-            # plt.subplot(4, 1, 2)
-            # plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
-            # plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
-            # plt.ylabel('Alpha (deg)')
-            # plt.title('Angle of Attack (Alpha)')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            plt.subplot(4, 1, 2)
+            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
+            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
+            plt.ylabel('Alpha (deg)')
+            plt.title('Angle of Attack (Alpha)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-            # plt.subplot(4, 1, 3)
-            # plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
-            # plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
-            # plt.ylabel('Mach')
-            # plt.title('Flight Mach Number')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            plt.subplot(4, 1, 3)
+            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
+            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
+            plt.ylabel('Mach')
+            plt.title('Flight Mach Number')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-            # plt.subplot(4, 1, 4)
-            # plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
-            # plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
-            # plt.ylabel('Alt (m)')
-            # plt.xlabel('Time (s)')
-            # plt.title('Altitude (Height)')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            plt.subplot(4, 1, 4)
+            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
+            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
+            plt.ylabel('Alt (m)')
+            plt.xlabel('Time (s)')
+            plt.title('Altitude (Height)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
             
-            # plt.tight_layout()
-            # plt.show()
+            plt.tight_layout()
+            plt.show()
             
-            # input("Press Enter to continue to the next test...")
+            input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")
