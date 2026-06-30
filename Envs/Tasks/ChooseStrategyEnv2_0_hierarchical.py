@@ -259,7 +259,7 @@ class ChooseStrategyEnv(Battle):
         speed_cmd = 340
 
         # 垂直方向指令
-        if action_v == 0: # 比目标高50°
+        if action_v == 0: # 比目标高45°
             theta_desired = np.clip(theta+delta_theta+np.radians(45), -pi/2, pi/2)
         if action_v == 1: # 比目标高20°
             theta_desired = np.clip(theta+delta_theta+np.radians(20), -pi/2, pi/2)
