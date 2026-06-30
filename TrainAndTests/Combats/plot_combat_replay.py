@@ -13,6 +13,13 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+import warnings
+
+# 抑制所有中文字体缺失警告
+warnings.filterwarnings('ignore')
+# 设置字体以支持中文
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 # axis equal
 def set_axes_equal(ax):
@@ -226,10 +233,12 @@ def find_record_dir():
     return record_dir
 
 
-def pick_file(record_dir: str) -> str:
+def pick_file(record_dir: str, experiment: str = None) -> str:
     files = sorted(glob.glob(os.path.join(record_dir, '*.json')))
+    if experiment:
+        files = [f for f in files if experiment.lower() in os.path.basename(f).lower()]
     if not files:
-        print(f"未在 {record_dir} 中找到任何 JSON 文件。")
+        print(f"未在 {record_dir} 中找到匹配实验名称的 JSON 文件。")
         sys.exit(1)
     print(f"\n找到 {len(files)} 个回放文件:")
     for i, f in enumerate(files):
@@ -243,13 +252,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Plot combat replay JSON')
     parser.add_argument('json_file', nargs='?', default=None, help='Path to replay JSON file')
     parser.add_argument('--save', action='store_true', help='Save figure alongside JSON file')
+    parser.add_argument('--experiment', type=str, default=None, help='Filter replay files by experiment name substring')
     args = parser.parse_args()
 
     if args.json_file and os.path.isfile(args.json_file):
         json_path = args.json_file
     else:
         record_dir = find_record_dir()
-        json_path = pick_file(record_dir)
+        json_path = pick_file(record_dir, experiment=args.experiment)
 
     print(f"\n正在读取: {json_path}")
     data = load_replay(json_path)

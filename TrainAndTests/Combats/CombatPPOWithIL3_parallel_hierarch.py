@@ -1989,6 +1989,10 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
 
+                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                # if batch_idx % 10 == 0:
+                #     student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
+
                 # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
                 current_ppo_grad = student_agent.pre_clip_actor_grad
                 if current_ppo_grad is not None and not np.isnan(current_ppo_grad):
