@@ -275,20 +275,22 @@ def plot_training_curves(data_dir, exp_name, name_list=None, name_list_show=None
     if os.path.exists(il_curve_file):
         try:
             df_il = pd.read_csv(il_curve_file)
-            if 'Epoch' in df_il.columns and 'ActorLoss' in df_il.columns:
+            if 'Step' in df_il.columns and 'Value' in df_il.columns:
                 fig4, ax4 = plt.subplots(figsize=(8, 5))
                 
-                raw_loss = df_il['ActorLoss']
+                raw_y = df_il['Value']
                 # 使用滑动平均平滑数据
-                smooth_loss = moving_average(raw_loss, 15)
+                smooth_loss = moving_average(raw_y, 15)
                 
-                # 绘制浅色原始曲线
-                sns.lineplot(x=df_il['Epoch'], y=raw_loss, ax=ax4, color='tab:green', alpha=0.2)
-                # 绘制深色平滑曲线
-                sns.lineplot(x=df_il['Epoch'], y=smooth_loss, ax=ax4, color='darkgreen', linewidth=1.8)
+                # # 绘制浅色原始曲线
+                # sns.lineplot(x=df_il['Step'], y=raw_y, ax=ax4, color='tab:green', alpha=0.2)
+                # # 绘制深色平滑曲线
+                # sns.lineplot(x=df_il['Step'], y=smooth_loss, ax=ax4, color='darkgreen', linewidth=1.8)
+
+                sns.lineplot(x=df_il['Step'], y=raw_y, ax=ax4, color='darkgreen', linewidth=1.8)
                 
                 ax4.set_xlabel("Epoch", fontweight='bold')
-                ax4.set_ylabel("Actor Loss", fontweight='bold')
+                ax4.set_ylabel("分类准确率", fontweight='bold')
                 
                 # 解决网格遮挡曲线的问题
                 ax4.set_axisbelow(True)
@@ -306,15 +308,23 @@ if __name__ == "__main__":
     EXPERIMENT_NAME = "ILHOPFSP"
 
     name_list = [
-        "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s",
-        "IL_and_MixedPFSP_低门槛_挑战_并行_分层2s",
-        "IL_and_MixedPFSP_高门槛_挑战_并行_分层2s",
-        "IL_and_PFSP_挑战_并行_分层2s",
-        "纯Rule4训练_分层_挑战2s",
-        "NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s",
-        "NoILPFSP_分阶段_挑战_并行_分层2s",
-        "IL_and_deltaFSP_挑战_并行_分层2s",
+        "CSVersusRules-run-20260614-163906",
+        "CSPFSP-run-20260615-234324",
+        "HLWSPFSP-run-20260616-130304",
+        "SLWSPFSP0.3-run-20260618-221044",
+        "SLWSPFSP0.5-run-20260620-211720",
+        "SLWSPFSP0.2-run-20260622-185856",
     ]
+    # [
+    #     "IL_and_MixedPFSP_分阶段_挑战_并行_分层2s",
+    #     "IL_and_MixedPFSP_低门槛_挑战_并行_分层2s",
+    #     "IL_and_MixedPFSP_高门槛_挑战_并行_分层2s",
+    #     "IL_and_PFSP_挑战_并行_分层2s",
+    #     "纯Rule4训练_分层_挑战2s",
+    #     "NoILPFSP_分阶段_混规则对手_挑战_并行_分层2s",
+    #     "NoILPFSP_分阶段_挑战_并行_分层2s",
+    #     "IL_and_deltaFSP_挑战_并行_分层2s",
+    # ]
     name_list_show = [
         1,
         2,

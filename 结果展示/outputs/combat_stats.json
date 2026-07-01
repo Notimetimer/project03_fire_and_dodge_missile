@@ -22,7 +22,7 @@
       "win_rate": 0.8,
       "score": 64.0
     },
-    "CSVersusRules": {
+    "CSFixedOpp": {
       "win": 74,
       "draw": 6,
       "loss": 0,
