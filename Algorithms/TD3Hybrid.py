@@ -29,8 +29,9 @@ class ReplayBufferHybrid:
         self.capacity = int(capacity)
         self.buffer = collections.deque(maxlen=self.capacity)
 
-    def add(self, state, action_dict, reward, next_state, done):
-        self.buffer.append((state, action_dict, reward, next_state, done))
+    def add(self, state, action_dict, reward, next_state, done, active_mask=1.0):
+        # active_mask: 智能体存活=1，死亡后=0，死亡样本不参与任何反向传播
+        self.buffer.append((state, action_dict, reward, next_state, done, active_mask))
 
     def save(self, path):
         """持久化经验池内容，支持中断续训。"""
@@ -52,8 +53,15 @@ class ReplayBufferHybrid:
         # 1. 随机抽样
         transitions = random.sample(self.buffer, batch_size)
         
-        # 2. 解包
-        states, actions, rewards, next_states, dones = zip(*transitions)
+        # 2. 解包（兼容旧的 5 元组存档：无 active_mask 时默认 1.0=存活）
+        states, actions, rewards, next_states, dones, active_masks = [], [], [], [], [], []
+        for t in transitions:
+            states.append(t[0])
+            actions.append(t[1])
+            rewards.append(t[2])
+            next_states.append(t[3])
+            dones.append(t[4])
+            active_masks.append(t[5] if len(t) > 5 else 1.0)
         
         # 3. 规整动作字典 (List[Dict] -> Dict[Array])
         actions_dict_np = {}
@@ -68,7 +76,8 @@ class ReplayBufferHybrid:
             'actions': actions_dict_np,
             'rewards': np.array(rewards, dtype=np.float32).reshape(-1, 1), # 预处理形状
             'next_states': np.array(next_states, dtype=np.float32),
-            'dones': np.array(dones, dtype=np.float32).reshape(-1, 1)      # 预处理形状
+            'dones': np.array(dones, dtype=np.float32).reshape(-1, 1),     # 预处理形状
+            'active_masks': np.array(active_masks, dtype=np.float32).reshape(-1, 1)  # 死亡样本=0
         }
         
         return batch_dict
@@ -905,7 +914,13 @@ class TD3Hybrid:
         # 初始化目标网络
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
-        
+
+        # [TD3] 目标 Actor：内部深拷贝当前 actor，参数不参与梯度优化，仅靠软更新跟随
+        self.target_actor = copy.deepcopy(self.actor).to(device)
+        self.target_actor.load_state_dict(self.actor.state_dict())
+        for p in self.target_actor.parameters():
+            p.requires_grad_(False)
+
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=critic_lr)
         self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=critic_lr)
@@ -952,6 +967,7 @@ class TD3Hybrid:
             'critic_2': self.critic_2.state_dict(),
             'target_critic_1': self.target_critic_1.state_dict(),
             'target_critic_2': self.target_critic_2.state_dict(),
+            'target_actor': self.target_actor.state_dict(),
             'k_entropy': self.k_entropy,
             'policy_delay': self.policy_delay,
             'target_noise': self.target_noise,
@@ -968,6 +984,8 @@ class TD3Hybrid:
         self.critic_2.load_state_dict(ckpt['critic_2'])
         self.target_critic_1.load_state_dict(ckpt['target_critic_1'])
         self.target_critic_2.load_state_dict(ckpt['target_critic_2'])
+        if 'target_actor' in ckpt:
+            self.target_actor.load_state_dict(ckpt['target_actor'])
         if 'k_entropy' in ckpt:
             self.k_entropy = ckpt['k_entropy']
             self.k_cont = self.k_entropy.get('cont', 0.01)
@@ -997,10 +1015,14 @@ class TD3Hybrid:
 
     def update(self, batch, freeze_actor=False):
         """
-        接收 ReplayBuffer 返回的字典 batch，按 TD3 方式更新：
-        - Critic：Twin Q + 目标策略平滑 + 最小目标 Q
-        - Actor：延迟更新（policy_delay），loss = -min(Q) + 固定熵系数 * 熵
-        - 不使用重要性采样，也不使用 SAC 自动温度 alpha
+        接收 ReplayBuffer 返回的字典 batch，按标准 TD3 的三条独立计算流更新：
+        - 流A（每次都执行）：target_actor 产生 next_action(确定性+截断噪声)，
+          两个 target_critic 取 min 算 TD 目标 y，更新当前两个 critic。
+        - 流B（每 policy_delay 次 critic 更新才执行 1 次）：当前 actor 产生确定性动作
+          a_pi(无噪声)，仅用当前 critic_1 计算 Q1(s, a_pi)，最大化 Q1 更新 actor。
+          此阶段 target 网络绝不参与计算。
+        - 软更新（仅在 actor 完成一次更新后执行）：actor->target_actor,
+          critic_1->target_critic_1, critic_2->target_critic_2。
         freeze_actor : True 时只更新 Q 网络，跳过 actor 更新（Q 预热阶段使用）。
         """
         # --- A. 数据搬运与类型转换 (NumPy -> Tensor) ---
@@ -1045,10 +1067,10 @@ class TD3Hybrid:
                 n_no_fire = (bern_buf <= 0.5).sum()
                 print(f"[TD3 diag #{self._diag_update_count}] replay buffer bern: fire={n_fire}, no_fire={n_no_fire}, ratio={n_fire/(n_fire+n_no_fire+1e-8):.3f}")
 
-        # 1. 更新 Q 网络 (Critic)
+        # ============ 流A：Critic 更新（每次 update 都执行）============
         with torch.no_grad():
-            # 目标策略平滑：确定性动作 + 裁剪噪声
-            next_actions_diff, _, _ = self.actor.sample_for_td3(
+            # 目标策略平滑：由 target_actor 产生确定性动作 + 裁剪噪声
+            next_actions_diff, _, _ = self.target_actor.sample_for_td3(
                 next_states, target_noise=self.target_noise, noise_clip=self.noise_clip)
 
             q1_target = self.target_critic_1(next_states, next_actions_diff)
@@ -1121,6 +1143,7 @@ class TD3Hybrid:
                     ent_bern = ent_bern.sum(-1, keepdim=True)
                 entropies['bern'] = ent_bern
 
+            # 标准 TD3：actor 更新可以只用 Q1，可以不取 min(Q1, Q2)，节省计算量，但我还是取min
             q1_pi = self.critic_1(states, actor_actions)
             q2_pi = self.critic_2(states, actor_actions)
             min_q_pi = torch.min(q1_pi, q2_pi)
@@ -1136,11 +1159,13 @@ class TD3Hybrid:
             actor_grad = nn.utils.clip_grad_norm_(self.actor.parameters(), self.actor_max_grad)
             self.actor_optimizer.step()
 
-        self.update_count += 1
+            # 软更新：仅在 actor 完成一次参数更新后执行，频率为 critic 的 1/policy_delay
+            # 三个目标网络一起跟随：target_actor / target_critic_1 / target_critic_2
+            self.soft_update(self.actor, self.target_actor)
+            self.soft_update(self.critic_1, self.target_critic_1)
+            self.soft_update(self.critic_2, self.target_critic_2)
 
-        # --- D. 目标网络软更新 ---
-        self.soft_update(self.critic_1, self.target_critic_1)
-        self.soft_update(self.critic_2, self.target_critic_2)
+        self.update_count += 1
 
         # --- E. 监控指标（兼容主训练脚本的 logger 字段） ---
         self.last_actor_loss = actor_loss.item()

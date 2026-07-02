@@ -26,7 +26,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': -0.000001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
@@ -53,7 +53,7 @@ transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1  # [�
 # [SAC] off-policy 专用超参数
 # replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
 replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（测试用）
-sac_tau = 0.005                      # 目标网络软更新系数
+sac_tau = 0.001                      # 目标网络软更新系数 0.005
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池

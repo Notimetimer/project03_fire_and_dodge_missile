@@ -25,8 +25,9 @@ class ReplayBufferHybrid:
         self.capacity = int(capacity)
         self.buffer = collections.deque(maxlen=self.capacity)
 
-    def add(self, state, action_dict, reward, next_state, done):
-        self.buffer.append((state, action_dict, reward, next_state, done))
+    def add(self, state, action_dict, reward, next_state, done, active_mask=1.0):
+        # active_mask: 智能体存活=1，死亡后=0，死亡样本不参与任何反向传播
+        self.buffer.append((state, action_dict, reward, next_state, done, active_mask))
 
     def save(self, path):
         """持久化经验池内容，支持中断续训。"""
@@ -48,8 +49,15 @@ class ReplayBufferHybrid:
         # 1. 随机抽样
         transitions = random.sample(self.buffer, batch_size)
         
-        # 2. 解包
-        states, actions, rewards, next_states, dones = zip(*transitions)
+        # 2. 解包（兼容旧的 5 元组存档：无 active_mask 时默认 1.0=存活）
+        states, actions, rewards, next_states, dones, active_masks = [], [], [], [], [], []
+        for t in transitions:
+            states.append(t[0])
+            actions.append(t[1])
+            rewards.append(t[2])
+            next_states.append(t[3])
+            dones.append(t[4])
+            active_masks.append(t[5] if len(t) > 5 else 1.0)
         
         # 3. 规整动作字典 (List[Dict] -> Dict[Array])
         actions_dict_np = {}
@@ -64,7 +72,8 @@ class ReplayBufferHybrid:
             'actions': actions_dict_np,
             'rewards': np.array(rewards, dtype=np.float32).reshape(-1, 1), # 预处理形状
             'next_states': np.array(next_states, dtype=np.float32),
-            'dones': np.array(dones, dtype=np.float32).reshape(-1, 1)      # 预处理形状
+            'dones': np.array(dones, dtype=np.float32).reshape(-1, 1),     # 预处理形状
+            'active_masks': np.array(active_masks, dtype=np.float32).reshape(-1, 1)  # 死亡样本=0
         }
         
         return batch_dict

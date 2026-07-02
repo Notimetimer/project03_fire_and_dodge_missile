@@ -1770,6 +1770,7 @@ def run_MLP_simulation(
                 act_seq = l_tr['actions']
                 rew_seq = l_tr['rewards']
                 done_seq = l_tr['dones']
+                mask_seq = l_tr['active_masks']  # 智能体存活=1，死亡后=0
                 N_tr = len(done_seq)
                 for i in range(N_tr):
                     next_obs = obs_seq[i + 1] if (i + 1 < N_tr) else obs_seq[i]
@@ -1779,6 +1780,7 @@ def run_MLP_simulation(
                         float(rew_seq[i]),
                         np.asarray(next_obs, dtype=np.float32),
                         float(done_seq[i]),
+                        float(mask_seq[i]),
                     )
                 steps_since_update += N_tr
                 
@@ -1948,9 +1950,13 @@ def run_MLP_simulation(
                     print(f"[做法5] Actor冻结中，将在 batch_idx>{q_warmup_batches} 后解冻")
                 elif not _freeze_actor_now and batch_idx == q_warmup_batches + 1:
                     print(f"[做法5] Actor已解冻，开始正常TD3更新")
-                for _ in range(num_TD3_updates):
+                for i in range(num_TD3_updates):
                     TD3_batch = replay_buffer.sample(TD3_batch_size)
                     student_agent.update(TD3_batch, freeze_actor=_freeze_actor_now)
+
+                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                student_agent.fire_prob_protection(TD3_batch, protect_epochs=1)
+
                 logger.add("train_plus/num_TD3_updates", num_TD3_updates, total_steps)
                 logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
                 # logger.add("train_plus/TD3_alpha", student_agent.alpha, total_steps)
