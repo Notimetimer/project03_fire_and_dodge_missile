@@ -54,3 +54,7 @@ __pycache__/
 结果展示/ControlTraining.png
 /结果展示/outputs
 /结果展示/outputs
+firing_probability_polar.png
+firing_probability_results.npz
+firing_probability_target_center.npz
+firing_probability_target_center.png
