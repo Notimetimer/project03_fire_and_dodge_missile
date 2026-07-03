@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿'
+mission_name = 'PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿1'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -38,7 +38,7 @@ action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,0,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 3 # 初始模仿对象
+IL_rule = 1 # 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数

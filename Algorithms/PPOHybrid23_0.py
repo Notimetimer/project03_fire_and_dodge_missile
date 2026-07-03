@@ -736,12 +736,12 @@ class HybridActorWrapper(nn.Module):
             "开火头适度动作平滑"
 
             # 开火头保持硬标签
-            max_target = sigmoid(3.0)
-            min_target = sigmoid(-3.0)
+            # max_target = sigmoid(3.0)
+            # min_target = sigmoid(-3.0)
 
             # 对比实验，临时使用软标签给开火头
-            # max_target = 1.0-label_smoothing
-            # min_target = label_smoothing
+            max_target = min(1.0-label_smoothing, sigmoid(3.0))
+            min_target = max(label_smoothing, sigmoid(-3.0))
             
             target = torch.clamp(target, min_target, max_target)
 

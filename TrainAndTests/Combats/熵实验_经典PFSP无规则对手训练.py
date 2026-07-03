@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项0.1'
+mission_name = 'PurePFSP_balanced1_0.3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -31,14 +31,14 @@ il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.5 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,0,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 2 # 3 # 初始模仿对象
+IL_rule = 1 # 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
@@ -122,9 +122,9 @@ if __name__=='__main__':
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
-        MAX_HISTORY_SIZE = 50, # 300 # 100
-        compete_old_rate = 0.0, # “复习”概率
+        ADMISSION_THRESHOLD = -1,  # 0.5,
+        MAX_HISTORY_SIZE = 50, # 150  # 300
+        compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样

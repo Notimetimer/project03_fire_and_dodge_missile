@@ -46,13 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "PFSP_分阶段_混规则对手_平衡_并行_训练满熵项0.2-run-20260622-185856"
-
-    "PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557"
-    
-    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
-    
-    "PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿-run-20260616-130304"
+    dir_name = "SLWSPFSP0.2-run-20260622-185856"
    
 
     # 次要
@@ -225,19 +219,20 @@ if __name__ == "__main__":
                     # print()
 
                 # --- 记录回放数据 ---
+                # 独立时间 t 存储，同时每个位置点末尾追加当前时刻用于对照，格式 [x, y, z, t]
                 replay_data['t'].append(env.t)
-                replay_data['RUAV']['pos_'].append(env.RUAV.pos_.tolist())
-                replay_data['BUAV']['pos_'].append(env.BUAV.pos_.tolist())
+                replay_data['RUAV']['pos_'].append(env.RUAV.pos_.tolist() + [env.t])
+                replay_data['BUAV']['pos_'].append(env.BUAV.pos_.tolist() + [env.t])
                 for m in env.alive_r_missiles:
                     key = str(m.id)
                     if key not in replay_data['RMIS']:
                         replay_data['RMIS'][key] = []
-                    replay_data['RMIS'][key].append(m.pos_.tolist())
+                    replay_data['RMIS'][key].append(m.pos_.tolist() + [env.t])
                 for m in env.alive_b_missiles:
                     key = str(m.id)
                     if key not in replay_data['BMIS']:
                         replay_data['BMIS'][key] = []
-                    replay_data['BMIS'][key].append(m.pos_.tolist())
+                    replay_data['BMIS'][key].append(m.pos_.tolist() + [env.t])
 
                 # --- 记录数据 ---
                 history['time'].append(count * action_cycle_multiplier * dt_maneuver)
@@ -260,6 +255,29 @@ if __name__ == "__main__":
             
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
+
+            # --- 导弹击毁判定与标注 ---
+            # 位置点格式为 [x, y, z, t]，t 在最后；独立 t 列表也保留
+            r_last_t = replay_data['RUAV']['pos_'][-1][3] if replay_data['RUAV']['pos_'] else None
+            b_last_t = replay_data['BUAV']['pos_'][-1][3] if replay_data['BUAV']['pos_'] else None
+
+            def mark_missile_hit(mis_dict, target_last_t, target_last_pos):
+                for key, traj in mis_dict.items():
+                    if not traj:
+                        continue
+                    mis_last = traj[-1]
+                    mis_last_t = mis_last[3]
+                    mis_last_pos = np.array(mis_last[:3])
+                    # 导弹航迹与飞机航迹在同一时刻结束，且距离小于80m，则标记为击毁
+                    if mis_last_t == target_last_t and target_last_pos is not None:
+                        dist = np.linalg.norm(mis_last_pos - target_last_pos)
+                        if dist < 80.0:
+                            mis_last.append('*')  # 在末端添加星号标记
+
+            r_last_pos = np.array(replay_data['RUAV']['pos_'][-1][:3]) if replay_data['RUAV']['pos_'] else None
+            b_last_pos = np.array(replay_data['BUAV']['pos_'][-1][:3]) if replay_data['BUAV']['pos_'] else None
+            mark_missile_hit(replay_data['BMIS'], r_last_t, r_last_pos)  # 蓝导弹打击红飞机
+            mark_missile_hit(replay_data['RMIS'], b_last_t, b_last_pos)  # 红导弹打击蓝飞机
 
             # --- 保存回放 JSON ---
             replay_data['meta']['result'] = result
