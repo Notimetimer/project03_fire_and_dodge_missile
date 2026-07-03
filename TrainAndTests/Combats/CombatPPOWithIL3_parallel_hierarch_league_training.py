@@ -62,6 +62,7 @@ from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch import test_worker
+from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
 
@@ -275,6 +276,20 @@ class IL_transition_buffer:
         for k in self.addon_dict:
             self.addon_dict[k] = []
         print("[IL_transition_buffer] Buffer cleared.")
+
+    def save(self, path):
+        """直接序列化整个 buffer 实例"""
+        torch.save(self, path)
+        print(f"[IL_transition_buffer] Saved to {path}. Size: {len(self.addon_dict['states'])}")
+
+    @staticmethod # 静态方法调用,不需要实例化
+    def load(path):
+        """从磁盘加载 buffer 实例"""
+        if not os.path.exists(path):
+            return None
+        buffer = torch.load(path, map_location='cpu')
+        print(f"[IL_transition_buffer] Loaded from {path}. Size: {len(buffer.addon_dict['states'])}")
+        return buffer
         
 
 
@@ -290,76 +305,51 @@ def update_elo(player_elo, opponent_elo, score, K_FACTOR):
     return player_elo + K_FACTOR * (score - expected)
 
 
-def get_opponent_probabilities(WinRates=None, Elite_WinRates=None, 
-                               SP_type='PFSP_classic', 
-                               rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
+def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None, 
+                               target_elo=None, sigma=400, SP_type='PFSP_with_delta', 
+                               compete_old_rate=0.5, deltaFSP_epsilon=0.5,):
     """
-    经典 PFSP 采样逻辑：
-    WinRates: dict, 记录 Learner 对阵各对手的胜率 P
-    p_factor: 经典公式 (1-P)^p 中的指数，通常取 1.0~3.0，越高越针对强敌
+    优化后的对手采样逻辑：
+    1. 优先判定是否进入“规则复习”分支。
+    2. 若未进入，则根据 SP_type 执行具体的采样策略。
     """
-    # 合并池子以便查询
-    if WinRates is None:
-        WinRates = {}
-    if Elite_WinRates is None:
-        Elite_WinRates = {}
-    candidate_pool = Elite_WinRates if Elite_WinRates else WinRates
+    # 【核心修改】在函数内部合并出一个临时的全集字典用于查询分数
+    # 这样 keys 里的任何元素都能在这里找到对应的 ELO
+    
+    if hall_of_fame is not None:
+        candidate_pool = hall_of_fame.copy()
+        candidate_pool.update(elite_elo_ratings)
+    else:
+        candidate_pool = elite_elo_ratings
     keys = list(candidate_pool.keys())
     
     if not keys: return np.array([]), []
 
-    # 1. 规则复习分支 (保持不变)
+    # --- 第一层判断：规则复习分支 (Epsilon-Greedy 锚点保护) ---
+    # 只要 compete_old_rate > 0，就有概率强行进入规则池采样，防止“策略遗忘”
     rule_keys = [k for k in keys if k.startswith('Rule')]
-    if np.random.rand() < rule_rate and rule_keys:
+    if np.random.rand() < compete_old_rate and rule_keys:
         probs = np.ones(len(rule_keys)) / len(rule_keys)
         return probs, rule_keys
-
-    # 2. 经典 PFSP 采样核心
-    # 正确判断不同 SP_type，PFSP 核心在 SP_type 为这两者之一时生效
-    if SP_type == 'PFSP_classic' or SP_type == 'PFSP_challenge' or SP_type == 'PFSP_double_dims':
-        # 获取所有候选对手的胜率 P
-        ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
+    
+    # --- 第二层判断：进入核心采样逻辑 ---
+    # 【核心修改】统一从 candidate_pool 取分，彻底避免 KeyError
+    elos = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
+    
+    # 1. 处理 PFSP 系列 (高斯核采样)
+    if SP_type.startswith('PFSP'):
+        if SP_type == 'PFSP_challenge':
+            actual_target = min(np.max(elos), float(target_elo) + 300)
+        elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
+            actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
+        else: # 默认通用的 'PFSP' 逻辑
+            actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
+            # # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
+            # actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
         
-        # 计算权重：(1 - P)^p
-        # 解释：胜率越低（越打不过），权重越高，但太强太弱的对手被过滤掉
-        opponent_mask = np.ones_like(ps)
-        for i in range(len(ps)):
-            if ps[i] > 0.2 and ps[i] < 0.8:
-                opponent_mask[i] = 1.0
-            else:
-                opponent_mask[i] = 0.01
-        weights = np.power((1.0 - ps), p_factor)
-        weights = weights * opponent_mask
-        
-        # 防止全为 0 的情况（例如胜率全是 1）
-        if weights.sum() < 1e-8:
-            probs = np.ones(len(keys)) / len(keys)
-        else:
-            probs = weights / weights.sum()
-            
-        return probs, keys
-    # 倾向势均力敌
-    elif SP_type == 'PFSP_balanced':
-        # 获取所有候选对手的胜率 P
-        ps = np.array([candidate_pool[k] for k in keys], dtype=np.float64)
-        
-        # 计算权重：((1 - P)*P)^(p/2)
-        # 解释：胜率越低（越打不过），权重越高，但太强太弱的对手被过滤掉
-        opponent_mask = np.ones_like(ps)
-        for i in range(len(ps)):
-            if ps[i] > 0.2 and ps[i] < 0.8:
-                opponent_mask[i] = 1.0
-            else:
-                opponent_mask[i] = 0.01
-        weights = np.power((1.0 - ps)*ps, p_factor/2)
-        weights = weights * opponent_mask
-        
-        # 防止全为 0 的情况（例如胜率全是 1）
-        if weights.sum() < 1e-8:
-            probs = np.ones(len(keys)) / len(keys)
-        else:
-            probs = weights / weights.sum()
-            
+        diffs = elos - actual_target
+        scores = np.exp(-0.5 * (diffs / float(sigma))**2)
+        probs = scores / (scores.sum() + 1e-12)
         return probs, keys
 
     # 2. 处理 FSP (全样本均匀分布)
@@ -484,28 +474,13 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
+        # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
-        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        local_agent = PPOHybrid(
-            actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
-            critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
-            actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
-            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
-            device=device_worker 
-        )
+        local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
         
         # 初始化对手网络
         adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        # 【修改 2】同样为对手创建一个 dummy critic
-        adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
-        adv_agent = PPOHybrid(
-            actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
-            critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
-            actor_lr=0, critic_lr=0, 
-            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
-            device=device_worker
-        )
+        adv_agent = HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker)
 
         # --- 2. 循环等待阶段 ---
         while True:
@@ -521,16 +496,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 (actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
-                local_agent.actor.load_state_dict(actor_weights)
+                local_agent.load_state_dict(actor_weights)
                 
                 # B. 配置对手
-                opp_name, opp_type, opp_data = opponent_info
+                opp_name, opp_type, opp_data, opp_temperature = opponent_info
                 adv_is_rule = (opp_type == 'rule')
                 rule_num = 0
                 if adv_is_rule:
                     rule_num = opp_data
                 else:
-                    adv_agent.actor.load_state_dict(opp_data)
+                    adv_agent.load_state_dict(opp_data)
 
                 # C. 准备本回合容器
                 # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
@@ -600,9 +575,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 current_action, current_action_exec, current_enm_action_exec = None, None, None
                 
                 steps_run = 0
-                episode_return1 = 0 # 仅用于统计显示
-                episode_return2 = 0
-                episode_return3 = 0
+                episode_return = 0 # 仅用于统计显示
+                episode_return_dense = 0
                 m_fired = 0
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
@@ -673,8 +647,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         with torch.no_grad():
                             # Blue Decision
                             b_state_check = env.unscale_state(b_check_obs)
-                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
-                            # b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                            b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
+                            # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                             b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -687,8 +661,9 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, mask_on=fire_mask)
-                                # r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
+                                                        mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
+                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -893,27 +868,26 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     ep_blue_avg_fire_AA_hor = None
                 
                 if len(episode_blue_fire_alts) > 0:
-                    ep_blue_avg_fire_altitude = float(np.mean(episode_blue_fire_alts))
+                    ep_blue_avg_fire_altitude = float(max(episode_blue_fire_alts)) # 不再记录平均开火高度，改为记录最大开火高度
                 else:
                     ep_blue_avg_fire_altitude = None
 
-                
+                WVR = env.close_range_kill()
+                BVR_perish_together = (not WVR) and env.draw
+
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
                     'ego_trans': ego_trans, # 用于 SIL (win)
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
-                        'return': {
-                            "episode_return1": episode_return1,
-                            "episode_return2": episode_return2,
-                            "episode_return3": episode_return3,
-                        },
+                        'return': episode_return,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
                         'draw': env.draw,
-                        'm_fired': m_fired
+                        'm_fired': m_fired,
+                        'BVR_perish_together': BVR_perish_together
                     },
                     'opp_name': opp_name,
                     # 新增: 本回合红方（对手）开火角度参数统计 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
@@ -970,9 +944,9 @@ def run_MLP_simulation(
     epochs=4,
     eps=0.2,
     k_entropy=None,
-    alpha_il=1.0,
+    alpha_il=0.05,
     il_batch_size=128,
-    il_batch_size2=1e4,
+    il_batch_size2=None,
     il_buffer_max_size=2e4,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
@@ -1000,7 +974,10 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    p_factor = 0.3,
+    chosen_quantile = 0.2, 
+    DARK_SIDE = 1,  # sil默认找最差
+    p_factor = None, # 无效接口
+    sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
     ADMISSION_THRESHOLD = 0.5,
     MAX_HISTORY_SIZE = 50, # 300 # 100
@@ -1021,6 +998,10 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
+    use_RND = 0, # 好奇心机制
+    beta_RND = 0.3,
+    use_RDistill = 0, # 温和蒸馏机制
+    beta_distill = 0.2,
 ):
 
     actor_lr0 = actor_lr
@@ -1109,6 +1090,25 @@ def run_MLP_simulation(
     save_meta_once(os.path.join(log_dir, "actor_kamikaze.meta.json"), kamikaze_agent.actor.state_dict())
     save_meta_once(os.path.join(log_dir, "actor_survivor.meta.json"), survivor_agent.actor.state_dict())
 
+    
+    # [新增] （训练方）蓝方开火策略指标的 EMA 变量（指数=0.2，即 1-0.8）
+    ema_fire_interval = None # 50
+    ema_fire_delta_psi = None # 30
+    ema_fire_distance = None # 50e3
+    ema_fire_AA_hor = None # 145
+    ema_fire_altitude = None # 3e3
+    ema_fire_theta = None # -5
+    ema_ATA = None # 37
+    ema_delta_psi_threat = None # 135
+    ema_delta_theta = None # 4
+    EMA_ALPHA = 0.2
+    
+    fire_inside_weight = None
+    fire_reward_weight = None
+
+    RWController = FireRewardWeightController(initial_fire_reward_weight=1.0)
+
+
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
         # --- Fighter ---
@@ -1118,14 +1118,14 @@ def run_MLP_simulation(
         else:
             # 优先加载current_actor（确保不加载搅拌后的参数）
             current_actor_path = os.path.join(log_dir, "current_actor.pt")
-
+            
         if os.path.exists(current_actor_path):
             fighter_agent.actor.load_state_dict(torch.load(current_actor_path, map_location=device))
             print(f"Loaded fighter from: {current_actor_path}")
         else:
             # 如果current_actor不存在，回退到原来的逻辑
             actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
-            if actor_files:
+            if len(actor_files) > 0:
                 def extract_num(f):
                     m = re.search(r'actor_rein(\d+)\.pt$', f)
                     return int(m.group(1)) if m else -1
@@ -2612,8 +2612,8 @@ def run_MLP_simulation(
                 critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
                 # 梯度监控
-                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
-                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
+                # logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
+                # logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 # 损失函数监控
                 logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
                 logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
@@ -2623,7 +2623,7 @@ def run_MLP_simulation(
                 logger.add("train/max_fire_prob", student_agent.max_fire_prob, total_steps)
                 logger.add("train/min_fire_prob", student_agent.min_fire_prob, total_steps)
 
-                logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+                # logger.add("train/10 advantage", student_agent.advantage, total_steps) 
                 # 强化学习
                 logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
                 logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
