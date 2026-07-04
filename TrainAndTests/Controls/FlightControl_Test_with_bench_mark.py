@@ -44,7 +44,7 @@ if mission_name != "PID":
     # log_dir = os.path.join(pre_log_dir, "FlightControl-run-20260308-211329")
 
     # 用新函数加载 actor：若想强制加载编号为 990 的模型，传入 number=990
-    actor_path = load_actor_from_log(log_dir, number=14200)
+    actor_path = load_actor_from_log(log_dir, number=18440) # 14200) # None
     if not actor_path:
         print(f"No actor checkpoint found in {log_dir}")
         sys.exit()

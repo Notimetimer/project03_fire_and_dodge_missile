@@ -64,6 +64,13 @@ class track_env():
         self.max_alt_safe = 13e3
         self.max_alt = 15e3
 
+        # Realistic flight limits
+        self.min_alpha_air = -5 # -8
+        self.max_alpha_air = 23 # 26
+        self.max_beta_air = 15
+        self.min_ny = -3
+        self.max_ny = 9
+
         self.flight_key_order = [
             "ego_main",  # 7
             "ego_control",  # 7
@@ -375,11 +382,11 @@ class track_env():
             self.fail = 1
         
         if self.realistic: # 考虑迎角过载限制
-            min_alpha_air = -8  # -7
-            max_alpha_air = 26  # 29
-            max_beta_air = 15
-            min_ny = -3
-            max_ny = 9.5
+            min_alpha_air = self.min_alpha_air
+            max_alpha_air = self.max_alpha_air
+            max_beta_air = self.max_beta_air
+            min_ny = self.min_ny
+            max_ny = self.max_ny
         else: # 无迎角过载限制
             min_alpha_air = -91
             max_alpha_air = 91
@@ -497,12 +504,12 @@ class track_env():
             # 原有写法
             # r_angle += -0.2 * abs(p)/pi  # 0.4 偏强？ 0.1偏弱？
             # 平方项修改
-            r_angle += -0.2 * (p/pi)**2
+            r_angle += -0.1 * (p/pi)**2
         else:
             # 原有写法
             # r_angle += -0.05 * abs(p)/pi # 0.01 可能有些弱？
             # 平方项修改
-            r_angle += -0.1 * (p/pi)**2
+            r_angle += -0.05 * (p/pi)**2
         
         # 平方项修改
         r_angle -= (0.1 * (r/pi)**2) # 加r的惩罚
@@ -514,15 +521,23 @@ class track_env():
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.0 # 0.5
-        if alpha_air >= 15:
-            reward_alpha -= (alpha_air-15) * 5/(26-15) # 10 可能有些大，没有把大迎角的全部优势拿出来
-        if alpha_air < -2:
-            reward_alpha -= ((-2) - alpha_air) * 15/((-2) - (-5))
+        # if alpha_air >= 15:
+        #     reward_alpha -= (alpha_air-15) * 5/(26-15) # 10 可能有些大，没有把大迎角的全部优势拿出来
+        # if alpha_air < -2:
+        #     reward_alpha -= ((-2) - alpha_air) * 15/((-2) - (-5))
+        if alpha_air > self.max_alpha_air/2:
+            reward_alpha -= 5 * ((alpha_air)/self.max_alpha_air)**2
+        if alpha_air < self.min_alpha_air/2:
+            reward_alpha -= 5 * ((alpha_air)/self.min_alpha_air)**2
         ny = self.RUAV.Ny
-        if ny<=-1:
-            reward_alpha -= 3 + ((-1)-ny)*6 *2
-        if ny >= 7:
-            reward_alpha -= 3 + (ny-7)*3 *2
+        # if ny<=-1:
+        #     reward_alpha -= 3 + ((-1)-ny)*6 *2
+        # if ny >= 7:
+        #     reward_alpha -= 3 + (ny-7)*3 *2
+        if ny > self.max_ny/2:
+            reward_alpha -= 10 * abs((ny/self.max_ny)) # 10
+        if ny < 0:
+            reward_alpha -= 10 * abs((ny/self.min_ny)) # 10
         
         # 侧滑角惩罚（尽量少侧滑）
         # 原有写法

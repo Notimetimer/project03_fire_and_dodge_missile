@@ -104,9 +104,17 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                 while not done:
                     # 目标会跑
                     height_req += np.random.randn() * 80 * dt_decide # 每秒动 80m
-                    env.height_req = np.clip(height_req, 1000, 13000)
                     psi_req += np.random.randn() * 10 *pi/180 * dt_decide # 每秒动10°
+                    
+                    # # 每41s剧变
+                    # if env.t % 41 == 0:
+                    #     height_req += np.random.randn() * 3000
+                    #     psi_req += np.random.randn() * np.radians(120)
+
+                    # 限制到允许范围
+                    env.height_req = np.clip(height_req, 1000, 13000)
                     env.psi_req = sub_of_radian(psi_req)
+
                     v_req += np.random.randn() * 3 * dt_decide # 速度目标也在动
                     # env.v_req = np.clip(v_req, 0.5 * 340, 2.5 * 340)
                     env.v_req = np.clip(v_req, 0.5 * 340, 1.3 * 340)
@@ -308,7 +316,9 @@ if __name__=='__main__':
             # agent.distil(master_transition_dict, teacher_agent=teacher_agent, epochs=distil_epochs, alpha=alpha_distill)
             
             # --- 保存模型 ---
-            if (i_episode // args.num_workers) % 10 == 0:
+            progress = rl_steps / max_steps
+            save_condition = ((i_episode // args.num_workers) % 10 == 0) or (progress > 0.8 and survive_rate == 1.0)
+            if save_condition:
                 critic_path = os.path.join(log_dir, "critic.pt")
                 th.save(agent.critic.state_dict(), critic_path)
                 actor_name = f"actor_rein{i_episode}.pt"
@@ -367,7 +377,7 @@ if __name__=='__main__':
             # 因子 alpha: 5->0.0, 20->1.0
             alpha_decay = np.clip((mean_ao_batch - 0.0) / (90.0 - 0.0), 0.0, 1.0)
             # 平滑调整 max_std
-            agent.max_std = 0.05 + (0.3 - 0.05) * alpha_decay
+            agent.max_std = 0.05 + (0.25 - 0.05) * alpha_decay
 
             "非线性调标准差"
             # alpha_decay = (mean_ao_batch - 0.0) / (20.0 - 0.0)
