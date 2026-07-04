@@ -41,6 +41,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     ATA = state_check["target_information"][4]
     AA_hor = state_check["target_information"][6]
     sin_theta = state_check["ego_main"][3]
+    ammo = state_check["ego_main"][-1]
 
     threat_distance_list = np.array([
                                     0, # 0
@@ -153,6 +154,10 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
             if sin_theta < sin(30*pi/180) and alt < 9500:  # last_action != 2: # 如果上一动作为非爬升
                 action_v = 0 # 爬升
+                # 防止无弹药爬高
+                if ammo == 0:
+                    action_v = max(2, action_v)
+
                 action_h = 0 # 追踪
                 fire_missile = False
                 action_number = [action_v, action_h]

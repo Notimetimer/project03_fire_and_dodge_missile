@@ -99,7 +99,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             self.b_dist_seq.append(b_dist)
             self.last_record_t = self.t
 
-        self.close_range_kill() # 允许跑刀
+        if len(self.alive_missiles)==0:
+            self.close_range_kill() # 允许跑刀
         self.update_missile_state()
         
         if side == 'r':
