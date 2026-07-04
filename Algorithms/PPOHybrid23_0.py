@@ -460,9 +460,9 @@ class HybridActorWrapper(nn.Module):
                 dist_cond    = (dist < 105e3)
                 delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
                 wait_til_last_missile_ends = not missile_in_mid_term
-                can_fire_full = (ata_cond & locked_cond & dist_cond)
-                                # & delta_theta_cond)
-                                # & wait_til_last_missile_ends)
+                can_fire_full = (ata_cond & locked_cond & dist_cond
+                                & delta_theta_cond
+                                & wait_til_last_missile_ends)
                 _deploy_can_fire = can_fire_full.all().item()  # 转成 bool
 
         # 调用网络（net 内部只施加弹药+冷却 mask）

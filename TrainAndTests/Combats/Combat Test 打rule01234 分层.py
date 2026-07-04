@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "HLWSPFSP-run-20260616-130304"
+    dir_name = "SLWSPFSP0.3-run-20260618-221044"
    
 
     # 次要
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3,4] # [3]
+    rule_opponents = [3,3,3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -162,8 +162,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.04,
-                            temperature={'cat':0.5, 'bern':1.0}
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.06,
+                            temperature={'cat':0.5, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -234,21 +234,23 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             
-            # --- 保存作战记录到 CSV ---
-            try:
-                df_history = pd.DataFrame(history)
-                save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-                save_path = os.path.join(project_root, "logs", save_name)
-                df_history.to_csv(save_path, index=False)
-                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            except Exception as e:
-                print(f"Failed to save CSV: {e}")
+            # # --- 保存作战记录到 CSV ---
+            # try:
+            #     df_history = pd.DataFrame(history)
+            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+            #     save_path = os.path.join(project_root, "logs", save_name)
+            #     df_history.to_csv(save_path, index=False)
+            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            # except Exception as e:
+            #     print(f"Failed to save CSV: {e}")
 
             # --- 绘制曲线 ---
             plt.figure(figsize=(10, 10))
             plt.subplot(4, 1, 1)
             plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
             plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
+            plt.axhline(y=-3, color='black', linestyle=':', alpha=0.7, label='Ny limit (-3g)')
+            plt.axhline(y=9, color='black', linestyle=':', alpha=0.7, label='Ny limit (9g)')
             plt.ylabel('Ny (g)')
             plt.title(f'Test vs Rule {rule_num}: Metrics')
             plt.legend()
@@ -257,6 +259,8 @@ if __name__ == "__main__":
             plt.subplot(4, 1, 2)
             plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
             plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
+            plt.axhline(y=-8, color='black', linestyle=':', alpha=0.7, label='Alpha limit (-8°)')
+            plt.axhline(y=26, color='black', linestyle=':', alpha=0.7, label='Alpha limit (26°)')
             plt.ylabel('Alpha (deg)')
             plt.title('Angle of Attack (Alpha)')
             plt.legend()
@@ -282,7 +286,7 @@ if __name__ == "__main__":
             plt.tight_layout()
             plt.show()
             
-            input("Press Enter to continue to the next test...")
+            # input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")

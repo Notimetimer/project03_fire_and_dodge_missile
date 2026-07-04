@@ -46,13 +46,13 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SLWSPFSP0.2-run-20260622-185856"
+    dir_name = "SLWSPFSP0.3-run-20260618-221044"
    
 
     # 次要
-    experiment_name = None
-    
+    experiment_name = None    
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -71,8 +71,9 @@ if __name__ == "__main__":
     vertices = None # 默认圆形边界
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
-    env = ChooseStrategyEnv(env_args, tacview_show=0, vertices=vertices)
-    env.dt_move = 0.025 # 0.05 # 0.04 # 25
+    env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
+    env.dt_move = 0.02 # 0.05 # 0.04 # 25
+
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
@@ -124,7 +125,7 @@ if __name__ == "__main__":
     agent_tag = os.path.basename(latest_log_dir)  # 用实验目录名作为文件名前缀
 
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3,4] # [0,1,2]
+    rule_opponents = [3,3,3] # [0,1,2]
     t_bias = 0
 
     try:
@@ -178,7 +179,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.04,
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.06,
                             temperature={'cat':0.3, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None
                         
@@ -301,45 +302,49 @@ if __name__ == "__main__":
             # except Exception as e:
             #     print(f"Failed to save CSV: {e}")
 
-            # # --- 绘制曲线 ---
-            # plt.figure(figsize=(10, 10))
-            # plt.subplot(4, 1, 1)
-            # plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
-            # plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
-            # plt.ylabel('Ny (g)')
-            # plt.title(f'Test vs Rule {rule_num}: Metrics')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            # --- 绘制曲线 ---
+            plt.figure(figsize=(10, 10))
+            plt.subplot(4, 1, 1)
+            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
+            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
+            plt.axhline(y=-3, color='black', linestyle=':', alpha=0.7, label='Ny limit (-3g)')
+            plt.axhline(y=9, color='black', linestyle=':', alpha=0.7, label='Ny limit (9g)')
+            plt.ylabel('Ny (g)')
+            plt.title(f'Test vs Rule {rule_num}: Metrics')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-            # plt.subplot(4, 1, 2)
-            # plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
-            # plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
-            # plt.ylabel('Alpha (deg)')
-            # plt.title('Angle of Attack (Alpha)')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            plt.subplot(4, 1, 2)
+            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
+            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
+            plt.axhline(y=-8, color='black', linestyle=':', alpha=0.7, label='Alpha limit (-8°)')
+            plt.axhline(y=26, color='black', linestyle=':', alpha=0.7, label='Alpha limit (26°)')
+            plt.ylabel('Alpha (deg)')
+            plt.title('Angle of Attack (Alpha)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-            # plt.subplot(4, 1, 3)
-            # plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
-            # plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
-            # plt.ylabel('Mach')
-            # plt.title('Flight Mach Number')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            plt.subplot(4, 1, 3)
+            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
+            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
+            plt.ylabel('Mach')
+            plt.title('Flight Mach Number')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
 
-            # plt.subplot(4, 1, 4)
-            # plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
-            # plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
-            # plt.ylabel('Alt (m)')
-            # plt.xlabel('Time (s)')
-            # plt.title('Altitude (Height)')
-            # plt.legend()
-            # plt.grid(True, alpha=0.3)
+            plt.subplot(4, 1, 4)
+            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
+            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
+            plt.ylabel('Alt (m)')
+            plt.xlabel('Time (s)')
+            plt.title('Altitude (Height)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
             
-            # plt.tight_layout()
-            # plt.show()
+            plt.tight_layout()
+            plt.show()
             
-            # input("Press Enter to continue to the next test...")
+            input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")
