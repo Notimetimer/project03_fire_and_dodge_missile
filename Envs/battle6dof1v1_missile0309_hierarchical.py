@@ -159,7 +159,7 @@ class Battle(object):
         self.tacview_show = tacview_show
 
         # 动作平滑参数
-        self.action_ema_beta = 0.05 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至5%
+        self.action_ema_beta = 0.006 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至5%
         self.r_actions_ema = None
         self.b_actions_ema = None
         
@@ -343,17 +343,19 @@ class Battle(object):
 
         actions = [r_actions] + [b_actions]
 
-        # # 动作 EMA 平滑
-        # if self.r_actions_ema is None:
-        #     self.r_actions_ema = r_actions.copy()
-        # else:
-        #     self.r_actions_ema = self.action_ema_beta * self.r_actions_ema + (1 - self.action_ema_beta) * r_actions
-        # if self.b_actions_ema is None:
-        #     self.b_actions_ema = b_actions.copy()
-        # else:
-        #     self.b_actions_ema = self.action_ema_beta * self.b_actions_ema + (1 - self.action_ema_beta) * b_actions
-        # # 使用平滑后的动作执行
-        # actions = [self.r_actions_ema] + [self.b_actions_ema]
+        # 动作 EMA 平滑
+        if self.r_actions_ema is None:
+            self.r_actions_ema = r_actions.copy()
+        else:
+            self.r_actions_ema = r_actions.copy()
+            self.r_actions_ema[0] = self.action_ema_beta * self.r_actions_ema[0] + (1 - self.action_ema_beta) * r_actions[0]
+        if self.b_actions_ema is None:
+            self.b_actions_ema = b_actions.copy()
+        else:
+            self.b_actions_ema = b_actions.copy()
+            self.b_actions_ema[0] = self.action_ema_beta * self.b_actions_ema[0] + (1 - self.action_ema_beta) * b_actions[0]
+        # 使用平滑后的动作执行
+        actions = [self.r_actions_ema] + [self.b_actions_ema]
 
         # 保存原始动作（用于记录或分析）
         self.r_actions = r_actions.copy()
@@ -499,6 +501,8 @@ class Battle(object):
                     # 控制器作用
                     control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                     aileron, elevator, rudder, throttle = control_action['cont']
+
+                    elevator*=0.75 # 弱化俯仰控制
                     UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=self.dt_move)
                 else:
                     UAV.move(target_height, delta_heading, target_speed, relevant_height=True, e2e=0, rudder=rudder)
