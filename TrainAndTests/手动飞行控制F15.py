@@ -8,14 +8,14 @@ import socket
 import threading
 import time
 import keyboard  # 需要安装: pip install keyboard
+import pygame  # 需要安装: pip install pygame，用于Xbox手柄
 import sys
 import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
-from Controller.F16PIDController2 import *
 
 tacview_show = True  # 是否显示Tacview
-model_name = "f16"  # JSBSim模型名称, f15, f16等可用
+model_name = "f15"  # JSBSim模型名称, f15, f16等可用
 
 class Tacview(object):
     def __init__(self):
@@ -69,6 +69,17 @@ class Tacview(object):
 if tacview_show:
     tacview = Tacview()
 
+# 初始化pygame手柄
+pygame.init()
+pygame.joystick.init()
+joystick = None
+if pygame.joystick.get_count() > 0:
+    joystick = pygame.joystick.Joystick(0)
+    joystick.init()
+    print(f"检测到手柄: {joystick.get_name()}")
+else:
+    print("未检测到手柄，使用键盘控制")
+
 t_total = 90  # 总时间（秒）
 dt = 0.02
 
@@ -82,18 +93,18 @@ try:
     sim.load_model(model_name) # f15, p51d, ball 等模型可选
 
     # 设置初始速率（单位：英尺、节、角度）
-    sim[ "ic/vt-kts"     ] = 661.47 * 1.94384     # 空速m/s转换为节
+    sim[ "ic/vt-kts"     ] = 0 * 1.94384     # 空速m/s转换为节
 
     # 设置初始位置（单位：经度、纬度）
     # 注意：经度和纬度的单位是度，JSBSim使用的是地球坐标系
     sim[ "ic/long-gc-deg" ] = 116.0          # 经度
     sim[ "ic/lat-gc-deg"  ] = 39.0        # 纬度
-    sim["ic/h-sl-ft"] = 2000 * 3.28084  # 高度转换为英尺
+    sim["ic/h-sl-ft"] = 0 * 3.28084  # 高度转换为英尺
 
     # 设置初始姿态（单位：度）
     sim[ "ic/psi-true-deg" ] = -60             # 航向角
     sim[ "ic/phi-deg"    ] = 0
-    sim[ "ic/theta-deg"  ] = 30
+    sim[ "ic/theta-deg"  ] = 10
     sim[ "ic/alpha-deg"  ] = 0
     sim[ "ic/beta-deg"   ] = 0
     # sim[ "ic/num-engines"] = 1
@@ -149,7 +160,7 @@ try:
     aileron_cmd = []
     elevator_cmd = []
     rudder_cmd = []
-    throttle_cmd = []
+    throttle_cmd_list = []
 
     # 记录过载量
     load_factors = []
@@ -161,21 +172,62 @@ try:
     break_state = 0  # 减速板状态
 
     for step in range(int(t_total / dt)):
-        sim.run()
+        # 处理pygame事件
+        pygame.event.pump()
+        
+        result = sim.run()
+        if not result:
+            print(f"模拟在第{step}步失败，时间{current_time:.1f}s")
+            break
+            
         current_time = step * dt
         
         time_steps.append(current_time)
+        
+        if step == 0:
+            print(f"模拟开始，总时间{t_total}s，步长{dt}s")
 
-        # 默认控制量
-        sim["fcs/aileron-cmd-norm"] = 0.0 # 副翼 -左+右
-        sim["fcs/elevator-cmd-norm"] = 0.0 # 升降舵,-拉杆+推杆
-        sim["fcs/rudder-cmd-norm"] = 0.0 # 方向舵，-左+右
-        sim["fcs/throttle-cmd-norm"] = 0.5 # 默认油门
+        # 默认控制量 - 使用命令接口
+        sim["fcs/aileron-cmd-norm"] = 0.0
+        sim["fcs/elevator-cmd-norm"] = 0.0
+        sim["fcs/rudder-cmd-norm"] = 0.0
+        throttle_cmd = 0.5  # 默认油门
+        sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd  # 左发动机
+        sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd  # 右发动机
         sim["fcs/ab-cmd-norm"] = 0.0 # 加力关闭
         sim["fcs/speedbrake-cmd-norm"] = 0.0   # 减速板收起
         sim["fcs/flap-cmd-norm"] = 0.0 # 襟翼收起
 
-        # 键盘检测和控制量设置
+        # 手柄控制（优先）
+        if joystick:
+            # 右摇杆控制升降舵和副翼
+            right_stick_x = joystick.get_axis(2)  # 右摇杆X轴 -> 副翼
+            right_stick_y = joystick.get_axis(3)  # 右摇杆Y轴 -> 升降舵
+            # 左摇杆控制方向舵和油门
+            left_stick_x = joystick.get_axis(0)   # 左摇杆X轴 -> 方向舵
+            left_stick_y = joystick.get_axis(1)   # 左摇杆Y轴 -> 油门
+            
+            # 设置舵面（Xbox手柄摇杆范围[-1,1]）
+            sim["fcs/aileron-cmd-norm"] = right_stick_x  # 右摇杆左右 -> 副翼
+            sim["fcs/elevator-cmd-norm"] = -right_stick_y  # 右摇杆上下 -> 升降舵（反向）
+            sim["fcs/rudder-cmd-norm"] = -left_stick_x   # 左摇杆左右 -> 方向舵
+            # 左摇杆上下 -> 油门（上推增加油门，需要反向）
+            throttle_cmd = 0.5 - left_stick_y * 0.5  # 映射到[0,1]范围
+            throttle_cmd = max(0.0, min(1.0, throttle_cmd))  # 限制在[0,1]
+            sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
+            sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
+            
+            # 手柄按钮控制
+            if joystick.get_button(0):  # A键 -> 减速板
+                sim["fcs/speedbrake-cmd-norm"] = 1.0
+            if joystick.get_button(1):  # B键 -> 襟翼
+                sim["fcs/flap-cmd-norm"] = 1.0
+            if joystick.get_button(2):  # X键 -> 加力
+                throttle_cmd = 1.5  # 油门大于1启用加力
+                sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
+                sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
+
+        # 键盘检测和控制量设置（备用）
         if keyboard.is_pressed('w'):
             sim["fcs/elevator-cmd-norm"] = 0.8  # 推杆
         if keyboard.is_pressed('s'):
@@ -184,19 +236,24 @@ try:
             sim["fcs/aileron-cmd-norm"] = -1.0  # 左滚转
         if keyboard.is_pressed('d'):
             sim["fcs/aileron-cmd-norm"] = 1.0   # 右滚转
-        if keyboard.is_pressed('q'):
+        if keyboard.is_pressed('j'):
             sim["fcs/rudder-cmd-norm"] = 1.0   # 左偏航
-        if keyboard.is_pressed('e'):
+        if keyboard.is_pressed('l'):
             sim["fcs/rudder-cmd-norm"] = -1.0    # 右偏航
-        if keyboard.is_pressed('shift'):
-            sim["fcs/throttle-cmd-norm"] = 1.0  # 最大油门， 根据deepwiki解读jsbsim，当油门位置>0.99且N2>97%时会自动打开加力
-        if keyboard.is_pressed('ctrl'):
-            sim["fcs/throttle-cmd-norm"] = 0.3  # 低油门
+        if keyboard.is_pressed("i"): # ('shift'):
+            throttle_cmd = 1.0  # 最大油门
+            sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
+            sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
+        if keyboard.is_pressed("k"): # ('ctrl'):
+            throttle_cmd = 0.3  # 低油门
+            sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
+            sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
         if keyboard.is_pressed('b'):
             sim["fcs/speedbrake-cmd-norm"] = 1.0  # 减速板展开，作用比起减速板更像是襟翼
-        if keyboard.is_pressed('h'):
-            sim["fcs/throttle-cmd-norm"] = 2.0
-            sim["fcs/ab-cmd-norm"] = 1.0  # 加力开启 对F16看不出对Thrust有什么影响，F15有明显的加力效果
+        if keyboard.is_pressed('9'):
+            throttle_cmd = 1.5  # 油门大于1启用加力
+            sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
+            sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
         if keyboard.is_pressed('f'):
             sim["fcs/flap-cmd-norm"] = 1.0  # 襟翼完全展开
 
@@ -204,7 +261,12 @@ try:
         aileron_cmd.append(sim["fcs/aileron-cmd-norm"])
         elevator_cmd.append(sim["fcs/elevator-cmd-norm"])
         rudder_cmd.append(sim["fcs/rudder-cmd-norm"])
-        throttle_cmd.append(sim["fcs/throttle-cmd-norm"])
+        throttle_cmd_list.append(throttle_cmd)
+        
+        # 调试输出 - 每0.5秒打印一次
+        if step % np.round(0.5/dt) == 0:
+            print(f"Cmd: ail={sim['fcs/aileron-cmd-norm']:.2f}, ele={sim['fcs/elevator-cmd-norm']:.2f}, rud={sim['fcs/rudder-cmd-norm']:.2f}")
+            print(f"Pos: ail_l={sim['fcs/left-aileron-pos-norm']:.2f}, ele={sim['fcs/elevator-pos-norm']:.2f}, rud={sim['fcs/rudder-pos-norm']:.2f}")
 
         # 取当前位置
         lon = sim["position/long-gc-deg"]  # 经度
@@ -236,8 +298,10 @@ try:
         
         # 记录推力和发动机参数
         try:
-            thrust=sim.get_property_value('propulsion/engine/thrust-lbs')
-            fuel_flow = sim["propulsion/engine/fuel-flow-rate-pps"]  # 燃油流量
+            thrust_0 = sim.get_property_value('propulsion/engine[0]/thrust-lbs')
+            thrust_1 = sim.get_property_value('propulsion/engine[1]/thrust-lbs')
+            thrust = thrust_0 + thrust_1  # 总推力
+            fuel_flow = sim["propulsion/engine[0]/fuel-flow-rate-pps"] + sim["propulsion/engine[1]/fuel-flow-rate-pps"]  # 总燃油流量
             total_speed = sim["velocities/vt-fps"] * 0.3048  # 总速度 (m/s)
             thrust_data.append((thrust, fuel_flow, total_speed))
             
@@ -249,15 +313,18 @@ try:
             
             # 打印关键参数
             if step % np.round(1/dt) == 0:  # 每1秒打印一次
-                print(f"Time: {current_time:.1f}s, Throttle: {sim['fcs/throttle-cmd-norm']:.1f}, "
-                    f"Thrust: {thrust:.0f} lbs, Speed: {total_speed:.1f} m/s, N_normal: {N_normal:.2f}, N_front: {N_front:.2f}, N_side: {N_side:.2f}")
+                weight = sim["inertia/weight-lbs"]  # 飞机总重
+                thrust_to_weight = thrust / weight  # 推重比
+                print(f"Time: {current_time:.1f}s, Throttle: {throttle_cmd:.2f}, "
+                    f"Thrust: {thrust:.0f} lbs (Eng0: {thrust_0:.0f}, Eng1: {thrust_1:.0f}), Weight: {weight:.0f} lbs, T/W: {thrust_to_weight:.2f}, Speed: {total_speed:.1f} m/s, N_normal: {N_normal:.2f}, N_front: {N_front:.2f}, N_side: {N_side:.2f}")
                 if np.linalg.norm(alpha)>15:
                     print(f"Warning: High angle of attack detected: {alpha:.2f} degrees")
                 # 升力和阻力系数不能像下面这样获取
                 # lift_coeff = sim["aero/CL"]
                 # drag_coeff = sim["aero/CD"]
                 # print(f"Lift Coefficient: {lift_coeff}, Drag Coefficient: {drag_coeff}")
-        except:
+        except Exception as e:
+            print(f"推力数据记录错误: {e}")
             thrust_data.append((0, 0, 0))
 
         # 通过tacview可视化
@@ -269,17 +336,24 @@ try:
             data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=%s,Color=Red\n" % (float(send_t), name_R, loc_r[0], loc_r[1], loc_r[2], phi, theta, psi, model_name)
             tacview.send_data_to_client(data_to_send)
             time.sleep(0.02)
-except:
-    pass
+except Exception as e:
+    print(f"模拟循环异常: {e}")
+    import traceback
+    traceback.print_exc()
 finally:
 
 
     # 拆分数据
+    if len(positions) == 0:
+        print("警告：没有记录到任何数据，可能模拟运行时间太短")
+        exit()
+    
     x_vals, y_vals, z_vals = zip(*positions)
     phi_vals, theta_vals, psi_vals, alpha_vals, beta_vals = zip(*attitudes)
     u_vals, v_vals, w_vals = zip(*velocities)
     thrust_vals, fuel_vals, speed_vals = zip(*thrust_data)
     N_front_vals, N_side_vals, N_normal_vals = zip(*load_factors)
+    throttle_vals = throttle_cmd_list
 
 
 
@@ -338,7 +412,7 @@ finally:
     axes[2, 0].plot(time_steps, aileron_cmd, label='Aileron', color='tab:blue')
     axes[2, 0].plot(time_steps, elevator_cmd, label='Elevator', color='tab:green')
     axes[2, 0].plot(time_steps, rudder_cmd, label='Rudder', color='tab:red')
-    axes[2, 0].plot(time_steps, throttle_cmd, label='Throttle', color='tab:orange')
+    axes[2, 0].plot(time_steps, throttle_vals, label='Throttle', color='tab:orange')
     axes[2, 0].set_title('Control Inputs vs Time')
     axes[2, 0].set_xlabel('Time (s)')
     axes[2, 0].set_ylabel('Normalized Command')
