@@ -6,8 +6,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"IL_PFSP_RDistill_0.3-run-20260624-193246")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"IL_PFSP_RDistill_0.3-run-20260704-162217")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -116,12 +116,12 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            # 'Rule_0': 1200, # debug
-            # "Rule_1": 1200,
-            # "Rule_2": 1200,
-            # 'Rule_3': 1200,
-            # 'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
@@ -145,8 +145,10 @@ if __name__=='__main__':
         adj_r_w=0, # 奖励函数权重可调
         use_RND = 0, # 内在奖励机制
         beta_RND = 0.01,
-        use_RDistill=0, # 温和蒸馏
-        beta_distill=0.01,
+        use_RDistill=1, # 温和蒸馏
+        beta_distill=0.005, # 0.003
+        no_bern_distill=1, # 禁止使用teacher的开火决策修改奖励
+        distill_learn_type='dual_prob', # 只是用teacher_prob添加附加奖励
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

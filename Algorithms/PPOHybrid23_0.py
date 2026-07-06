@@ -967,79 +967,126 @@ class PPOHybrid:
         mse_raw = i_mean.item()  # 归一化前的原始 MSE 均值，用于监控
         return new_dict, mse_raw
 
-    def RDistill(self, transition_dict, beta, k=1, teacher_actor=None):
+    def RDistill(self, transition_dict, beta, k=1, teacher_actor=None, no_bern=1, learn_type="dual_prob"):
         """
         计算 RDistill (Reward Shaping via Imitation Learning) 内在奖励并叠加到外在奖励上。
 
-        步骤：
-          1. 对 cat 和 bern 部分，让 teacher_actor 和 self.actor 对 transition_dict 中的 obs 进行前向传播
-          2. 以 teacher 的策略分布为 P，self.actor 的分布为 Q
-          3. 计算 KL 散度 D_KL = sum(P * (log(P) - log(Q))) 得到 D_KL 序列
-          4. 归一化 D_KL 序列（除以标准差，防除0错误）
-          5. 计算内在奖励 = beta * exp(-k * D_KL_normalized)
-          6. 叠加到外在奖励
+        learn_type 决定“距离度量”的构造方式：
+          - "dual_prob": 使用 teacher 与 student 两个分布的 KL 散度作为距离。
+            这种方式将奖励与 student 分布耦合，可能造成“奖励与实际动作分离”，仅仅是修理动作概率的形状。
+          - "single_prob": 只使用 teacher 对经验池里【实际执行动作】的负对数似然(NLL)作为距离，
+            奖励与经验池中真实动作直接对应，避免奖励-动作分离。
+
+        通用步骤：
+          1. 对 cat 和 bern 部分构造 per-sample 距离 D（KL 或 NLL）
+          2. 归一化 D 序列（除以标准差，防除0错误）
+          3. 计算内在奖励 = beta * (exp(-k * D_normalized) - 0.99)
+          4. 叠加到外在奖励
+        cat 与 bern 两部分的区分处理由 no_bern 控制（no_bern=1 时跳过 bern）。
 
         Args:
-            transition_dict: 包含 'states', 'rewards' 等键的字典
+            transition_dict: 包含 'states', 'rewards', 'actions' 等键的字典
             beta: 内在奖励缩放倍率
-            k: KL 散度的缩放系数，默认为 1
+            k: 距离的缩放系数，默认为 1
             teacher_actor: 已加载参数的 PolicyNetHybrid 实例（教师策略）
+            no_bern: 1 时不计算 bern 部分
+            learn_type: "dual_prob"(师生KL) 或 "single_prob"(teacher对真实动作的NLL)
 
         Returns:
             new_dict: 奖励已被修改的新字典（浅拷贝，rewards 为新数组）
-            kl_mean: 归一化前的 KL 散度均值，用于监控
+            dist_mean: 归一化前的距离均值，用于监控
         """
-        assert teacher_actor is not None, "teacher_actor 不能为空，请传入已加载参数的 PolicyNetHybrid 实例"
+        assert learn_type in ("dual_prob", "single_prob"), f"未知 learn_type: {learn_type}"
+        assert teacher_actor is not None, "teacher_actor 不能为空，请传入已加载参数的 PolicyNetHybrid 实例或 RuleTeacherWrapper"
 
-        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+        # actor 使用局部观测 obs（若存在），与 update() 中 actor_inputs 的选择保持一致；
+        # 这样才能正确重构规则教师所需的 check_obs，并保证师生 KL 使用同一输入
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            states = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+        else:
+            states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
 
         with torch.no_grad():
-            # 1. 获取 teacher 和 student 的策略分布
-            teacher_outputs = teacher_actor.net(states)
-            student_outputs = self.actor.net(states)
+            # 1. 获取 teacher 策略分布
+            #    类型区分：规则教师(RuleTeacherWrapper)通过 predict_distributions 直接给出软 one-hot 分布；
+            #    网络教师(HybridActorWrapper)通过 net(states) 前向得到分布。
+            if getattr(teacher_actor, 'is_rule_teacher', False):
+                teacher_outputs = teacher_actor.predict_distributions(states)
+            else:
+                teacher_outputs = teacher_actor.net(states)
 
-            # 2. 计算 KL 散度（仅针对 cat 和 bern）
-            kl_per_sample = torch.zeros(states.size(0), 1).to(self.device)
+            # 2. 计算 per-sample 距离度量
+            dist_per_sample = torch.zeros(states.size(0), 1).to(self.device)
 
-            # --- Categorical 部分 ---
-            if teacher_outputs['cat'] is not None and student_outputs['cat'] is not None:
-                teacher_probs_list = teacher_outputs['cat']
-                student_probs_list = student_outputs['cat']
+            if learn_type == "dual_prob":
+                # ===== 师生 KL 散度模式 =====
+                student_outputs = self.actor.net(states)
 
-                for teacher_probs, student_probs in zip(teacher_probs_list, student_probs_list):
-                    # KL(P||Q) = sum(P * (log(P) - log(Q)))
-                    # 添加小常数防止 log(0)
+                # --- Categorical 部分 ---
+                if teacher_outputs['cat'] is not None and student_outputs['cat'] is not None:
+                    for teacher_probs, student_probs in zip(teacher_outputs['cat'], student_outputs['cat']):
+                        # KL(P||Q) = sum(P * (log(P) - log(Q)))，加小常数防 log(0)
+                        teacher_log_probs = torch.log(teacher_probs + 1e-8)
+                        student_log_probs = torch.log(student_probs + 1e-8)
+                        kl_cat = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(dim=-1, keepdim=True)
+                        dist_per_sample += kl_cat
+
+                # --- Bernoulli 部分 ---（no_bern=1 时跳过）
+                if (not no_bern) and teacher_outputs['bern'] is not None and student_outputs['bern'] is not None:
+                    teacher_probs = torch.sigmoid(teacher_outputs['bern'])
+                    student_probs = torch.sigmoid(student_outputs['bern'])
                     teacher_log_probs = torch.log(teacher_probs + 1e-8)
                     student_log_probs = torch.log(student_probs + 1e-8)
-                    kl_cat = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(dim=-1, keepdim=True)
-                    kl_per_sample += kl_cat
+                    teacher_log_probs_inv = torch.log(1 - teacher_probs + 1e-8)
+                    student_log_probs_inv = torch.log(1 - student_probs + 1e-8)
+                    kl_bern = (teacher_probs * (teacher_log_probs - student_log_probs) +
+                               (1 - teacher_probs) * (teacher_log_probs_inv - student_log_probs_inv)).sum(dim=-1, keepdim=True)
+                    dist_per_sample += kl_bern
 
-            # --- Bernoulli 部分 ---
-            if teacher_outputs['bern'] is not None and student_outputs['bern'] is not None:
-                teacher_logits = teacher_outputs['bern']
-                student_logits = student_outputs['bern']
+            elif learn_type == "single_prob":
+                # ===== single_prob：teacher 对经验池实际动作的负对数似然(NLL) =====
+                # 只用 teacher 执行“经验池里真实动作”的概率产生奖励附加项，
+                # 奖励与实际动作直接对应，避免奖励-动作分离。
+                actions_from_buffer = transition_dict['actions']
+                if isinstance(actions_from_buffer, dict):
+                    actions_dict = actions_from_buffer
+                else:
+                    # 兼容旧格式：list of dicts
+                    actions_dict = {}
+                    for key in actions_from_buffer[0].keys():
+                        actions_dict[key] = np.array([d[key] for d in actions_from_buffer])
 
-                # 将 logits 转换为概率
-                teacher_probs = torch.sigmoid(teacher_logits)
-                student_probs = torch.sigmoid(student_logits)
+                # --- Categorical 部分 ---
+                if teacher_outputs['cat'] is not None and 'cat' in actions_dict:
+                    cat_actions = torch.as_tensor(np.array(actions_dict['cat']), dtype=torch.long, device=self.device)
+                    if cat_actions.dim() == 1:
+                        cat_actions = cat_actions.unsqueeze(-1)
+                    for h, teacher_probs in enumerate(teacher_outputs['cat']):
+                        act_h = cat_actions[:, h].unsqueeze(-1)
+                        p_taken = teacher_probs.gather(1, act_h)  # (B,1) teacher 对该动作的概率
+                        dist_per_sample += -torch.log(p_taken + 1e-8)  # NLL
 
-                # KL(P||Q) = sum(P * (log(P) - log(Q)) + (1-P) * (log(1-P) - log(1-Q)))
-                teacher_log_probs = torch.log(teacher_probs + 1e-8)
-                student_log_probs = torch.log(student_probs + 1e-8)
-                teacher_log_probs_inv = torch.log(1 - teacher_probs + 1e-8)
-                student_log_probs_inv = torch.log(1 - student_probs + 1e-8)
+                # --- Bernoulli 部分 ---（no_bern=1 时跳过）
+                if (not no_bern) and teacher_outputs['bern'] is not None and 'bern' in actions_dict:
+                    bern_actions = torch.as_tensor(np.array(actions_dict['bern']), dtype=torch.float, device=self.device)
+                    if bern_actions.dim() == 1:
+                        bern_actions = bern_actions.unsqueeze(-1)
+                    teacher_probs = torch.sigmoid(teacher_outputs['bern'])
+                    # NLL = -[a*log(p) + (1-a)*log(1-p)]
+                    nll_bern = -(bern_actions * torch.log(teacher_probs + 1e-8) +
+                                 (1 - bern_actions) * torch.log(1 - teacher_probs + 1e-8)).sum(dim=-1, keepdim=True)
+                    dist_per_sample += nll_bern
+            else:
+                print("错误的奖励修改类型")
+                return dict(transition_dict), 0
 
-                kl_bern = (teacher_probs * (teacher_log_probs - student_log_probs) +
-                           (1 - teacher_probs) * (teacher_log_probs_inv - student_log_probs_inv)).sum(dim=-1, keepdim=True)
-                kl_per_sample += kl_bern
+            # 3. 归一化距离（除以标准差）
+            dist_mean = dist_per_sample.mean()
+            dist_std = dist_per_sample.std() + 1e-8
+            dist_normalized = torch.clamp(dist_per_sample / dist_std, 0.0, 1.0)
 
-            # 3. 归一化 KL 散度（除以标准差）
-            kl_mean = kl_per_sample.mean()
-            kl_std = kl_per_sample.std() + 1e-8
-            kl_normalized = kl_per_sample / kl_std
-
-            # 4. 计算内在奖励 = beta * exp(-k * D_KL_normalized)
-            intrinsic = beta * (torch.exp(-k * kl_normalized) - 0.99)
+            # 4. 计算内在奖励 = beta * (exp(-k * D_normalized) - 0.99)
+            intrinsic = beta * (torch.exp(-k * dist_normalized) - 0.99)
 
             # 5. 叠加到外在奖励
             rewards = np.array(transition_dict['rewards'], dtype=np.float32).reshape(-1, 1)
@@ -1048,8 +1095,8 @@ class PPOHybrid:
 
         new_dict = dict(transition_dict)
         new_dict['rewards'] = rewards_aug
-        kl_mean_raw = kl_mean.item()  # 归一化前的 KL 散度均值，用于监控
-        return new_dict, kl_mean_raw
+        dist_mean_raw = dist_mean.item()  # 归一化前的距离均值，用于监控
+        return new_dict, dist_mean_raw
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:

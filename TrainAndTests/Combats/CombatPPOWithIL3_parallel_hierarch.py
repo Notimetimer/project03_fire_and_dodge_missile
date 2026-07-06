@@ -54,6 +54,70 @@ from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
 
+
+class RuleTeacherWrapper:
+    """
+    基于规则(basic_rules)的教师包装器，用于 RDistill。
+
+    对齐 PolicyNetHybrid.forward 的输出格式：
+      - 'cat': list[Tensor]，每个动作头一个软 one-hot 概率分布 (B, n_classes)
+      - 'bern': Tensor，开火头 logits (B, 1)
+      - 'cont': None
+    软 one-hot 构造方式与 PPOHybrid.compute_il_loss 的 pre_training 分支一致：
+      正确动作概率 = 1 - label_smoothing，其余均分 label_smoothing/(n-1)。
+
+    通过 env.obs2obs_check + env.unscale_state 把网络局部观测(obs)还原为
+    basic_rules 所需的 state_check，再逐样本调用规则得到 (action, fire)。
+    """
+    is_rule_teacher = True
+
+    def __init__(self, env, rule_num, action_dims_dict, device, label_smoothing=0.1):
+        self.env = env
+        self.rule_num = rule_num
+        self.action_dims_dict = action_dims_dict
+        self.device = device
+        self.label_smoothing = label_smoothing
+        cat_dims = action_dims_dict.get('cat', [])
+        # 兼容 int / list 两种写法
+        self.cat_dims = list(cat_dims) if isinstance(cat_dims, (list, tuple)) else [cat_dims]
+
+    def eval(self):
+        return self
+
+    @torch.no_grad()
+    def predict_distributions(self, states):
+        obs_np = states.detach().cpu().numpy()
+        B = obs_np.shape[0]
+        ls = self.label_smoothing
+        n_heads = len(self.cat_dims)
+
+        # 初始化为平滑背景概率
+        cat_probs = [np.full((B, nc), ls / max(nc - 1, 1), dtype=np.float32) for nc in self.cat_dims]
+        bern_logits = np.full((B, 1), -3.0, dtype=np.float32)
+
+        for i in range(B):
+            check_obs = self.env.obs2obs_check(obs_np[i])
+            state_check = self.env.unscale_state(check_obs)
+            action_number, fire = basic_rules(state_check, self.rule_num, p_random=0)
+
+            if isinstance(action_number, (list, tuple, np.ndarray)):
+                act_list = list(np.asarray(action_number).reshape(-1))
+            else:
+                act_list = [action_number]
+
+            for h in range(n_heads):
+                nc = self.cat_dims[h]
+                idx = int(act_list[h]) if h < len(act_list) else 0
+                idx = int(np.clip(idx, 0, nc - 1))
+                cat_probs[h][i, :] = ls / max(nc - 1, 1)
+                cat_probs[h][i, idx] = 1.0 - ls
+
+            bern_logits[i, 0] = 3.0 if fire else -3.0
+
+        cat_tensors = [torch.tensor(cp, dtype=torch.float, device=self.device) for cp in cat_probs]
+        bern_tensor = torch.tensor(bern_logits, dtype=torch.float, device=self.device)
+        return {'cont': None, 'cat': cat_tensors, 'bern': bern_tensor}
+
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
@@ -975,7 +1039,9 @@ def run_MLP_simulation(
     use_RND = 0, # 好奇心机制
     beta_RND = 0.3,
     use_RDistill = 0, # 温和蒸馏机制
-    beta_distill = 0.2,
+    beta_distill = 0.04,
+    no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
+    distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
 
     actor_lr0 = actor_lr
@@ -1023,6 +1089,8 @@ def run_MLP_simulation(
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
+    # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
+    rule_teacher_env = copy.deepcopy(dummy_env)
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -1959,22 +2027,39 @@ def run_MLP_simulation(
                 max_fire_logits = 4.0
 
                 # 随机拜师法
-                if use_RDistill:
-                    # 从 elo_ratings 中筛选 actor_rein 开头的策略，取分值最高的前10个随机抽1个
-                    rein_elo_items = [(k, v) for k, v in elo_ratings.items() if k.startswith('actor_rein')]
-                    if len(rein_elo_items) >= 1:
+                if use_RDistill and batch_idx > 50:
+                    # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
+                    # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
+                    candidate_items = [(k, v) for k, v in elo_ratings.items()
+                                       if k.startswith('actor_rein') or k.startswith('Rule')]
+                    if len(candidate_items) >= 1:
                         print("有可调用teacher")
-                        rein_elo_items.sort(key=lambda x: x[1], reverse=True)
-                        top_candidates = rein_elo_items[:10]
+                        candidate_items.sort(key=lambda x: x[1], reverse=True)
+                        top_candidates = candidate_items[:10]
                         teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
-                        teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
-                        if os.path.exists(teacher_path):
-                            print("teacher路径已获取")
-                            teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-                            teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
-                            teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
-                            teacher_wrapper.eval()
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper)
+
+                        teacher_wrapper = None
+                        if teacher_key.startswith('Rule'):
+                            # 构建基于规则的teacher
+                            try:
+                                t_rule_num = int(teacher_key.split('_')[1])
+                            except (IndexError, ValueError):
+                                t_rule_num = 0
+                            print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
+                            teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
+                                                                 action_dims_dict, device,
+                                                                 label_smoothing=label_smoothing)
+                        else:
+                            teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
+                            if os.path.exists(teacher_path):
+                                print("teacher路径已获取")
+                                teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+                                teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
+                                teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
+                                teacher_wrapper.eval()
+
+                        if teacher_wrapper is not None:
+                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
                             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
                         else:
                             RDistill_kl = None
