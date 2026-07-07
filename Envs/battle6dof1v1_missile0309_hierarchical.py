@@ -503,6 +503,9 @@ class Battle(object):
                     aileron, elevator, rudder, throttle = control_action['cont']
 
                     elevator*=0.75 # 弱化俯仰控制
+                    if UAV.mach > 0.85:
+                        elevator=np.clip(elevator, -0.72, 0.72)
+
                     UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=self.dt_move)
                 else:
                     UAV.move(target_height, delta_heading, target_speed, relevant_height=True, e2e=0, rudder=rudder)

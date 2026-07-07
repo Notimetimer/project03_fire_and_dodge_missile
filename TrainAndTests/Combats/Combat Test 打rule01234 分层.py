@@ -72,7 +72,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.025 # 0.05 # 0.04 # 25
+    env.dt_move = 0.020 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -162,9 +162,9 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.06,
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.072,
                             temperature={'cat':0.5, 'bern':0.97}
-                            ) # check_obs=r_check_obs, check_obs=None
+                            ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
