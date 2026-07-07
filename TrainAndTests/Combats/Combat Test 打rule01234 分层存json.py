@@ -72,7 +72,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.02 # 0.05 # 0.04 # 25
+    env.dt_move = 0.020 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -179,10 +179,10 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.06,
-                            temperature={'cat':0.3, 'bern':1}
-                            ) # check_obs=r_check_obs, check_obs=None
-                        
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.072,
+                            temperature={'cat':0.5, 'bern':0.97}
+                            ) # check_obs=r_check_obs, check_obs=None 0.06
+                    # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
                     last_r_action_label = r_action_label
@@ -256,51 +256,8 @@ if __name__ == "__main__":
             
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
-
-            # --- 导弹击毁判定与标注 ---
-            # 位置点格式为 [x, y, z, t]，t 在最后；独立 t 列表也保留
-            r_last_t = replay_data['RUAV']['pos_'][-1][3] if replay_data['RUAV']['pos_'] else None
-            b_last_t = replay_data['BUAV']['pos_'][-1][3] if replay_data['BUAV']['pos_'] else None
-
-            def mark_missile_hit(mis_dict, target_last_t, target_last_pos):
-                for key, traj in mis_dict.items():
-                    if not traj:
-                        continue
-                    mis_last = traj[-1]
-                    mis_last_t = mis_last[3]
-                    mis_last_pos = np.array(mis_last[:3])
-                    # 导弹航迹与飞机航迹在同一时刻结束，且距离小于80m，则标记为击毁
-                    if mis_last_t == target_last_t and target_last_pos is not None:
-                        dist = np.linalg.norm(mis_last_pos - target_last_pos)
-                        if dist < 80.0:
-                            mis_last.append('*')  # 在末端添加星号标记
-
-            r_last_pos = np.array(replay_data['RUAV']['pos_'][-1][:3]) if replay_data['RUAV']['pos_'] else None
-            b_last_pos = np.array(replay_data['BUAV']['pos_'][-1][:3]) if replay_data['BUAV']['pos_'] else None
-            mark_missile_hit(replay_data['BMIS'], r_last_t, r_last_pos)  # 蓝导弹打击红飞机
-            mark_missile_hit(replay_data['RMIS'], b_last_t, b_last_pos)  # 红导弹打击蓝飞机
-
-            # --- 保存回放 JSON ---
-            replay_data['meta']['result'] = result
-            json_name = f"{agent_tag}_vs_Rule{rule_num}_{result}.json"
-            json_path = os.path.join(record_dir, json_name)
-            try:
-                import json as _json
-                with open(json_path, 'w', encoding='utf-8') as _f:
-                    _json.dump(replay_data, _f, ensure_ascii=False)
-                print(f"回放已保存: {json_path}")
-            except Exception as _e:
-                print(f"保存回放失败: {_e}")
-
-            # # --- 保存作战记录到 CSV ---
-            # try:
-            #     df_history = pd.DataFrame(history)
-            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-            #     save_path = os.path.join(project_root, "logs", save_name)
-            #     df_history.to_csv(save_path, index=False)
-            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            # except Exception as e:
-            #     print(f"Failed to save CSV: {e}")
+            
+            
 
             # --- 绘制曲线 ---
             plt.figure(figsize=(10, 10))
@@ -344,6 +301,49 @@ if __name__ == "__main__":
             plt.tight_layout()
             plt.show()
             
+            # --- 导弹击毁判定与标注 ---
+            # 位置点格式为 [x, y, z, t]，t 在最后；独立 t 列表也保留
+            r_last_t = replay_data['RUAV']['pos_'][-1][3] if replay_data['RUAV']['pos_'] else None
+            b_last_t = replay_data['BUAV']['pos_'][-1][3] if replay_data['BUAV']['pos_'] else None
+
+            def mark_missile_hit(mis_dict, target_last_t, target_last_pos):
+                for key, traj in mis_dict.items():
+                    if not traj:
+                        continue
+                    mis_last = traj[-1]
+                    mis_last_t = mis_last[3]
+                    mis_last_pos = np.array(mis_last[:3])
+                    # 导弹航迹与飞机航迹在同一时刻结束，且距离小于80m，则标记为击毁
+                    if mis_last_t == target_last_t and target_last_pos is not None:
+                        dist = np.linalg.norm(mis_last_pos - target_last_pos)
+                        if dist < 80.0:
+                            mis_last.append('*')  # 在末端添加星号标记
+
+            r_last_pos = np.array(replay_data['RUAV']['pos_'][-1][:3]) if replay_data['RUAV']['pos_'] else None
+            b_last_pos = np.array(replay_data['BUAV']['pos_'][-1][:3]) if replay_data['BUAV']['pos_'] else None
+            mark_missile_hit(replay_data['BMIS'], r_last_t, r_last_pos)  # 蓝导弹打击红飞机
+            mark_missile_hit(replay_data['RMIS'], b_last_t, b_last_pos)  # 红导弹打击蓝飞机
+
+            # --- 保存回放 JSON ---
+            replay_data['meta']['result'] = result
+            json_name = f"{agent_tag}_vs_Rule{rule_num}_{result}.json"
+            json_path = os.path.join(record_dir, json_name)
+            try:
+                import json as _json
+                with open(json_path, 'w', encoding='utf-8') as _f:
+                    _json.dump(replay_data, _f, ensure_ascii=False)
+                print(f"回放已保存: {json_path}")
+            except Exception as _e:
+                print(f"保存回放失败: {_e}")
+            # --- 保存作战记录到 CSV ---
+            try:
+                df_history = pd.DataFrame(history)
+                save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+                save_path = os.path.join(project_root, "logs", save_name)
+                df_history.to_csv(save_path, index=False)
+                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            except Exception as e:
+                print(f"Failed to save CSV: {e}")
             input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:

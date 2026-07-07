@@ -330,6 +330,9 @@ class missile_class:
                 self.radar_on = True
             else:
                 self.radar_on = False
+            # 没电关雷达
+            if self.t > self.t_max:
+                self.radar_on = False
         else: # 有数据链支持
             self.radar_on = False
             vtt_predict = v_target_
@@ -594,8 +597,17 @@ class missile_class:
         # 速率更新
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
         vmt += v_dot * dt
-        # # 限马赫数
-        # vmt = min(vmt, self.max_mach * sound_speed)
+        
+        # 速度过低没有舵效
+        if vmt < self.speed_min:
+            nzt = np.clip(nzt, -0.2, 0.2)
+            nyt = np.clip(nyt, -0.2, 0.2)
+
+        # 电池耗尽也没有舵效
+        if self.t > self.t_max:
+            nzt = 0
+            nyt = 0
+
         # 过载限制2
         self.get_max_g(Rho, vmt) # 动态改变最大过载
         nt = np.clip(np.linalg.norm([nyt, nzt]), 0, self.max_g)

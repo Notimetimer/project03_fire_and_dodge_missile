@@ -548,15 +548,16 @@ class Battle(object):
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
                 # 导弹慢速自爆，节省计算量
-                if vmt1 < missile.speed_min \
-                    and missile.t > 0.5 + missile.stage1_time + missile.stage2_time \
-                        and last_pmt_[1] < 15e3: # 3000
-                    missile.dead = True
+                # if vmt1 < missile.speed_min \
+                #     and missile.t > 0.5 + missile.stage1_time + missile.stage2_time \
+                #         and last_pmt_[1] < 15e3: # 3000
+                #     missile.dead = True
                 if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
                     missile.dead = True
-                if missile.t > missile.t_max:  # 超时自爆
-                    missile.dead = True
-                if missile.t >= 0 + self.dt_move and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
+                # if missile.t > missile.t_max:  # 超时自爆
+                #     missile.dead = True
+                # 超出电池工作时间引信不工作
+                if 0 + self.dt_move <= missile.t <= missile.t_max and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
                                                        dt=self.dt_move, kill_range=missile.kill_range)
                     if hit:
@@ -1286,6 +1287,9 @@ class Battle(object):
                             )
                     else:
                         # 导弹存活但雷达关闭，移除可能残留的雷达波束可视
+                        data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
+                    # 没电了没雷达
+                    if missile.t > missile.t_max:
                         data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
 
             self.tacview.send_data_to_client(data_to_send)
