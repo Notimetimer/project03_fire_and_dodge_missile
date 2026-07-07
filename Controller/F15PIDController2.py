@@ -109,9 +109,9 @@ class F15PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=2 / pi)  # 10 / pi, i=0 / pi, d=0.5 / pi
+        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=5 / pi)  # 10 / pi, i=0 / pi, d=0.5 / pi
         self.r_pid = None
-        self.t_pid = PositionPID(max=1, min=0, p=1, i=0.3, d=0.2)
+        self.t_pid = PositionPID(max=1, min=0, p=2, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
         # self.t_pid.output_limits = (-1, 1)
         self.pids = [self.yaw_pid, self.e_pid, self.r_pid, self.t_pid]
@@ -153,7 +153,7 @@ class F15PIDController:
         # # 迎角限制器 -8~13
         if alpha<=-1.2:
             k_alpha_air = 0.5
-        elif alpha>17:
+        elif alpha>15:
             k_alpha_air = 0.3 # 0.2
         else:
             if alpha>=0:
@@ -200,7 +200,7 @@ class F15PIDController:
 
         # # 方向舵控制
         # rudder=0 # abaaba
-        rudder = 0 # -beta_air / (5 * pi / 180)
+        rudder = -beta_air / (8 * pi / 180)
         # rudder = -beta_air / (5 * pi / 180) * 0.5 - r * 0.9
 
         # 升降舵控制
@@ -265,7 +265,7 @@ class F15PIDController:
 
         # 通用
         roll_error = delta_x_angle
-        aileron = roll_error / pi * 2 - p / pi * 2 # 1
+        aileron = 2 * (roll_error / pi * 2 - p / pi * 2) # 1
 
         # steady filght
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
@@ -337,14 +337,14 @@ if __name__ == '__main__':
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 10e3  # m # 测试飞行控制器
-    target_heading = 20  # 度 to rad
-    target_speed = 340 * 3  # m/s
+    target_height = 5e3  # m # 测试飞行控制器
+    target_heading = 270  # 度 to rad
+    target_speed = 340 * 0.8  # m/s
     t_last = 60 * 5
 
     # 设置初始状态（单位：英尺、节、角度）
-    sim["ic/h-sl-ft"] = 12e3 * 3.2808  # 高度：m -> ft
-    sim["ic/vt-kts"] = 340 * 1.13 * 1.9438  # 空速： m/s-> 节
+    sim["ic/h-sl-ft"] = 5e3 * 3.2808  # 高度：m -> ft
+    sim["ic/vt-kts"] = 340 * 0.9 * 1.9438  # 空速： m/s-> 节
     sim["ic/psi-true-deg"] = 90  # 航向角: °
     sim["ic/phi-deg"] = 0
     sim["ic/theta-deg"] = 0
@@ -463,8 +463,8 @@ if __name__ == '__main__':
             throttle_cmd_ = norm_act  # .tolist()  # 设置控制量
         
         # 明确设置两个引擎的初始油门
-        sim["fcs/throttle-cmd-norm[0]"] = 2 # throttle_cmd_
-        sim["fcs/throttle-cmd-norm[1]"] = 2 # throttle_cmd_
+        sim["fcs/throttle-cmd-norm[0]"] = 1 # throttle_cmd_
+        sim["fcs/throttle-cmd-norm[1]"] = 1 # throttle_cmd_
 
         # # 记录控制量
         aileron_cmd.append(sim["fcs/aileron-cmd-norm"])

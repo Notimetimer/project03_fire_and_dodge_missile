@@ -93,13 +93,13 @@ try:
     sim.load_model(model_name) # f15, p51d, ball 等模型可选
 
     # 设置初始速率（单位：英尺、节、角度）
-    sim[ "ic/vt-kts"     ] = 0 * 1.94384     # 空速m/s转换为节
+    sim[ "ic/vt-kts"     ] = 300 * 1.94384     # 空速m/s转换为节
 
     # 设置初始位置（单位：经度、纬度）
     # 注意：经度和纬度的单位是度，JSBSim使用的是地球坐标系
     sim[ "ic/long-gc-deg" ] = 116.0          # 经度
     sim[ "ic/lat-gc-deg"  ] = 39.0        # 纬度
-    sim["ic/h-sl-ft"] = 0 * 3.28084  # 高度转换为英尺
+    sim["ic/h-sl-ft"] = 6000 * 3.28084  # 高度转换为英尺
 
     # 设置初始姿态（单位：度）
     sim[ "ic/psi-true-deg" ] = -60             # 航向角
@@ -220,8 +220,8 @@ try:
             # 手柄按钮控制
             if joystick.get_button(0):  # A键 -> 减速板
                 sim["fcs/speedbrake-cmd-norm"] = 1.0
-            if joystick.get_button(1):  # B键 -> 襟翼
-                sim["fcs/flap-cmd-norm"] = 1.0
+            # if joystick.get_button(1):  # B键 -> 襟翼
+            #     sim["fcs/flap-cmd-norm"] = 1.0
             if joystick.get_button(2):  # X键 -> 加力
                 throttle_cmd = 1.5  # 油门大于1启用加力
                 sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
@@ -236,26 +236,25 @@ try:
             sim["fcs/aileron-cmd-norm"] = -1.0  # 左滚转
         if keyboard.is_pressed('d'):
             sim["fcs/aileron-cmd-norm"] = 1.0   # 右滚转
-        if keyboard.is_pressed('j'):
+        if keyboard.is_pressed('b'):
             sim["fcs/rudder-cmd-norm"] = 1.0   # 左偏航
-        if keyboard.is_pressed('l'):
+        if keyboard.is_pressed('m'):
             sim["fcs/rudder-cmd-norm"] = -1.0    # 右偏航
-        if keyboard.is_pressed("i"): # ('shift'):
+        if keyboard.is_pressed("h"): # ('shift'):
             throttle_cmd = 1.0  # 最大油门
             sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
             sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
-        if keyboard.is_pressed("k"): # ('ctrl'):
-            throttle_cmd = 0.3  # 低油门
+        if keyboard.is_pressed("n"): # ('ctrl'):
+            throttle_cmd = 0.1  # 低油门
             sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
             sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
-        if keyboard.is_pressed('b'):
+        if keyboard.is_pressed(','):
             sim["fcs/speedbrake-cmd-norm"] = 1.0  # 减速板展开，作用比起减速板更像是襟翼
-        if keyboard.is_pressed('9'):
+        if keyboard.is_pressed('y'):
             throttle_cmd = 1.5  # 油门大于1启用加力
             sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd
             sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd
-        if keyboard.is_pressed('f'):
-            sim["fcs/flap-cmd-norm"] = 1.0  # 襟翼完全展开
+        # F15没有襟翼控制接口，已删除
 
         # 记录控制量
         aileron_cmd.append(sim["fcs/aileron-cmd-norm"])
@@ -267,6 +266,8 @@ try:
         if step % np.round(0.5/dt) == 0:
             print(f"Cmd: ail={sim['fcs/aileron-cmd-norm']:.2f}, ele={sim['fcs/elevator-cmd-norm']:.2f}, rud={sim['fcs/rudder-cmd-norm']:.2f}")
             print(f"Pos: ail_l={sim['fcs/left-aileron-pos-norm']:.2f}, ele={sim['fcs/elevator-pos-norm']:.2f}, rud={sim['fcs/rudder-pos-norm']:.2f}")
+            print(f"减速板: cmd={sim['fcs/speedbrake-cmd-norm']:.2f}, pos={sim['fcs/speedbrake-pos-norm']:.2f}")
+            print() # 必要的空行
 
         # 取当前位置
         lon = sim["position/long-gc-deg"]  # 经度
