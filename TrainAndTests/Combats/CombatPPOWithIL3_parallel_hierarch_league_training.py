@@ -2037,25 +2037,29 @@ def run_MLP_simulation(
                             Elite_Fire_Stats.get(src_fs, [0.0]*5)
                         )
 
-                        if hist_agent_as_opponent:
-                            pool_p    = [k for k in WinRates if k.startswith(agent_prefix)]
-                            sorted_p  = sorted(pool_p, key=lambda k: WinRates[k])
-                            rule_pres = [k for k in WinRates if k.startswith('Rule')]
-                            max_rw    = max(WinRates[k] for k in rule_pres) if rule_pres else None
-
+                    if hist_agent_as_opponent:
+                        # 每次全量重建 Elite_WinRates，避免旧条目无限积累
+                        new_elite = {}
+                        rule_pres = [k for k in WinRates if k.startswith('Rule')]
+                        max_rw    = max(WinRates[k] for k in rule_pres) if rule_pres else None
+                        for agent_prefix in ['actor_rein', 'actor_kamikaze', 'actor_survivor']:
+                            pool_p   = [k for k in WinRates if k.startswith(agent_prefix)]
+                            sorted_p = sorted(pool_p, key=lambda k: WinRates[k])
                             qualified = [a for a in sorted_p
                                          if max_rw is None or WinRates.get(a, 1.0) < float(max_rw)]
-                            toughest  = qualified[:MAX_HISTORY_SIZE]
-
-                            for k in toughest:
-                                Elite_WinRates[k] = WinRates[k]
-                            # 保证 Rule 始终在 Elite 中
-                            for rk in [k for k in init_elo_ratings if k.startswith("Rule")]:
-                                if rk in WinRates:
-                                    Elite_WinRates[rk] = WinRates[rk]
+                            for k in qualified[:MAX_HISTORY_SIZE]:
+                                new_elite[k] = WinRates[k]
+                        # 保证 Rule 始终在 Elite 中
+                        for rk in [k for k in init_elo_ratings if k.startswith("Rule")]:
+                            if rk in WinRates:
+                                new_elite[rk] = WinRates[rk]
+                        Elite_WinRates = new_elite
 
                     elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in Elite_WinRates}
-                    print(f"Elite pool size: {len(Elite_WinRates)}")
+                    rein_cnt     = len([k for k in Elite_WinRates if k.startswith('actor_rein')])
+                    kamikaze_cnt = len([k for k in Elite_WinRates if k.startswith('actor_kamikaze')])
+                    survivor_cnt = len([k for k in Elite_WinRates if k.startswith('actor_survivor')])
+                    print(f"Elite pool size: {len(Elite_WinRates)} (rein={rein_cnt}, kamikaze={kamikaze_cnt}, survivor={survivor_cnt})")
 
                 # 全量 Elo 记录
                 elo_ratings[fighter_key]              = main_agent_elo
@@ -2101,8 +2105,13 @@ def run_MLP_simulation(
                     print('elo分极差：', elo_spread)
                     if total_steps >= WARM_UP_STEPS:
                         logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
-                    hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
-                    logger.add("Elo/History_Pool_Size",    hist_count,                    total_steps)
+                    rein_cnt_log     = len([k for k in valid_elos if k.startswith('actor_rein')])
+                    kamikaze_cnt_log = len([k for k in valid_elos if k.startswith('actor_kamikaze')])
+                    survivor_cnt_log = len([k for k in valid_elos if k.startswith('actor_survivor')])
+                    logger.add("Elo/Elite_rein_cnt",     rein_cnt_log,                              total_steps)
+                    logger.add("Elo/Elite_kamikaze_cnt", kamikaze_cnt_log,                          total_steps)
+                    logger.add("Elo/Elite_survivor_cnt", survivor_cnt_log,                          total_steps)
+                    logger.add("Elo/History_Pool_Size",  rein_cnt_log + kamikaze_cnt_log + survivor_cnt_log, total_steps)
                     logger.add("Elo_Centered/Latest_Best", main_agent_elo - mean_elo,     total_steps)
                     for rk in sorted(k for k in valid_elos if k.startswith("Rule_")):
                         re_v = float(valid_elos[rk])
