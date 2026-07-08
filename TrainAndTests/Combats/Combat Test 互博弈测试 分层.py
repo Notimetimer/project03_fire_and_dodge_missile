@@ -8,6 +8,7 @@ import re
 from math import pi
 import time
 import datetime
+import pandas as pd
 import matplotlib.pyplot as plt
 
 # # --- 1. 项目路径和模块导入 ---
@@ -17,7 +18,7 @@ import matplotlib.pyplot as plt
 
 from _context import *
 
-from BasicRules_new_hierarchical import basic_rules
+# from BasicRules_new_hierarchical import basic_rules  # 不再使用规则智能体
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
@@ -30,30 +31,26 @@ dt_maneuver = 0.2
 # --- 2. 辅助函数 ---
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
 
-def create_initial_state():
-    """创建固定的初始状态"""
-    blue_height, red_height = 8000, 8000
-    red_psi, blue_psi = -pi / 2 + random.uniform(-pi/4, pi/4), \
-        pi / 2 + random.uniform(-pi/4, pi/4)
-    red_N, red_E = random.uniform(-20,20)*1e3, 45e3
-    blue_N, blue_E = random.uniform(-20,20)*1e3, -45e3
-    DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
-    DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
-    return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+# def create_initial_state():
+#     """创建固定的初始状态"""
+#     blue_height, red_height = 8000, 8000
+#     red_psi, blue_psi = -pi / 2, pi / 2
+#     red_N, red_E = 0, 55e3  # 55e3
+#     blue_N, blue_E = red_N, -red_E # -45e3
+#     DEFAULT_RED_BIRTH_STATE = {'position': np.array([red_N, red_height, red_E]), 'psi': red_psi}
+#     DEFAULT_BLUE_BIRTH_STATE = {'position': np.array([blue_N, blue_height, blue_E]), 'psi': blue_psi}
+#     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
 
 # --- 3. 主程序 ---
 if __name__ == "__main__":
 
-    # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = "IL_and_Mixed经典PFSP_挑战_并行_分层_训练满熵项-run-20260515-104131"
-   
+    # 红方和蓝方分别使用不同的模型目录
+    red_dir_name = "SLWSA3C0.3-run-20260630-220403"
+    blue_dir_name = "SLWSPFSP0.3-run-20260618-221044"
 
-    # 次要
-    experiment_name = "IL_and_Pure经典PFSP_挑战_并行_分层_训练满熵项-run-20260516-170432"
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
-    parser.add_argument("--mission-name", type=str, default=experiment_name, help="Mission name to find the log directory.")
     args = parser.parse_args()    
 
     red_agent_id = None # 700
@@ -70,33 +67,31 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.025
+    env.dt_move = 0.020 # 0.05 # 0.04 # 25
+
     
     state_dim = env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
 
     # --- 查找并加载模型 ---
     logs_root_dir = os.path.join(project_root, "logs/combat")
-    
 
-    latest_log_dir = os.path.join(logs_root_dir, dir_name) if dir_name else \
-        get_latest_log_dir(logs_root_dir, args.mission_name)
-    
-    # 如果要硬编码为本地绝对路径，使用原始字符串并检查存在性
-    # hardcoded = r'D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\RL_combat_PFSP-run-20251215-175820'
-    # if os.path.exists(hardcoded):
-    #     latest_log_dir = hardcoded
-    
-    if not latest_log_dir:
-        raise FileNotFoundError(f"No log directory found for mission '{args.mission_name}' in '{logs_root_dir}'")
-    
-    red_agent_path = find_latest_agent_path(latest_log_dir, red_agent_id)
-    blue_agent_path = find_latest_agent_path(latest_log_dir, blue_agent_id)
+    red_log_dir = os.path.join(logs_root_dir, red_dir_name)
+    blue_log_dir = os.path.join(logs_root_dir, blue_dir_name)
+
+    if not os.path.exists(red_log_dir):
+        raise FileNotFoundError(f"Red log directory not found: {red_log_dir}")
+    if not os.path.exists(blue_log_dir):
+        raise FileNotFoundError(f"Blue log directory not found: {blue_log_dir}")
+
+    red_agent_path = find_latest_agent_path(red_log_dir, red_agent_id)
+    blue_agent_path = find_latest_agent_path(blue_log_dir, blue_agent_id)
     if not red_agent_path or not blue_agent_path:
         raise FileNotFoundError(f"Found missing agent. Red:{red_agent_path}, Blue:{blue_agent_path}")
 
     print()
-    print(f"Found log directory: {latest_log_dir}")
+    print(f"Red log directory: {red_log_dir}")
+    print(f"Blue log directory: {blue_log_dir}")
     print(f"Loading Red Agent (ID: {red_agent_id}) from: {red_agent_path}")
     print(f"Loading Blue Agent (ID: {blue_agent_id}) from: {blue_agent_path}")
     print()
@@ -132,8 +127,9 @@ if __name__ == "__main__":
             print("="*50)
 
             # 重置环境
-            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = create_initial_state()
-            env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r')
+            DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = None, None # create_initial_state()
+            env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r', 
+                      red_init_ammo=4, blue_init_ammo=4)
 
             done = False
             last_r_action_label = 0
@@ -148,6 +144,8 @@ if __name__ == "__main__":
                 'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
             }
 
+            fire_time = -120
+
             # 回合仿真循环
             for count in range(round(env_args.max_episode_len / dt_maneuver)):
                 if not env.running or done:
@@ -161,9 +159,10 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.4
-                            ) # check_obs=r_check_obs, check_obs=None
-                        
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
+                            temperature={'cat':0.5, 'bern':0.97}
+                            ) # check_obs=r_check_obs, check_obs=None 0.06
+                    # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
                     last_r_action_label = r_action_label
@@ -171,14 +170,17 @@ if __name__ == "__main__":
 
                     if r_fire:
                         env.RUAV.about_to_fire = 1
+                        
+                        print("开火瞬间状态观测", r_check_obs)
+                        print("开火瞬间动作", r_action_label)
 
-                    # --- 蓝方 (RL 智能体 200) ---
+                    # --- 蓝方 (RL 智能体) ---
                     with torch.no_grad():
                         b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(
-                            b_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=None, bern_threshold=0.4
+                            b_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.072,
+                            temperature={'cat':0.5, 'bern':0.97}
                         )
-                        
-                    b_action_label = b_action_exec['cat'] # [0]
+                    b_action_label = b_action_exec['cat']
                     b_fire = b_action_exec['bern'][0]
                     last_b_action_label = b_action_label
                     if b_fire:
@@ -190,13 +192,27 @@ if __name__ == "__main__":
                 
                 # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', tabu=0, action_label=r_action_label) # r_action_label)
+                    launch_missile_immediately(env, 'r', tabu=1, action_label=None) # r_action_label)
+                    print("Shoot")
+                    print()
+                    fire_time = env.t
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', tabu=0, action_label=b_action_label) # b_action_label)
-                    
+                    launch_missile_immediately(env, 'b', tabu=1, action_label=None) # b_action_label)
+                
+
+                if (action_cycle_multiplier-1) * env.dt_maneuver <= env.t-fire_time < 2 * action_cycle_multiplier * env.dt_maneuver:
+                    print("开火后瞬间观测", r_check_obs)
+                    print("开火后动作", r_action_label)
+                    print()
+
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
-                done, _, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
+                done, b_r1, b_r2, b_r3 = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
+
+                # if abs(env.t % 5) < 0.1:
+                    # print("当前动作", r_action_exec)
+                    # print("当前奖励函数", b_r1)
+                    # print()
 
                 # --- 记录数据 ---
                 history['time'].append(count * action_cycle_multiplier * dt_maneuver)
@@ -220,6 +236,58 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             
+            
+
+            # --- 绘制曲线 ---
+            plt.figure(figsize=(10, 10))
+            plt.subplot(4, 1, 1)
+            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
+            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
+            plt.axhline(y=-3, color='black', linestyle=':', alpha=0.7, label='Ny limit (-3g)')
+            plt.axhline(y=9, color='black', linestyle=':', alpha=0.7, label='Ny limit (9g)')
+            plt.ylabel('Ny (g)')
+            plt.title(f'R vs B: Metrics')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(4, 1, 2)
+            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
+            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
+            plt.axhline(y=-8, color='black', linestyle=':', alpha=0.7, label='Alpha limit (-8°)')
+            plt.axhline(y=26, color='black', linestyle=':', alpha=0.7, label='Alpha limit (26°)')
+            plt.ylabel('Alpha (deg)')
+            plt.title('Angle of Attack (Alpha)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(4, 1, 3)
+            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
+            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
+            plt.ylabel('Mach')
+            plt.title('Flight Mach Number')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(4, 1, 4)
+            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
+            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
+            plt.ylabel('Alt (m)')
+            plt.xlabel('Time (s)')
+            plt.title('Altitude (Height)')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
+            # # --- 保存作战记录到 CSV ---
+            # try:
+            #     df_history = pd.DataFrame(history)
+            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+            #     save_path = os.path.join(project_root, "logs", save_name)
+            #     df_history.to_csv(save_path, index=False)
+            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            # except Exception as e:
+            #     print(f"Failed to save CSV: {e}")
             # input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:

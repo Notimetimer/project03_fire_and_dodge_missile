@@ -186,7 +186,7 @@ class missile_class:
         self.datalink = None
         self.A_pole_moment = None
         self.delta_height = 0
-        self.close_rate = None
+        self.target_close_v = None
         self.off_lock = False
         self.ground_close_rate = None
         self.dt = 0.04 # 初始值
@@ -330,9 +330,6 @@ class missile_class:
                 self.radar_on = True
             else:
                 self.radar_on = False
-            # 没电关雷达
-            if self.t > self.t_max:
-                self.radar_on = False
         else: # 有数据链支持
             self.radar_on = False
             vtt_predict = v_target_
@@ -341,6 +338,9 @@ class missile_class:
             self.last_target_v = vtt_predict.copy()
             self.last_target_t = self.t
 
+        # 没电关雷达
+        if self.t > self.t_max:
+            self.radar_on = False
         # 输入参数
         vmt_ = v_missile_
         ptt_ = ptt_predict
@@ -399,6 +399,9 @@ class missile_class:
     # 末制导
     def terminal_guidance(self, v_missile_, v_target_, p_missile_, p_target_):
         self.radar_on = True
+        # 没电关雷达
+        if self.t > self.t_max:
+            self.radar_on = False
         # 输入参数
         vmt_ = v_missile_
         ptt_ = p_target_
@@ -465,7 +468,7 @@ class missile_class:
         
         # 试验：多普勒 导致脱锁
         if self.ground_close_rate is not None:
-            if abs(self.ground_close_rate - self.close_rate) < 40 and self.pos_[1] < 7000:
+            if abs(self.ground_close_rate - self.target_close_v) < 40 and self.pos_[1] < 7000:
                 # 40m/s 约为塞斯纳起飞速度，7000m是随便设的
                 self.off_lock = True
 
@@ -538,7 +541,7 @@ class missile_class:
         vmt = np.linalg.norm(vmt_)
 
         # 试验：多普勒速度窗口相关计算
-        self.close_rate = - L_dot
+        self.target_close_v = - np.dot(vtt_, line_t_)/distance        
         self.ground_close_rate = vmt if self.theta < np.radians(-15) else 0
 
         # 目标是否进入锁定角度范围
@@ -598,10 +601,10 @@ class missile_class:
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
         vmt += v_dot * dt
         
-        # 速度过低没有舵效
-        if vmt < self.speed_min:
-            nzt = np.clip(nzt, -0.2, 0.2)
-            nyt = np.clip(nyt, -0.2, 0.2)
+        # # 速度过低没有舵效
+        # if vmt < self.speed_min:
+        #     nzt = np.clip(nzt, -1, 1)
+        #     nyt = np.clip(nyt, -1, 1)
 
         # 电池耗尽也没有舵效
         if self.t > self.t_max:

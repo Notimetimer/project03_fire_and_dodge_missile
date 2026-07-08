@@ -1288,9 +1288,9 @@ class Battle(object):
                     else:
                         # 导弹存活但雷达关闭，移除可能残留的雷达波束可视
                         data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
-                    # 没电了没雷达
-                    if missile.t > missile.t_max:
-                        data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
+                    # # 没电了没雷达
+                    # if missile.t > missile.t_max:
+                    #     data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
 
             self.tacview.send_data_to_client(data_to_send)
 
