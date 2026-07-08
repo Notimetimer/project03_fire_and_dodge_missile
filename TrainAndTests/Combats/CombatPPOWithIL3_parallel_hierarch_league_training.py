@@ -61,7 +61,7 @@ from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrap
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training_hierarch import test_worker
+from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
@@ -1268,19 +1268,14 @@ def run_MLP_simulation(
             for _name, _val in [
                 ("il_train/nll_cont", getattr(student_agent, "marwil_nll_cont", None)),
                 ("il_train/nll_cat", getattr(student_agent, "marwil_nll_cat", None)),
-                # ("il_train/nll_bern", getattr(student_agent, "marwil_nll_bern", None)),
                 ("il_train/entropy_cont", getattr(student_agent, "marwil_entropy_cont", None)),
                 ("il_train/entropy_cat", getattr(student_agent, "marwil_entropy_cat", None)),
-                # ("il_train/entropy_bern", getattr(student_agent, "marwil_entropy_bern", None)),
                 ("il_train/accuracy_cont", getattr(student_agent, "marwil_accuracy_cont", None)),
                 ("il_train/accuracy_cat", getattr(student_agent, "marwil_accuracy_cat", None)),
                 ("il_train/accuracy_bern", getattr(student_agent, "marwil_accuracy_bern", None)),
                 ("il_train/weight_mean", getattr(student_agent, "marwil_weight_mean", None)),
-                # ("il_train/weight_max", getattr(student_agent, "marwil_weight_max", None)),
-                # ("il_train/weight_min", getattr(student_agent, "marwil_weight_min", None)),
                 ("il_train/weight_clip_frac", getattr(student_agent, "marwil_weight_clip_frac", None)),
                 ("il_train/adv_std", getattr(student_agent, "marwil_adv_std", None)),
-                # ("il_train/adv_p95", getattr(student_agent, "marwil_adv_p95", None)),
                 ("il_train/adv_max", getattr(student_agent, "marwil_adv_max", None)),
                 ("il_train/adv_mean", getattr(student_agent, "marwil_adv_mean", None)),
                 ("il_train/adv_positive_frac", getattr(student_agent, "marwil_adv_positive_frac", None)),
@@ -1744,24 +1739,34 @@ def run_MLP_simulation(
                 test_results           = [t.get() for t in test_tasks]
                 test_results_no_random = [t.get() for t in test_tasks_no_random]
 
-                outcomes        = {rn: sc  for rn,sc,r2,w,l,d in test_results}
-                outcomes_return = {rn: r2  for rn,sc,r2,w,l,d in test_results}
+                outcomes         = {rn: sc  for rn,sc,r2,w,l,d,p_t in test_results}
+                outcomes_return  = {rn: r2  for rn,sc,r2,w,l,d,p_t in test_results}
+                outcomes_perish  = {rn: p_t for rn,sc,r2,w,l,d,p_t in test_results}
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
                     print(f"  [Test] Rule_{r_num}: {score:.2f} (return: {outcomes_return[r_num]:.2f})")
+                avg_score = np.mean(list(outcomes.values()))
+                avg_perish_together = np.mean(list(outcomes_perish.values()))
+                logger.add("test/avg_score", avg_score, total_steps)
+                logger.add("test/BVR perish together", avg_perish_together, total_steps)
 
-                outcomes_nr        = {rn: sc for rn,sc,r2,w,l,d in test_results_no_random}
-                outcomes_return_nr = {rn: r2 for rn,sc,r2,w,l,d in test_results_no_random}
+                outcomes_nr         = {rn: sc  for rn,sc,r2,w,l,d,p_t in test_results_no_random}
+                outcomes_return_nr  = {rn: r2  for rn,sc,r2,w,l,d,p_t in test_results_no_random}
+                outcomes_perish_nr  = {rn: p_t for rn,sc,r2,w,l,d,p_t in test_results_no_random}
                 for r_num, score in outcomes_nr.items():
                     logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score:.2f} (return: {outcomes_return_nr[r_num]:.2f})")
+                avg_score_nr = np.mean(list(outcomes_nr.values()))
+                avg_perish_together_nr = np.mean(list(outcomes_perish_nr.values()))
+                logger.add("test_No_random/avg_score", avg_score_nr, total_steps)
+                logger.add("test_No_random/BVR perish together", avg_perish_together_nr, total_steps)
 
                 # 测试结果更新 Elo 和胜率
                 def update_ratings_from_test(test_results_data, current_main_elo, valid_opponents=None):
                     nonlocal main_agent_elo
                     alpha_wt = 0.05
                     upd_elo  = current_main_elo
-                    for rn, score, r2, w, l, d in test_results_data:
+                    for rn, score, r2, w, l, d, p_t in test_results_data:
                         opp_t = f"Rule_{rn}"
                         if valid_opponents is not None and opp_t not in valid_opponents:
                             continue
@@ -1836,6 +1841,10 @@ def run_MLP_simulation(
                 fighter_agent.update(f_td, adv_normed=1, mini_batch_size=mini_batch_size_mixed,
                                       target_p1=target_p1, k_nonlinear=k_nonlinear,
                                       mask_on=fire_mask, actor_frozen=freeze_actor)
+                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                if batch_idx % 10 == 0:
+                    fighter_agent.fire_prob_protection(f_td, protect_epochs=4)
+
                 logger.add("train_rein/7 actor_loss",   fighter_agent.actor_loss,    total_steps)
                 logger.add("train_rein/8 critic_loss",  fighter_agent.critic_loss,   total_steps)
                 logger.add("train_rein/9 entropy",      fighter_agent.entropy_mean,  total_steps)
@@ -1871,6 +1880,9 @@ def run_MLP_simulation(
                 kamikaze_agent.update(k_td, adv_normed=1, mini_batch_size=mini_batch_size_mixed,
                                        target_p1=target_p1, k_nonlinear=k_nonlinear,
                                        mask_on=fire_mask, actor_frozen=0)
+                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                if batch_idx % 10 == 0:
+                    kamikaze_agent.fire_prob_protection(k_td, protect_epochs=4)
                 logger.add("train_k/7 actor_loss",   kamikaze_agent.actor_loss,  total_steps)
                 logger.add("train_k/8 critic_loss",  kamikaze_agent.critic_loss, total_steps)
                 logger.add("train_k/9 entropy_cat",  kamikaze_agent.entropy_cat, total_steps)
@@ -1902,6 +1914,9 @@ def run_MLP_simulation(
                 survivor_agent.update(s_td, adv_normed=1, mini_batch_size=mini_batch_size_mixed,
                                        target_p1=target_p1, k_nonlinear=k_nonlinear,
                                        mask_on=fire_mask, actor_frozen=0)
+                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                if batch_idx % 10 == 0:
+                    survivor_agent.fire_prob_protection(s_td, protect_epochs=4)
                 logger.add("train_s/7 actor_loss",   survivor_agent.actor_loss,  total_steps)
                 logger.add("train_s/8 critic_loss",  survivor_agent.critic_loss, total_steps)
                 logger.add("train_s/9 entropy_cat",  survivor_agent.entropy_cat, total_steps)
@@ -2100,7 +2115,7 @@ def run_MLP_simulation(
             if total_steps >= trigger:
                 print(f"\n>>> Triggering Parallel Test at steps {total_steps}...")
                 # 1. 深度拷贝当前 Actor 权重到 CPU 内存
-                current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
+                current_weights = {k: v.cpu().clone() for k, v in fighter_agent.actor.state_dict().items()}
 
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
@@ -2249,7 +2264,7 @@ def run_MLP_simulation(
             
 
             # A. 获取当前策略权重 (CPU)
-            current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
+            current_actor_weights = {k: v.cpu() for k, v in fighter_agent.actor.state_dict().items()}
             
             # B. 分发任务给 Worker
             # 这一步 Master 决定每个 Worker 打谁
@@ -2590,7 +2605,7 @@ def run_MLP_simulation(
                 # 学习率warm_up
                 actor_lr = min(actor_lr0, actor_lr0 * total_steps/1e6)
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
-                student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+                fighter_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
                 if batch_idx <= actor_freeze_until:
                     freeze_actor = 1
@@ -2602,35 +2617,35 @@ def run_MLP_simulation(
                 
                 max_fire_logits = 4.0
 
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
+                fighter_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
                 #====================
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
-                actor_pre_clip_grad = student_agent.pre_clip_actor_grad
-                critic_pre_clip_grad = student_agent.pre_clip_critic_grad
+                actor_pre_clip_grad = fighter_agent.pre_clip_actor_grad
+                critic_pre_clip_grad = fighter_agent.pre_clip_critic_grad
 
                 # 梯度监控
                 # logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
                 # logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 # 损失函数监控
-                logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
-                logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
+                logger.add("train/7 actor_loss", fighter_agent.actor_loss, total_steps)
+                logger.add("train/8 critic_loss", fighter_agent.critic_loss, total_steps)
                 # 强化学习actor特殊项监控
-                logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
-                logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
-                logger.add("train/max_fire_prob", student_agent.max_fire_prob, total_steps)
-                logger.add("train/min_fire_prob", student_agent.min_fire_prob, total_steps)
+                logger.add("train/9 entropy_cat", fighter_agent.entropy_cat, total_steps)
+                logger.add("train/9 entropy_bern", fighter_agent.entropy_bern, total_steps)
+                logger.add("train/max_fire_prob", fighter_agent.max_fire_prob, total_steps)
+                logger.add("train/min_fire_prob", fighter_agent.min_fire_prob, total_steps)
 
-                # logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+                # logger.add("train/10 advantage", fighter_agent.advantage, total_steps) 
                 # 强化学习
-                logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
-                logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
-                logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+                logger.add("train/10 explained_var", fighter_agent.explained_var, total_steps)
+                logger.add("train/10 approx_kl", fighter_agent.approx_kl, total_steps)
+                logger.add("train/10 clip_frac", fighter_agent.clip_frac, total_steps)
                 
                 # [新增] 诊断监控
-                logger.add("train/td_error_var", student_agent.td_error_var, total_steps)
+                logger.add("train/td_error_var", fighter_agent.td_error_var, total_steps)
                     
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
@@ -2640,10 +2655,10 @@ def run_MLP_simulation(
                 actor_key = f"actor_rein{batch_idx}"
                 
                 # 正常保存模型
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                torch.save(fighter_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                torch.save(fighter_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
                 # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                torch.save(fighter_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
                 print(f"Saved Checkpoint: {actor_key}")
                 print(f"Saved Current Actor: current_actor.pt")
                 
@@ -2687,12 +2702,6 @@ def run_MLP_simulation(
 
                         toughest_agents = qualified_agents[:MAX_HISTORY_SIZE]
 
-                        # # --- 新增逻辑：同步移除数值过高的“过期”Agent ---
-                        # if max_rule_win is not None:
-                        #     purge_threshold = float(max_rule_win) + 0.1
-                        #     # 仅保留胜率没超过阈值的 NN 智能体
-                        #     toughest_agents = [a for a in toughest_agents if WinRates.get(a, 1.0) <= purge_threshold]
-                        # # ----------------------------------------------
 
                         # 3. 更新 Elite 表格（仅包含通过硬性门槛的 NN），并保证 init_elo_ratings 中的 Rule 被保留
                         Elite_WinRates = {k: WinRates[k] for k in toughest_agents}
@@ -2785,11 +2794,6 @@ def run_MLP_simulation(
                         logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
                     
 
-                    # # 动态学习率调节
-                    # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
-                    # critic_lr = actor_lr * 5
-                    # student_agent.set_learning_rate(actor_lr, critic_lr)
-
                     hist_count = len([k for k in valid_elos if not k.startswith("Rule")])
                     logger.add("Elo/History_Pool_Size", hist_count, total_steps)
 
@@ -2810,8 +2814,8 @@ def run_MLP_simulation(
 
                 # --- 例行保存优化器状态和步数 ---
                 torch.save({
-                    'actor_optimizer': student_agent.actor_optimizer.state_dict(),
-                    'critic_optimizer': student_agent.critic_optimizer.state_dict(),
+                    'actor_optimizer': fighter_agent.actor_optimizer.state_dict(),
+                    'critic_optimizer': fighter_agent.critic_optimizer.state_dict(),
                 }, os.path.join(log_dir, "optimizers_state.pt"))
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps

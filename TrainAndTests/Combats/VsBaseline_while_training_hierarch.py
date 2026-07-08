@@ -24,9 +24,9 @@ from Visualize.tensorboard_visualize import TensorBoardLogger
 # ==========================================
 # [修改] 并行测试 Worker 函数 (增加了 dt_maneuver_val 参数)
 # ==========================================
-def test_worker(model_state_dict, rule_num, 
-                env_args, state_dim, hidden_dim, 
-                action_dims_dict, dt_maneuver_val, 
+def test_worker(model_state_dict, rule_num,
+                env_args, state_dim, hidden_dim,
+                action_dims_dict, dt_maneuver_val,
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
                 no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0, Temperature=None):
     seed = 42
