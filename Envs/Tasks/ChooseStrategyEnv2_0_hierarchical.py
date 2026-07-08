@@ -324,6 +324,7 @@ class ChooseStrategyEnv(Battle):
         ])
         
         ATA_estimated = np.arccos(np.dot(desired_point_, target_delta_point_)*0.999)
+        # crank
         if action_h in[1,5]:
             crank_angle = 53 # 59 # 偏置机动角度
             if ATA_estimated > np.radians(crank_angle):
@@ -332,12 +333,12 @@ class ChooseStrategyEnv(Battle):
                 target_delta_point_ = RodRot(target_delta_point_, axis_, np.radians(crank_angle))
                 theta_desired = np.arcsin(target_delta_point_[1])
                 delta_psi_cmd = np.arctan2(target_delta_point_[2], target_delta_point_[0])
-
+        # 39
         if action_h in[2,4]:
             if RWR:
                 crank_angle = 90
             else: # 未收到告警保持锁定
-                crank_angle = 59 # 59 # 偏置机动角度
+                crank_angle = 90 # 59 # 偏置机动角度
             if ATA_estimated != np.radians(crank_angle):
                 axis_ = np.cross(target_delta_point_, desired_point_)
                 axis_ = axis_ / (norm(axis_) + 1e-6)
