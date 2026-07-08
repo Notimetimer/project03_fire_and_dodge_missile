@@ -76,8 +76,8 @@ def get_top_elo_agents(log_dir, top_n=50, prog=1.0):
     return top_agents_paths
 
 def run_battle(env, blue_wrapper, red_wrapper, device):
-    """仿真逻辑（参考 VsBaseline_while_... 的正确写法）"""
-    env.reset(red_init_ammo=6, blue_init_ammo=6, ego_side='b')
+    """仿真逻辑（参考 VsBaseline_while_training_hierarch.py 的正确写法）"""
+    env.reset(red_init_ammo=4, blue_init_ammo=4, ego_side='b')
     env.shielded = 1 # 测试时开启防撞地
     env.no_out = 0 # 测试时防止出界
 
@@ -90,9 +90,9 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             r_obs, r_check = env.obs_1v1('r', pomdp=1)
             b_obs, b_check = env.obs_1v1('b', pomdp=1)
             with torch.no_grad():
-                explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
+                explore_dict = {'cat':0, 'bern':1} # {'cat': using_explore_maneuver, 'bern': 1}
                 # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
-                temp_dict = {'cat': 0.2, 'bern': 1.0}
+                temp_dict = {'cat': 0.2, 'bern': 0.97}
                 # 不再向网络传入 check_obs 执行强力动作屏蔽
                 r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temperature=temp_dict, check_obs=r_check)
                 b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temperature=temp_dict, check_obs=b_check)
@@ -169,12 +169,12 @@ if __name__ == "__main__":
 
     # 2s
     mission_names = [
-        'SLWSPFSP0.3-run-20260618-221044',
-        'SLWSPFSP0.5-run-20260620-211720',
+        'SLWSPFSP0.3-run-20260618-221044', # 'SLWSPFSP0.3-run-20260618-221044', SLWSPFSP0.3-run-20260704-175531
+        'SLWSPFSP0.2-run-20260622-185856', # 'SLWSPFSP0.5-run-20260620-211720',
         'HLWSPFSP-run-20260616-130304',
         'CSPFSP-run-20260615-234324',
-        'CSVersusRules-run-20260614-163906',
-        'SLWSDPC-PFSP-run-20260614-000523',
+        # 'CSVersusRules-run-20260614-163906',
+        'SLWSA3C0.3-run-20260630-220403',
     ]
     
     # team_labels = range(len(mission_names))
