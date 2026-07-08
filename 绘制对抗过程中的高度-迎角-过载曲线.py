@@ -21,6 +21,7 @@ else:
     plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
     plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
     plt.rcParams['axes.labelsize'] = 12
+    plt.rcParams['ytick.labelsize'] = 11
 
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
 
@@ -59,12 +60,12 @@ else:
     add_max_min_ticks(axes[1], df['r_alpha'], df['b_alpha'], precision=1)
 
     # 3. 高度 (Alt) - 第三张图
-    axes[2].plot(df['time'], df['r_alt'], label='R_UAV', color='crimson', linewidth=1.8)
-    axes[2].plot(df['time'], df['b_alt'], label='B_UAV', color='royalblue', linestyle='--', alpha=0.7)
-    axes[2].set_ylabel('高度 (m)')
+    axes[2].plot(df['time'], df['r_alt'] / 1000, label='R_UAV', color='crimson', linewidth=1.8)
+    axes[2].plot(df['time'], df['b_alt'] / 1000, label='B_UAV', color='royalblue', linestyle='--', alpha=0.7)
+    axes[2].set_ylabel('高度 (km)')
     axes[2].legend(loc='upper right')
     axes[2].grid(True, alpha=0.4)
-    add_max_min_ticks(axes[2], df['r_alt'], df['b_alt'], precision=0)
+    add_max_min_ticks(axes[2], df['r_alt'] / 1000, df['b_alt'] / 1000, precision=2)
 
     # 4. 马赫数 (Mach) - 第四张图
     axes[3].plot(df['time'], df['r_mach'], label='R_UAV', color='crimson', linewidth=1.8)
@@ -77,7 +78,7 @@ else:
 
     # 调整布局 (增加边距)
     plt.tight_layout(pad=2.0)
-    plt.subplots_adjust(top=0.93, bottom=0.1)
+    plt.subplots_adjust(left=0.12, right=0.95, top=0.93, bottom=0.1)
     
     # 保存结果（可选）
     # save_path = os.path.join(current_dir, "Combat_VS_Rule4_Plots.png")
