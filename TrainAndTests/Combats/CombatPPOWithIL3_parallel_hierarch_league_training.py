@@ -2218,7 +2218,7 @@ def run_MLP_simulation(
                 if outcomes:
                     logger.add("test/avg_score", np.mean(list(outcomes.values())), total_steps)
                 if outcomes_bvr:
-                    logger.add("test/BVR_perish_together", np.mean(list(outcomes_bvr.values())), total_steps)
+                    logger.add("test/BVR perish together", np.mean(list(outcomes_bvr.values())), total_steps)
 
                 # 记录第二种测试结果 (test_No_random)
                 outcomes_nr, outcomes_return_nr, outcomes_bvr_nr = {}, {}, {}
@@ -2234,7 +2234,7 @@ def run_MLP_simulation(
                 if outcomes_nr:
                     logger.add("test_No_random/avg_score", np.mean(list(outcomes_nr.values())), total_steps)
                 if outcomes_bvr_nr:
-                    logger.add("test_No_random/BVR_perish_together", np.mean(list(outcomes_bvr_nr.values())), total_steps)
+                    logger.add("test_No_random/BVR perish together", np.mean(list(outcomes_bvr_nr.values())), total_steps)
 
                 # --- 新增：从测试结果更新Elo分值和胜率表 ---
                 def update_ratings_from_test(test_results_data, test_type="test", current_main_elo=1200, valid_opponents=None):
