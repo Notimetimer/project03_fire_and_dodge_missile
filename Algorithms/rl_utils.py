@@ -67,8 +67,10 @@ def moving_average(a, window_size):
     counts = np.convolve(np.ones(n), kernel, mode='same')
     return sum_a / counts
 
-def ema(a, epsilon):
+def ema(a, epsilon, bigger_smoother=1):
     # epsilon越大，越趋向于最新的数据
+    if bigger_smoother:
+        epsilon=1-epsilon
     ema_list = []
     v = 0
     for t, x in enumerate(a, 1):

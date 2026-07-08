@@ -3,15 +3,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from _context import *
-from Algorithms.rl_utils import moving_average
+from Algorithms.rl_utils import moving_average, ema
 import seaborn as sns
 
 # --- 环境与绘图配置 ---
 sns.set_theme(style="whitegrid", font="SimHei", rc={"axes.unicode_minus": False})
-
-# OriginalData_dir = os.path.join(project_root, "logs", "OriginalData")
-Data_dir = r"D:\360极速浏览器X下载"
-# os.path.join(project_root, "logs", "Data")
 
 # TensorBoard 默认配色序列
 TENSORBOARD_COLORS = [
@@ -21,14 +17,15 @@ TENSORBOARD_COLORS = [
 ]
 
 
-def plot_single_curve(data_dir, smooth_window, curves, xlabel="Step", ylabel="",
-                      ref_lines=None, ax=None):
+def plot_single_curve(data_dir, curves, xlabel="Step", ylabel="",
+                      ref_lines=None, ax=None, smooth_type="MA", smooth_window=31):
     """
     绘制单个 subplot 风格的曲线图。
 
     Args:
         data_dir (str): CSV 文件所在目录。
-        smooth_window (int): 平滑窗口大小。
+        smooth_window: MA 时为窗口大小；EMA 时作为平滑指数 epsilon 传入 ema()。
+        smooth_type (str): "MA" 使用移动平均，"EMA" 使用指数滑动平均。
         curves (list): 每条曲线配置，形如
             [
                 {'Data_source': 'SLWSPFSP0.2-run-20260622-185856.csv', 'label': None, 'linestyle': '-'},
@@ -51,7 +48,7 @@ def plot_single_curve(data_dir, smooth_window, curves, xlabel="Step", ylabel="",
         fig = ax.figure
 
     if ref_lines is None:
-        ref_lines = [0, 0.5, 1.0]
+        ref_lines = []
 
     y_min_total, y_max_total = float('inf'), float('-inf')
     has_plotted = False
@@ -80,7 +77,10 @@ def plot_single_curve(data_dir, smooth_window, curves, xlabel="Step", ylabel="",
             continue
 
         raw = df['Value']
-        smooth = moving_average(raw, smooth_window)
+        if smooth_type == "EMA":
+            smooth = ema(raw, smooth_window)
+        else:
+            smooth = moving_average(raw, smooth_window)
 
         y_min_total = min(y_min_total, np.nanmin(smooth))
         y_max_total = max(y_max_total, np.nanmax(smooth))
@@ -117,8 +117,17 @@ def plot_single_curve(data_dir, smooth_window, curves, xlabel="Step", ylabel="",
 
 
 if __name__ == "__main__":
-    DATA_DIRECTORY = Data_dir
-    SMOOTH_WINDOW = 41
+    # OriginalData_dir = os.path.join(project_root, "logs", "OriginalData")
+    DATA_DIRECTORY = r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\训练曲线csv\奖励函数"
+    # score
+    r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\训练曲线csv\对基准对手score"
+    r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\训练曲线csv\奖励函数"
+
+
+    
+    # os.path.join(project_root, "logs", "Data")
+
+    SMOOTH_WINDOW = 0.97 # 41
     X_LABEL = "Step"
     Y_LABEL = "平均对抗得分"
 
@@ -131,6 +140,6 @@ if __name__ == "__main__":
         {'Data_source': 'CSPFSP-run-20260615-234324.csv', 'label': None, 'PPO': '-'},
     ]
 
-    fig, ax = plot_single_curve(DATA_DIRECTORY, SMOOTH_WINDOW, CURVES,
-                                xlabel=X_LABEL, ylabel=Y_LABEL)
+    fig, ax = plot_single_curve(DATA_DIRECTORY, CURVES,
+                                xlabel=X_LABEL, ylabel=Y_LABEL, smooth_type="EMA", smooth_window=SMOOTH_WINDOW)
     plt.show()
