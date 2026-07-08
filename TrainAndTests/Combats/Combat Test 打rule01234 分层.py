@@ -47,6 +47,10 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
     dir_name = "SLWSPFSP0.3-run-20260618-221044"
+    
+    "SLWSA3C0.3-run-20260630-220403"
+    
+    "SLWSPFSP0.3-run-20260618-221044"
    
 
     # 次要
@@ -162,7 +166,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.072,
+                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
                             temperature={'cat':0.5, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
@@ -277,16 +281,16 @@ if __name__ == "__main__":
             
             plt.tight_layout()
             plt.show()
-            # --- 保存作战记录到 CSV ---
-            try:
-                df_history = pd.DataFrame(history)
-                save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-                save_path = os.path.join(project_root, "logs", save_name)
-                df_history.to_csv(save_path, index=False)
-                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            except Exception as e:
-                print(f"Failed to save CSV: {e}")
-            input("Press Enter to continue to the next test...")
+            # # --- 保存作战记录到 CSV ---
+            # try:
+            #     df_history = pd.DataFrame(history)
+            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+            #     save_path = os.path.join(project_root, "logs", save_name)
+            #     df_history.to_csv(save_path, index=False)
+            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            # except Exception as e:
+            #     print(f"Failed to save CSV: {e}")
+            # input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")

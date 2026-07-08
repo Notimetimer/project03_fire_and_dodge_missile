@@ -13,6 +13,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import warnings
 
 # 抑制所有中文字体缺失警告
@@ -41,6 +42,50 @@ def set_axes_equal(ax, z_min=0, z_max=20, pad=0.05):
     # box_aspect 按实际跨度比，使三轴单位长度视觉相等
     z_range = z_max - z_min
     ax.set_box_aspect([x_range, y_range, z_range])
+
+
+def _perp_basis(d):
+    """返回两个单位向量，均垂直于 d 且互相正交。"""
+    d = np.asarray(d, dtype=float)
+    norm = np.linalg.norm(d)
+    if norm < 1e-12:
+        return np.array([1, 0, 0]), np.array([0, 1, 0])
+    d = d / norm
+    ref = np.array([0, 0, 1], dtype=float) if abs(d[2]) < 0.9 else np.array([1, 0, 0], dtype=float)
+    u = np.cross(d, ref)
+    u = u / np.linalg.norm(u)
+    v = np.cross(d, u)
+    v = v / np.linalg.norm(v)
+    return u, v
+
+
+def _draw_cone_arrow(ax, origin, direction, color, radius_ratio=0.35, n_segments=12):
+    """在 3D 轴上绘制一个实心圆锥箭头。origin 为尾部，direction 指向尖端。"""
+    origin = np.asarray(origin, dtype=float)
+    direction = np.asarray(direction, dtype=float)
+    length = np.linalg.norm(direction)
+    if length < 1e-9:
+        return
+    d = direction / length
+    radius = length * radius_ratio
+
+    u, v = _perp_basis(d)
+    theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
+    base_points = np.array([origin + radius * (np.cos(th) * u + np.sin(th) * v) for th in theta])
+    apex = origin + direction
+
+    # 圆锥侧面：apex 与相邻两个底面点组成三角形
+    side_verts = [[apex, base_points[i], base_points[(i + 1) % n_segments]]
+                  for i in range(n_segments)]
+    # 底面封口
+    base_verts = [[origin, base_points[i], base_points[(i + 1) % n_segments]]
+                  for i in range(n_segments)]
+
+    verts = [np.array(tri, dtype=float) for tri in side_verts + base_verts]
+    poly3d = Poly3DCollection(verts, facecolors=color, edgecolors=None,
+                              alpha=0.85, shade=True)
+    ax.add_collection3d(poly3d)
+
 
 def load_replay(json_path: str) -> dict:
     with open(json_path, 'r', encoding='utf-8') as f:
@@ -90,6 +135,37 @@ def plot_replay(data: dict, save_path: str = None):
         lbl = 'B_Missile' if not b_mis_labeled else ''
         ax3.plot(mx, my, mz, color='royalblue', lw=1.0, linestyle='--', alpha=0.8, label=lbl)
         b_mis_labeled = True
+
+    def add_direction_arrows(ax, x, y, z, t_arr, color, interval=30, arrow_len=1.2):
+        """从进场开始，每隔 interval 秒在轨迹上绘制一个指向前进方向的圆锥箭头。"""
+        if len(t_arr) < 2 or len(x) < 2:
+            return
+        start_t = t_arr[0]
+        end_t = t_arr[-1]
+        sample_ts = np.arange(start_t, end_t + 1e-9, interval)
+        idxs = [int(np.argmin(np.abs(t_arr - st))) for st in sample_ts]
+        idxs = sorted(set(idxs))
+
+        for i in idxs:
+            if i == 0:
+                dx, dy, dz = x[1] - x[0], y[1] - y[0], z[1] - z[0]
+            elif i == len(x) - 1:
+                dx, dy, dz = x[-1] - x[-2], y[-1] - y[-2], z[-1] - z[-2]
+            else:
+                dx, dy, dz = x[i+1] - x[i-1], y[i+1] - y[i-1], z[i+1] - z[i-1]
+            norm = np.sqrt(dx*dx + dy*dy + dz*dz)
+            if norm < 1e-9:
+                continue
+            scale = arrow_len / norm
+            dx, dy, dz = dx * scale, dy * scale, dz * scale
+            # 箭头胖瘦比 radius_ratio
+            _draw_cone_arrow(ax, origin=(x[i], y[i], z[i]), direction=(dx, dy, dz),
+                             color=color, radius_ratio=0.4, n_segments=12)
+
+    # 方向箭头：从进场开始每隔 30s 绘制一次
+    # 箭头长度 arrow_len
+    add_direction_arrows(ax3, rx, ry, rz, t_arr, color='crimson', interval=30, arrow_len=2.0)
+    add_direction_arrows(ax3, bx, by, bz, t_arr, color='royalblue', interval=30, arrow_len=2.0)
 
     # 起点（大点）和终点（小点）
     ax3.scatter(rx[0],  ry[0],  rz[0],  color='crimson',   marker='o', s=80,  zorder=5)

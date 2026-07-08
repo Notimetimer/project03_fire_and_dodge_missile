@@ -76,7 +76,7 @@ def get_top_elo_agents(log_dir, top_n=50, prog=1.0):
     return top_agents_paths
 
 def run_battle(env, blue_wrapper, red_wrapper, device):
-    """仿真逻辑（参考 VsBaseline_while_training_hierarch.py 的正确写法）"""
+    """仿真逻辑（参考 VsBaseline_while_... 的正确写法）"""
     env.reset(red_init_ammo=6, blue_init_ammo=6, ego_side='b')
     env.shielded = 1 # 测试时开启防撞地
     env.no_out = 0 # 测试时防止出界
