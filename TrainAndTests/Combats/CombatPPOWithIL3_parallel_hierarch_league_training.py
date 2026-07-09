@@ -8,7 +8,7 @@
 test_worker只测试fighter，其余的不测试
 
 采样和更新
-1、对每个策略，先并行采样然后更新网络，然后再管下一个策略，主智能体用的worker和其余智能体用的worker数量都有num_worker 那么多，三个智能体共用对手策略库，elo_ratings、elite_elo_ratings、WinRates，Elite_WinRates，都要共用。每次抽取对手的时候，fighter将总num_workers均分为3组，第一组在rule_和actor_rein开头的智能体里面按胜率分数高低抽样，第二组在rule_和actor_kamikaze里面按胜率分数高低抽样，第三组在rule_和actor_survivor里面抽样；kamimaze不和kamimaze打，等分匹配Rule+fighter和Rule+survivor；survivor不和survivor打，只匹配Rule+kamimaze和Rule+fighter。
+1、对每个策略，先并行采样然后更新网络，然后再管下一个策略，主智能体用的worker和其余智能体用的worker数量都有num_worker 那么多，三个智能体共用对手策略库，elo_ratings、elite_elo_ratings，都要共用。每次抽取对手的时候，fighter将总num_workers均分为3组，第一组在rule_和actor_rein开头的智能体里面按胜率分数高低抽样，第二组在rule_和actor_kamikaze里面按胜率分数高低抽样，第三组在rule_和actor_survivor里面抽样；kamimaze不和kamimaze打，等分匹配Rule+fighter和Rule+survivor；survivor不和survivor打，只匹配Rule+kamimaze和Rule+fighter。
 2、在每个batch，先并行给fighter采样，更新fighter，清空经验池(完全不在member之间共用回放经验)，然后并行给kamikaze采样，更新kamikaze，清空经验池，然后轮到survivor
 3、fighter使用 done, b_fighter, b_kamikaze, b_survivor = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier) 中的b_fighter作为奖励，kamikaze用b_kamikaze，survivor用b_survivor作为奖励函数
 4、训练步数按照总步数统计。
@@ -396,27 +396,29 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         return probs, rule_keys
 
 
-def get_opponent_probabilities_filtered(WinRates, Elite_WinRates,
+def get_opponent_probabilities_filtered(elite_elo_ratings,
                                        allowed_prefixes,
+                                       hall_of_fame=None,
+                                       target_elo=None,
                                        SP_type='PFSP_balanced',
-                                       rule_rate=0.5, p_factor=0.3, deltaFSP_epsilon=0.5):
+                                       rule_rate=0.5, sigma=400, deltaFSP_epsilon=0.5):
     """
-    带前缀过滤的对手采样函数。
-    allowed_prefixes: list of str, 只保留以这些前缀开头的对手键（Rule 视为特殊前缀始终允许）。
+    带前缀过滤的对手采样函数（纯 Elo，无 WinRate）。
+    allowed_prefixes: list of str, 只保留以这些前缀开头的对手键（Rule 始终允许）。
     """
-    filtered_WinRates = {k: v for k, v in WinRates.items()
-                         if any(k.startswith(p) for p in allowed_prefixes)}
-    filtered_Elite   = {k: v for k, v in Elite_WinRates.items()
-                         if any(k.startswith(p) for p in allowed_prefixes)}
-    if not filtered_WinRates and not filtered_Elite:
-        # 退化为只用 Rule 均匀采样
-        rule_fb = {k: v for k, v in WinRates.items() if k.startswith('Rule')}
+    filtered = {k: v for k, v in elite_elo_ratings.items()
+                if any(k.startswith(p) for p in allowed_prefixes) and not k.startswith('__')}
+    if not filtered:
+        rule_fb = {k: v for k, v in elite_elo_ratings.items()
+                   if k.startswith('Rule')}
         if not rule_fb:
             return np.array([]), []
         probs = np.ones(len(rule_fb)) / len(rule_fb)
         return probs, list(rule_fb.keys())
-    return get_opponent_probabilities(filtered_WinRates, filtered_Elite,
+    return get_opponent_probabilities(filtered, hall_of_fame,
+                                      target_elo=target_elo,
                                       SP_type=SP_type, rule_rate=rule_rate,
+                                      sigma=sigma,
                                       deltaFSP_epsilon=deltaFSP_epsilon)
 
 
@@ -1381,18 +1383,10 @@ def run_MLP_simulation(
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
     elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
     hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
-    # 新增：胜率表文件路径
-    WinRates_path = os.path.join(log_dir, "WinRates.json")
-    Elite_WinRates_path = os.path.join(log_dir, "Elite_WinRates.json")
-    GameTimes_path = os.path.join(log_dir, "GameTimes.json")
     # 新增：对手及精英开火与导弹期参数统计文件路径
     Elite_Fire_Stats_path = os.path.join(log_dir, "Elite_Fire_Stats.json")
 
-    # 初始化胜率字典和游戏次数字典
-    WinRates = {}
-    Elite_WinRates = {}
-    GameTimes = {}
-    # 初始化开火与导弹期参数统计字典（不区分普通和精英）
+    # 初始化开火与导弹期参数统计字典
     Elite_Fire_Stats = {}
 
     # 尝试加载历史 # 中断续训
@@ -1402,12 +1396,6 @@ def run_MLP_simulation(
         with open(elite_json_path, 'r', encoding='utf-8') as f: elite_elo_ratings = json.load(f)
     if os.path.exists(hof_json_path):
         with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
-    if os.path.exists(WinRates_path):
-        with open(WinRates_path, 'r') as f: WinRates = json.load(f)
-    if os.path.exists(Elite_WinRates_path):
-        with open(Elite_WinRates_path, 'r') as f: Elite_WinRates = json.load(f)
-    if os.path.exists(GameTimes_path):
-        with open(GameTimes_path, 'r') as f: GameTimes = json.load(f)
     if os.path.exists(Elite_Fire_Stats_path):
         with open(Elite_Fire_Stats_path, 'r', encoding='utf-8') as f: Elite_Fire_Stats = json.load(f)
 
@@ -1416,9 +1404,6 @@ def run_MLP_simulation(
     
     # 不论如何，记录在线训练前的网络参数
     if (not elite_elo_ratings): # 如果是从零开始训练的
-        # 初始对手胜率一律当做0.5
-        for k in init_elo_ratings.keys():
-            WinRates[k] = 0.5
         # 初始对手Elo一律当1200
         for k in init_elo_ratings.keys():
             elo_ratings[k] = main_agent_elo
@@ -1427,16 +1412,14 @@ def run_MLP_simulation(
         if hist_agent_as_opponent:
             for _iname in [int_fighter_name, int_kamikaze_name, int_survivor_name]:
                 elo_ratings[_iname] = main_agent_elo
-                WinRates[_iname]    = 0.5
 
         # 从零开始不论对手有多烂都要加入Elite池
-        Elite_WinRates = copy.deepcopy(WinRates)
         elite_elo_ratings = copy.deepcopy(elo_ratings)
 
-        # 初始化GameTimes表与Elite_Fire_Stats表
-        for k in WinRates.keys():
-            GameTimes[k] = 0
-            Elite_Fire_Stats[k] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_range, delta_velocity, delta_R_cage]
+        # 初始化Elite_Fire_Stats表
+        for k in elo_ratings.keys():
+            if not k.startswith('__'):
+                Elite_Fire_Stats[k] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_range, delta_velocity, delta_R_cage]
         # 初始化三个 Agent 当前行为统计键
         Elite_Fire_Stats["__CURRENT_FIGHTER__"]  = [0.0, 0.0, 0.0, 0.0, 0.0]
         Elite_Fire_Stats["__CURRENT_KAMIKAZE__"] = [0.0, 0.0, 0.0, 0.0, 0.0]
@@ -1488,16 +1471,18 @@ def run_MLP_simulation(
             if n_w <= 0:
                 continue
             probs, opp_keys = get_opponent_probabilities_filtered(
-                WinRates, Elite_WinRates,
+                elite_elo_ratings,
                 allowed_prefixes=prefixes,
+                hall_of_fame=hall_of_fame,
+                target_elo=main_agent_elo,
                 SP_type=self_play_type,
                 rule_rate=rule_rate,
-                p_factor=p_factor,
+                sigma=sigma_elo,
                 deltaFSP_epsilon=deltaFSP_epsilon,
             )
             if len(opp_keys) == 0:
                 # 退化：纯 Rule 均匀
-                rule_fb = {k: v for k, v in WinRates.items() if k.startswith('Rule')}
+                rule_fb = {k: v for k, v in elite_elo_ratings.items() if k.startswith('Rule')}
                 if rule_fb:
                     opp_keys = list(rule_fb.keys())
                     probs    = np.ones(len(opp_keys)) / len(opp_keys)
@@ -1510,10 +1495,6 @@ def run_MLP_simulation(
         # --- 发送任务给 Workers ---
         for rank in range(num_workers):
             selected_opponent_name = all_opponents[rank]
-            if selected_opponent_name in GameTimes:
-                GameTimes[selected_opponent_name] += 1
-            else:
-                GameTimes[selected_opponent_name] = 1
 
             opp_type = 'rule'
             opp_data = 0
@@ -1640,19 +1621,10 @@ def run_MLP_simulation(
             #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
             #     sil_buffer.add(ego_tr)
 
-            # ELO & WinRate 更新
+            # ELO 更新
             actual_score = 0.5
             if metrics['win']:    actual_score = 1.0
             elif metrics['lose']: actual_score = 0.0
-
-            alpha_win = 0.1
-            if opp_name in WinRates:
-                WinRates[opp_name] = (1-alpha_win)*WinRates[opp_name] + alpha_win*actual_score
-                if opp_name in Elite_WinRates:
-                    Elite_WinRates[opp_name] = WinRates[opp_name]
-            else:
-                if hist_agent_as_opponent:
-                    WinRates[opp_name] = 0.5
 
             if opp_name in elo_ratings:
                 prev_main = main_agent_elo
@@ -1784,12 +1756,6 @@ def run_MLP_simulation(
                         opp_t = f"Rule_{rn}"
                         if valid_opponents is not None and opp_t not in valid_opponents:
                             continue
-                        if opp_t in WinRates:
-                            WinRates[opp_t] = (1-alpha_wt)*WinRates[opp_t] + alpha_wt*score
-                            if opp_t in Elite_WinRates:
-                                Elite_WinRates[opp_t] = WinRates[opp_t]
-                        else:
-                            WinRates[opp_t] = score
                         if opp_t in elo_ratings:
                             new_m = update_elo(upd_elo,       elo_ratings[opp_t], score,   K_FACTOR*2)
                             new_a = update_elo(elo_ratings[opp_t], upd_elo, 1.0-score, K_FACTOR*2)
@@ -2017,7 +1983,7 @@ def run_MLP_simulation(
                     avg_pool_elo = np.mean([elo_ratings[k] for k in pool_keys])
                     logger.add("train_rein/elo_diff_x", main_agent_elo - avg_pool_elo, total_steps)
 
-                # 三类 Agent 各自维护精英池（共享 Elite_WinRates）
+                # 三类 Agent 各自维护精英池（共享 elo_ratings）
                 if total_steps >= WARM_UP_STEPS:
                     # fire_stats 键映射（用于从当前 agent 统计复制给新 checkpoint）
                     _fs_map = {
@@ -2030,7 +1996,6 @@ def run_MLP_simulation(
                         ('actor_kamikaze', kamikaze_key),
                         ('actor_survivor', survivor_key),
                     ]:
-                        WinRates[actor_key_used]    = 0.5
                         elo_ratings[actor_key_used] = main_agent_elo
                         src_fs = _fs_map.get(agent_prefix, '__CURRENT_MAIN__')
                         Elite_Fire_Stats[actor_key_used] = copy.deepcopy(
@@ -2038,28 +2003,36 @@ def run_MLP_simulation(
                         )
 
                     if hist_agent_as_opponent:
-                        # 每次全量重建 Elite_WinRates，避免旧条目无限积累
-                        new_elite = {}
-                        rule_pres = [k for k in WinRates if k.startswith('Rule')]
-                        max_rw    = max(WinRates[k] for k in rule_pres) if rule_pres else None
-                        for agent_prefix in ['actor_rein', 'actor_kamikaze', 'actor_survivor']:
-                            pool_p   = [k for k in WinRates if k.startswith(agent_prefix)]
-                            sorted_p = sorted(pool_p, key=lambda k: WinRates[k])
-                            qualified = [a for a in sorted_p
-                                         if max_rw is None or WinRates.get(a, 1.0) < float(max_rw)]
-                            for k in qualified[:MAX_HISTORY_SIZE]:
-                                new_elite[k] = WinRates[k]
                         # 保证 Rule 始终在 Elite 中
                         for rk in [k for k in init_elo_ratings if k.startswith("Rule")]:
-                            if rk in WinRates:
-                                new_elite[rk] = WinRates[rk]
-                        Elite_WinRates = new_elite
+                            if rk not in elite_elo_ratings:
+                                elite_elo_ratings[rk] = elo_ratings.get(rk, main_agent_elo)
+                        # 各类别：满员时踢掉 Elo 最低的，再入池新 checkpoint
+                        for agent_prefix, actor_key_used in [
+                            ('actor_rein',     fighter_key),
+                            ('actor_kamikaze', kamikaze_key),
+                            ('actor_survivor', survivor_key),
+                        ]:
+                            if actor_key_used in elite_elo_ratings:
+                                # 已在池中：直接更新 Elo，无需踢人
+                                elite_elo_ratings[actor_key_used] = main_agent_elo
+                            else:
+                                # 新 key：满员时踢掉 Elo 最低的再入池
+                                history_keys = [k for k in elite_elo_ratings
+                                                if k.startswith(agent_prefix)]
+                                while len(history_keys) >= MAX_HISTORY_SIZE:
+                                    weakest = min(history_keys, key=lambda k: elite_elo_ratings[k])
+                                    old_elo = elite_elo_ratings[weakest]
+                                    del elite_elo_ratings[weakest]
+                                    history_keys.remove(weakest)
+                                    print(f"[Pool Cleanup] Kicked weakest: {weakest} (Elo: {old_elo:.0f})")
+                                elite_elo_ratings[actor_key_used] = main_agent_elo
+                                print(f"Accepted {actor_key_used} into Elite Pool.")
 
-                    elite_elo_ratings = {k: elo_ratings.get(k, 1200) for k in Elite_WinRates}
-                    rein_cnt     = len([k for k in Elite_WinRates if k.startswith('actor_rein')])
-                    kamikaze_cnt = len([k for k in Elite_WinRates if k.startswith('actor_kamikaze')])
-                    survivor_cnt = len([k for k in Elite_WinRates if k.startswith('actor_survivor')])
-                    print(f"Elite pool size: {len(Elite_WinRates)} (rein={rein_cnt}, kamikaze={kamikaze_cnt}, survivor={survivor_cnt})")
+                    rein_cnt     = len([k for k in elite_elo_ratings if k.startswith('actor_rein')])
+                    kamikaze_cnt = len([k for k in elite_elo_ratings if k.startswith('actor_kamikaze')])
+                    survivor_cnt = len([k for k in elite_elo_ratings if k.startswith('actor_survivor')])
+                    print(f"Elite pool size: {len(elite_elo_ratings)} (rein={rein_cnt}, kamikaze={kamikaze_cnt}, survivor={survivor_cnt})")
 
                 # 全量 Elo 记录
                 elo_ratings[fighter_key]              = main_agent_elo
@@ -2077,12 +2050,6 @@ def run_MLP_simulation(
                     json.dump(save_elite, f, ensure_ascii=False, indent=2)
                 with open(hof_json_path, "w", encoding="utf-8") as f:
                     json.dump(hall_of_fame, f, ensure_ascii=False, indent=2)
-                with open(WinRates_path, "w", encoding="utf-8") as f:
-                    json.dump(WinRates, f, ensure_ascii=False, indent=2)
-                with open(Elite_WinRates_path, "w", encoding="utf-8") as f:
-                    json.dump(Elite_WinRates, f, ensure_ascii=False, indent=2)
-                with open(GameTimes_path, "w", encoding="utf-8") as f:
-                    json.dump(GameTimes, f, ensure_ascii=False, indent=2)
                 with open(Elite_Fire_Stats_path, "w", encoding="utf-8") as f:
                     json.dump(Elite_Fire_Stats, f, ensure_ascii=False, indent=2)
 
@@ -2244,21 +2211,10 @@ def run_MLP_simulation(
                     
                     for rule_num, score, result2, wins, loses, draws, BVR_perish_togethers in test_results_data:
                         opp_name = f"Rule_{rule_num}"
-                        # 跳过不在 init_elo_ratings 中的 rule，防止意外泄露进 WinRates/Elite_WinRates
+                        # 跳过不在 init_elo_ratings 中的 rule，防止意外泄露进 elo_ratings
                         if valid_opponents is not None and opp_name not in valid_opponents:
                             continue
                         actual_score = score  # score已经是胜率(0-1)
-                        
-                        # --- 更新胜率表 ---
-                        if opp_name in WinRates:
-                            old_p = WinRates[opp_name]
-                            WinRates[opp_name] = (1 - alpha_win) * old_p + alpha_win * actual_score
-                            # 同步更新 Elite 池中已有的对手
-                            if opp_name in Elite_WinRates:
-                                Elite_WinRates[opp_name] = WinRates[opp_name]
-                        else:
-                            # 新对手，初始化为当前胜率
-                            WinRates[opp_name] = actual_score
                         
                         # --- 更新Elo分值 ---
                         if opp_name in elo_ratings:
