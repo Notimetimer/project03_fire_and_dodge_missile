@@ -1610,6 +1610,107 @@ class PPOHybrid:
         check_weights_bias_nan(self.critic, "critic", "update后")
 
     # =========================================================================
+    #  [New Method] Bernoulli 开火头保护性有监督训练 (防止机动策略被bern崩溃拖累)
+    # =========================================================================
+    def fire_prob_protection(self, transition_dict, protect_epochs=4, protect_mini_batch=256, mask_on=0):
+        """
+        Bern头概率范围保护器。当开火概率整体崩溃（全高或全低）时，以有监督方式
+        强行拉回bern头分布，同时切断backbone和其它动作头的梯度。
+
+        必要条件1 (比值护栏): max_fire_prob / min_fire_prob >= 10 → 分布仍有分化，跳过。
+        必要条件2 (触发case):
+          case1: max_fire_prob < 0.05  → 以0.5为监督信号，拉高熵。
+          case2: min_fire_prob > 0.1   → 以1e-3为监督信号，压低概率。
+        """
+        ratio = self.max_fire_prob / (self.min_fire_prob + 1e-12)
+        if ratio >= 10.0:
+            return
+
+        if self.max_fire_prob < 0.05:
+            target_prob = 0.5
+        elif self.min_fire_prob > 0.1:
+            target_prob = 1e-3
+        else:
+            return
+
+        def to_tensor(x, dtype):
+            if isinstance(x, np.ndarray):
+                return torch.tensor(x, dtype=dtype).to(self.device)
+            else:
+                return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+
+        if 'obs' in transition_dict:
+            actor_inputs = to_tensor(transition_dict['obs'], torch.float)
+        else:
+            actor_inputs = to_tensor(transition_dict['states'], torch.float)
+
+        if 'active_masks' in transition_dict:
+            active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
+        else:
+            active_masks = torch.ones(actor_inputs.size(0), 1, device=self.device)
+
+        num_samples = actor_inputs.size(0)
+        mb_size = min(protect_mini_batch, num_samples)
+
+        net = self.actor.net
+
+        def set_requires_grad(module, flag):
+            if module is not None:
+                for p in module.parameters():
+                    p.requires_grad_(flag)
+
+        set_requires_grad(net.net, False)
+        set_requires_grad(getattr(net, 'fc_mu', None), False)
+        set_requires_grad(getattr(net, 'fc_cat', None), False)
+        set_requires_grad(getattr(net, 'fc_circ', None), False)
+        set_requires_grad(getattr(net, 'fc_lin', None), False)
+        if hasattr(net, 'log_std_shared'):
+            net.log_std_shared.requires_grad_(False)
+        set_requires_grad(getattr(net, 'fc_bern', None), True)
+
+        target_tensor = torch.tensor(target_prob, device=self.device)
+        mask_eps_loc = 1e-5
+
+        for _ in range(protect_epochs):
+            perm = torch.randperm(num_samples, device=self.device)
+            for start in range(0, num_samples, mb_size):
+                end = min(start + mb_size, num_samples)
+                batch_idx = perm[start:end]
+
+                mb_states = actor_inputs[batch_idx]
+                mb_active = active_masks[batch_idx]
+                active_sum = mb_active.sum()
+
+                actor_out = self.actor.net(mb_states, mask_on=mask_on)
+
+                if actor_out['bern'] is None:
+                    break
+
+                bern_logits = actor_out['bern'].clamp(min=-1e8)
+                bern_probs = torch.sigmoid(bern_logits)
+
+                target_full = target_tensor.expand_as(bern_probs)
+                bern_loss_per_sample = F.binary_cross_entropy(
+                    bern_probs, target_full, reduction='none'
+                ).sum(dim=-1, keepdim=True)
+
+                bern_loss = (bern_loss_per_sample * mb_active).sum() / (active_sum + mask_eps_loc)
+
+                self.actor_optimizer.zero_grad()
+                bern_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+                self.actor_optimizer.step()
+
+        set_requires_grad(net.net, True)
+        set_requires_grad(getattr(net, 'fc_mu', None), True)
+        set_requires_grad(getattr(net, 'fc_cat', None), True)
+        set_requires_grad(getattr(net, 'fc_circ', None), True)
+        set_requires_grad(getattr(net, 'fc_lin', None), True)
+        if hasattr(net, 'log_std_shared'):
+            net.log_std_shared.requires_grad_(True)
+        set_requires_grad(getattr(net, 'fc_bern', None), True)
+
+    # =========================================================================
     #  [New Helper] 提取出的 MSE 计算逻辑 (供 mixed_update 和 BC_update 复用)
     # =========================================================================
     def _compute_mse_loss_with_f(self, actor_input_batch, actions_batch, returns_batch, 

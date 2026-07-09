@@ -2125,6 +2125,9 @@ def run_MLP_simulation(
                 # 调用 update
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, 
                     target_p1=target_p1, k_nonlinear=k_nonlinear)
+                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                if batch_idx % 10 == 0:
+                    student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
                 #====================
                 # 记录 Log
 
