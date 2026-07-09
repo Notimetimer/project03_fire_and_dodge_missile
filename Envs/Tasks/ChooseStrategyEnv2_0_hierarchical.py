@@ -211,7 +211,10 @@ class ChooseStrategyEnv(Battle):
         speed_cmd = 340
 
         # 垂直
-        theta_desired = np.clip(theta+delta_theta + np.clip(action_v, -pi/2, pi/2), -pi/2, pi/2)
+        theta_desired = np.clip(theta+delta_theta + 
+            np.clip(action_v, np.radians(-75), np.radians(45)), 
+            np.radians(-75), np.radians(60))
+
         # 不能出安全高度范围
         delta_height_cmd = np.clip(theta_desired/pi*2*5000, 
                                    self.min_alt_safe-UAV.alt, 

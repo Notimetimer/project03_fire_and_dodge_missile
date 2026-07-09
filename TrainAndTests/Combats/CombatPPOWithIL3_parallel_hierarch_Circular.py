@@ -1364,8 +1364,8 @@ def run_MLP_simulation(
 
     # --- 新增：重置分布的标准差 ---
     # 模仿学习往往会把 std 压得很低，导致进入强化学习时丧失探索能力。
-    # 这里强行把动作分布的 std 推回初始值 (1.5)
-    init_std_val = 1.2 # 1.5
+    # 这里强行把动作分布的 std 推回初始值 (1.5太大，0.2对应11.5度，0.3对应17.2度)
+    init_std_val = 0.2 # 1.5
     with torch.no_grad():
         if hasattr(student_agent.actor.net, 'log_std_shared'):
             student_agent.actor.net.log_std_shared.fill_(np.log(init_std_val))
@@ -1600,36 +1600,30 @@ def run_MLP_simulation(
                 test_results_no_random = [t.get() for t in test_tasks_no_random]
 
                 # 记录第一种测试结果
-                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
-                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
-                outcomes_perish = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
+                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
                     # logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
 
-                # 记录第一种测试的平均指标（所有对手的平均Score和超视距双杀率）
+                # 记录第一种测试的平均指标
                 avg_score = np.mean(list(outcomes.values()))
-                avg_perish_together = np.mean(list(outcomes_perish.values()))
                 logger.add("test/avg_score", avg_score, total_steps)
-                logger.add("test/BVR perish together", avg_perish_together, total_steps)
 
                 # 记录第二种测试结果 (test_No_random)
-                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
-                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
-                outcomes_perish_nr = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results_no_random}
 
                 for r_num, score in outcomes_nr.items():
                     logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
                     # logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
-                # 记录第二种测试的平均指标（所有对手的平均Score和超视距双杀率）
+                # 记录第二种测试的平均指标
                 avg_score_nr = np.mean(list(outcomes_nr.values()))
-                avg_perish_together_nr = np.mean(list(outcomes_perish_nr.values()))
                 logger.add("test_No_random/avg_score", avg_score_nr, total_steps)
-                logger.add("test_No_random/BVR perish together", avg_perish_together_nr, total_steps)
 
                 # 名人堂判定：如果全胜则保存并加入池子
                 if all(score > 0.5 for score in outcomes_nr.values()): # 原先为outcomes.values()
@@ -2071,36 +2065,36 @@ def run_MLP_simulation(
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
 
-                #====================
-                # 动态调节 std 约束范围 (线性退火)
-                #====================
-                # max_std: 限制探索的上限，从 1.1 降到 0.8，防止训练后期动作过于离谱
-                current_max_std = 1.1 - (1.1 - 0.8) * np.clip(total_steps / 10e6, 0.0, 1.0)
+                # #====================
+                # # 动态调节 std 约束范围 (线性退火)
+                # #====================
+                # # max_std: 限制探索的上限，从 1.1 降到 0.8，防止训练后期动作过于离谱
+                # current_max_std = 1.1 - (1.1 - 0.8) * np.clip(total_steps / 10e6, 0.0, 1.0)
 
-                # # min_std: 限制探索的下限，核心是强迫机动策略保持探索。
-                # # 初始设定为一个较大的值 (如 0.7)，直到 10M steps 时才允许其降到 0.2 左右
-                # # 这样在训练前期，机动策略永远不会变成确定性策略，必须给开火头留出尝试空间
-                # current_min_std = 0.7 - (0.7 - 0.2) * np.clip(total_steps / 10e6, 0.0, 1.0)
+                # # # min_std: 限制探索的下限，核心是强迫机动策略保持探索。
+                # # # 初始设定为一个较大的值 (如 0.7)，直到 10M steps 时才允许其降到 0.2 左右
+                # # # 这样在训练前期，机动策略永远不会变成确定性策略，必须给开火头留出尝试空间
+                # # current_min_std = 0.7 - (0.7 - 0.2) * np.clip(total_steps / 10e6, 0.0, 1.0)
 
-                student_agent.max_std = current_max_std
-                # student_agent.min_std = current_min_std # 假设你在 agent 类中定义了这个变量
+                # student_agent.max_std = current_max_std
+                # # student_agent.min_std = current_min_std # 假设你在 agent 类中定义了这个变量
 
-                #====================
-                # 强制将底层网络参数限制在 [min, max] 区间
-                #====================
-                with torch.no_grad():
-                    # 对数空间的限制：std = exp(log_std) -> log_std = ln(std)
-                    log_max = np.log(current_max_std)
-                    log_min = 0 # np.log(current_min_std)
+                # #====================
+                # # 强制将底层网络参数限制在 [min, max] 区间
+                # #====================
+                # with torch.no_grad():
+                #     # 对数空间的限制：std = exp(log_std) -> log_std = ln(std)
+                #     log_max = np.log(current_max_std)
+                #     log_min = 0 # np.log(current_min_std)
                     
-                    # 针对共享 std 和连续动作 std 进行双向截断
-                    if hasattr(student_agent.actor.net, 'log_std_shared'):
-                        student_agent.actor.net.log_std_shared.clamp_(min=log_min, max=log_max)
+                #     # 针对共享 std 和连续动作 std 进行双向截断
+                #     if hasattr(student_agent.actor.net, 'log_std_shared'):
+                #         student_agent.actor.net.log_std_shared.clamp_(min=log_min, max=log_max)
                         
-                    if hasattr(student_agent.actor.net, 'log_std_cont'):
-                        student_agent.actor.net.log_std_cont.clamp_(min=log_min, max=log_max)
+                #     if hasattr(student_agent.actor.net, 'log_std_cont'):
+                #         student_agent.actor.net.log_std_cont.clamp_(min=log_min, max=log_max)
                 
-                logger.add("train_plus/max_std", current_max_std, total_steps)
+                # logger.add("train_plus/max_std", current_max_std, total_steps)
 
                 #====================
                 # 原有强化学习部分

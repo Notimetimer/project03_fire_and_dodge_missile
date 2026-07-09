@@ -394,24 +394,14 @@ class HybridActorWrapper(nn.Module):
 
                 pi = math.pi
                 ata_hor      = torch.acos(cos_ata_hor)
-                ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 30.0 * pi / 180.0)
+                ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 20.0 * pi / 180.0)
                 locked_cond  = (locked > 0)
-                # ammo_cond    = (ammo > 0.0)
-                # time_cond    = (t_since_launch >= 20) | ((dist < 30e3) & (t_since_launch >= 10))
                 dist_cond    = (dist < 105e3)
                 delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
                 wait_til_last_missile_ends = not missile_in_mid_term
-                # cont_plus_1  = ~((delta_theta > 15.0 * pi / 180.0) & (torch.asin(sin_theta) <= -15.0 * pi / 180.0))
-                # low_alt_no_chase_fire = ~((dist > 25e3) & (torch.abs(AA_hor) < 120.0 * pi / 180.0))
-                # alt_dist_fire_ok = ~(
-                #     ((alt < 4000.0) & (dist > 35e3)) |
-                #     ((alt < 5000.0) & (dist > 45e3)) |
-                #     ((alt < 6000.0) & (dist > 65e3)) |
-                #     ((alt < 7000.0) & (dist > 75e3)) |
-                #     ((alt < 8000.0) & (dist > 85e3))
-                # )
                 can_fire_full = (ata_cond & locked_cond & dist_cond
-                                 & delta_theta_cond & wait_til_last_missile_ends) #  & cont_plus_1 & low_alt_no_chase_fire) & alt_dist_fire_ok)
+                                & delta_theta_cond
+                                & wait_til_last_missile_ends)
                 _deploy_can_fire = can_fire_full.all().item()  # 转成 bool
 
         # 调用网络（net 内部只施加弹药+冷却 mask）
@@ -663,6 +653,9 @@ class HybridActorWrapper(nn.Module):
                             注意：对于连续动作，这里通常假设传入的是 pre-tanh 的 u，
                             或者你需要在外部处理好。
             label_smoothing: 标签平滑系数
+            action_heads_mask: dict, 例如 {'cont': True, 'cat': True, 'bern': True}
+                               指定哪些动作头参与模仿学习 Loss 计算。
+                               为兼容旧代码，仍保留 no_bern/no_cat，但它们会被映射为 mask。
             
         Returns:
             total_loss_per_sample: (Batch, ) 每个样本的 Loss 总和，未加权
@@ -769,38 +762,39 @@ class HybridActorWrapper(nn.Module):
 
         # --- 3. 伯努利动作 (Bernoulli) ---
         # -- Focal Loss --
-        if not no_bern:
-            if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
-                bern_logits = actor_outputs['bern']
-                # Clamp masked -inf logits to a large negative finite value for stable sigmoid/log calculations
-                bern_logits = bern_logits.clamp(min=-1e8)
-                probs = torch.sigmoid(bern_logits)
-                probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
-                target = expert_actions['bern'] # (Batch, 1)
-                # Label Smoothing
-                if label_smoothing > 0:
-                    target = target * (1.0 - label_smoothing) + 0.5 * label_smoothing
-                # === 方案2：Focal Loss (针对敏感度问题) ===
-                # alpha: 平衡因子，类似于 pos_weight 的作用，但范围是 0-1
-                # gamma: 聚焦因子，通常设为 2.0。值越大，越忽视简单背景，越关注难分类的发射瞬间
-                
-                # 建议参数组合：
-                # alpha = 0.75 (意味着正样本本身权重是 0.75，负样本是 0.25，自带 3:1 的加权)
-                # gamma = 2.0 (标准设置)
-                
-                alpha = 0.75
-                gamma = 2.0
-                
-                # Focal Loss 公式
-                # 对于正样本 (target=1): -alpha * (1-p)^gamma * log(p)
-                # 对于负样本 (target=0): -(1-alpha) * p^gamma * log(1-p)
-                
-                loss_pos = -alpha * torch.pow(1.0 - probs, gamma) * torch.log(probs) * target
-                loss_neg = -(1 - alpha) * torch.pow(probs, gamma) * torch.log(1.0 - probs) * (1.0 - target)
-                
+        if (not no_bern) and 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+            bern_logits = actor_outputs['bern']
+            # Clamp masked -inf logits to a large negative finite value for stable sigmoid/log calculations
+            bern_logits = bern_logits.clamp(min=-1e8)
+            probs = torch.sigmoid(bern_logits)
+            probs = torch.clamp(probs, 1e-10, 1.0 - 1e-10)
+            target = expert_actions['bern'] # (Batch, 1)
+            
+            "开火头适度动作平滑"
+
+            # 开火头保持硬标签
+            max_target = sigmoid(3.0)
+            min_target = sigmoid(-3.0)
+
+            # # 对比实验，临时使用软标签给开火头
+            # max_target = min(1.0-label_smoothing, sigmoid(3.0))
+            # min_target = max(label_smoothing, sigmoid(-3.0))
+            
+            target = torch.clamp(target, min_target, max_target)
+
+            # 交叉熵公式
+            # 正向模仿学习，增加样本中的动作概率
+            if 1:
+                loss_pos = - torch.log(probs) * target
+                loss_neg = - torch.log(1.0 - probs) * (1.0 - target)
                 bce_loss = loss_pos + loss_neg
-                
-                total_loss_per_sample += bce_loss.sum(dim=-1)
+            # # 负向模仿学习 / 互补标签学习，减少样本中的动作概率
+            # else:
+            #     loss_pos = - torch.log(probs) * (1.0 - target)
+            #     loss_neg = - torch.log(1.0 - probs) * target
+            #     bce_loss = loss_pos + loss_neg
+            
+            total_loss_per_sample += bce_loss.sum(dim=-1)
         
         return total_loss_per_sample
 # =============================================================================

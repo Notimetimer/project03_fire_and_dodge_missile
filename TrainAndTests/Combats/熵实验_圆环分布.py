@@ -66,14 +66,8 @@ original_il_transition_dict, transition_dict = load_il_and_transitions(
     f"transition_dict_combat_LR_rule{IL_rule}.pkl"
 )
 
-# --- 关键步骤：执行数据重构 ---
-if original_il_transition_dict is not None:
-    # 这里完成 (Batch, Key) -> (Key, Batch) 的转换
-    original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict['actions'])
-    
-    # 顺便确保 states 和 returns 也是标准的 float32 numpy array
-    original_il_transition_dict['states'] = np.array(original_il_transition_dict['states'], dtype=np.float32)
-    original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
+# convert_il_actions + restructure_actions 在 run_MLP_simulation 内部统一处理
+# 此处不做预处理，避免双重映射导致 circ/lin 动作索引错误
 
 if __name__=='__main__':
     print('Hello')
