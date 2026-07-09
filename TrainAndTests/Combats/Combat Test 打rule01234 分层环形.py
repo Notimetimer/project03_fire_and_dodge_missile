@@ -96,7 +96,7 @@ if __name__ == "__main__":
     # 实例化模型结构并加载权重
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     # 注意：测试时只需要 Actor Wrapper，不需要完整的 PPO agent
-    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
+    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device, circ_angles=[0, np.pi/3, np.pi/2, np.pi, -np.pi/2, -np.pi/3]).to(device)
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 

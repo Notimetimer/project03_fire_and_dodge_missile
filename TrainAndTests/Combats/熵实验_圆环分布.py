@@ -18,7 +18,7 @@ mission_name = 'Circular0.3'
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30
-max_steps = 20e6 # 1320e4
+max_steps = 10e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
@@ -110,12 +110,12 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            # 'Rule_0': 1200, # debug
-            # "Rule_1": 1200,
-            # "Rule_2": 1200,
-            # 'Rule_3': 1200,
-            # 'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈

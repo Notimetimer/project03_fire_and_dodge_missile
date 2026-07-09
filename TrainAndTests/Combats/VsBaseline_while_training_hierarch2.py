@@ -50,7 +50,7 @@ def test_worker(model_state_dict, rule_num,
     
     # 2. 局部初始化网络并加载权重
     net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-    actor = HybridActorWrapper(net, action_dims_dict, None, device).to(device)
+    actor = HybridActorWrapper(net, action_dims_dict, None, device, circ_angles=[0, np.pi/3, np.pi/2, np.pi, -np.pi/2, -np.pi/3]).to(device)
     actor.load_state_dict(model_state_dict)
     actor.eval() # 设置为评估模式
     action_cycle = 10 # 30 action_cycle_multiplier 锁死测试回合的动作间隔，便于做课程学习

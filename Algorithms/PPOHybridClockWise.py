@@ -13,7 +13,7 @@ import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, CircularDiscretizedDistribution
+from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, CircularDiscretizedDistribution, CircularDiscretizedDistribution_NL
 from Algorithms.MLP_heads import ValueNet
 
 def sigmoid(x):
@@ -293,7 +293,8 @@ class HybridActorWrapper(nn.Module):
     将具体的 PolicyNetHybrid 封装起来，对外提供标准的 get action 和 evaluate actions 接口。
     未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
     """
-    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu', n_circle=24, n_linear=12):
+    def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu', n_circle=24, n_linear=12,
+                 circ_angles=None):
         super(HybridActorWrapper, self).__init__()
         self.net = policy_net
         self.action_dims = action_dims_dict
@@ -311,6 +312,9 @@ class HybridActorWrapper(nn.Module):
         self.device = device
         self.n_circle = n_circle
         self.n_linear = n_linear
+        import math as _math
+        _pi = _math.pi
+        self.circ_angles = circ_angles if circ_angles is not None else [0, _pi/3, _pi/2, _pi, -_pi/2, -_pi/3]
         
         # 处理 Action Bounds
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -494,15 +498,15 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['circ']):
                 vec_h = vec_circ[:, i, :] # (Batch, 2)
                 std_h = std_all[:, i:i+1] # (Batch, 1)
-                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h, angles=self.circ_angles)
                 
                 idx = dist.sample()[0] if explore_opts.get('circ', True) else dist.mean_idx
                 circ_indices.append(idx)
                 circ_probs.append(dist.probs.cpu().detach().numpy())
             
             idx_stack = torch.stack(circ_indices, dim=-1).cpu().detach().numpy()
-            # convert discrete indices to radians: 2*pi*index/(n-1)
-            circ_angles = 2.0 * np.pi * idx_stack / float(self.n_circle - 1)
+            _angles_arr = np.array(self.circ_angles)
+            circ_angles = _angles_arr[idx_stack.astype(int)]
             actions_exec['circ'] = circ_angles if is_batch else circ_angles[0]
             actions_raw['circ'] = idx_stack
             actions_dist_check['circ'] = circ_probs
@@ -609,7 +613,7 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['circ']):
                 vec_h = vec_circ[:, i, :]
                 std_h = std_all[:, i:i+1]
-                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h, angles=self.circ_angles)
                 
                 act_i = circ_actions[:, i]
                 log_probs += dist.log_prob(act_i).unsqueeze(-1)
@@ -686,19 +690,11 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['circ']):
                 vec_h = vec_circ[:, i, :]
                 std_h = std_all[:, i:i+1]
-                dist = CircularDiscretizedDistribution(vec_h, std_h, n=self.n_circle)
+                dist = CircularDiscretizedDistribution_NL(vec_h, std_h, angles=self.circ_angles)
                 expert_idx = expert_circ[:, i]
                 
                 log_probs = F.log_softmax(dist.logits, dim=-1)
-                
-                if label_smoothing > 0:
-                    n_classes = dist.n
-                    one_hot = torch.zeros_like(log_probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
-                    smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / n_classes)
-                    ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
-                else:
-                    ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
-                
+                ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
                 total_loss_per_sample += ce_loss        
         # --- 1.6 线性离散动作 ---
         if 'lin' in self.action_dims and self.action_dims['lin'] > 0:
@@ -711,15 +707,7 @@ class HybridActorWrapper(nn.Module):
                 expert_idx = expert_lin[:, i]
                 
                 log_probs = F.log_softmax(dist.logits, dim=-1)
-                
-                if label_smoothing > 0:
-                    n_classes = dist.n
-                    one_hot = torch.zeros_like(log_probs).scatter_(1, expert_idx.unsqueeze(1), 1.0)
-                    smooth_target = one_hot * (1.0 - label_smoothing) + (label_smoothing / n_classes)
-                    ce_loss = -torch.sum(smooth_target * log_probs, dim=1)
-                else:
-                    ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
-                
+                ce_loss = -log_probs.gather(1, expert_idx.unsqueeze(1)).squeeze(1)
                 total_loss_per_sample += ce_loss        
         # --- 2. 离散/多离散动作 (Categorical) ---
         # 依据提供的 Multi-Discrete 代码，使用 CrossEntropy

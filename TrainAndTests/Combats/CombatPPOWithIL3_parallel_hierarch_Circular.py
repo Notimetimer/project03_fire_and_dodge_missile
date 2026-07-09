@@ -159,7 +159,7 @@ def new_lin_radians_grid(n_linear):
 
 def new_circ_radians_grid(n_circle):
     idxs = np.arange(n_circle)
-    return 2.0 * np.pi * idxs / float(n_circle - 1)
+    return 2.0 * np.pi * idxs / float(n_circle)
 
 # def new_lin_idx2radian(idx, n_linear=12):
 #     lin_grid = new_lin_radians_grid(n_linear)
@@ -197,39 +197,54 @@ def new_circ_radians_grid(n_circle):
 
 def convert_il_actions(actions, n_linear=12, n_circle=24):
     """
-    Convert imitation-learning actions from old discrete scheme to new discrete indices.
-    Accepts dict-of-arrays or list-of-dicts and returns the remapped structure.
+    Convert imitation-learning actions from old cat-based scheme to lin/circ indices.
+
+    IL data stores actions as {'cat': [action_v, action_h], 'bern': ...}
+    where action_v in {0..4} (5 vertical levels) and action_h in {0..5} (6 horizontal
+    directions matching old_circ_idx2radian).
+
+    After conversion:
+      'lin'  <- action_v mapped to nearest index in new 12-point linear grid
+      'circ' <- action_h kept as-is (0..5 directly index the 6 NL circ angles)
+      'cat'  key is removed.
+
+    Also handles legacy data that already has 'lin'/'circ' keys (no-op for those).
     """
     lin_grid = new_lin_radians_grid(n_linear)
-    circ_grid = new_circ_radians_grid(n_circle)
 
     def map_lin(old_idx):
         rad = old_lin_idx2radian(old_idx)
         return int(np.argmin(np.abs(lin_grid - rad)))
 
-    def map_circ(old_idx):
-        rad = old_circ_idx2radian(old_idx)
-        rad_norm = np.mod(rad, 2.0 * np.pi)
-        return int(np.argmin(np.abs(circ_grid - rad_norm)))
-
     if isinstance(actions, dict):
-        new_actions = actions.copy()
-        if 'lin' in actions and actions['lin'] is not None:
+        new_actions = {k: v for k, v in actions.items() if k != 'cat'}
+
+        if 'cat' in actions and actions['cat'] is not None:
+            cat = np.array(actions['cat'])
+            if cat.ndim == 1:
+                # single sample: cat shape (2,) -> treat as one row
+                cat = cat.reshape(1, -1)
+            v_col = cat[:, 0]
+            h_col = cat[:, 1]
+            new_actions['lin']  = np.array([map_lin(x) for x in v_col], dtype=np.int64).reshape(-1, 1)
+            new_actions['circ'] = h_col.astype(np.int64).reshape(-1, 1)
+
+        if 'lin' in actions and actions['lin'] is not None and 'cat' not in actions:
             a = np.array(actions['lin']).reshape(-1)
             new_actions['lin'] = np.array([map_lin(x) for x in a], dtype=np.int64).reshape(-1, 1)
-        if 'circ' in actions and actions['circ'] is not None:
-            a = np.array(actions['circ']).reshape(-1)
-            new_actions['circ'] = np.array([map_circ(x) for x in a], dtype=np.int64).reshape(-1, 1)
+
         return new_actions
 
     if isinstance(actions, list):
         new_list = []
         for item in actions:
-            it = item.copy()
-            if 'lin' in item:
+            it = {k: v for k, v in item.items() if k != 'cat'}
+            if 'cat' in item:
+                cat = np.asarray(item['cat']).reshape(-1)
+                it['lin']  = map_lin(cat[0])
+                it['circ'] = int(cat[1])
+            elif 'lin' in item:
                 it['lin'] = map_lin(item['lin'])
-            if 'circ' in item:
-                it['circ'] = map_circ(item['circ'])
             new_list.append(it)
         return new_list
 
@@ -533,7 +548,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
         local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
         local_agent = ClockwisePPO(
-            actor=ClockwiseActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
+            actor=ClockwiseActorWrapper(local_actor, action_dims_dict, None, device_worker, circ_angles=[0, np.pi/3, np.pi/2, np.pi, -np.pi/2, -np.pi/3]).to(device_worker),
             critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
             actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
             lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
@@ -545,7 +560,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         # 【修改 2】同样为对手创建一个 dummy critic
         adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
         adv_agent = ClockwisePPO(
-            actor=ClockwiseActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
+            actor=ClockwiseActorWrapper(adv_actor, action_dims_dict, None, device_worker, circ_angles=[0, np.pi/3, np.pi/2, np.pi, -np.pi/2, -np.pi/3]).to(device_worker),
             critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
             actor_lr=0, critic_lr=0, 
             lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
@@ -1148,7 +1163,7 @@ def run_MLP_simulation(
     # 3. 创建神经网络
     actor_net = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict, init_std=1.5).to(device)
     critic_net = ValueNet(state_dim, hidden_dim).to(device)
-    actor_wrapper = ClockwiseActorWrapper(actor_net, action_dims_dict, None, device).to(device)
+    actor_wrapper = ClockwiseActorWrapper(actor_net, action_dims_dict, None, device, circ_angles=[0, np.pi/3, np.pi/2, np.pi, -np.pi/2, -np.pi/3]).to(device)
 
     student_agent = ClockwisePPO(
         actor=actor_wrapper, 
