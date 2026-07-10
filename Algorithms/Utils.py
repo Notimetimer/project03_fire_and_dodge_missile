@@ -349,6 +349,50 @@ class CircularDiscretizedDistribution:
         return torch.argmax(self.probs, dim=-1)
 
 
+class LinearDiscretizedDistribution_NL:
+    """
+    线性空间离散化分布 (不规则采样版本)。
+    直接传入物理角度列表作为支撑点，高斯核计算 logits。
+    适用于采样点不均匀分布的线性区间。
+    """
+    def __init__(self, mu, std, points=[pi/4, pi/8, 0.0, -pi/8, -pi/2], eps=1e-8):
+        """
+        Args:
+            mu:     (batch_size, 1) 神经网络输出的均值 (tanh 后的值，范围 [-1,1])。
+            std:    (batch_size, 1) 等效标准差。
+            points: 物理角度列表，长度即为档位数。
+        """
+        self.device = mu.device
+        self.points = torch.tensor(points, dtype=torch.float32, device=self.device)
+        self.n = len(points)
+        self.eps = eps
+
+        self.mu = mu
+        self.std = torch.as_tensor(std, device=self.device).clamp(min=1e-3)
+        self.tau_inv = 1.0 / (2.0 * self.std.pow(2) + eps)
+
+        # logits: -(v - mu)^2 / (2*sigma^2), shape (batch, n)
+        dist_sq = (self.points - self.mu).pow(2)
+        self.logits = -dist_sq * self.tau_inv
+
+        self.probs = F.softmax(self.logits, dim=-1)
+        self.dist = torch.distributions.Categorical(probs=self.probs)
+
+    def sample(self):
+        a = self.dist.sample()
+        return a, self.logits
+
+    def log_prob(self, a):
+        return self.dist.log_prob(a)
+
+    def entropy(self):
+        return self.dist.entropy()
+
+    @property
+    def mean_idx(self):
+        return torch.argmax(self.probs, dim=-1)
+
+
 class CircularDiscretizedDistribution_NL:
     """
     圆周空间离散化分布 (不规则采样版本)。

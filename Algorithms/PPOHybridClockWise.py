@@ -13,7 +13,7 @@ import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, CircularDiscretizedDistribution, CircularDiscretizedDistribution_NL
+from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal, LinearDiscretizedDistribution, LinearDiscretizedDistribution_NL, CircularDiscretizedDistribution, CircularDiscretizedDistribution_NL
 from Algorithms.MLP_heads import ValueNet
 
 def sigmoid(x):
@@ -294,7 +294,7 @@ class HybridActorWrapper(nn.Module):
     未来如果引入 GRU，只需修改这个 Wrapper 或替换为 RecurrentActorWrapper，PPO 算法本身无需修改。
     """
     def __init__(self, policy_net, action_dims_dict, action_bounds=None, device='cpu', n_circle=24, n_linear=12,
-                 circ_angles=None):
+                 circ_angles=None, lin_angles=None):
         super(HybridActorWrapper, self).__init__()
         self.net = policy_net
         self.action_dims = action_dims_dict
@@ -315,6 +315,7 @@ class HybridActorWrapper(nn.Module):
         import math as _math
         _pi = _math.pi
         self.circ_angles = circ_angles if circ_angles is not None else [0, _pi/3, _pi/2, _pi, -_pi/2, -_pi/3]
+        self.lin_angles = lin_angles if lin_angles is not None else [_pi/4, _pi/8, 0.0, -_pi/8, -_pi/2]
         
         # 处理 Action Bounds
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
@@ -519,16 +520,16 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['lin']):
                 vec_v = vec_lin[:, i:i+1] # (Batch, 1)
                 std_v = std_all[:, i:i+1] # (Batch, 1)
-                dist = LinearDiscretizedDistribution(vec_v, std_v, n=self.n_linear)
+                dist = LinearDiscretizedDistribution_NL(vec_v, std_v, points=self.lin_angles)
 
                 idx = dist.sample()[0] if explore_opts.get('lin', True) else dist.mean_idx
                 lin_indices.append(idx)
                 lin_probs.append(dist.probs.cpu().detach().numpy())
             
             idx_stack = torch.stack(lin_indices, dim=-1).cpu().detach().numpy()
-            # convert discrete indices to radians for linear head: pi/2 - pi*index/(n-1)
-            lin_angles = np.pi/2.0 - np.pi * idx_stack / float(self.n_linear - 1)
-            actions_exec['lin'] = lin_angles if is_batch else lin_angles[0]
+            _lin_arr = np.array(self.lin_angles)
+            lin_angles_exec = _lin_arr[idx_stack.astype(int)]
+            actions_exec['lin'] = lin_angles_exec if is_batch else lin_angles_exec[0]
             actions_raw['lin'] = idx_stack
             actions_dist_check['lin'] = lin_probs
 
@@ -634,7 +635,7 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['lin']):
                 vec_v = vec_lin[:, i:i+1]
                 std_v = std_all[:, i:i+1]
-                dist = LinearDiscretizedDistribution(vec_v, std_v, n=self.n_linear)
+                dist = LinearDiscretizedDistribution_NL(vec_v, std_v, points=self.lin_angles)
                 
                 act_i = lin_actions[:, i]
                 log_probs += dist.log_prob(act_i).unsqueeze(-1)
@@ -703,7 +704,7 @@ class HybridActorWrapper(nn.Module):
             for i in range(self.action_dims['lin']):
                 vec_h = vec_lin[:, i:i+1]
                 std_h = std_all[:, i:i+1]
-                dist = LinearDiscretizedDistribution(vec_h, std_h, n=self.n_linear)
+                dist = LinearDiscretizedDistribution_NL(vec_h, std_h, points=self.lin_angles)
                 expert_idx = expert_lin[:, i]
                 
                 log_probs = F.log_softmax(dist.logits, dim=-1)
