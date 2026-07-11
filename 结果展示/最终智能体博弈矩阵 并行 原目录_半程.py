@@ -25,21 +25,30 @@ using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有�
 
 # --- 2. 核心辅助函数 ---
 
-def get_agents_by_rein_desc(log_dir, top_n=80):
+def get_agents_halfprog_desc(log_dir, top_n=80):
     """
-    扫描 log_dir 中所有 actor_rein{N}.pt 文件，
-    按序号 N 降序排列，取前 top_n 个。
+    扫描 log_dir 中所有 actor_rein{N}.pt 文件：
+    1. 找出最大序号 max_idx
+    2. 只保留 N <= max_idx // 2 的文件（训练前半程）
+    3. 按序号 N 降序排列，取前 top_n 个
     """
     rein_pattern = re.compile(r'^actor_rein(\d+)\.pt$')
-    candidates = []
+    all_candidates = []
     for fname in os.listdir(log_dir):
         m = rein_pattern.match(fname)
         if m:
             idx = int(m.group(1))
-            candidates.append((idx, os.path.join(log_dir, fname)))
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    paths = [p for _, p in candidates[:top_n]]
-    print(f"  [{os.path.basename(log_dir)}] 按序号降序加载了 {len(paths)} 个智能体。")
+            all_candidates.append((idx, os.path.join(log_dir, fname)))
+    if not all_candidates:
+        print(f"  [{os.path.basename(log_dir)}] 未找到任何 actor_rein*.pt 文件。")
+        return []
+    max_idx = max(idx for idx, _ in all_candidates)
+    half_threshold = max_idx // 2
+    half_candidates = [(idx, p) for idx, p in all_candidates if idx <= half_threshold]
+    half_candidates.sort(key=lambda x: x[0], reverse=True)
+    paths = [p for _, p in half_candidates[:top_n]]
+    print(f"  [{os.path.basename(log_dir)}] max_idx={max_idx}, 半程阈值<={half_threshold}, "
+          f"候选{len(half_candidates)}个, 加载{len(paths)}个。")
     return paths
 
 # --- 保持原样，完全不改动 ---
@@ -172,7 +181,7 @@ if __name__ == "__main__":
             
         if not log_dir:
             raise FileNotFoundError(f"未找到任务目录: {name}")
-        teams.append(get_agents_by_rein_desc(log_dir, TEAM_SIZE))
+        teams.append(get_agents_halfprog_desc(log_dir, TEAM_SIZE))
 
     num_teams = len(teams)
 
@@ -228,7 +237,7 @@ if __name__ == "__main__":
 
     # 保存博弈矩阵为 CSV 以便后续分析/绘图
     os.makedirs(os.path.join(project_root, "结果展示", "outputs"), exist_ok=True)
-    csv_path = os.path.join(project_root, "结果展示", "outputs", "combat_matrix.csv")
+    csv_path = os.path.join(project_root, "结果展示", "outputs", "combat_matrix_half.csv")
     df = pd.DataFrame(results_matrix, index=team_labels, columns=team_labels)
     df.to_csv(csv_path, float_format="%.4f", encoding="utf-8-sig")
     print(f"博弈矩阵已保存到: {csv_path}")

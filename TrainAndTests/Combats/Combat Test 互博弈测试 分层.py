@@ -45,8 +45,8 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 if __name__ == "__main__":
 
     # 红方和蓝方分别使用不同的模型目录
-    red_dir_name = "SLWSA3C0.3-run-20260630-220403"
-    blue_dir_name = "SLWSPFSP0.3-run-20260618-221044"
+    red_dir_name = "SLWSPFSP0.3-run-20260618-221044"
+    blue_dir_name = "HLWSPFSP-run-20260616-130304"
 
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")

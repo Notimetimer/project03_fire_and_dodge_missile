@@ -1,40 +1,33 @@
 {
-  "baseline": "SLWSPFSP0.3",
+  "sota": "SLWSPFSP0.2",
   "stats": {
-    "SLWSPFSP0.5": {
-      "win": 35,
-      "draw": 23,
-      "loss": 22,
-      "win_rate": 0.58125,
-      "score": 46.5
+    "SLWSPFSP0.3": {
+      "win": 23,
+      "draw": 9,
+      "loss": 48,
+      "win_rate": 0.34375,
+      "score": 27.5
     },
     "HLWSPFSP": {
-      "win": 30,
-      "draw": 26,
+      "win": 29,
+      "draw": 27,
       "loss": 24,
-      "win_rate": 0.5375,
-      "score": 43.0
+      "win_rate": 0.53125,
+      "score": 42.5
     },
     "CSPFSP": {
-      "win": 53,
-      "draw": 22,
-      "loss": 5,
-      "win_rate": 0.8,
-      "score": 64.0
+      "win": 52,
+      "draw": 13,
+      "loss": 15,
+      "win_rate": 0.73125,
+      "score": 58.5
     },
-    "CSFixedOpp": {
-      "win": 74,
-      "draw": 6,
-      "loss": 0,
-      "win_rate": 0.9625,
-      "score": 77.0
-    },
-    "SLWSDPC-PFSP": {
-      "win": 28,
-      "draw": 31,
-      "loss": 21,
-      "win_rate": 0.54375,
-      "score": 43.5
+    "SLWSA3C0.3": {
+      "win": 59,
+      "draw": 14,
+      "loss": 7,
+      "win_rate": 0.825,
+      "score": 66.0
     }
   },
   "total_rounds": 80

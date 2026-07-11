@@ -129,9 +129,9 @@ def draw_combat_matrix(csv_path, team_labels=None,
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
     
-    # 调整刻度标签字号
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
+    # 调整刻度标签字号：上边缘X轴倾斜15度，左边缘Y轴倾斜15度
+    plt.xticks(fontsize=12, rotation=15, ha='left')
+    plt.yticks(fontsize=12, rotation=15, ha='right')
 
     # 使用传入的自定义文本
     if title:
@@ -140,7 +140,7 @@ def draw_combat_matrix(csv_path, team_labels=None,
     plt.ylabel(ylabel, fontsize=16)
 
     # 只需要原始边距，去掉下方文字说明
-    plt.subplots_adjust(top=0.82, bottom=0.12, left=0.15, right=0.95)
+    plt.subplots_adjust(top=0.78, bottom=0.12, left=0.2, right=0.95)
     if show:
         plt.show()
 
