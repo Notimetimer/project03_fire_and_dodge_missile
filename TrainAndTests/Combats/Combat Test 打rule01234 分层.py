@@ -217,7 +217,7 @@ if __name__ == "__main__":
                     # print()
 
                 # --- 记录数据 ---
-                history['time'].append(count * action_cycle_multiplier * dt_maneuver)
+                history['time'].append(count * dt_maneuver)
                 history['r_ny'].append(env.RUAV.Ny)
                 history['r_alpha'].append(env.RUAV.alpha_air * 180 / np.pi)
                 history['r_alt'].append(env.RUAV.alt)

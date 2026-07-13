@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import matplotlib.ticker as mticker
 import os
 
 
@@ -23,6 +24,11 @@ else:
     plt.rcParams['axes.labelsize'] = 12
     plt.rcParams['ytick.labelsize'] = 11
 
+    def fmt_mmss(x, pos):
+        m = int(x) // 60
+        s = int(x) % 60
+        return f"{m}:{s:02d}"
+
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
 
     def add_max_min_ticks(ax, data_red, data_blue, precision=2):
@@ -44,7 +50,7 @@ else:
     # 1. 过载 (Ny) - 第一张图
     axes[0].plot(df['time'], df['r_ny'], label='R_UAV', color='crimson', linewidth=1.8)
     axes[0].plot(df['time'], df['b_ny'], label='B_UAV', color='royalblue', linestyle='--', alpha=0.7)
-    axes[0].set_ylabel('过载量 (g)')
+    axes[0].set_ylabel('$N_z$ / g')
     # axes[0].set_title('Normal Load Factor Comparison', fontweight='bold')
     axes[0].legend(loc='upper right')
     axes[0].grid(True, alpha=0.4)
@@ -53,7 +59,7 @@ else:
     # 2. 迎角 (Alpha) - 第二张图
     axes[1].plot(df['time'], df['r_alpha'], label='R_UAV', color='crimson', linewidth=1.8)
     axes[1].plot(df['time'], df['b_alpha'], label='B_UAV', color='royalblue', linestyle='--', alpha=0.7)
-    axes[1].set_ylabel('迎角 (°)')
+    axes[1].set_ylabel('${\\alpha}_{air}$ / °')
     # axes[1].set_title('Angle of Attack (Alpha) Comparison', fontweight='bold')
     axes[1].legend(loc='upper right')
     axes[1].grid(True, alpha=0.4)
@@ -62,7 +68,11 @@ else:
     # 3. 高度 (Alt) - 第三张图
     axes[2].plot(df['time'], df['r_alt'] / 1000, label='R_UAV', color='crimson', linewidth=1.8)
     axes[2].plot(df['time'], df['b_alt'] / 1000, label='B_UAV', color='royalblue', linestyle='--', alpha=0.7)
-    axes[2].set_ylabel('高度 (km)')
+    axes[2].set_ylabel('h / km')
+    # axes[2].legend(loc='upper right')
+    # axes[2].grid(True, alpha=0.4)
+    # axes[2].set_xlabel('时间 (min:s)')
+    # axes[2].xaxis.set_major_formatter(mticker.FuncFormatter(fmt_mmss))
     axes[2].legend(loc='upper right')
     axes[2].grid(True, alpha=0.4)
     add_max_min_ticks(axes[2], df['r_alt'] / 1000, df['b_alt'] / 1000, precision=2)
@@ -70,15 +80,16 @@ else:
     # 4. 马赫数 (Mach) - 第四张图
     axes[3].plot(df['time'], df['r_mach'], label='R_UAV', color='crimson', linewidth=1.8)
     axes[3].plot(df['time'], df['b_mach'], label='B_UAV', color='royalblue', linestyle='--', alpha=0.7)
-    axes[3].set_ylabel('马赫数')
-    axes[3].set_xlabel('时间 (s)')
+    axes[3].set_ylabel('Mach')
+    axes[3].set_xlabel('时间 (min:s)')
+    axes[3].xaxis.set_major_formatter(mticker.FuncFormatter(fmt_mmss))
     axes[3].legend(loc='upper right')
     axes[3].grid(True, alpha=0.4)
     add_max_min_ticks(axes[3], df['r_mach'], df['b_mach'], precision=2)
 
     # 调整布局 (增加边距)
     plt.tight_layout(pad=2.0)
-    plt.subplots_adjust(left=0.12, right=0.95, top=0.93, bottom=0.1)
+    plt.subplots_adjust(left=0.2, right=0.8, top=0.93, bottom=0.2)
     
     # 保存结果（可选）
     # save_path = os.path.join(current_dir, "Combat_VS_Rule4_Plots.png")
