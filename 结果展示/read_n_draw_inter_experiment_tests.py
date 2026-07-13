@@ -11,8 +11,8 @@ plt.rcParams['axes.unicode_minus'] = False
 
 def draw_combat_matrix(csv_path, team_labels=None, 
                        title=None,
-                       xlabel="Opponent Team (Column)",
-                       ylabel="Evaluated Team (Row)",
+                       xlabel=None,
+                       ylabel=None,
                        cbar_label="Win Rate",
                        color_theme='blue',
                        show=True):
@@ -46,9 +46,9 @@ def draw_combat_matrix(csv_path, team_labels=None,
                    f"does not match matrix dimension ({len(df.columns)}). Using CSV headers.")
              labels = df.columns.tolist()
         else:
-            labels = team_labels
+            labels = [str(lbl).replace('_', '-') for lbl in team_labels]
     else:
-        labels = df.columns.tolist()
+        labels = [str(col).replace('_', '-') for col in df.columns.tolist()]
 
     num_teams = len(labels)
     
@@ -62,9 +62,9 @@ def draw_combat_matrix(csv_path, team_labels=None,
         display_labels = labels
 
     # 4. 绘图部分
-    # 动态调整图片大小
-    fig_size = max(8, num_teams + 2)
-    plt.figure(figsize=(fig_size + 2, fig_size))
+    # 动态调整图片大小（更紧凑）
+    fig_size = max(6, num_teams + 1)
+    plt.figure(figsize=(fig_size + 1, fig_size))
     
     # [修改] 使用从白到深蓝的颜色映射
     end_color = (0.06, 0.1, 0.38)  # 深蓝色 （0.6， 0.05， 0.05)深红色
@@ -135,12 +135,14 @@ def draw_combat_matrix(csv_path, team_labels=None,
 
     # 使用传入的自定义文本
     if title:
-        plt.title(title, fontsize=18, pad=30)
-    plt.xlabel(xlabel, fontsize=16, labelpad=20)
-    plt.ylabel(ylabel, fontsize=16)
+        plt.title(title, fontsize=16, pad=15)
+    if xlabel:
+        plt.xlabel(xlabel, fontsize=14, labelpad=12)
+    if ylabel:
+        plt.ylabel(ylabel, fontsize=14)
 
-    # 只需要原始边距，去掉下方文字说明
-    plt.subplots_adjust(top=0.78, bottom=0.12, left=0.2, right=0.95)
+    # 更紧凑的边距
+    plt.subplots_adjust(top=0.85, bottom=0.08, left=0.18, right=0.95)
     if show:
         plt.show()
 

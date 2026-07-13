@@ -36,8 +36,6 @@ for csv_name, label in csv_files:
         csv_path = csv_path,
         team_labels = team_labels,
         title=f"Combat Matrix ({label})",
-        xlabel="Opponent / Column",
-        ylabel="Evaluated / Row",
         cbar_label="Pairwise Avg Score",
         show=False  # 设置为 False，不立即阻塞
     )

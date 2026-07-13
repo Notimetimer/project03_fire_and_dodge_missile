@@ -137,12 +137,12 @@ if __name__ == "__main__":
 
     # 2s
     mission_names = [
-        'SLWSPFSP0.3-run-20260618-221044',
-        'HLWSPFSP-run-20260616-130304',
-        'CSPFSP-run-20260615-234324',
-        'SLWSA3C0.3-run-20260630-220403',
-        'CSVersusRules-run-20260614-163906',
-        'SLVersesRules-run-20260620-113330',
+        'SLWS-PFSP-run-20260618-221044',
+        'HLWS-PFSP-run-20260616-130304',
+        'PFSP-run-20260615-234324',
+        'SLWS-PFSP(A3C)-run-20260630-220403',
+        'FixedOpp-run-20260614-163906',
+        'SLWS-FixedOpp-run-20260712-113316',
     ]
     
     # team_labels = range(len(mission_names))

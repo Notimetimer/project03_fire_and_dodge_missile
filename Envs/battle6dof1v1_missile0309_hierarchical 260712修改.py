@@ -746,17 +746,16 @@ class Battle(object):
             dist_closest = 200e3
             for i, missile in enumerate(alive_enm_missiles):
                 distance_this_one = missile.distance
+                # [修改] 不论是否满足告警几何条件，始终跟踪最近导弹的真实方位信息（供critic使用）
+                if distance_this_one < dist_closest:
+                    dist_closest = distance_this_one
+                    threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
+                    threat_delta_theta = -missile.q_epsilon
+                    threat_distance = distance_this_one
                 # 告警距离大于导弹锁定距离，只要导弹雷达开机，就给告警信息
                 if missile.in_angle and missile.radar_on and distance_this_one < self.RWR_distance:
                     warning = 1
                     direct_threat = 1
-                    if distance_this_one < dist_closest:
-                        dist_closest = distance_this_one # 这个导弹目前最近
-                        threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
-                        threat_delta_theta = -missile.q_epsilon
-                    # 如果处于可测距范围(当作和告警距离一样远)，就报告威胁距离
-                    if 1:
-                        threat_distance = min(threat_distance, missile.distance)
                 else:
                     pass
                     # if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
@@ -959,6 +958,14 @@ class Battle(object):
         
         # [修改] 获取当前真实状态
         state = self.get_state(side) # np.stack(self.get_state(side)) stack用于多架无人机
+
+        # [修改] 若本帧无告警（warning==0），将导弹方位/距离信息覆盖回初始值，供actor观测
+        # critic通过reward_fn=1绕过此处，可看到真实最近导弹信息
+        if not reward_fn and state["warning"] == 0:
+            state["threat"][0] = cos(pi)   # cos(threat_delta_psi默认值pi)
+            state["threat"][1] = sin(pi)   # sin(threat_delta_psi默认值pi)
+            state["threat"][2] = 0.0        # threat_delta_theta默认值0
+            state["threat"][3] = self.RWR_distance  # threat_distance默认值
 
         # [新增] 增加时间戳，用于状态管理
         state['t'] = self.t

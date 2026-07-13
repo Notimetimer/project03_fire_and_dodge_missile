@@ -1799,6 +1799,148 @@ class PPOHybrid:
         return
 
     # =========================================================================
+    #  [New Method] 碎片化有监督机动保护 (水平指令头软约束)
+    # =========================================================================
+    def maneuver_il_protection(self, transition_dict, alpha=1.0, epochs=4, mini_batch=256, mask_on=0):
+        """
+        根据状态标志对水平机动头施加碎片化有监督约束，冻结backbone和其他动作头。
+
+        触发规则（仅针对 cat[1] 水平头）：
+          - missile_in_mid_term==0 且 warning==0：目标为动作索引 0（追踪）
+          - warning==1                          ：目标为动作索引 2/3/4（均等概率，标签平滑）
+
+        不满足上述任一条件的样本（如 missile_in_mid_term==1 且 warning==0）直接跳过。
+
+        Args:
+            transition_dict : 与 update() 相同格式的经验字典。
+            alpha           : 与 ADPC_update 相同，用于缩放学习率。
+            epochs          : 有监督训练的 epoch 数。
+            mini_batch      : 每个 mini-batch 的大小。
+            mask_on         : 传给 net forward 的 mask 开关。
+        """
+        def to_tensor(x, dtype):
+            if isinstance(x, np.ndarray):
+                return torch.tensor(x, dtype=dtype).to(self.device)
+            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+
+        # ── 读取 actor 输入 obs ────────────────────────────────────────────────
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            actor_inputs = to_tensor(transition_dict['obs'], torch.float)
+        else:
+            actor_inputs = to_tensor(transition_dict['states'], torch.float)
+
+        num_samples = actor_inputs.size(0)
+
+        # ── 从 obs 提取标志位 (obs2obs_check 中确认的列索引) ──────────────────
+        # col 3: missile_in_mid_term,  col 5: warning,  col 25: threat_distance (scaled)
+        missile_in_mid_term = actor_inputs[:, 3]          # (N,)
+        warning_flag        = actor_inputs[:, 5]          # (N,)
+        threat_distance     = actor_inputs[:, 25] * 10e3  # (N,) 还原为米
+
+        # ── 构造每个样本的有监督目标 (one-hot 软标签，水平头共7类) ────────────
+        # 满足条件1: missile_in_mid_term~0 且 warning~0 → 目标索引 0
+        # 满足条件2: warning~1                          → 目标索引 2/3/4 均等
+        # 其余: 跳过 (mask=0)
+        n_h = self.actor.net.cat_dims[1]  # 水平头类别数，应为 7
+
+        cond1 = (missile_in_mid_term < 0.5) & (warning_flag < 0.5)  # 追踪
+        cond2 = (warning_flag > 0.5) & (threat_distance < 15e3)       # 防御（近距告警）
+
+        active = (cond1 | cond2).float().unsqueeze(1)  # (N, 1)
+        if active.sum() < 1:
+            return  # 没有可监督的样本，直接跳过
+
+        # 软标签矩阵 (N, n_h)
+        soft_labels = torch.zeros(num_samples, n_h, device=self.device)
+        soft_labels[cond1, 0] = 1.0                   # 条件1: 只有动作0
+        soft_labels[cond2, 2] = 0.25                   # 条件2: 动作2/3/4 按 1:2:1
+        soft_labels[cond2, 3] = 0.50
+        soft_labels[cond2, 4] = 0.25
+
+        # active_masks（若存在）
+        if 'active_masks' in transition_dict:
+            env_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
+        else:
+            env_masks = torch.ones(num_samples, 1, device=self.device)
+
+        # ── 冻结 backbone / 其他动作头，仅放开 fc_cat ────────────────────────
+        net = self.actor.net
+
+        def set_requires_grad(module_or_param, flag):
+            if isinstance(module_or_param, nn.Module):
+                for p in module_or_param.parameters():
+                    p.requires_grad_(flag)
+            elif isinstance(module_or_param, nn.Parameter):
+                module_or_param.requires_grad_(flag)
+
+        set_requires_grad(net.net, False)
+        if hasattr(net, 'fc_mu'):
+            set_requires_grad(net.fc_mu, False)
+        if hasattr(net, 'log_std_cont'):
+            set_requires_grad(net.log_std_cont, False)
+        if hasattr(net, 'fc_bern'):
+            set_requires_grad(net.fc_bern, False)
+        # 只留 fc_cat 可训练
+        if hasattr(net, 'fc_cat'):
+            set_requires_grad(net.fc_cat, True)
+
+        # ── 缩放学习率 ────────────────────────────────────────────────────────
+        current_lr = self.actor_optimizer.param_groups[0]['lr']
+        self.actor_optimizer.param_groups[0]['lr'] = current_lr * alpha
+
+        mb_size = min(mini_batch, num_samples)
+        eps_loc = 1e-5
+
+        for _ in range(epochs):
+            idx_perm = torch.randperm(num_samples, device=self.device)
+            for start in range(0, num_samples, mb_size):
+                mb_idx = idx_perm[start: start + mb_size]
+
+                mb_obs    = actor_inputs[mb_idx]
+                mb_labels = soft_labels[mb_idx]           # (mb, n_h)
+                mb_active = active[mb_idx] * env_masks[mb_idx]  # (mb, 1)
+
+                active_sum = mb_active.sum()
+                if active_sum < eps_loc:
+                    continue
+
+                # 前向：只需要 cat 输出
+                actor_out = self.actor.net(mb_obs, mask_on=mask_on)
+                cat_probs_list = actor_out['cat']  # list of (mb, dim_i)
+
+                # 取水平头 (index 1)
+                h_probs = cat_probs_list[1]  # (mb, n_h)
+
+                # KL(软标签 || 模型分布) = sum(p_target * log(p_target / p_model))
+                # 等价于交叉熵 - 标签熵；因标签熵为常数，直接用交叉熵梯度方向即可
+                # 使用 NLL = -sum(label * log(probs))
+                log_probs = torch.log(h_probs.clamp(min=1e-8))  # (mb, n_h)
+                nll_per_sample = -(mb_labels * log_probs).sum(dim=-1, keepdim=True)  # (mb, 1)
+
+                cat_h_loss = (nll_per_sample * mb_active).sum() / (active_sum + eps_loc)
+
+                self.actor_optimizer.zero_grad()
+                cat_h_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
+                self.actor_optimizer.step()
+
+        # ── 恢复所有模块梯度 ─────────────────────────────────────────────────
+        set_requires_grad(net.net, True)
+        if hasattr(net, 'fc_mu'):
+            set_requires_grad(net.fc_mu, True)
+        if hasattr(net, 'log_std_cont'):
+            set_requires_grad(net.log_std_cont, True)
+        if hasattr(net, 'fc_cat'):
+            set_requires_grad(net.fc_cat, True)
+        if hasattr(net, 'fc_bern'):
+            set_requires_grad(net.fc_bern, True)
+
+        # ── 还原学习率 ────────────────────────────────────────────────────────
+        self.actor_optimizer.param_groups[0]['lr'] = current_lr
+
+        return
+
+    # =========================================================================
     #  [New Method] 将平铺的 transition_dict 重排为 (num_seqs, seq_len, ...) 形状
     # =========================================================================
     def reshape_for_rnn(self, transition_dict, seq_len):

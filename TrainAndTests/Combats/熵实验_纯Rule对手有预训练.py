@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = '纯Rule_混规则对手_挑战_并行_训练满熵项'
+mission_name = 'WS-FixedOpp'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -123,7 +123,7 @@ if __name__=='__main__':
             'Rule_4': 1200,
             'Rule_5': 1200,
             },
-        self_play_type = 'FSP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
