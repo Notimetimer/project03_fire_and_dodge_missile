@@ -32,16 +32,21 @@ def set_axes_equal(ax, z_min=0, z_max=20, pad=0.05):
     y_range = abs(y_limits[1] - y_limits[0])
     x_middle = np.mean(x_limits)
     y_middle = np.mean(y_limits)
-    x_half = x_range / 2 * (1 + pad)
-    y_half = y_range / 2 * (1 + pad)
-    ax.set_xlim3d([x_middle - x_half, x_middle + x_half])
-    ax.set_ylim3d([y_middle - y_half, y_middle + y_half])
+    # x_half = x_range / 2 * (1 + pad)
+    # y_half = y_range / 2 * (1 + pad)
+    # ax.set_xlim3d([x_middle - x_half, x_middle + x_half])
+    # ax.set_ylim3d([y_middle - y_half, y_middle + y_half])
+    # 取 x/y 最大跨度，强制 N/E 等宽
+    xy_half = max(x_range, y_range) / 2 * (1 + pad)
+    ax.set_xlim3d([x_middle - xy_half, x_middle + xy_half])
+    ax.set_ylim3d([y_middle - xy_half, y_middle + xy_half])
     ax.set_zlim3d([z_min, z_max])
     ax.set_zticks(np.arange(z_min, z_max + 1, 5))
 
     # box_aspect 按实际跨度比，使三轴单位长度视觉相等
     z_range = z_max - z_min
-    ax.set_box_aspect([x_range, y_range, z_range])
+    xy_span = xy_half * 2
+    ax.set_box_aspect([xy_span, xy_span, z_range])
 
 
 def _perp_basis(d):
@@ -168,8 +173,8 @@ def plot_replay(data: dict, save_path: str = None):
     add_direction_arrows(ax3, bx, by, bz, t_arr, color='royalblue', interval=30, arrow_len=2.0)
 
     # 起点（大点）和终点（小点）
-    ax3.scatter(rx[0],  ry[0],  rz[0],  color='crimson',   marker='o', s=80,  zorder=5)
-    ax3.scatter(bx[0],  by[0],  bz[0],  color='royalblue',  marker='o', s=80,  zorder=5)
+    ax3.scatter(rx[0],  ry[0],  rz[0],  color='crimson',   marker='o', s=40,  zorder=5)
+    ax3.scatter(bx[0],  by[0],  bz[0],  color='royalblue',  marker='o', s=40,  zorder=5)
     ax3.scatter(rx[-1], ry[-1], rz[-1], color='crimson',   marker='o', s=20,  zorder=5)
     ax3.scatter(bx[-1], by[-1], bz[-1], color='royalblue',  marker='o', s=20,  zorder=5)
 
