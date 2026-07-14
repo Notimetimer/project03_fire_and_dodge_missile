@@ -49,7 +49,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
         end_reward_weight=1.0, 
         fire_reward_weight=None,
-        fire_inside_weight = None, ends_in_bvr=0):
+        fire_inside_weight = None, ends_in_bvr=0,
+        proxy_warning_dist=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
 
         if fire_reward_weight is None:
             fire_reward_weight=1.0
@@ -99,7 +100,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             self.b_dist_seq.append(b_dist)
             self.last_record_t = self.t
 
-        self.close_range_kill() # 允许跑刀
+        if len(self.alive_missiles)==0:
+            self.close_range_kill() # 允许跑刀
         self.update_missile_state()
         
         if side == 'r':
@@ -189,6 +191,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         threat_distance = ego_states["threat"][3]
         delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
         delta_theta_threat = ego_states["threat"][2]
+
+        # 有效威胁判断：真实 RWR 告警，或代理告警距离触发（critic能看到真实导弹方位）
+        if proxy_warning_dist is not None:
+            effective_threat = warning or (threat_distance < proxy_warning_dist)
+        else:
+            effective_threat = warning
         
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
@@ -256,7 +264,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #     r_constraint -= 0.0005 * (1 - ego.dead) # 0.001
 
         # 角度奖励
-        if not warning:
+        if not effective_threat:
             # 进攻引导
             if not missile_in_mid_term:
                 # if len(alive_ally_missiles) == 0:
@@ -274,9 +282,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 # r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
                 r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
                 r_constraint += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
-        # 防御引导
-        if warning:
-            # 受到威胁应该三九线/置尾和下高
+        # 防御引导（真实RWR告警或代理告警距离触发）
+        if effective_threat:
+            # 受到威胁应该三九线/置尾和下高，始终用最近导弹方位
             r_constraint += 2 * min(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
             # r_constraint += 2 * min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
             r_constraint += 2 * (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
@@ -397,11 +405,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
-                    r_event1 = r_event + 0 * end_reward_weight
+                    r_event1 = r_event - 180 * end_reward_weight # 双杀没什么好处
                     r_event2 = r_event + 180 * end_reward_weight # 双杀当做赢
                     r_event3 = r_event - 180 * end_reward_weight # 双杀当做输
                 else:
-                    r_event1 = r_event + 0 * end_reward_weight
+                    r_event1 = r_event - 90 * end_reward_weight # 能把时间拖完算你牛逼
                     r_event2 = r_event - 180 * end_reward_weight # 双杀策略
                     r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
                 
