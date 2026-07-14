@@ -186,6 +186,6 @@ def run_rules(gamma=0.995, weight_reward=np.array([1,0,0]), action_cycle_multipl
 
 
 if __name__=='__main__':
-    for current_rule in [2]:
+    for current_rule in [0]:
         run_rules(current_rule=current_rule)
 
