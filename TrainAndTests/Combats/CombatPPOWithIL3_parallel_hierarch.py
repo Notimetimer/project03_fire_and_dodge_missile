@@ -2077,11 +2077,12 @@ def run_MLP_simulation(
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:
                     student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
-                # # 机动概率保护
-                # if batch_idx % 10 == 0 and \
+                
+                # # 机动概率保护，未被调好，无法区分告警状态的有无，加上进攻引导就不会躲，加上防御引导又不会进攻
+                # if  \
                 #     (batch_blue_avg_fire_delta_psi*180/pi > 60 or
                 #         batch_blue_avg_delta_psi_threat*180/pi < 90):
-                #     student_agent.maneuver_il_protection(transition_dict, alpha=0.1)
+                #     student_agent.maneuver_il_protection(transition_dict, alpha=3, epochs=12)
 
                 # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
                 current_ppo_grad = student_agent.pre_clip_actor_grad

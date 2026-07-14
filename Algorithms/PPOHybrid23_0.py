@@ -1847,6 +1847,7 @@ class PPOHybrid:
         cond2 = (warning_flag > 0.5) & (threat_distance < 15e3)       # 防御（近距告警）
 
         active = (cond1 | cond2).float().unsqueeze(1)  # (N, 1)
+        # active = (cond2).float().unsqueeze(1)  # (N, 1)
         if active.sum() < 1:
             return  # 没有可监督的样本，直接跳过
 
