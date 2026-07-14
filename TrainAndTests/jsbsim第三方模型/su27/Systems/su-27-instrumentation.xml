@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+ 
+<!-- Su-27 Insrumentation helper -->
+<PropertyList>
+	<flasher-anim>0</flasher-anim>
+	<IPV-mode>NAV</IPV-mode>
+	<N010-radar><emitting type="bool">false</emitting></N010-radar>
+	<HUD>
+	<mode>EnRoute</mode>
+	<visible>0</visible> <!-- Flag prop for hud object creation.-->
+	<brightness>0.7</brightness>
+	</HUD>
+	<PNK-10>
+		<active type="bool">true</active>
+		<ready type="bool">true</ready>
+		
+		<!-- Active PNK mode is: 0 : "PROGRAM", 1: "RSBN", 1.1: "ARC".-->
+		<active-mode type="double">1</active-mode>
+		<radial type="double">0</radial>
+		<desired-course type="double">0</desired-course>
+		<PNK-Power-Switch-Pos type="int">0</PNK-Power-Switch-Pos>
+		<guidance-mode type="int">3</guidance-mode>		<!-- PNK guidance auto/manual: 0 for AUTO, 1 for MANUAL,3 for pilot assist -->
+<!--
+		<in-use>0</in-use>
+-->
+		<manual-speed>0.9</manual-speed>
+		<manual-alt>4</manual-alt>
+	</PNK-10>
+	<PU-184>
+		<!-- Pretend that NPN is PPM9 -->	
+		<active-PPM type="int">1</active-PPM>
+		<PPM1>325</PPM1>
+		<PPM2>310</PPM2>
+		<PPM3>350</PPM3>
+		<PPM4>350</PPM4>
+		<PPM5>350</PPM5>
+		<PPM6>350</PPM6>
+		<PPM7>350</PPM7>
+		<PPM8>350</PPM8>
+		<NPN>385</NPN>
+		<ILS-channel>1</ILS-channel>
+		<KOM-ANT>0</KOM-ANT>
+	</PU-184>
+	<RSBN>
+		<!-- Pretend that RSBN AER is PPM**(Still to decide  or find alternative way !!) -->
+		<active-PPM type="int">1</active-PPM>
+		<active-AER type="int">1</active-AER>
+		<AER>108.50</AER>
+		<AER-alt>114.20</AER-alt>
+		<AER-alt2>114.20</AER-alt2>
+		<PPM1>116.5</PPM1>
+		<PPM2>114.2</PPM2>
+		<PPM3>114.2</PPM3>
+		<PPM4>114.2</PPM4>
+		<PPM5>114.2</PPM5>
+		<PPM6>114.2</PPM6>
+		<PPM7>114.2</PPM7>
+		<PPM8>114.2</PPM8>
+		<PPM9>114.2</PPM9>
+	</RSBN>
+	<OC-controller>
+		<!-- staus : 1- ready,3- waiting for PPM input,5- waiting for AER input,7:waiting for wp ,
+		 so we keep 0,2,4.... for future improvements-->
+		<status>1</status>
+		<active-wpt>1</active-wpt>
+	</OC-controller>
+	
+	<Engines-Fire-emergency-panel>
+		<Start-cover-pos type="int">0</Start-cover-pos>
+		<Switch-restrict-pos type="int">0</Switch-restrict-pos>
+	</Engines-Fire-emergency-panel>
+	
+	<Energy-Engines-panel>
+	<Crank-Start-APU-Left-pos type="int">0</Crank-Start-APU-Left-pos>    <!-- 0= StartEngines pos; 1= Crank Engine; -1= Crank GTD  -->
+	<Crank-Start-APU-Right-pos type="int">0</Crank-Start-APU-Right-pos>
+	<Emergency-alternator-0-off-COVER type="int">0</Emergency-alternator-0-off-COVER>
+	<Emergency-alternator-1-off-COVER type="int">0</Emergency-alternator-1-off-COVER>
+	<Anti-ice-switch-pos type="int">0</Anti-ice-switch-pos>
+	</Energy-Engines-panel>
+	
+	<SDU-panel>
+	<SDU-off-switch-cover-pos type="int">0</SDU-off-switch-cover-pos>
+	<SDU-fail-off-cover type="int">0</SDU-fail-off-cover>
+	
+	</SDU-panel>
+	
+</PropertyList>

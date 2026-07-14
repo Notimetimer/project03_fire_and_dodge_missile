@@ -1,0 +1,234 @@
+<?xml version="1.0"?>
+
+
+ 
+<system name="SDU-10">
+    
+    
+    <property value="1">/su-27/SDU-10/serviceable</property>
+    <property value="1">/su-27/SDU-10/active</property>.
+    <property value="1">/su-27/SDU-10/pitch-trim-active </property>
+    
+    
+    <property value="1">/su-27/instrumentation/ASI/airspeed-kmh</property>   
+     
+    
+    <property value="1">/su-27/SDU-10/pitch-limiter-switch-active</property>
+    <property value="0">/su-27/SDU-10/pitch-limiter-gain</property>
+    
+    <property value="0">/su-27/SDU-10/pitch-stab-gain</property>
+	<property value="1">/su-27/SDU-10/pitch-stab-switch-active</property>
+    
+	<property value="0">/su-27/SDU-10/pitch-trim-sum</property>
+
+
+   
+    
+
+    
+    <channel name = "Pitch-limiter">
+        
+<!--
+    This is a logics switch controls the state of serviceability of the FBW system
+     and restrict engaging if Not ready to operate.
+     [TODO]: this still needs to check for power availability !
+--> 
+    <switch name = "FBW-Status Logical switch">
+    <default value= "1"/>
+     <test logic="OR" value="0">
+         /su-27/SDU-10/serviceable NE 1
+    </test>
+    <output>/su-27/SDU-10/active</output>
+    </switch>
+<!--
+    ***************************************************
+-->
+
+	<summer name="/su-27/SDU-10/pitch-trim-sum">
+		<input>/su-27/SDU-10/pitch-limiter-gain</input>
+		<input>/su-27/SDU-10/pitch-stab-gain</input>
+		<clipto>
+			<min>-1</min>
+			<max>1</max>
+		</clipto>
+	</summer>
+
+    <switch name = "pitch-trim-switch">
+    <default value= "/su-27/SDU-10/pitch-trim-sum"/>
+     <test logic="OR" value="0">
+         /su-27/SDU-10/pitch-trim-active EQ 0 
+         /su-27/SDU-10/active EQ 0
+         /su-27/instrumentation/ASI/airspeed-kmh LE 1
+    </test>
+    <output>/controls/flight/elevator-trim</output>
+    </switch>
+
+
+
+
+
+<!--***********************************************-->
+
+    <switch name = "pilot-stick-status">
+    <default value= "0"/>
+     <test logic="OR" value="0">
+         /su-27/SDU-10/pitch-trim-active EQ 0 
+         /su-27/SDU-10/active EQ 0
+         /su-27/instrumentation/ASI/airspeed-kmh LE 1
+	  	 /controls/flight/elevator GE  0.15
+		 /controls/flight/elevator LE -0.15
+    </test>
+    <output>/su-27/SDU-10/pilot-input-state</output>
+    </switch>
+
+    <scheduled_gain name="/su-27/SDU-10/pitch-limiter-gain-raw">
+	    <input>/orientation/alpha-deg</input>
+	    <gain>1</gain>
+	    <table>
+		    <independentVar>/su-27/instrumentation/ASI/airspeed-kmh</independentVar>
+		    <tableData>
+		    300    0.01
+		    800    0.07
+		    1200   0.10
+		    1600   0.12
+		    </tableData>
+	    </table>
+	    <clipto>
+		    <min>-1</min>
+		    <max>1</max>
+	    </clipto>
+    </scheduled_gain>
+    
+    <switch name = "pitch-limiter-switch">
+    <default value= "/su-27/SDU-10/pitch-limiter-gain-raw"/>
+     <test logic="OR" value="0">
+         /su-27/SDU-10/pitch-limiter-switch-active EQ 0
+         /su-27/SDU-10/active EQ 0
+         /su-27/instrumentation/ASI/airspeed-kmh LE 1
+<!--
+         /controls/flight/elevator LE  0.15
+         /controls/flight/elevator GE -0.15
+-->
+
+<!--
+         /orientation/pitch-deg GE  80
+         /orientation/pitch-deg LE -80
+-->
+
+    </test>
+    <output>/su-27/SDU-10/pitch-limiter-gain</output>
+    </switch>
+
+	<pure_gain name="/su-27/SDU-10/pitch-stab-gain-raw">
+		<input>/orientation/pitch-rate-degps </input>
+		<gain>0.036</gain>
+		<clipto>
+			<min>-1</min>
+			<max>1</max>
+		</clipto>
+	</pure_gain>
+	
+    <switch name = "pitch-stab-switch">
+    <default value= "/su-27/SDU-10/pitch-stab-gain-raw"/>
+     <test logic="OR" value="0">
+		/su-27/SDU-10/pitch-stab-switch-active EQ 0
+		/su-27/SDU-10/active EQ 0
+		/su-27/instrumentation/ASI/airspeed-kmh LE 1
+		
+
+
+		/orientation/pitch-rate-degps GE  5
+		/orientation/pitch-rate-degps LE -5
+     
+    </test>
+    <output>/su-27/SDU-10/pitch-stab-gain</output>
+    </switch>
+
+
+    </channel>
+    
+    <property value="1">/su-27/SDU-10/roll-limiter-switch-active</property>
+    
+    
+    <channel name = "Roll-limiter">
+        
+
+    <scheduled_gain name="/su-27/SDU-10/roll-limiter-gain">
+    <input>/controls/flight/aileron</input>
+    <gain>1</gain>
+    <table>
+    <independentVar>/su-27/instrumentation/ASI/airspeed-kmh</independentVar>
+    <tableData>
+    300    -0.77
+    800    -0.80
+    1200   -0.84
+    1600   -0.88
+    </tableData>
+    </table>
+    <clipto>
+    <min>-0.35</min>
+    <max>0.35</max>
+    </clipto>
+    </scheduled_gain>
+
+
+<!--
+a scheduled gain that mutiply controls/aileron by 0.xx 
+so it transfer stick input * reduce-config = trim with a IAS table (or alpha )
+-->
+
+    <switch name = "roll-limiter-switch">
+    <default value= "/su-27/SDU-10/roll-limiter-gain"/>
+     <test logic="OR" value="0">
+         /su-27/SDU-10/roll-limiter-switch-active EQ 0
+         /su-27/SDU-10/active EQ 0
+         /su-27/instrumentation/ASI/airspeed-kmh LE 270
+         /orientation/roll-rate-degps GE 400
+         /orientation/roll-rate-degps LE -400
+    </test>
+    <output>/controls/flight/aileron-trim</output>
+    </switch>
+    
+    
+    </channel>
+    
+    <property value="0">/su-27/SDU-10/yaw-limiter-switch-active</property>
+    
+    <channel>
+        
+    
+    
+    <scheduled_gain name="/su-27/SDU-10/yaw-limiter-gain">
+    <input>/orientation/yaw-rate-degps</input>
+    <gain>1</gain>
+    <table>
+    <independentVar>/su-27/instrumentation/ASI/airspeed-kmh</independentVar>
+    <tableData>
+    300    -0.09
+    800    -0.06
+    1200   -0.04
+    1600   -0.02
+    </tableData>
+    </table>
+    <clipto>
+    <min>-1</min>
+    <max>1</max>
+    </clipto>
+    </scheduled_gain>
+    
+    <switch name = "yaw-limiter-switch">
+    <default value= "/su-27/SDU-10/yaw-limiter-gain"/>
+     <test logic="OR" value="0">
+         /su-27/SDU-10/yaw-limiter-switch-active EQ 0
+         /su-27/SDU-10/active EQ 0
+         /controls/flight/rudder LE -0.1
+         /controls/flight/rudder GE 0.1
+    </test>
+    <output>/controls/flight/rudder-trim</output>
+    </switch>
+    
+    </channel>
+    
+    
+
+</system>
