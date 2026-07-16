@@ -405,18 +405,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
-                    r_event1 = r_event - 180 * end_reward_weight # 双杀没什么好处
+                    both_survived_bvr = 0
+                    if len(self.alive_missiles)==0:
+                        if self.close_range_kill():
+                            both_survived_bvr = 1
+                    if not both_survived_bvr:
+                        r_event1 = r_event - 180 * end_reward_weight # 超视距双杀与负同罚
+                    else:
+                        r_event1 = r_event + 0 * end_reward_weight # 近距对头可视为超视距双存活
                     r_event2 = r_event + 180 * end_reward_weight # 双杀当做赢
                     r_event3 = r_event - 180 * end_reward_weight # 双杀当做输
-                else:
-                    r_event1 = r_event - 90 * end_reward_weight # 能把时间拖完算你牛逼
+                else: # 真正的双存活
+                    r_event1 = r_event + 0 * end_reward_weight # 能把时间拖完算你牛逼
                     r_event2 = r_event - 180 * end_reward_weight # 双杀策略
                     r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
                 
-                # # “同归于尽收回导弹浪费惩罚，先死才有补偿，后死照样惩罚”
-                # if enm.dead and getattr(ego, 'last_dead', False):
-                #     r_event += 15 * ego.ammo
-            
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
