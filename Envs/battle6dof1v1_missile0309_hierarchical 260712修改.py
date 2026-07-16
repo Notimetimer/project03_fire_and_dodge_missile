@@ -961,7 +961,8 @@ class Battle(object):
 
         # [修改] 若本帧无告警（warning==0），将导弹方位/距离信息覆盖回初始值，供actor观测
         # critic通过reward_fn=1绕过此处，可看到真实最近导弹信息
-        if not reward_fn and state["warning"] == 0:
+        # Critic能看到来袭导弹，不论告警灯亮起与否
+        if (not reward_fn) and state["warning"] == 0:
             state["threat"][0] = cos(pi)   # cos(threat_delta_psi默认值pi)
             state["threat"][1] = sin(pi)   # sin(threat_delta_psi默认值pi)
             state["threat"][2] = 0.0        # threat_delta_theta默认值0
