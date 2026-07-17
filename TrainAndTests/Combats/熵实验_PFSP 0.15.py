@@ -1,20 +1,19 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
-# [SAC] 使用 SAC 版本的训练主模块
-from CombatPPOWithIL3_parallel_hierarchTD3 import *
+from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415")
+#     r"PFSP_纯规则对手0.15-run-20260714-143600")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'TD3_PFSP_0.3'
+mission_name = 'PFSP_0.15'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -26,13 +25,13 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.15 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -48,15 +47,7 @@ dt_move = 0.07 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这�
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1  # [调试] 原为 5*，临时改为 1* 让 update 更快启动
-
-# [SAC] off-policy 专用超参数
-# replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
-replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（测试用）
-sac_tau = 0.001                      # 目标网络软更新系数 0.005
-sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
-sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
-replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
+transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -93,7 +84,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20（测试用）
+        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -123,9 +114,6 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
-        # [SAC] off-policy 专用参数
-        replay_buffer_size=replay_buffer_size,
-        replay_buffer_save_interval=replay_buffer_save_interval,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug
