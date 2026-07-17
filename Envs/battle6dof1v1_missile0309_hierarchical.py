@@ -336,7 +336,10 @@ class Battle(object):
         #             self.dt_move = 0.02
         #             break
 
-        report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
+        full_move_steps, remainder = divmod(self.dt_maneuver, self.dt_move)
+        substep_dts = [self.dt_move] * int(full_move_steps)
+        if remainder > 1e-12:
+            substep_dts.append(remainder)
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
         self.t = round(self.t, 3)  # 保留3位小数
@@ -429,7 +432,7 @@ class Battle(object):
         self.r_can_guide = 0
         self.b_can_guide = 0
 
-        for j1 in range(int(report_move_time_rate)):
+        for substep_dt in substep_dts:
             # 飞机移动
             for UAV, action in zip(self.UAVs, actions):
                 if UAV.dead:
@@ -506,7 +509,7 @@ class Battle(object):
                     if UAV.mach > 0.85:
                         elevator=np.clip(elevator, -0.72, 0.72)
 
-                    UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=self.dt_move)
+                    UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=substep_dt)
                 else:
                     UAV.move(target_height, delta_heading, target_speed, relevant_height=True, e2e=0, rudder=rudder)
 
@@ -544,7 +547,7 @@ class Battle(object):
                             else:
                                 self.b_can_guide = max(1, self.b_can_guide)
                 last_vmt_, last_pmt_, _, _, _, _, _, _, _, _ = \
-                    missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
+                    missile.step(target_info, dt=substep_dt, datalink=has_datalink)
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
                 # 导弹慢速自爆，节省计算量
@@ -557,9 +560,9 @@ class Battle(object):
                 # if missile.t > missile.t_max:  # 超时自爆
                 #     missile.dead = True
                 # 超出电池工作时间引信不工作
-                if 0 + self.dt_move <= missile.t <= missile.t_max and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
+                if 0 + substep_dt <= missile.t <= missile.t_max and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
-                                                       dt=self.dt_move, kill_range=missile.kill_range)
+                                                       dt=substep_dt, kill_range=missile.kill_range)
                     if hit:
                         print(target.side, 'is hit')
                         missile.dead = True
