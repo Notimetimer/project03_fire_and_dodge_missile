@@ -110,7 +110,7 @@ if __name__=='__main__':
             # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             },
-        self_play_type = 'PFSP_challenge', # PFSP, FSP, SP, None(非自博弈)
+        self_play_type = 'PFSP_balanced', # PFSP, FSP, SP, None(非自博弈)
         hist_agent_as_opponent = 0,
         sigma_elo = 500,  # 200,
         WARM_UP_STEPS = 100e3, # 500e3, # 1e3 为debug

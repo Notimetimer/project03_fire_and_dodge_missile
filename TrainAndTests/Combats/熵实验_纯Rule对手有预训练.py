@@ -121,7 +121,7 @@ if __name__=='__main__':
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            'Rule_5': 1200,
+            # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈

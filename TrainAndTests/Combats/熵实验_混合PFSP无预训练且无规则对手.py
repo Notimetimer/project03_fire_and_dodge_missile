@@ -117,7 +117,7 @@ if __name__=='__main__':
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
         }, # 不允许规则对手进入，这样就是纯自博弈了, 
-        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,

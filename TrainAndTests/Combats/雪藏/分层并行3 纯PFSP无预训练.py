@@ -113,7 +113,7 @@ if __name__=='__main__':
         init_elo_ratings = {
             }, # 
         # init_elo_ratings = {}, # 纯自博弈
-        self_play_type = 'PFSP_challenge', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
         use_sil = 0,
         sigma_elo = 500,  # 200,
