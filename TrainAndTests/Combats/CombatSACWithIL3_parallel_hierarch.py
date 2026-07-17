@@ -25,7 +25,7 @@ sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
-from Algorithms.TD3Hybrid import TD3Hybrid, PolicyNetHybrid, HybridActorWrapper, QNetHybrid, ReplayBufferHybrid
+from Algorithms.SACHybrid import SACHybrid, PolicyNetHybrid, HybridActorWrapper, QNetHybrid, ReplayBufferHybrid
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
@@ -418,7 +418,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
-        # Worker 仅做推理：直接用 HybridActorWrapper（TD3 与 PPO 共用同一套 actor 接口），无需构建完整 TD3/Q 网络
+        # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
         local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
         
@@ -917,11 +917,12 @@ def run_MLP_simulation(
     R_cage = 62.00e3, # 45e3 # 55e3,
     dt_maneuver=0.2,
     transition_dict_threshold=1000,
-    replay_buffer_size=int(1e6),   # [TD3] 经验池容量
-    TD3_tau=0.005,                 # [TD3] 目标网络软更新系数
-    TD3_alpha_lr=3e-4,             # [TD3] 温度参数 alpha 的学习率
-    TD3_updates_per_10_steps=1,    # [TD3] 每经过10个采样步执行的梯度更新次数
-    replay_buffer_save_interval=20,# [TD3] 每多少个 batch 持久化一次经验池
+    replay_buffer_size=int(1e6),   # [SAC] 经验池容量
+    sac_tau=0.005,                 # [SAC] 目标网络软更新系数
+    sac_alpha_lr=3e-4,             # [SAC] 温度参数 alpha 的学习率
+    sac_updates_per_10_steps=1,    # [SAC] 每经过10个采样步执行的梯度更新次数
+    SAC_gumbel_tau=1.5,            # [SAC] Cat Gumbel-Softmax 温度
+    replay_buffer_save_interval=20,# [SAC] 每多少个 batch 持久化一次经验池
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
@@ -957,9 +958,9 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
-    TD3_target_entropy = None, # [TD3] 目标熵（正数），None 表示不自动调节 alpha
-    TD3_alpha_clip = (0.001, 0.1), # [TD3] alpha 截断范围
-    q_warmup_batches = 20, # [TD3] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
+    sac_target_entropy = None, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
+    sac_alpha_clip = (0.001, 0.1), # [SAC] alpha 截断范围
+    q_warmup_batches = 20, # [SAC] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
 ):
 
     actor_lr0 = actor_lr
@@ -1009,29 +1010,29 @@ def run_MLP_simulation(
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     del dummy_env
 
-    # [TD3] 若外部未指定目标熵，则只根据机动部分 (cat) 计算；bern 使用固定 k_entropy 不再参与 alpha 调节
-    if TD3_target_entropy is None:
+    # [SAC] 若外部未指定目标熵，则只根据机动部分 (cat) 计算；bern 使用固定 k_entropy 不再参与 alpha 调节
+    if sac_target_entropy is None:
         import math
         _cat_max_ent = sum(math.log(d) for d in action_dims_dict['cat']) if action_dims_dict['cat'] else 0.0
-        TD3_target_entropy = 2.3 # _cat_max_ent * 0.5  # 取最大熵的一半作为目标
-        # print(f"[TD3] Auto target_entropy (mobility only) = {TD3_target_entropy:.4f}  (cat_max={_cat_max_ent:.4f})")
+        sac_target_entropy = 2.3 # _cat_max_ent * 0.5  # 取最大熵的一半作为目标
+        # print(f"[SAC] Auto target_entropy (mobility only) = {sac_target_entropy:.4f}  (cat_max={_cat_max_ent:.4f})")
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
 
     # 3. 创建神经网络
     actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-    # 预训练 (MARWIL) 用的 ValueNet，在线 TD3 阶段弃置不用
+    # 预训练 (MARWIL) 用的 ValueNet，在线 SAC 阶段弃置不用
     critic_temp_net = ValueNet(state_dim, hidden_dim).to(device)
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
 
-    # [TD3] 双 Q 网络 + 目标网络（输入为 actor 所见的 obs，与 actor 维度一致）
+    # [SAC] 双 Q 网络 + 目标网络（输入为 actor 所见的 obs，与 actor 维度一致）
     critic_1_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     critic_2_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     target_critic_1_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
     target_critic_2_net = QNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
 
-    student_agent = TD3Hybrid(
+    student_agent = SACHybrid(
         actor=actor_wrapper,
         critic_temp=critic_temp_net,
         critic_1=critic_1_net,
@@ -1040,12 +1041,14 @@ def run_MLP_simulation(
         target_critic_2=target_critic_2_net,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
+        alpha_lr=sac_alpha_lr,
         action_dims_dict=action_dims_dict,
         gamma=gamma,
-        tau=TD3_tau,
+        tau=sac_tau,
         device=device,
         k_entropy=k_entropy,
         max_std=label_smoothing,
+        gumbel_tau=SAC_gumbel_tau,
     )
     
     
@@ -1106,13 +1109,13 @@ def run_MLP_simulation(
                 student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
                 print(f"Loaded actor from: {latest_actor}")
         
-        # [TD3] 加载在线 Q 网络（critic.pt 现为双Q网络+目标网络+log_alpha）
+        # [SAC] 加载在线 Q 网络（critic.pt 现为双Q网络+目标网络+log_alpha）
         critic_path = os.path.join(log_dir, "critic.pt")
         if os.path.exists(critic_path):
             student_agent.load_critics(critic_path, map_location=device)
-            print(f"Loaded TD3 critics from: {critic_path}")
+            print(f"Loaded SAC critics from: {critic_path}")
         
-        # [TD3] 加载优化器状态（actor / critic_1 / critic_2 / alpha）
+        # [SAC] 加载优化器状态（actor / critic_1 / critic_2 / alpha）
         opt_path = os.path.join(log_dir, "optimizers_state.pt")
         if os.path.exists(opt_path):
             student_agent.load_optimizers(opt_path, map_location=device)
@@ -1374,13 +1377,13 @@ def run_MLP_simulation(
     
     current_max_steps = int(max_steps)
     
-    # [TD3] 经验回放池（off-policy，数据不再用完即弃；支持中断续训）
+    # [SAC] 经验回放池（off-policy，数据不再用完即弃；支持中断续训）
     replay_buffer_path = os.path.join(log_dir, "replay_buffer.pt")
     replay_buffer = ReplayBufferHybrid.load(replay_buffer_path, map_location='cpu')
     if replay_buffer is None:
         replay_buffer = ReplayBufferHybrid(int(replay_buffer_size))
-        print(f"[TD3] Created new replay buffer (capacity={int(replay_buffer_size)})")
-    # 距离上次 TD3 更新累计的采样步数，用于决定本轮执行多少次梯度更新
+        print(f"[SAC] Created new replay buffer (capacity={int(replay_buffer_size)})")
+    # 距离上次 SAC 更新累计的采样步数，用于决定本轮执行多少次梯度更新
     steps_since_update = 0
 
     # 初始化基于胜率的在线 EMA 变量
@@ -1763,8 +1766,8 @@ def run_MLP_simulation(
                 else: 
                     batch_draw_cnt += 1
                 
-                # 3.1 [TD3] 把本回合经验逐条写入经验回放池（不再用完即弃）
-                # actor 仅观测 obs，故 TD3 的 state/next_state 统一使用 obs。
+                # 3.1 [SAC] 把本回合经验逐条写入经验回放池（不再用完即弃）
+                # actor 仅观测 obs，故 SAC 的 state/next_state 统一使用 obs。
                 # 同一回合内，转移 i 的 next_obs = obs[i+1]；末步为终止(done=1)，next_obs 被 (1-done) 屏蔽，复用自身即可。
                 obs_seq = l_tr['obs']
                 act_seq = l_tr['actions']
@@ -1912,7 +1915,7 @@ def run_MLP_simulation(
             logger.add("agent/ batch_step", batch_idx, total_steps)
 
             # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
-            # [TD3] 触发条件：经验池累计样本达到阈值（warm-up）即可开始 off-policy 更新
+            # [SAC] 触发条件：经验池累计样本达到阈值（warm-up）即可开始 off-policy 更新
             if batch_idx % save_interval == 0:# and \
                 # replay_buffer.size() >= transition_dict_threshold:
                 
@@ -1938,28 +1941,29 @@ def run_MLP_simulation(
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
 
-                # [TD3] 统计自上次更新以来经过了多少采样步，off-policy 需要执行成比例的多次梯度更新
-                # 每经过 10 个采样步执行 TD3_updates_per_10_steps 次更新（默认 steps/10 次）
-                num_TD3_updates = max(1, int(steps_since_update // 10) * int(TD3_updates_per_10_steps))
+                # [SAC] 统计自上次更新以来经过了多少采样步，off-policy 需要执行成比例的多次梯度更新
+                # 每经过 10 个采样步执行 sac_updates_per_10_steps 次更新（默认 steps/10 次）
+                num_sac_updates = max(1, int(steps_since_update // 10) * int(sac_updates_per_10_steps))
                 steps_since_update = 0
-                TD3_batch_size = int(min(mini_batch_size_mixed, replay_buffer.size()))
+                sac_batch_size = int(min(mini_batch_size_mixed, replay_buffer.size()))
                 # [做法5] 前 q_warmup_batches 个 batch 冻结 actor，只更新 Q 网络
                 # 让 Q 先在真实 replay buffer 数据上建立合理估值，再允许 actor 被梯度更新
                 _freeze_actor_now = (batch_idx <= q_warmup_batches)
                 if _freeze_actor_now and batch_idx == 1:
                     print(f"[做法5] Actor冻结中，将在 batch_idx>{q_warmup_batches} 后解冻")
                 elif not _freeze_actor_now and batch_idx == q_warmup_batches + 1:
-                    print(f"[做法5] Actor已解冻，开始正常TD3更新")
-                for i in range(num_TD3_updates):
-                    TD3_batch = replay_buffer.sample(TD3_batch_size)
-                    student_agent.update(TD3_batch, freeze_actor=_freeze_actor_now)
+                    print(f"[做法5] Actor已解冻，开始正常SAC更新")
+                for _ in range(num_sac_updates):
+                    sac_batch = replay_buffer.sample(sac_batch_size)
+                    student_agent.update(sac_batch, target_entropy=sac_target_entropy,
+                                        alpha_clip=sac_alpha_clip, freeze_actor=_freeze_actor_now)
 
-                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
-                student_agent.fire_prob_protection(TD3_batch, protect_epochs=1)
+                    # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                    student_agent.fire_prob_protection(sac_batch, protect_epochs=1)
 
-                logger.add("train_plus/num_TD3_updates", num_TD3_updates, total_steps)
+                logger.add("train_plus/num_sac_updates", num_sac_updates, total_steps)
                 logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
-                # logger.add("train_plus/TD3_alpha", student_agent.alpha, total_steps)
+                logger.add("train_plus/sac_alpha", student_agent.alpha, total_steps)
 
                 # 计算/更新 actor pre-clip 梯度的 EMA 值
                 current_ppo_grad = student_agent.pre_clip_actor_grad
@@ -2009,14 +2013,14 @@ def run_MLP_simulation(
                 
                 # 正常保存模型
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                # [TD3] critic.pt 现保存双Q网络+目标网络+log_alpha
+                # [SAC] critic.pt 现保存双Q网络+目标网络+log_alpha
                 student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
                 # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
                 print(f"Saved Checkpoint: {actor_key}")
                 print(f"Saved Current Actor: current_actor.pt")
                 
-                # [TD3] off-policy 经验池不再清空（用完不抛弃）
+                # [SAC] off-policy 经验池不再清空（用完不抛弃）
 
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
@@ -2167,11 +2171,11 @@ def run_MLP_simulation(
                         logger.add(f"Elo_Diff/Latest_vs_{rk}", main_agent_elo - rule_elo, total_steps)
 
                 # --- 例行保存优化器状态和步数 ---
-                # [TD3] 保存 actor / critic_1 / critic_2 / alpha 优化器
+                # [SAC] 保存 actor / critic_1 / critic_2 / alpha 优化器
                 student_agent.save_optimizers(os.path.join(log_dir, "optimizers_state.pt"))
                 if il_transition_buffer is not None:
                     il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))
-                # [TD3] 定期持久化经验池以支持中断续训（经验池较大，降低保存频率）
+                # [SAC] 定期持久化经验池以支持中断续训（经验池较大，降低保存频率）
                 if batch_idx % max(1, int(replay_buffer_save_interval)) == 0:
                     replay_buffer.save(replay_buffer_path)
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
@@ -2202,15 +2206,15 @@ def run_MLP_simulation(
             print("Invalid input (not a number). Exiting...")
             break
 
-    # [TD3] 退出前最后保存一次经验池/网络/优化器，确保续训完整
+    # [SAC] 退出前最后保存一次经验池/网络/优化器，确保续训完整
     try:
         replay_buffer.save(replay_buffer_path)
         student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
         student_agent.save_optimizers(os.path.join(log_dir, "optimizers_state.pt"))
         torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-        print("[TD3] Final state (replay buffer / critics / optimizers / actor) saved.")
+        print("[SAC] Final state (replay buffer / critics / optimizers / actor) saved.")
     except Exception as e:
-        print(f"[TD3] Final save failed: {e}")
+        print(f"[SAC] Final save failed: {e}")
 
     # Cleanup
     print("Closing workers...")

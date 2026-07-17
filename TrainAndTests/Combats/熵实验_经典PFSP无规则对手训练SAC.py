@@ -1,7 +1,7 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
 # [SAC] 使用 SAC 版本的训练主模块
-from CombatPPOWithIL3_parallel_hierarchSAC import *
+from CombatSACWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
@@ -26,7 +26,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
@@ -44,7 +44,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+dt_move = 0.07 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
@@ -53,9 +53,10 @@ transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1  # [�
 # [SAC] off-policy 专用超参数
 # replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
 replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（测试用）
-sac_tau = 0.005                      # 目标网络软更新系数
+sac_tau = 0.001                      # 目标网络软更新系数 0.005
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
+SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 
 
@@ -128,16 +129,23 @@ if __name__=='__main__':
         sac_tau=sac_tau,
         sac_alpha_lr=sac_alpha_lr,
         sac_updates_per_10_steps=sac_updates_per_10_steps,
+        SAC_gumbel_tau=SAC_gumbel_tau,
         replay_buffer_save_interval=replay_buffer_save_interval,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-        }, # 不允许规则对手进入，这样就是纯自博弈了, 
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
+            },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = 0.5,
+        ADMISSION_THRESHOLD = -1,
         MAX_HISTORY_SIZE = 50, # 300 # 100
         compete_old_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了

@@ -579,7 +579,7 @@ class HybridActorWrapper(nn.Module):
 
         return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
-    def sample_for_sac(self, states, action_masks=None):
+    def sample_for_sac(self, states, action_masks=None, gumbel_tau=1.5):
         """
         专门为 SAC 提供的采样方法。
         返回可导的 actions，以及按动作头拆分的 log_prob 字典。
@@ -614,7 +614,7 @@ class HybridActorWrapper(nn.Module):
             log_p_cat_sum = torch.zeros(states.size(0), 1).to(self.device)
             for logits in cat_logits_list:
                 # hard=True 表示前向传播输出 One-hot(例如[0,1,0])，反向传播用 softmax 的梯度
-                gumbel_out = F.gumbel_softmax(logits, tau=1.0, hard=True)
+                gumbel_out = F.gumbel_softmax(logits, tau=gumbel_tau, hard=True)
                 cat_actions.append(gumbel_out)
                 
                 # 计算 log_prob (近似)
@@ -860,7 +860,8 @@ class HybridActorWrapper(nn.Module):
 class SACHybrid:
     def __init__(self, actor, critic_temp, critic_1, critic_2, target_critic_1, target_critic_2, 
                  actor_lr, critic_lr, alpha_lr, action_dims_dict, gamma, tau, device,
-                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
+                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7,
+                 gumbel_tau=1.5):
         self.actor = actor
         # MARWIL_update 内部引用 self.critic，这里让其指向预训练用的 ValueNet
         self.critic = critic_temp # 仅给预训练(MARWIL)使用，在线SAC阶段弃置不用
@@ -877,6 +878,7 @@ class SACHybrid:
         self.max_std = max_std
         self.actor_max_grad = actor_max_grad
         self.critic_max_grad = critic_max_grad
+        self.gumbel_tau = gumbel_tau
         
         # 初始化目标网络
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
@@ -932,6 +934,7 @@ class SACHybrid:
             'target_critic_1': self.target_critic_1.state_dict(),
             'target_critic_2': self.target_critic_2.state_dict(),
             'log_alpha': self.log_alpha.detach().cpu(),
+            'gumbel_tau': self.gumbel_tau,
         }, path)
 
     def load_critics(self, path, map_location='cpu'):
@@ -1026,7 +1029,7 @@ class SACHybrid:
         # 1. 更新 Q 网络 (Critic)
         with torch.no_grad():
             # 获取下一状态的动作 (可导采样) 和 log_prob
-            next_actions_diff, next_log_probs = self.actor.sample_for_sac(next_states)
+            next_actions_diff, next_log_probs = self.actor.sample_for_sac(next_states, gumbel_tau=self.gumbel_tau)
             
             # [诊断] 统计 next_states 里被 mask 和未被 mask 的样本数
             if self._diag_update_count % 200 == 1:
@@ -1082,7 +1085,7 @@ class SACHybrid:
         # 2. 更新 策略网络 (Actor) —— freeze_actor=True 时跳过
         if not freeze_actor:
             # 重新对当前状态采样
-            curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states)
+            curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states, gumbel_tau=self.gumbel_tau)
             
             q1_pi = self.critic_1(states, curr_actions_diff)
             q2_pi = self.critic_2(states, curr_actions_diff)

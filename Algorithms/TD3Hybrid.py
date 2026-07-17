@@ -583,7 +583,7 @@ class HybridActorWrapper(nn.Module):
 
         return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
 
-    def sample_for_td3(self, states, target_noise=0.0, noise_clip=0.5, action_masks=None):
+    def sample_for_td3(self, states, target_noise=0.0, noise_clip=0.5, action_masks=None, gumbel_tau=1.5):
         """
         TD3风格的确定性采样接口。
         - 连续动作：使用策略网络的 mu 作为确定性输出，可选加入目标平滑噪声。
@@ -640,7 +640,7 @@ class HybridActorWrapper(nn.Module):
             ent_cat_sum = torch.zeros(states.size(0), 1).to(self.device)
             for logits in cat_logits_list:
                 # hard=True 表示前向传播输出 One-hot(例如[0,1,0])，反向传播用 softmax 的梯度
-                gumbel_out = F.gumbel_softmax(logits, tau=1.0, hard=True)
+                gumbel_out = F.gumbel_softmax(logits, tau=gumbel_tau, hard=True)
                 cat_actions.append(gumbel_out)
                 
                 # 计算 log_prob (近似)
@@ -888,7 +888,7 @@ class TD3Hybrid:
                  actor_lr, critic_lr, action_dims_dict, gamma, tau, device,
                  k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05},
                  critic_max_grad=2, actor_max_grad=2, max_std=0.7,
-                 policy_delay=2, target_noise=0.2, noise_clip=0.5):
+                 policy_delay=2, target_noise=0.2, noise_clip=0.5, gumbel_tau=1.5):
         self.actor = actor
         # MARWIL_update 内部引用 self.critic，这里让其指向预训练用的 ValueNet
         self.critic = critic_temp # 仅给预训练(MARWIL)使用，在线TD3阶段弃置不用
@@ -909,6 +909,7 @@ class TD3Hybrid:
         self.policy_delay = policy_delay
         self.target_noise = target_noise
         self.noise_clip = noise_clip
+        self.gumbel_tau = gumbel_tau
         self.update_count = 0
 
         # 初始化目标网络
@@ -972,6 +973,7 @@ class TD3Hybrid:
             'policy_delay': self.policy_delay,
             'target_noise': self.target_noise,
             'noise_clip': self.noise_clip,
+            'gumbel_tau': self.gumbel_tau,
         }, path)
 
     def load_critics(self, path, map_location='cpu'):
@@ -1071,7 +1073,8 @@ class TD3Hybrid:
         with torch.no_grad():
             # 目标策略平滑：由 target_actor 产生确定性动作 + 裁剪噪声
             next_actions_diff, _, _ = self.target_actor.sample_for_td3(
-                next_states, target_noise=self.target_noise, noise_clip=self.noise_clip)
+                next_states, target_noise=self.target_noise, noise_clip=self.noise_clip,
+                gumbel_tau=self.gumbel_tau)
 
             q1_target = self.target_critic_1(next_states, next_actions_diff)
             q2_target = self.target_critic_2(next_states, next_actions_diff)
@@ -1122,7 +1125,7 @@ class TD3Hybrid:
                 cat_actions = []
                 ent_cat = torch.zeros(states.size(0), 1).to(device)
                 for logits in cat_logits_list:
-                    gumbel_out = F.gumbel_softmax(logits, tau=1.0, hard=True)
+                    gumbel_out = F.gumbel_softmax(logits, tau=self.gumbel_tau, hard=True)
                     cat_actions.append(gumbel_out)
                     probs = F.softmax(logits, dim=-1)
                     ent_cat += Categorical(probs=probs).entropy().unsqueeze(-1)

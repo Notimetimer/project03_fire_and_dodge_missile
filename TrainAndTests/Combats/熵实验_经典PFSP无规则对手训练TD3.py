@@ -1,14 +1,14 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
 # [SAC] 使用 SAC 版本的训练主模块
-from CombatPPOWithIL3_parallel_hierarchTD3 import *
+from CombatTD3WithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"TD3_PFSP_0.3-run-20260717-114025")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -26,7 +26,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.01, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
@@ -56,8 +56,15 @@ replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（�
 sac_tau = 0.001                      # 目标网络软更新系数 0.005
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
+TD3_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 
+"""
+tau=1.0：原始基线，利用更强，塌缩风险更高。
+tau=1.5：当前建议的首个稳定化实验值。
+tau=2.0：若 1.5 下 cat 熵仍快速塌缩，可尝试。
+tau>3.0：通常过于平滑，不建议直接作为常规配置。
+"""
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
 
@@ -125,6 +132,7 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         # [SAC] off-policy 专用参数
         replay_buffer_size=replay_buffer_size,
+        TD3_gumbel_tau=TD3_gumbel_tau,
         replay_buffer_save_interval=replay_buffer_save_interval,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
@@ -136,7 +144,7 @@ if __name__=='__main__':
             'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
+        hist_agent_as_opponent = 1, # 开启自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug

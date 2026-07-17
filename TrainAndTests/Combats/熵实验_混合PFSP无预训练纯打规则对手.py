@@ -7,18 +7,18 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项0.2-run-20260622-120922")
+#     r"NoIL打纯规则对手-run-20260717-120734")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PurePFSP_balanced1_0.3'
+mission_name = 'NoIL打纯规则对手'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 30 # 180
+IL_epoches= 0
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -38,7 +38,7 @@ action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
 trigger0 = 50e3  #  / 10
 trigger_delta = 50e3  #  / 10
 weight_reward_0 = np.array([1,0,0]) # 1,1,1 引导奖励很难说该不该有
-IL_rule = 1 # 3 # 初始模仿对象
+IL_rule = 2 # 3 # 初始模仿对象
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # 仿真环境参数
@@ -116,15 +116,21 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-        }, # 不允许规则对手进入，这样就是纯自博弈了, 
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
+            'Rule_4': 1200,
+            # 'Rule_5': 1200,
+            },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
+        hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = -1,  # 0.5,
+        ADMISSION_THRESHOLD = -1,
         MAX_HISTORY_SIZE = 50, # 150  # 300
-        compete_old_rate = 0.2, # “复习”概率
+        compete_old_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
