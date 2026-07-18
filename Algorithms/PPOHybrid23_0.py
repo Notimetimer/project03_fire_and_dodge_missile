@@ -1545,10 +1545,10 @@ class PPOHybrid:
                 #  reduction='none' 使得我们可以应用 mask
                 critic_loss_per_sample = F.mse_loss(v_pred, mb_td_target, reduction='none')
                
-                # 1、1V1时候 Critic Loss 使用 mask 加权
-                critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
+                # 1、有序列时间修正的时候， Critic Loss 使用 mask 加权
+                # critic_loss = (critic_loss_per_sample * mb_active_masks).sum() / (active_sum + mask_eps)
                 # 2、多智能体情况下，critic不传入active_mask
-                # critic_loss = critic_loss_per_sample.mean()
+                critic_loss = critic_loss_per_sample.mean()
                 
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()

@@ -120,6 +120,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # --- 2. 终止判定 ---
         done = 0
         
+        # 死亡时间戳
+        if ego.dead and ego.dead_time == None:
+            ego.dead_time = self.t
+        if enm.dead and enm.dead_time == None:
+            enm.dead_time = self.t
+
         # --简单判定法--
         # 严格回合时间限制
         if self.t > self.game_time_limit:
@@ -298,10 +304,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 被目标锁定
         if locked_by_target:
-            r_constraint -= 1.0
+            r_constraint -= 1.0 * (1-ego.dead) * (1-enm.dead)
         # 锁定目标
         if target_locked:
-            r_constraint += 1.0
+            r_constraint += 1.0 * (1-ego.dead) * (1-enm.dead)
         
         # 密集奖励只有在agent活着的时候有意义
         # r_constraint *= (1-ego.dead)
@@ -337,6 +343,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if not hasattr(ego, '_last_phi_t'):
             ego._last_phi_t = -cycle_time
             ego._last_enm_threat_dist = enm_states["threat"][3]
+            ego._threat_crossing_reward_t = None
+            ego._threat_crossing_reward = 0.0
 
         # 威胁目标
         threat_distance_threshold1 = 12e3
@@ -346,15 +354,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             weight_temp = fire_inside_weight[6]
         else:
             weight_temp = 1
-        if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
-            r_constraint += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
-        if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
-            r_constraint += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
 
         if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
+            threat_crossing_reward = 0.0
+            if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
+                threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
+            if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
+                threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+            ego._threat_crossing_reward_t = self.t
+            ego._threat_crossing_reward = threat_crossing_reward
             ego._last_phi_t = self.t
             # 上一步敌方受到的威胁距离
             ego._last_enm_threat_dist = enm_states["threat"][3]
+
+        if ego._threat_crossing_reward_t == self.t:
+            r_constraint += ego._threat_crossing_reward
 
             
         # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
@@ -405,21 +419,27 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
-                    both_survived_bvr = 0
-                    if len(self.alive_missiles)==0:
-                        if self.close_range_kill():
-                            both_survived_bvr = 1
-                    if not both_survived_bvr:
-                        r_event1 = r_event - 180 * end_reward_weight # 超视距双杀与负同罚
-                    else:
-                        r_event1 = r_event + 0 * end_reward_weight # 近距对头可视为超视距双存活
+                    
+                    # # 区分双死和双活
+                    # both_survived_bvr = 0
+                    # if len(self.alive_missiles)==0:
+                    #     if self.close_range_kill():
+                    #         both_survived_bvr = 1
+                    # if not both_survived_bvr:
+                    #     r_event1 = r_event - 180 * end_reward_weight # 超视距双杀与负同罚
+                    # else:
+                    #     r_event1 = r_event + 0 * end_reward_weight # 近距对头可视为超视距双存活
+
+                    # 不区分双死和双活
+                    r_event1 = r_event - 0 * end_reward_weight # 双杀没什么好处
                     r_event2 = r_event + 180 * end_reward_weight # 双杀当做赢
                     r_event3 = r_event - 180 * end_reward_weight # 双杀当做输
-                else: # 真正的双存活
-                    r_event1 = r_event + 0 * end_reward_weight # 能把时间拖完算你牛逼
+                else:
+                    r_event1 = r_event - 0 * end_reward_weight # 能把时间拖完算你牛逼
                     r_event2 = r_event - 180 * end_reward_weight # 双杀策略
                     r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
-                
+
+            
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")

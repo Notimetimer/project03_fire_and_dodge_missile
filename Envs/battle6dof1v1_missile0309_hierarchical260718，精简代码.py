@@ -235,6 +235,7 @@ class Battle(object):
             index_in_side = i if is_red else i - self.Rnum
             
             UAV = UAVModel(dt=self.dt_move)
+            UAV.dead_time = None # 战斗机死的时间
             UAV.state_memory = None
             UAV.action_memory = np.array([0, 0, 340])
             UAV.last_state = None
@@ -336,7 +337,10 @@ class Battle(object):
         #             self.dt_move = 0.02
         #             break
 
-        report_move_time_rate = int(round(self.dt_maneuver / self.dt_move))
+        full_move_steps, remainder = divmod(self.dt_maneuver, self.dt_move)
+        substep_dts = [self.dt_move] * int(full_move_steps)
+        if remainder > 1e-12:
+            substep_dts.append(remainder)
         # 输入动作（范围为[-1,1]
         self.t += self.dt_maneuver
         self.t = round(self.t, 3)  # 保留3位小数
@@ -429,7 +433,7 @@ class Battle(object):
         self.r_can_guide = 0
         self.b_can_guide = 0
 
-        for j1 in range(int(report_move_time_rate)):
+        for substep_dt in substep_dts:
             # 飞机移动
             for UAV, action in zip(self.UAVs, actions):
                 if UAV.dead:
@@ -506,7 +510,7 @@ class Battle(object):
                     if UAV.mach > 0.85:
                         elevator=np.clip(elevator, -0.72, 0.72)
 
-                    UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=self.dt_move)
+                    UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=substep_dt)
                 else:
                     UAV.move(target_height, delta_heading, target_speed, relevant_height=True, e2e=0, rudder=rudder)
 
@@ -544,7 +548,7 @@ class Battle(object):
                             else:
                                 self.b_can_guide = max(1, self.b_can_guide)
                 last_vmt_, last_pmt_, _, _, _, _, _, _, _, _ = \
-                    missile.step(target_info, dt=self.dt_move, datalink=has_datalink)
+                    missile.step(target_info, dt=substep_dt, datalink=has_datalink)
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
                 # 导弹慢速自爆，节省计算量
@@ -557,9 +561,9 @@ class Battle(object):
                 # if missile.t > missile.t_max:  # 超时自爆
                 #     missile.dead = True
                 # 超出电池工作时间引信不工作
-                if 0 + self.dt_move <= missile.t <= missile.t_max and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
+                if 0 + substep_dt <= missile.t <= missile.t_max and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
-                                                       dt=self.dt_move, kill_range=missile.kill_range)
+                                                       dt=substep_dt, kill_range=missile.kill_range)
                     if hit:
                         print(target.side, 'is hit')
                         missile.dead = True
@@ -739,14 +743,12 @@ class Battle(object):
         threat_delta_theta = 0
         threat_distance = self.RWR_distance
         direct_threat = 0 # 是否受到导弹的直接威胁
-        if not alive_enm_missiles:
-            pass
-        else:
+        if alive_enm_missiles:
             # 存在敌导弹
             dist_closest = 200e3
             for i, missile in enumerate(alive_enm_missiles):
                 distance_this_one = missile.distance
-                # [修改] 不论是否满足告警几何条件，始终跟踪最近导弹的真实方位信息（供critic使用）
+                # get_state 始终返回最近敌方导弹的真实方位/距离（供 critic 使用）
                 if distance_this_one < dist_closest:
                     dist_closest = distance_this_one
                     threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
@@ -756,15 +758,6 @@ class Battle(object):
                 if missile.in_angle and missile.radar_on and distance_this_one < self.RWR_distance:
                     warning = 1
                     direct_threat = 1
-                else:
-                    pass
-                    # if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
-                    #     # 进入告警距离前用敌机方位作为导弹告警方位
-                    #     warning = 1 # 敌机为导弹提供中制导也会触发我机告警信号
-                    #     # 如果没有受到导弹的直接锁定，才报告敌机的方位
-                    #     if direct_threat == 0:
-                    #         threat_delta_psi = delta_psi
-                    #         threat_delta_theta = delta_theta + ego.theta
 
 
         p = ego.p
@@ -960,9 +953,15 @@ class Battle(object):
         state = self.get_state(side) # np.stack(self.get_state(side)) stack用于多架无人机
 
         # [修改] 若本帧无告警（warning==0），将导弹方位/距离信息覆盖回初始值，供actor观测
-        # critic通过reward_fn=1绕过此处，可看到真实最近导弹信息
-        # Critic能看到来袭导弹，不论告警灯亮起与否
-        if (not reward_fn) and state["warning"] == 0:
+        # actor看不到中段导弹
+
+        # Critic看不到中段导弹
+        # if state["warning"] == 0:
+
+        # Critic看得到中段导弹：
+        # if (not reward_fn) and state["warning"] == 0:
+
+        if state["warning"] == 0:
             state["threat"][0] = cos(pi)   # cos(threat_delta_psi默认值pi)
             state["threat"][1] = sin(pi)   # sin(threat_delta_psi默认值pi)
             state["threat"][2] = 0.0        # threat_delta_theta默认值0

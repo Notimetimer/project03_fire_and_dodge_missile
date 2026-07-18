@@ -1072,7 +1072,7 @@ class SACHybrid:
         
         mask_eps = 1e-5
         active_sum = active_masks.sum()
-        critic_loss = ((F.mse_loss(q1_pred, y_target, reduction='none') + F.mse_loss(q2_pred, y_target, reduction='none')) * active_masks).sum() / (active_sum + mask_eps)
+        critic_loss = (F.mse_loss(q1_pred, y_target, reduction='none') + F.mse_loss(q2_pred, y_target, reduction='none')).mean()
         
         self.critic_1_optimizer.zero_grad()
         self.critic_2_optimizer.zero_grad()

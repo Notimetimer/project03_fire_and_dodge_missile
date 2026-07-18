@@ -235,6 +235,7 @@ class Battle(object):
             index_in_side = i if is_red else i - self.Rnum
             
             UAV = UAVModel(dt=self.dt_move)
+            UAV.dead_time = None # 战斗机死的时间
             UAV.state_memory = None
             UAV.action_memory = np.array([0, 0, 340])
             UAV.last_state = None
@@ -742,23 +743,29 @@ class Battle(object):
         threat_delta_theta = 0
         threat_distance = self.RWR_distance
         direct_threat = 0 # 是否受到导弹的直接威胁
-        if not alive_enm_missiles:
-            pass
-        else:
+        if alive_enm_missiles:
             # 存在敌导弹
             dist_closest = 200e3
             for i, missile in enumerate(alive_enm_missiles):
                 distance_this_one = missile.distance
-                # [修改] 不论是否满足告警几何条件，始终跟踪最近导弹的真实方位信息（供critic使用）
-                if distance_this_one < dist_closest:
-                    dist_closest = distance_this_one
-                    threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
-                    threat_delta_theta = -missile.q_epsilon
-                    threat_distance = distance_this_one
+                # # Critic能看到中段导弹
+                # if distance_this_one < dist_closest:
+                #     dist_closest = distance_this_one
+                #     threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
+                #     threat_delta_theta = -missile.q_epsilon
+                #     threat_distance = distance_this_one
                 # 告警距离大于导弹锁定距离，只要导弹雷达开机，就给告警信息
                 if missile.in_angle and missile.radar_on and distance_this_one < self.RWR_distance:
                     warning = 1
                     direct_threat = 1
+                    # Critic看不到中段导弹
+                    if distance_this_one < dist_closest:
+                        dist_closest = distance_this_one # 这个导弹目前最近
+                        threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
+                        threat_delta_theta = -missile.q_epsilon
+                    # 如果处于可测距范围(当作和告警距离一样远)，就报告威胁距离
+                    if 1:
+                        threat_distance = min(threat_distance, missile.distance)
                 else:
                     pass
                     # if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
@@ -964,7 +971,7 @@ class Battle(object):
 
         # [修改] 若本帧无告警（warning==0），将导弹方位/距离信息覆盖回初始值，供actor观测
         # critic通过reward_fn=1绕过此处，可看到真实最近导弹信息
-        # Critic能看到来袭导弹，不论告警灯亮起与否
+        # actor看不到中段导弹
         if (not reward_fn) and state["warning"] == 0:
             state["threat"][0] = cos(pi)   # cos(threat_delta_psi默认值pi)
             state["threat"][1] = sin(pi)   # sin(threat_delta_psi默认值pi)
