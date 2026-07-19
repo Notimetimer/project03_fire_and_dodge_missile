@@ -159,8 +159,8 @@ def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
     missile1 = missile_class(pm0_, vm0_, pt0_, vt0_, t)
     Target = target(pt0_, vt0_)
     t_max = 120  # 假设电池工作120s
-    dt_small = 0.08
-    dt_big = 0.2
+    dt_small = 0.1 # 0.08
+    dt_big = 1 # 0.2
     break_flag = 0
     ptt_ = pt0_.copy()
     pmt_ = pm0_.copy()
@@ -195,9 +195,9 @@ def sim_hit(pm0_, vm0_, pt0_, vt0_, target_move, datalink=1, show=0):
         if missile1.t > missile1.t_max:  # 超时自爆
             missile1.dead = True
             break_flag = 1
-        if norm(missile1.vel_) < missile1.speed_min:  # 低速自爆
-            missile1.dead = True
-            break_flag = 1
+        # if norm(missile1.vel_) < missile1.speed_min:  # 低速自爆
+        #     missile1.dead = True
+        #     break_flag = 1
         if t >= 0 + dt:
             hit, point1, point2 = hit_target(missile1.pos_, missile1.vel_, Target.pos_, Target.vel_, dt)
             if hit:
@@ -223,9 +223,9 @@ def hit_prob(p_carrier_, v_carrier_, p_target_, v_target_):
 
 
 if __name__ == '__main__':
-    p_carrier_ = np.array([0, 7000, 0], dtype='float64')
+    p_carrier_ = np.array([0, 8000, 0], dtype='float64')
     v_carrier_ = np.array([300, 0, 0], dtype='float64')
-    p_target_ = np.array([30e3, 7000, 0e3], dtype='float64')
+    p_target_ = np.array([100e3, 8000, 0e3], dtype='float64')
     v_target_ = np.array([-300, 0, 0], dtype='float64')
 
     # 变步长解算导弹和目标的运动直到目标被命中或导弹超时/速度过低/错过目标
