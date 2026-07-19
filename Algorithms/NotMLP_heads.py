@@ -8,9 +8,9 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 from Algorithms.SharedLayers import GruMlp
 
-# GRU-MLP critic head
+# 双向 GRU-MLP critic head
 class ValueNet(torch.nn.Module):
-    def __init__(self, state_dim, hidden_dim, gru_hidden_size=128, gru_num_layers=1, batch_first=True):
+    def __init__(self, state_dim, hidden_dim, gru_hidden_size=128, gru_num_layers=1, batch_first=True, bidirectional=True):
         super(ValueNet, self).__init__()
         if isinstance(hidden_dim, int):
             hidden_dim = [hidden_dim]
@@ -22,7 +22,7 @@ class ValueNet(torch.nn.Module):
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
         self.gru_mlp = GruMlp(prev_size, gru_hidden_size, gru_num_layers,
-                              output_dim=1, batch_first=batch_first)
+                              output_dim=1, batch_first=batch_first, bidirectional=bidirectional)
         # 方便外部判断 RNN 维度
         self.gru = self.gru_mlp.gru
 
@@ -38,8 +38,10 @@ class ValueNet(torch.nn.Module):
         x_flat = x.reshape(B * T, D)
         features = self.net(x_flat)
 
+        # 双向 GRU 的隐状态层数为 num_layers * (2 if bidirectional else 1)
+        num_directions = 2 if self.gru.bidirectional else 1
         if h is None:
-            h = torch.zeros(self.gru.num_layers, B, self.gru.hidden_size,
+            h = torch.zeros(self.gru.num_layers * num_directions, B, self.gru.hidden_size,
                             device=x.device, dtype=x.dtype)
         gru_input = features.view(B, T, -1)
         gru_out, h_out = self.gru_mlp(gru_input, h)

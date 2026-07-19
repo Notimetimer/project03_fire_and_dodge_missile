@@ -44,8 +44,9 @@ class PolicyNetHybrid(torch.nn.Module):
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
 
-        # GRU-MLP 时序特征提取层
-        self.gru_mlp = GruMlp(prev_size, gru_hidden_size, gru_num_layers, output_dim=prev_size, batch_first=True)
+        # Actor 不再使用 GRU；保留参数仅用于兼容隐状态维度
+        self.gru_hidden_size = gru_hidden_size
+        self.gru_num_layers = gru_num_layers
 
         # 1. 连续动作头 (Continuous)
         # 参数: log_std (控制高斯分布宽度)
@@ -142,13 +143,12 @@ class PolicyNetHybrid(torch.nn.Module):
         # 主干网络
         backbone_features = self.net(x_flat)  # (B*T, prev_size)
 
-        # GRU-MLP 时序特征提取
-        if h is None:
-            h = torch.zeros(self.gru_mlp.gru.num_layers, B, self.gru_mlp.gru.hidden_size,
-                            device=x.device, dtype=x.dtype)
-        gru_input = backbone_features.view(B, T, -1)
-        gru_out, h_out = self.gru_mlp(gru_input, h)  # (B, T, prev_size), (L, B, H)
-        shared_features = gru_out.reshape(B * T, -1)
+        # Actor 不再使用 GRU，直接拿主干特征
+        shared_features = backbone_features
+
+        # 为兼容旧接口，仍返回 dummy 隐状态
+        h_out = torch.zeros(self.gru_num_layers, B, self.gru_hidden_size,
+                            device=x.device, dtype=x.dtype) if return_h else None
 
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -801,6 +801,21 @@ class PPOHybrid:
         self.td_error_var = 0     # TD error 的分布方差
         self.grad_norm_ratio = 0  # actor 梯度与 critic 梯度的范数比
 
+    def _get_actor_gru_dims(self):
+        net = self.actor.net
+        if hasattr(net, 'gru_mlp') and net.gru_mlp is not None:
+            gru = net.gru_mlp.gru
+            num_directions = 2 if gru.bidirectional else 1
+            return gru.num_layers * num_directions, gru.hidden_size
+        return getattr(net, 'gru_num_layers', 1), getattr(net, 'gru_hidden_size', 64)
+
+    def _get_critic_gru_dims(self):
+        if hasattr(self.critic, 'gru') and self.critic.gru is not None:
+            gru = self.critic.gru
+            num_directions = 2 if gru.bidirectional else 1
+            return gru.num_layers * num_directions, gru.hidden_size
+        return 1, 64
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
@@ -891,15 +906,10 @@ class PPOHybrid:
                 return h
             return torch.zeros(default_L, B, default_H, device=self.device)
 
-        L_a = self.actor.net.gru_mlp.gru.num_layers
-        H_a = self.actor.net.gru_mlp.gru.hidden_size
+        L_a, H_a = self._get_actor_gru_dims()
         h_actor = get_h('init_h_actor', self.actor.net, L_a, H_a)
 
-        if hasattr(self.critic, 'gru') and self.critic.gru is not None:
-            L_c = self.critic.gru.num_layers
-            H_c = self.critic.gru.hidden_size
-        else:
-            L_c, H_c = L_a, H_a
+        L_c, H_c = self._get_critic_gru_dims()
         h_critic = get_h('init_h_critic', self.critic, L_c, H_c)
 
         dones = to_tensor(transition_dict['dones'], torch.float).view(B, T, 1)
@@ -1782,10 +1792,8 @@ class PPOHybrid:
             out['actions'][k] = np.zeros((num_seqs, seq_len) + act_shape, dtype=dtype)
 
         # --- 初始化隐藏状态容器（未存储则使用零初始化） ---
-        L_a = self.actor.net.gru_mlp.gru.num_layers
-        H_a = self.actor.net.gru_mlp.gru.hidden_size
-        L_c = self.critic.gru.num_layers if hasattr(self.critic, 'gru') and self.critic.gru is not None else L_a
-        H_c = self.critic.gru.hidden_size if hasattr(self.critic, 'gru') and self.critic.gru is not None else H_a
+        L_a, H_a = self._get_actor_gru_dims()
+        L_c, H_c = self._get_critic_gru_dims()
 
         if has_actor_h:
             out['init_h_actor'] = np.zeros((num_seqs, L_a, H_a), dtype=np.float32)
@@ -2032,16 +2040,10 @@ class PPOHybrid:
                 return h
             return torch.zeros(default_L, N, default_H, device=self.device)
 
-        L_a = self.actor.net.gru_mlp.gru.num_layers
-        H_a = self.actor.net.gru_mlp.gru.hidden_size
+        L_a, H_a = self._get_actor_gru_dims()
         h_actor_all = get_h('init_h_actor', L_a, H_a, states_all.size(0))
 
-        # Critic 可能没有 GRU，按默认值构造
-        if hasattr(self.critic, 'gru') and self.critic.gru is not None:
-            L_c = self.critic.gru.num_layers
-            H_c = self.critic.gru.hidden_size
-        else:
-            L_c, H_c = L_a, H_a
+        L_c, H_c = self._get_critic_gru_dims()
         h_critic_all = get_h('init_h_critic', L_c, H_c, states_all.size(0))
         
         # 统一处理 Actions：List of Dicts -> Dict of Tensors

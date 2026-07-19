@@ -297,8 +297,10 @@ class HybridReplayBuffer:
         if 'bern' in self.actions: final_data['actions']['bern'] = np.zeros((num_seqs, seq_len, self.actions['bern'].shape[-1]), dtype=np.float32)
 
         # 初始隐藏状态：(Batch, Layers, Dim)
-        final_data['init_h_actor'] = np.zeros((num_seqs, self.actor_hidden.shape[1], self.actor_hidden.shape[3]), dtype=np.float32)
-        final_data['init_h_critic'] = np.zeros((num_seqs, self.critic_hidden.shape[1], self.critic_hidden.shape[3]), dtype=np.float32)
+        if self.actor_hidden is not None:
+            final_data['init_h_actor'] = np.zeros((num_seqs, self.actor_hidden.shape[1], self.actor_hidden.shape[3]), dtype=np.float32)
+        if self.critic_hidden is not None:
+            final_data['init_h_critic'] = np.zeros((num_seqs, self.critic_hidden.shape[1], self.critic_hidden.shape[3]), dtype=np.float32)
 
         
         for i, (env_id, s_ptr) in enumerate(valid_seq_starts):
@@ -325,8 +327,10 @@ class HybridReplayBuffer:
             
             # 记录序列起始时刻之前的隐藏状态
             # 注意：s_ptr 对应的是该序列第一帧进入 GRU 之前的状态
-            final_data['init_h_actor'][i] = self.actor_hidden[s_ptr, :, env_id, :]
-            final_data['init_h_critic'][i] = self.critic_hidden[s_ptr, :, env_id, :]
+            if self.actor_hidden is not None:
+                final_data['init_h_actor'][i] = self.actor_hidden[s_ptr, :, env_id, :]
+            if self.critic_hidden is not None:
+                final_data['init_h_critic'][i] = self.critic_hidden[s_ptr, :, env_id, :]
 
         return final_data
 
