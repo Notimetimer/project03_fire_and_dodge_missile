@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PFSP_纯规则对手0'
+mission_name = 'PFSP0'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -43,7 +43,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+dt_move = 0.07 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
@@ -124,13 +124,13 @@ if __name__=='__main__':
             # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 0, # 奖励函数调试禁止自博弈
+        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
-        WARM_UP_STEPS = 500e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = -1,
+        WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
+        ADMISSION_THRESHOLD = -1,  # 0.5,
         MAX_HISTORY_SIZE = 50, # 150  # 300
-        compete_old_rate = 0.2, # “复习”概率
+        compete_old_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样

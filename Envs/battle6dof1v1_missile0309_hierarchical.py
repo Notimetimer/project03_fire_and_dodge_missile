@@ -663,6 +663,8 @@ class Battle(object):
             alive_own_missiles = alive_b_missiles
             alive_enm_missiles = alive_r_missiles
 
+        # 留下一个小bug，没有考虑双法是否存活
+        ego_alive = not ego.dead
         # 目标存活标志
         target_alive = not adv.dead
         # 目标可见性标志 0 完全不可见 1 可获取角度信息 2 可获取全部信息
@@ -702,7 +704,7 @@ class Battle(object):
         ammo = ego.ammo
 
         # 雷达可跟踪标志
-        if ATA <= ego.max_radar_angle_rad and dist <= ego.max_radar_range and target_alive:
+        if ATA <= ego.max_radar_angle_rad and dist <= ego.max_radar_range and target_alive and ego_alive: # 留下一个小bug，没有考虑双法是否存活
             target_locked = 1
             ego.lock_on = 1
         else:
@@ -731,7 +733,7 @@ class Battle(object):
 
         # 目标雷达跟踪标志 bool
         alpha_enm = np.arccos(np.dot(-L_, adv.vel_) / (norm(adv.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
-        if alpha_enm < ego.max_radar_angle_rad and dist < ego.max_radar_range:
+        if alpha_enm < ego.max_radar_angle_rad and dist < ego.max_radar_range and target_alive and ego_alive: # 留下一个小bug，没有考虑双法是否存活
             locked_by_target = 1
         else:
             locked_by_target = 0

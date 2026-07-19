@@ -128,7 +128,7 @@ class HybridReplayBuffer:
                 # 维度变换: (T, L, N, H) -> (L, T*N, H)
                 h_in = h_in.permute(1, 0, 2, 3).reshape(h_in.shape[1], -1, h_in.shape[-1]).contiguous()
                 # [修改] 带上隐藏状态接收，确保 GRU 模式正常
-                v_res, _ = critic_net(flat_states, h_in=h_in)
+                v_res, _ = critic_net(flat_states, h=h_in, return_h=True)
                 values = v_res.view(T, N, 1).cpu().numpy()
             else:
                 # MLP 模式
@@ -213,7 +213,7 @@ class HybridReplayBuffer:
                 # 维度变换: (T, L, N, H) -> (L, T*N, H)
                 h_in = h_in.permute(1, 0, 2, 3).reshape(h_in.shape[1], -1, h_in.shape[-1]).contiguous()
                 # [修改] 显式接收两个返回值
-                v_res, _ = critic_net(flat_states, h_in=h_in)
+                v_res, _ = critic_net(flat_states, h=h_in, return_h=True)
                 values = v_res.view(T, N).cpu().numpy()
             else:
                 # MLP 模式

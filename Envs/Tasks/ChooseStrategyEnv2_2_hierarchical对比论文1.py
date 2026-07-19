@@ -1,6 +1,6 @@
 '''
-增加开火惩罚
-三元组奖励
+论文名称：
+
 '''
 
 from Controller.Controller_function import sub_of_radian
@@ -99,7 +99,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             self.b_dist_seq.append(b_dist)
             self.last_record_t = self.t
 
-        self.close_range_kill() # 允许跑刀
+        if len(self.alive_missiles)==0:
+            self.close_range_kill() # 允许跑刀
         self.update_missile_state()
         
         if side == 'r':
@@ -118,6 +119,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # --- 2. 终止判定 ---
         done = 0
         
+        # 死亡时间戳
+        if ego.dead and ego.dead_time == None:
+            ego.dead_time = self.t
+        if enm.dead and enm.dead_time == None:
+            enm.dead_time = self.t
+
         # --简单判定法--
         # 严格回合时间限制
         if self.t > self.game_time_limit:
@@ -235,11 +242,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 被锁定惩罚
         if locked_by_target:
-            r_constraint -= 2
+            r_constraint -= 2 * (1-ego.dead) * (1-enm.dead)
 
         # 锁定敌机奖励
         if target_locked:
-            r_constraint += 2
+            r_constraint += 2 * (1-ego.dead) * (1-enm.dead)
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:

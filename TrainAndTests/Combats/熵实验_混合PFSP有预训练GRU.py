@@ -1,6 +1,6 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
-from CombatPPOWithIL3_parallel_hierarch import *
+from CombatPPOWithIL3_parallel_hierarchGRU import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'SLWSPFSP0.3'
+mission_name = 'GRU0.3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -96,9 +96,7 @@ if __name__=='__main__':
         epochs=epochs,
         eps=eps,
         k_entropy=k_entropy,
-        alpha_il=alpha_il,
         il_batch_size=il_batch_size,
-        il_buffer_max_size=il_buffer_max_size,
         mini_batch_size_mixed=mini_batch_size_mixed,
         beta_mixed=beta_mixed,
         label_smoothing=label_smoothing,
@@ -125,12 +123,11 @@ if __name__=='__main__':
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
-        use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = -1,  # 0.5,
         MAX_HISTORY_SIZE = 50, # 150  # 300
-        compete_old_rate = 0.0, # “复习”概率
+        compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
