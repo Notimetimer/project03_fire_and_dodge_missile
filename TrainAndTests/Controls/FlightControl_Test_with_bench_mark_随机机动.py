@@ -46,7 +46,7 @@ mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限�
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 "FlightControl_parallel目标会动_高度可超调_自动调方差"
 
-save_csv = 1 # 是否保存csv
+save_csv = 0 # 是否保存csv
 # 是否可视化
 visualize = 1
 target_range = 3e3
@@ -205,6 +205,11 @@ for init_h in height_list:
             # 根据高度差计算俯仰角指令
             theta_req = (env.height_req - env.RUAV.alt) / 5000 * pi/2
             env.theta_req = theta_req
+
+            # 俯仰指令保护(防撞地超高)
+            min_theta_req = np.arcsin(np.clip(6*9.8*(env.min_alt_safe-env.RUAV.alt)/(2124/3.6)**2, -0.999, 0.999))
+            max_theta_req = np.arcsin(np.clip(6*9.8*(env.max_alt_safe-env.RUAV.alt)/(2124/3.6)**2, -0.999, 0.999))
+            env.theta_req = np.clip(theta_req, min_theta_req, max_theta_req)
             # 决策
             obs, obs_check = env.get_obs()
             if mission_name != "PID":

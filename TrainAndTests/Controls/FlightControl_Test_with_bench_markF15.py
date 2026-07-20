@@ -149,6 +149,10 @@ for init_h in height_list:
 
             env.v_req = min(target_v, (0.8 + (env.RUAV.alt)/(2e4)*(2.5-0.8)) * 340)
             
+            # 俯仰指令保护(防撞地超高)
+            min_theta_req = np.arcsin(np.clip(4.5*9.8*(env.min_alt_safe-env.RUAV.alt)/(min(3000/3.6, env.RUAV.speed))**2, -0.999, 0.999))
+            max_theta_req = np.arcsin(np.clip(4.5*9.8*(env.max_alt_safe-env.RUAV.alt)/(min(3000/3.6, env.RUAV.speed))**2, -0.999, 0.999))
+            env.theta_req = np.clip(theta_req, min_theta_req, max_theta_req)
             # 决策
             obs, obs_check = env.get_obs()
             if mission_name != "PID":
