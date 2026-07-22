@@ -245,6 +245,7 @@ class Battle(object):
             UAV.init_ammo = red_init_ammo if is_red else blue_init_ammo
             UAV.ammo = red_init_ammo if is_red else blue_init_ammo
             UAV.id = (index_in_side + 1) if is_red else (index_in_side + 201)
+            UAV.killer_id = None
             UAV.red = is_red
             UAV.blue = not is_red
             UAV.side = 'r' if is_red else 'b'
@@ -574,6 +575,7 @@ class Battle(object):
                         target.vel_ = last_vtt_
                         target.dead = True
                         target.got_hit = True
+                        target.killer_id = missile.id
                         self.UAV_hit[self.UAV_ids.index(target.id)] = True
                         if missile.side=='r':
                             self.r_hitter_id = missile.id

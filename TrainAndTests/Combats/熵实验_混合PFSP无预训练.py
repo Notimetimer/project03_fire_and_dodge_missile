@@ -6,8 +6,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"NoILand_PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260615-234324")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"无预训练-run-20260717-230802")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -43,7 +43,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+dt_move = 0.07 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier

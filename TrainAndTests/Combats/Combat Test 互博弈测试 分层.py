@@ -45,8 +45,8 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 if __name__ == "__main__":
 
     # 红方和蓝方分别使用不同的模型目录
-    red_dir_name = "SLWSPFSP0.3-run-20260618-221044"
-    blue_dir_name = "HLWSPFSP-run-20260616-130304"
+    red_dir_name = "SLWSPFSP0.3-run-20260719-082619"
+    blue_dir_name = "PFSP0_comapre1-run-20260720-144633" # "HLWSPFSP-run-20260616-130304"
 
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
@@ -159,8 +159,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.5, 'bern':0.97}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
+                            temperature={'cat':1.0, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -177,8 +177,8 @@ if __name__ == "__main__":
                     # --- 蓝方 (RL 智能体) ---
                     with torch.no_grad():
                         b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(
-                            b_obs, explore={'cont':0, 'cat':0, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.5, 'bern':0.97}
+                            b_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.072,
+                            temperature={'cat':1.0, 'bern':0.97}
                         )
                     b_action_label = b_action_exec['cat']
                     b_fire = b_action_exec['bern'][0]

@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SLWSPFSP0.3-run-20260618-221044"
+    dir_name = "有预训练compare4-run-20260721-225216" # "PFSP_0.15-run-20260717-230658"
     
     "SLWSA3C0.3-run-20260630-220403"
     
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.020 # 0.05 # 0.04 # 25
+    env.dt_move = 0.025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -166,8 +166,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':0, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.5, 'bern':0.97}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
+                            temperature={'cat':1.0, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -194,7 +194,7 @@ if __name__ == "__main__":
                 
                 # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', tabu=1, action_label=None) # r_action_label)
+                    launch_missile_immediately(env, 'r', tabu=0, action_label=None) # r_action_label)
                     print("Shoot")
                     print()
                     fire_time = env.t

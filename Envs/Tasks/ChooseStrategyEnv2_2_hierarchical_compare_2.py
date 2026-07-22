@@ -1,7 +1,21 @@
 '''
 论文名称：
-An Autonomous Decision-making Method for Beyond Visual Range Air Combat Driven by Deep Reinforcement Learning
-2026
+H3E: Learning air combat with a three-level hierarchical framework embedding expert knowledge
+2024 
+
+结果奖励：
+取胜：+1
+落败：-1
+平局: 0
+
+事件奖励：
+开火：-0.1（需要我方存活
+锁定对手瞬间：0.1 （需要双方存活）
+被锁定瞬间：-0.1 （需要双方存活）
+脱离锁定瞬间：0.2 （需要我方存活）
+逃脱导弹瞬间：0.5 （需要我方存活）
+
+无密集奖励
 '''
 
 from Controller.Controller_function import sub_of_radian
@@ -179,19 +193,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         distance = ego_states["target_information"][3]
         speed = ego_states["ego_main"][0]
         alt = ego_states["ego_main"][1]
-        enm_speed = enm_states["ego_main"][0]
-        enm_alt = enm_states["ego_main"][1]
         cos_delta_psi = ego_states["target_information"][0]
         sin_delta_psi = ego_states["target_information"][1]
         delta_psi = atan2(sin_delta_psi, cos_delta_psi)
         alpha = ego_states["target_information"][4]
         # 严格被锁判定
-        locked_by_target_flag = ego_states["locked_by_target"]
-        target_locked_flag = ego_states["target_locked"]
+        locked_by_target = ego_states["locked_by_target"] #  and (dist_enm2ego <= 80e3) and (ATA_enm <= self.RUAV.max_radar_angle_rad)
+        target_locked = ego_states["target_locked"]
         AA_hor = ego_states["target_information"][-2]
         warning = ego_states["warning"]
         missile_in_mid_term = ego_states["missile_in_mid_term"]
-        missile_time_since_shoot = ego_states["weapon"]
+        missile_time_since_shoot = ego_states["weapon"] 
+        # ↑无法用在开火奖励函数里面，会随着执行顺序被覆盖掉
+        # ↑但是可以用在机动奖励函数里面，不论如何，只要刚发射导弹就应该crank
         cos_delta_psi_threat = ego_states["threat"][0]
         sin_delta_psi_threat = ego_states["threat"][1]
         threat_distance = ego_states["threat"][3]
@@ -199,68 +213,51 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_theta_threat = ego_states["threat"][2]
         
         # 奖励项初始化
-        r_event = 0.0      # 结果奖励 + 关键事件奖励
-        r_shaping = 0.0    # 状态密集奖励
+        r_event = 0.0
 
-        # 关键事件奖励（只在 cycle_time 边界触发并更新记忆，以时间戳保护避免重复）
+        # 关键事件奖励（只在 cycle_time 边界触发并更新记忆）
         at_cycle = abs(self.t - step_idx * cycle_time) < 1e-4
         current_cycle_t = step_idx * cycle_time
 
         if not hasattr(ego, '_last_target_locked'):
             ego._last_target_locked = False
             ego._last_locked_by_target = False
+            ego._last_escape_once = False
 
         if at_cycle:
-            if target_locked_flag and not ego._last_target_locked:
-                r_event += 10.0 * (not ego.dead) * (not enm.dead)
-            if locked_by_target_flag and not ego._last_locked_by_target:
-                r_event -= 10.0 * (not ego.dead) * (not enm.dead)
+            # 锁定对手瞬间（需要双方存活）
+            if target_locked and not ego._last_target_locked:
+                r_event += 0.1 * (not ego.dead) * (not enm.dead)
+            # 被锁定瞬间（需要双方存活）
+            if locked_by_target and not ego._last_locked_by_target:
+                r_event -= 0.1 * (not ego.dead) * (not enm.dead)
+            # 脱离锁定瞬间（需要我方存活）
+            if not locked_by_target and ego._last_locked_by_target:
+                r_event += 0.2 * (not ego.dead)
+            # 逃脱导弹瞬间（需要我方存活）
+            if ego.escape_once and not ego._last_escape_once:
+                r_event += 0.5 * (not ego.dead)
 
-            ego._last_target_locked = bool(target_locked_flag)
-            ego._last_locked_by_target = bool(locked_by_target_flag)
+            ego._last_target_locked = bool(target_locked)
+            ego._last_locked_by_target = bool(locked_by_target)
+            ego._last_escape_once = bool(ego.escape_once)
 
-        # 开火：每步只要有射击动作就给 -5.0 * action_shoot
+        # 开火：每步只要有射击动作就给 -0.1
         if action_shoot >= 1:
-            r_shaping -= 5.0 * action_shoot * (not ego.dead)
+            r_event -= 0.1 * (not ego.dead)
 
-        # 状态密集奖励
-        # 高度
-        r_shaping += -0.003 * (6000.0 - alt) * (alt < 6000.0) - 0.002 * (alt - 9000.0) * (alt > 9000.0)
-        # 速度奖励
-        r_shaping += 0.1 * (speed / (enm_speed + 1e-3)) * exp((alt - enm_alt) / 1800.0)
-        # 角度奖励
-        abs_delta_psi = abs(delta_psi)
-        if 0 <= abs_delta_psi <= pi / 3.0:
-            r_shaping += 0.8 * exp(-(abs_delta_psi - pi / 6.0) ** 2 / 100.0)
-        # 威胁惩罚
-        if 0 <= threat_distance <= 25e3:
-            r_shaping += -15.0 * 2 ** (-threat_distance / 5e3 + 1)
-        # 时间惩罚
-        r_shaping += -0.01 * self.t
-        # 密集奖励仅在我方存活时生效
-        r_shaping *= (not ego.dead)
-
-        r_event1 = r_event
-        r_event2 = r_event
-        r_event3 = r_event
-
-        # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
+        # 结果奖励
         if done:
             if enm.dead and not ego.dead:
-                r_event += 50.0
+                r_event += 1.0
             elif ego.dead and not enm.dead:
-                r_event -= 50.0
-            elif self.draw:
-                r_event -= 20.0
+                r_event -= 1.0
+            # 平局保持 +0.0
 
-            r_event1 = r_event
-            r_event2 = r_event
-            r_event3 = r_event
-            
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
-            print(f"R_Event: {r_event:.2f} | R_Shaping: {r_shaping:.2f}")
+            print(f"R_Event: {r_event:.2f}")
 
         # 返回 done 和三个分项奖励
-        return done, r_event1+r_shaping, r_event2+r_shaping, r_event3+r_shaping
+        return done, r_event, r_event, r_event

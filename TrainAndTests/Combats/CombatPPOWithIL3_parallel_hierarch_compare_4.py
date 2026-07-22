@@ -1,6 +1,5 @@
 '''
-同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
-放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
+带奖励时间回溯
 '''
 
 from typing import final
@@ -44,7 +43,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_1 import * # 奖励函数 对比
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import * # 奖励函数 对比
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -52,7 +51,7 @@ from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 # 强制显式绑定：防止调用链中其它 import 污染 ChooseStrategyEnv
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_1 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import ChooseStrategyEnv
 
 dt_move = 0.04
 
@@ -242,6 +241,105 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     td['dones'].append(done)
     td['active_masks'].append(active_mask) # 【新增】active_mask，转入多智能体
     return td
+
+# 后验补充奖励
+def synthesize_vector_rewards(td, killer_id=None):
+    """
+    将 transition_dict 中存储的 5 维奖励向量
+    [原始奖励, not ego.dead, 逃脱导弹瞬间布尔标识, enm.got_hit, 新发射导弹 ID]
+    对后三个维度及导弹击杀溯源做指数时间回溯，再求和压成 1 维标量奖励。
+    如果 rewards 已经是标量列表，则直接返回原 td。
+    """
+    if not td or len(td.get('rewards', [])) == 0:
+        return td
+
+    rewards = td['rewards']
+    first = rewards[0]
+    # 已经是标量就不再处理
+    if not (isinstance(first, (np.ndarray, list, tuple)) and len(first) == 5):
+        return td
+
+    R = np.array(rewards, dtype=np.float32)
+    T = R.shape[0]
+    q = (0.01) ** 0.1 # q的衰减率，10步后只剩0.01
+
+    orig = R[:, 0]
+    not_ego_dead = R[:, 1]
+    escape = R[:, 2]
+    enm_hit = R[:, 3]
+    missile_ids = R[:, 4]
+
+    def _decay(events, scale, use_first=True):
+        """events 中 1 表示事件发生，从该时刻向前按 q^k 衰减，
+        再除以无穷级数和 1/(1-q)，最后乘以 scale。"""
+        decay = np.zeros(T, dtype=np.float32)
+        if use_first:
+            # 仅取第一次发生的事件
+            idx = np.argmax(events > 0.5)
+            if events[idx] > 0.5:
+                decay[:idx+1] = q ** np.arange(idx, -1, -1)
+        else:
+            carry = 0.0
+            for t in range(T-1, -1, -1):
+                carry = carry * q + events[t]
+                decay[t] = carry
+        # 无穷级数和 sum_{k=0}^inf q^k = 1/(1-q)，所以乘以 (1-q)*scale
+        return decay * (1.0 - q) * scale
+
+    # 死亡事件：not_ego_dead 全为 0 时不回溯；否则从第一个死亡时刻向前衰减
+    if np.all(not_ego_dead < 0.5):
+        death_decay = np.zeros(T, dtype=np.float32)
+    else:
+        death_events = np.zeros(T, dtype=np.float32)
+        dead_mask = (1.0 - not_ego_dead) > 0.5
+        if np.any(dead_mask):
+            first_dead = int(np.argmax(dead_mask))
+            death_events[first_dead] = 1.0
+        death_decay = _decay(death_events, scale=-10.0, use_first=True)
+
+    # enm.got_hit：全为 0 时不回溯；否则从第一次命中向前衰减
+    if np.all(enm_hit < 0.5):
+        hit_decay = np.zeros(T, dtype=np.float32)
+    else:
+        hit_events = np.zeros(T, dtype=np.float32)
+        first_hit = int(np.argmax(enm_hit > 0.5))
+        hit_events[first_hit] = 1.0
+        hit_decay = _decay(hit_events, scale=10.0, use_first=True)
+
+    # 逃脱导弹：每个 1 都向前（过去）指数扩散
+    if np.all(escape < 0.5):
+        escape_decay = np.zeros(T, dtype=np.float32)
+    else:
+        escape_decay_raw = np.zeros(T, dtype=np.float32)
+        for t in range(T):
+            if escape[t] > 0.5:
+                # 从 t 向前扩散：t 处为 1, t-1 处为 q, ...
+                escape_decay_raw[:t+1] += q ** np.arange(t, -1, -1)
+        # 使用无穷级数和归一化：sum_{k=0}^inf q^k = 1/(1-q)
+        # 乘以 (1-q)*10，单事件无穷时间奖励总和为 10
+        escape_decay = escape_decay_raw * (1.0 - q) * 10.0
+        # 原先的整回合平均归一化（按 episode 内 raw 总和归一到 10）
+        # eps = 1e-8
+        # escape_decay = escape_decay_raw / (escape_decay_raw.sum() + eps) * 10.0
+
+    # # 导弹击杀溯源：在记录的导弹 ID 序列里找到 killer_id 的位置，
+    # # 从该位置向前指数扩散，最后按总和归一化到 5
+    # killer_decay = np.zeros(T, dtype=np.float32)
+    # if killer_id is not None and killer_id != 0:
+    #     events = (np.abs(missile_ids - float(killer_id)) < 0.5).astype(np.float32)
+    #     if events.sum() > 0:
+    #         decay_raw = np.zeros(T, dtype=np.float32)
+    #         for t in range(T):
+    #             if events[t] > 0.5:
+    #                 # 从 t 向前扩散：t 处为 1, t-1 处为 q, ...
+    #                 decay_raw[:t+1] += q ** np.arange(t, -1, -1)
+    #         eps = 1e-8
+    #         killer_decay = decay_raw / (decay_raw.sum() + eps) * 5.0
+
+    scalar_rewards = orig + death_decay + escape_decay + hit_decay # + killer_decay
+    td['rewards'] = scalar_rewards.tolist()
+    return td
+
 
 # ==========================================
 # 新增：混合缓冲区类
@@ -486,7 +584,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
     """
     try:  # <--- 【新增】添加此行，并将下方所有代码整体缩进
         # 在子进程内部再次显式绑定 ChooseStrategyEnv，避免全局命名空间被其它 import 污染
-        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_1 import ChooseStrategyEnv
+        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import ChooseStrategyEnv
         # --- 1. 初始化阶段 (只运行一次) ---
         
         # 确保每个进程种子不同，避免所有环境生成完全一样的随机数
@@ -779,12 +877,21 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
 
-                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
-                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
+                    # reward_weight 兼容标量 / 一维权重的写法，结果统一为 4 维奖励向量
+                    if reward_weight is None:
+                        rw = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+                    else:
+                        rw = np.array(reward_weight, dtype=np.float32)
+                    if rw.ndim == 0:
+                        reward_for_learn = (b_reward1 + b_reward2 + b_reward3) * rw
+                        reward_for_enm = (r_reward1 + r_reward2 + r_reward3) * rw
+                    else:
+                        reward_for_learn = np.stack([b_reward1, b_reward2, b_reward3], axis=0).T @ rw
+                        reward_for_enm = np.stack([r_reward1, r_reward2, r_reward3], axis=0).T @ rw
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += b_reward1
-                        episode_return_dense += b_dense_reward
+                        episode_return += b_reward1[0]
+                        episode_return_dense += b_dense_reward[0]
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -830,6 +937,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                 td[k] = td[k][:last_idx+1]
                     return td
                 
+                # 把五维奖励向量合成为一维标量，并对后三维及导弹击杀溯源做指数时间回溯
+                r_killer_id = env.RUAV.killer_id if done else None
+                b_killer_id = env.BUAV.killer_id if done else None
+                local_trans = synthesize_vector_rewards(local_trans, killer_id=r_killer_id)
+                ego_trans = synthesize_vector_rewards(ego_trans, killer_id=r_killer_id)
+                enm_trans = synthesize_vector_rewards(enm_trans, killer_id=b_killer_id)
                 local_trans = truncate_and_shift(local_trans)
                 ego_trans = truncate_and_shift(ego_trans)
                 enm_trans = truncate_and_shift(enm_trans)
@@ -923,7 +1036,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': b_dense_reward,
+                        'dense_return': b_dense_reward[0],
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -1979,7 +2092,6 @@ def run_MLP_simulation(
             
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
-            logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)

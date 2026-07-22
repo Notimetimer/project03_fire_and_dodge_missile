@@ -1,24 +1,24 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
-from CombatPPOWithIL3_parallel_hierarch_compare_1 import *
+from CombatPPOWithIL3_parallel_hierarch_compare_4 import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"PFSP0-run-20260719-091220")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"有预训练compare4-run-20260721-225216")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PFSP0'
+mission_name = '有预训练compare4'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 30 # 180
+IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -31,7 +31,7 @@ il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -124,12 +124,12 @@ if __name__=='__main__':
             # 'Rule_5': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
+        hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = -1,  # 0.5,
-        MAX_HISTORY_SIZE = 50, # 150  # 300
+        ADMISSION_THRESHOLD = -1,
+        MAX_HISTORY_SIZE = 50, # 300 # 100
         compete_old_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,

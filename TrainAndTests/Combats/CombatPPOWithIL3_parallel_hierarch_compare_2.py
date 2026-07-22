@@ -44,7 +44,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_1 import * # 奖励函数 对比
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_2 import * # 奖励函数 对比
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -52,7 +52,7 @@ from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 # 强制显式绑定：防止调用链中其它 import 污染 ChooseStrategyEnv
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_1 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_2 import ChooseStrategyEnv
 
 dt_move = 0.04
 
@@ -486,7 +486,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
     """
     try:  # <--- 【新增】添加此行，并将下方所有代码整体缩进
         # 在子进程内部再次显式绑定 ChooseStrategyEnv，避免全局命名空间被其它 import 污染
-        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_1 import ChooseStrategyEnv
+        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_2 import ChooseStrategyEnv
         # --- 1. 初始化阶段 (只运行一次) ---
         
         # 确保每个进程种子不同，避免所有环境生成完全一样的随机数
