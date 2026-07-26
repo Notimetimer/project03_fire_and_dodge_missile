@@ -127,6 +127,14 @@ def plot_replay(data: dict, save_path: str = None):
     ax3.plot(rx, ry, rz, color='crimson', lw=1.5, label='R_UAV')
     ax3.plot(bx, by, bz, color='royalblue', lw=1.5, label='B_UAV')
 
+    # 任务区域限制：以 (0,0,0) 为圆心，65km 为半径的圆（E-N 平面，H=0）
+    radius_km = 62.0
+    theta = np.linspace(0, 2 * np.pi, 256)
+    circle_e = radius_km * np.cos(theta)
+    circle_n = radius_km * np.sin(theta)
+    circle_h = np.zeros_like(theta)
+    ax3.plot(circle_e, circle_n, circle_h, color='black', linestyle='-.', lw=1.2, label='Mission Zone')
+
     # 导弹虚线（只有第一条带 label）
     r_mis_labeled = False
     for mid, traj in rmis.items():
