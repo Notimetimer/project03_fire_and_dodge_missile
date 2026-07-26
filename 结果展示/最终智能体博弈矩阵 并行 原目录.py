@@ -138,9 +138,11 @@ if __name__ == "__main__":
     # 2s
     mission_names = [
         'SLWS-PFSP-run-20260618-221044',
+        'SLWSPFSP0.2-run-20260622-185856',
+        'SLWSPFSP0.1-run-20260624-220934',
         'HLWS-PFSP-run-20260616-130304',
         'PFSP-run-20260615-234324',
-        'SLWS-PFSP(A3C)-run-20260630-220403',
+        # 'SLWS-PFSP(A3C)-run-20260630-220403',
         'FixedOpp-run-20260614-163906',
         'SLWS-FixedOpp-run-20260712-113316',
     ]

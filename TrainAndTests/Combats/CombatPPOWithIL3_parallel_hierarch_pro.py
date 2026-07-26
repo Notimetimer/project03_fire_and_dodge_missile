@@ -1,5 +1,6 @@
 '''
-带奖励时间回溯
+同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
+放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
 
 from typing import final
@@ -43,15 +44,13 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import * # 奖励函数 对比
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_pro import * # 奖励函数
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
-# 强制显式绑定：防止调用链中其它 import 污染 ChooseStrategyEnv
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import ChooseStrategyEnv
 
 dt_move = 0.04
 
@@ -242,104 +241,54 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     td['active_masks'].append(active_mask) # 【新增】active_mask，转入多智能体
     return td
 
-# 后验补充奖励
-def synthesize_vector_rewards(td, killer_id=None):
-    """
-    将 transition_dict 中存储的 5 维奖励向量
-    [原始奖励, not ego.dead, 逃脱导弹瞬间布尔标识, enm.dead, 新发射导弹 ID]
-    对后三个维度及导弹击杀溯源做指数时间回溯，再求和压成 1 维标量奖励。
-    如果 rewards 已经是标量列表，则直接返回原 td。
-    """
-    if not td or len(td.get('rewards', [])) == 0:
-        return td
 
-    rewards = td['rewards']
-    first = rewards[0]
-    # 已经是标量就不再处理
-    if not (isinstance(first, (np.ndarray, list, tuple)) and len(first) == 5):
-        return td
+def get_phase_masks(states):
+    states = np.asarray(states, dtype=np.float32)
+    warning = states[:, 5] > 0.5
+    missile_in_mid_term = states[:, 3] > 0.5
+    return {
+        'attack': ~warning & ~missile_in_mid_term,
+        'crank': ~warning & missile_in_mid_term,
+        'escape': warning,
+    }
 
-    R = np.array(rewards, dtype=np.float32)
-    T = R.shape[0]
-    q = (0.01) ** 0.1 # q的衰减率，10步后只剩0.01
 
-    orig = R[:, 0]
-    not_ego_dead = R[:, 1]
-    escape = R[:, 2]
-    enm_hit = R[:, 3]
-    missile_ids = R[:, 4]
+def get_phase_features(states):
+    return np.asarray(states, dtype=np.float32)[:, [6, 8, 2]]
 
-    def _decay(events, scale, use_first=True):
-        """events 中 1 表示事件发生，从该时刻向前按 q^k 衰减，
-        再除以无穷级数和 1/(1-q)，最后乘以 scale。"""
-        decay = np.zeros(T, dtype=np.float32)
-        if use_first:
-            # 仅取第一次发生的事件
-            idx = np.argmax(events > 0.5)
-            if events[idx] > 0.5:
-                decay[:idx+1] = q ** np.arange(idx, -1, -1)
-        else:
-            carry = 0.0
-            for t in range(T-1, -1, -1):
-                carry = carry * q + events[t]
-                decay[t] = carry
-        # 无穷级数和 sum_{k=0}^inf q^k = 1/(1-q)，所以乘以 (1-q)*scale
-        return decay * (1.0 - q) * scale
 
-    # 死亡事件：not_ego_dead 全为 0 时不回溯；否则从第一个死亡时刻向前衰减
-    if np.all(not_ego_dead < 0.5):
-        death_decay = np.zeros(T, dtype=np.float32)
-    else:
-        death_events = np.zeros(T, dtype=np.float32)
-        dead_mask = (1.0 - not_ego_dead) > 0.5
-        if np.any(dead_mask):
-            first_dead = int(np.argmax(dead_mask))
-            death_events[first_dead] = 1.0
-        death_decay = _decay(death_events, scale=-10.0, use_first=True)
+def get_phase_reference_vectors(states):
+    states = np.asarray(states, dtype=np.float32)
+    if states.ndim != 2 or states.shape[1] <= 8:
+        raise ValueError('IL states must be a 2D state vector containing indices 2, 3, 5, 6, and 8.')
+    features = get_phase_features(states)
+    return {
+        phase: features[mask].mean(axis=0) if np.any(mask) else None
+        for phase, mask in get_phase_masks(states).items()
+    }
 
-    # enm.dead：全为 0 时不回溯；否则从第一次命中向前衰减
-    if np.all(enm_hit < 0.5):
-        hit_decay = np.zeros(T, dtype=np.float32)
-    else:
-        hit_events = np.zeros(T, dtype=np.float32)
-        first_hit = int(np.argmax(enm_hit > 0.5))
-        hit_events[first_hit] = 1.0
-        hit_decay = _decay(hit_events, scale=10.0, use_first=True)
 
-    # 逃脱导弹：每个 1 都向前（过去）指数扩散
-    if np.all(escape < 0.5):
-        escape_decay = np.zeros(T, dtype=np.float32)
-    else:
-        escape_decay_raw = np.zeros(T, dtype=np.float32)
-        for t in range(T):
-            if escape[t] > 0.5:
-                # 从 t 向前扩散：t 处为 1, t-1 处为 q, ...
-                escape_decay_raw[:t+1] += q ** np.arange(t, -1, -1)
-        # 使用无穷级数和归一化：sum_{k=0}^inf q^k = 1/(1-q)
-        # 乘以 (1-q)*10，单事件无穷时间奖励总和为 10
-        escape_decay = escape_decay_raw * (1.0 - q) * 10.0
-        # 原先的整回合平均归一化（按 episode 内 raw 总和归一到 10）
-        # eps = 1e-8
-        # escape_decay = escape_decay_raw / (escape_decay_raw.sum() + eps) * 10.0
-
-    # # 导弹击杀溯源：在记录的导弹 ID 序列里找到 killer_id 的位置，
-    # # 从该位置向前指数扩散，最后按总和归一化到 5
-    # killer_decay = np.zeros(T, dtype=np.float32)
-    # if killer_id is not None and killer_id != 0:
-    #     events = (np.abs(missile_ids - float(killer_id)) < 0.5).astype(np.float32)
-    #     if events.sum() > 0:
-    #         decay_raw = np.zeros(T, dtype=np.float32)
-    #         for t in range(T):
-    #             if events[t] > 0.5:
-    #                 # 从 t 向前扩散：t 处为 1, t-1 处为 q, ...
-    #                 decay_raw[:t+1] += q ** np.arange(t, -1, -1)
-    #         eps = 1e-8
-    #         killer_decay = decay_raw / (decay_raw.sum() + eps) * 5.0
-
-    scalar_rewards = orig + death_decay + escape_decay + hit_decay # + killer_decay
-    td['rewards'] = scalar_rewards.tolist()
-    return td
-
+def add_phase_distance_rewards(transition_dict, phase_reference_vectors, weight=0.05):
+    states = np.asarray(transition_dict['states'], dtype=np.float32)
+    if states.ndim != 2 or len(states) == 0:
+        return {phase: 0 for phase in phase_reference_vectors}
+    rewards = np.asarray(transition_dict['rewards'], dtype=np.float32).reshape(-1)
+    if len(rewards) != len(states):
+        raise ValueError('transition_dict states and rewards must have matching lengths.')
+    features = get_phase_features(states)
+    phase_counts = {}
+    for phase, mask in get_phase_masks(states).items():
+        reference = phase_reference_vectors[phase]
+        phase_counts[phase] = int(mask.sum())
+        if reference is None or not np.any(mask):
+            continue
+        distances = np.linalg.norm(features[mask] - reference, axis=1)
+        distance_std = distances.std()
+        if distance_std > 1e-8:
+            dense_rewards = -np.clip((distances - distances.mean()) / distance_std, -1.0, 1.0) * weight
+            rewards[mask] += dense_rewards
+    transition_dict['rewards'] = rewards.tolist()
+    return phase_counts
 
 # ==========================================
 # 新增：混合缓冲区类
@@ -583,8 +532,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
     """
     try:  # <--- 【新增】添加此行，并将下方所有代码整体缩进
-        # 在子进程内部再次显式绑定 ChooseStrategyEnv，避免全局命名空间被其它 import 污染
-        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import ChooseStrategyEnv
         # --- 1. 初始化阶段 (只运行一次) ---
         
         # 确保每个进程种子不同，避免所有环境生成完全一样的随机数
@@ -710,6 +657,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 m_fired = 0
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
+                
+                # 新增: 出界状态及首次出界时间记录（用于Elo惩罚）
+                red_out_cage = False
+                red_out_cage_time = None
+                blue_out_cage = False
+                blue_out_cage_time = None
                 
                 # --- E. 仿真循环 (核心物理逻辑) ---
                 # 计算最大步数
@@ -865,6 +818,14 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
                     
+                    # 新增: 记录红蓝双方首次出界时刻
+                    if not red_out_cage and env.out_cage(env.RUAV):
+                        red_out_cage = True
+                        red_out_cage_time = env.t
+                    if not blue_out_cage and env.out_cage(env.BUAV):
+                        blue_out_cage = True
+                        blue_out_cage_time = env.t
+                    
                     # 4. 奖励计算
                     done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
                                                             action_cycle_multiplier, end_reward_weight=end_reward_weight,
@@ -877,21 +838,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
 
-                    # reward_weight 兼容标量 / 一维权重的写法，结果统一为 4 维奖励向量
-                    if reward_weight is None:
-                        rw = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-                    else:
-                        rw = np.array(reward_weight, dtype=np.float32)
-                    if rw.ndim == 0:
-                        reward_for_learn = (b_reward1 + b_reward2 + b_reward3) * rw
-                        reward_for_enm = (r_reward1 + r_reward2 + r_reward3) * rw
-                    else:
-                        reward_for_learn = np.stack([b_reward1, b_reward2, b_reward3], axis=0).T @ rw
-                        reward_for_enm = np.stack([r_reward1, r_reward2, r_reward3], axis=0).T @ rw
+                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
+                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += b_reward1[0]
-                        episode_return_dense += b_dense_reward[0]
+                        episode_return += b_reward1
+                        episode_return_dense += b_dense_reward
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -937,12 +889,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                 td[k] = td[k][:last_idx+1]
                     return td
                 
-                # 把五维奖励向量合成为一维标量，并对后三维及导弹击杀溯源做指数时间回溯
-                r_killer_id = env.RUAV.killer_id if done else None
-                b_killer_id = env.BUAV.killer_id if done else None
-                local_trans = synthesize_vector_rewards(local_trans, killer_id=r_killer_id)
-                ego_trans = synthesize_vector_rewards(ego_trans, killer_id=r_killer_id)
-                enm_trans = synthesize_vector_rewards(enm_trans, killer_id=b_killer_id)
                 local_trans = truncate_and_shift(local_trans)
                 ego_trans = truncate_and_shift(ego_trans)
                 enm_trans = truncate_and_shift(enm_trans)
@@ -1036,7 +982,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': b_dense_reward[0],
+                        'dense_return': b_dense_reward,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -1062,7 +1008,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ep_blue_avg_fire_delta_psi': ep_blue_avg_fire_delta_psi,
                     'ep_blue_avg_fire_distance': ep_blue_avg_fire_distance,
                     'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor,
-                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude
+                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude,
+                    # 新增: 回合结束时双方出界状态与首次出界时间
+                    'red_out_cage': red_out_cage,
+                    'red_out_cage_time': red_out_cage_time,
+                    'blue_out_cage': blue_out_cage,
+                    'blue_out_cage_time': blue_out_cage_time
                 }
                 
                 # 8. 发送回 Master
@@ -1195,6 +1146,10 @@ def run_MLP_simulation(
         if 'returns' in original_il_transition_dict:
             original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
         print(f"IL dataset processed. Samples: {len(original_il_transition_dict['states'] if original_il_transition_dict['states'] is not None else [])}")
+    else:
+        raise ValueError('Phase-distance reward requires original_il_transition_dict.')
+
+    phase_reference_vectors = get_phase_reference_vectors(original_il_transition_dict['states'])
     
     # 2. 参数与环境配置 (Master 用于获取维度)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
@@ -1988,17 +1943,25 @@ def run_MLP_simulation(
                     main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score, K_FACTOR)
                     # 更新对手Elo分
                     new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR)
-                    elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
-                    # 同步更新 Elite 池中已有的对手Elo分值
-                    if opp_name in elite_elo_ratings:
-                        elite_elo_ratings[opp_name] = new_adv_elo
-                    # 同步更新 Hall of Fame 中已有的对手Elo分值
-                    if opp_name in hall_of_fame:
-                        hall_of_fame[opp_name] = new_adv_elo
                 else:
-                    # 新对手：始终添加到 elo_ratings
-                    elo_ratings[opp_name] = main_agent_elo
+                    # 新对手：初始Elo与主智能体相同
+                    new_adv_elo = main_agent_elo
+                
+                # --- 新增: 出界惩罚 ---
+                # 若对手在3分钟内出界，对手Elo额外扣除200分；当前主智能体Elo不额外修改
+                red_out_cage = res.get('red_out_cage', False)
+                red_out_cage_time = res.get('red_out_cage_time')
+                if red_out_cage and red_out_cage_time is not None and red_out_cage_time <= 3 * 60:
+                    new_adv_elo -= 200
+                
+                elo_ratings[opp_name] = new_adv_elo
+                # 同步更新 Elite 池中已有的对手Elo分值
+                if opp_name in elite_elo_ratings:
+                    elite_elo_ratings[opp_name] = new_adv_elo
+                # 同步更新 Hall of Fame 中已有的对手Elo分值
+                if opp_name in hall_of_fame:
+                    hall_of_fame[opp_name] = new_adv_elo
             
             # 计算蓝方开火策略指标的批次平均值
             batch_blue_avg_fire_interval = float(np.mean(batch_blue_fire_intervals)) if batch_blue_fire_intervals else None
@@ -2092,6 +2055,7 @@ def run_MLP_simulation(
             
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
+            logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
@@ -2142,50 +2106,55 @@ def run_MLP_simulation(
                 
                 max_fire_logits = 4.0
 
-                # 随机拜师法
-                if use_RDistill and batch_idx > 50:
-                    # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
-                    # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
-                    candidate_items = [(k, v) for k, v in elo_ratings.items()
-                                       if k.startswith('actor_rein') or k.startswith('Rule')]
-                    if len(candidate_items) >= 1:
-                        print("有可调用teacher")
-                        candidate_items.sort(key=lambda x: x[1], reverse=True)
-                        top_candidates = candidate_items[:10]
-                        teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
+                # # 随机拜师法
+                # if use_RDistill and batch_idx > 50:
+                #     # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
+                #     # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
+                #     candidate_items = [(k, v) for k, v in elo_ratings.items()
+                #                        if k.startswith('actor_rein') or k.startswith('Rule')]
+                #     if len(candidate_items) >= 1:
+                #         print("有可调用teacher")
+                #         candidate_items.sort(key=lambda x: x[1], reverse=True)
+                #         top_candidates = candidate_items[:10]
+                #         teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
 
-                        teacher_wrapper = None
-                        if teacher_key.startswith('Rule'):
-                            # 构建基于规则的teacher
-                            try:
-                                t_rule_num = int(teacher_key.split('_')[1])
-                            except (IndexError, ValueError):
-                                t_rule_num = 0
-                            print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
-                            teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
-                                                                 action_dims_dict, device,
-                                                                 label_smoothing=label_smoothing)
-                        else:
-                            teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
-                            if os.path.exists(teacher_path):
-                                print("teacher路径已获取")
-                                teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-                                teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
-                                teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
-                                teacher_wrapper.eval()
+                #         teacher_wrapper = None
+                #         if teacher_key.startswith('Rule'):
+                #             # 构建基于规则的teacher
+                #             try:
+                #                 t_rule_num = int(teacher_key.split('_')[1])
+                #             except (IndexError, ValueError):
+                #                 t_rule_num = 0
+                #             print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
+                #             teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
+                #                                                  action_dims_dict, device,
+                #                                                  label_smoothing=label_smoothing)
+                #         else:
+                #             teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
+                #             if os.path.exists(teacher_path):
+                #                 print("teacher路径已获取")
+                #                 teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+                #                 teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
+                #                 teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
+                #                 teacher_wrapper.eval()
 
-                        if teacher_wrapper is not None:
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
-                            logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
-                        else:
-                            RDistill_kl = None
-                    else:
-                        RDistill_kl = None
+                #         if teacher_wrapper is not None:
+                #             transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
+                #             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
+                #         else:
+                #             RDistill_kl = None
+                #     else:
+                #         RDistill_kl = None
 
-                if use_RND:
-                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
-                else:
-                    rnd_mse = None
+                # if use_RND:
+                #     transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
+                # else:
+                #     rnd_mse = None
+
+                # 替代引导奖励
+                # phase_sample_counts = add_phase_distance_rewards(transition_dict, phase_reference_vectors, weight=0.03) # 0.05
+                # for phase, sample_count in phase_sample_counts.items():
+                #     logger.add(f"train_plus/phase_samples_{phase}", sample_count, total_steps)
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
@@ -2210,13 +2179,13 @@ def run_MLP_simulation(
 
                 alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
 
-                if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
-                    if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
-                                                  chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
-                                                  ppo_grad_val=ppo_grad_ema)
-                        # 不可以自模仿得过于频繁
-                        last_il_update_batch_idx = batch_idx
+                # if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
+                #     if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
+                #         student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
+                #                                   chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
+                #                                   ppo_grad_val=ppo_grad_ema)
+                #         # 不可以自模仿得过于频繁
+                #         last_il_update_batch_idx = batch_idx
                 
                 # 记录 Log
 

@@ -221,7 +221,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 逃脱来袭导弹瞬间 +10
             if not warning and ego._last_warning:
                 if (current_cycle_t - ego._last_missile_escape_t) > (cycle_time * 0.5):
-                    r_event += 10.0 * (not ego.dead)
+                    r_event += 20.0 * (not ego.dead) # 10
                     ego._last_missile_escape_t = current_cycle_t
 
             ego._last_target_locked = bool(target_locked)
@@ -257,9 +257,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 结果奖励（对应 Episodic rewards）
         if done:
             if enm.dead and not ego.dead:
-                r_event += 500.0
+                r_event += 510.0 # 500
             elif ego.dead and not enm.dead:
-                r_event -= 500.0
+                r_event -= 510.0 # 500
             # 平局保持 +0.0
 
             # 打印详细奖励组成，方便调试
