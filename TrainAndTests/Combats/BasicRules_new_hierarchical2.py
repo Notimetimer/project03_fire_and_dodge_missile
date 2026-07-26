@@ -104,6 +104,11 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
                 action_v = 2 # 平飞
             # 置尾机动
             action_h = 3 # 水平方向背离
+            # # 39
+            # if delta_psi < 0:
+            #     action_h = 4 # 39
+            # else:
+            #     action_h = 2 # 39
         elif on_guiding: # 如果本回合决定发射导弹
             action_v = 2 # 平飞
             if abs(delta_psi) < 5*pi/180:
@@ -122,6 +127,10 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_v = 4 # 下降高度
             action_h = 3 # 置尾机动
+            # if delta_psi < 0:
+            #     action_h = 4 # 39
+            # else:
+            #     action_h = 2 # 39
             action_number = [action_v, action_h]
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
@@ -150,6 +159,10 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if RWR: #  and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_v = 4 # 下降高度
             action_h = 3 # 置尾机动
+            # if delta_psi < 0:
+            #     action_h = 4 # 39
+            # else:
+            #     action_h = 2 # 39
             action_number = [action_v, action_h]
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
@@ -182,6 +195,10 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_v = 4 # 下降高度
             action_h = 3 # 置尾机动
+            # if delta_psi < 0:
+            #     action_h = 4 # 39
+            # else:
+            #     action_h = 2 # 39
             action_number = [action_v, action_h]
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离
@@ -205,6 +222,10 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         if RWR and threat_distance < threat_distance_list[rules_num]: # 受到威胁
             action_v = 4 # 下降高度
             action_h = 3 # 置尾机动
+            # if delta_psi < 0:
+            #     action_h = 4 # 39
+            # else:
+            #     action_h = 2 # 39
             action_number = [action_v, action_h]
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离
