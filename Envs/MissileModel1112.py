@@ -167,7 +167,7 @@ class missile_class:
         # 初制导下最大速度倾角
         self.v_theta_of_initial_guidance_max = 45 * pi / 180
         self.t = 0  # 导弹初始计时
-        self.t_max = self.stage1_start + 110  # 100 电池工作时间
+        self.t_max = self.stage1_start + 120  # 110 电池工作时间
         self.t_go = 120
         self.trajectory = np.empty((0, 7))  # 导弹轨迹, 结构为时间、位置（3）、速度（3）
         self.guidance_stage = 2  # 2为中制导，3为末制导
@@ -190,6 +190,8 @@ class missile_class:
         self.off_lock = False
         self.ground_close_rate = None
         self.dt = 0.04 # 初始值
+        self.v_dot = 0
+        self.gliding = 0
 
     def Cd(self, mach):
         lis0 = np.array([
@@ -601,6 +603,8 @@ class missile_class:
         v_dot = (Fp - Fx) / m_missile1 - g * sin(theta_mt)
         vmt += v_dot * dt
         
+        self.v_dot = v_dot
+
         # # 速度过低没有舵效
         # if vmt < self.speed_min:
         #     nzt = np.clip(nzt, -1, 1)
@@ -634,6 +638,10 @@ class missile_class:
         self.t += dt
         self.t = round(self.t, 2)  # 保留两位小数
 
+        if self.t < self.stage2_end or self.t > self.t_max:
+            self.gliding = 0
+        else:
+            self.gliding = 1
 
         # print(self.t)
         # 记录运行轨迹

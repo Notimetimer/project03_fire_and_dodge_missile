@@ -272,7 +272,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 返回 done 和三个分项奖励
         r_total = r_event + r_dense
         not_ego_dead = 0.0 if ego.dead else 1.0
-        enm_got_hit = 1.0 if enm.got_hit else 0.0
+        enm_dead = 1.0 if enm.dead else 0.0
         # 新增：记录本步新发射导弹的 ID，没有则为 0
         # 只在 action_shoot==1 且出现更高 ID 的导弹时记录，避免把“导弹在空中飞”的 ID 写进去
         current_max_id = max([m.id for m in alive_ally_missiles], default=0)
@@ -280,5 +280,5 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if action_shoot >= 1 and current_max_id > ego._last_seen_max_missile_id:
             new_missile_id = float(current_max_id)
         ego._last_seen_max_missile_id = current_max_id
-        r_total_vec = np.array([r_total, not_ego_dead, escape_missile_bool, enm_got_hit, new_missile_id], dtype=np.float32)
+        r_total_vec = np.array([r_total, not_ego_dead, escape_missile_bool, enm_dead, new_missile_id], dtype=np.float32)
         return done, r_total_vec, r_total_vec, r_total_vec

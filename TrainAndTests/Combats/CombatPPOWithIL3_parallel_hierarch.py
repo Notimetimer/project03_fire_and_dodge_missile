@@ -609,6 +609,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
                 
+                # 新增: 出界状态及首次出界时间记录（用于Elo惩罚）
+                red_out_cage = False
+                red_out_cage_time = None
+                blue_out_cage = False
+                blue_out_cage_time = None
+                
                 # --- E. 仿真循环 (核心物理逻辑) ---
                 # 计算最大步数
                 max_counts = int(args.max_episode_len / dt_maneuver)
@@ -762,6 +768,14 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
+                    
+                    # 新增: 记录红蓝双方首次出界时刻
+                    if not red_out_cage and env.out_cage(env.RUAV):
+                        red_out_cage = True
+                        red_out_cage_time = env.t
+                    if not blue_out_cage and env.out_cage(env.BUAV):
+                        blue_out_cage = True
+                        blue_out_cage_time = env.t
                     
                     # 4. 奖励计算
                     done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
@@ -945,7 +959,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ep_blue_avg_fire_delta_psi': ep_blue_avg_fire_delta_psi,
                     'ep_blue_avg_fire_distance': ep_blue_avg_fire_distance,
                     'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor,
-                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude
+                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude,
+                    # 新增: 回合结束时双方出界状态与首次出界时间
+                    'red_out_cage': red_out_cage,
+                    'red_out_cage_time': red_out_cage_time,
+                    'blue_out_cage': blue_out_cage,
+                    'blue_out_cage_time': blue_out_cage_time
                 }
                 
                 # 8. 发送回 Master
@@ -1871,17 +1890,25 @@ def run_MLP_simulation(
                     main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score, K_FACTOR)
                     # 更新对手Elo分
                     new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR)
-                    elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
-                    # 同步更新 Elite 池中已有的对手Elo分值
-                    if opp_name in elite_elo_ratings:
-                        elite_elo_ratings[opp_name] = new_adv_elo
-                    # 同步更新 Hall of Fame 中已有的对手Elo分值
-                    if opp_name in hall_of_fame:
-                        hall_of_fame[opp_name] = new_adv_elo
                 else:
-                    # 新对手：始终添加到 elo_ratings
-                    elo_ratings[opp_name] = main_agent_elo
+                    # 新对手：初始Elo与主智能体相同
+                    new_adv_elo = main_agent_elo
+                
+                # --- 新增: 出界惩罚 ---
+                # 若对手在3分钟内出界，对手Elo额外扣除200分；当前主智能体Elo不额外修改
+                red_out_cage = res.get('red_out_cage', False)
+                red_out_cage_time = res.get('red_out_cage_time')
+                if red_out_cage and red_out_cage_time is not None and red_out_cage_time <= 3 * 60:
+                    new_adv_elo -= 200
+                
+                elo_ratings[opp_name] = new_adv_elo
+                # 同步更新 Elite 池中已有的对手Elo分值
+                if opp_name in elite_elo_ratings:
+                    elite_elo_ratings[opp_name] = new_adv_elo
+                # 同步更新 Hall of Fame 中已有的对手Elo分值
+                if opp_name in hall_of_fame:
+                    hall_of_fame[opp_name] = new_adv_elo
             
             # 计算蓝方开火策略指标的批次平均值
             batch_blue_avg_fire_interval = float(np.mean(batch_blue_fire_intervals)) if batch_blue_fire_intervals else None
@@ -2026,50 +2053,50 @@ def run_MLP_simulation(
                 
                 max_fire_logits = 4.0
 
-                # 随机拜师法
-                if use_RDistill and batch_idx > 50:
-                    # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
-                    # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
-                    candidate_items = [(k, v) for k, v in elo_ratings.items()
-                                       if k.startswith('actor_rein') or k.startswith('Rule')]
-                    if len(candidate_items) >= 1:
-                        print("有可调用teacher")
-                        candidate_items.sort(key=lambda x: x[1], reverse=True)
-                        top_candidates = candidate_items[:10]
-                        teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
+                # # 随机拜师法
+                # if use_RDistill and batch_idx > 50:
+                #     # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
+                #     # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
+                #     candidate_items = [(k, v) for k, v in elo_ratings.items()
+                #                        if k.startswith('actor_rein') or k.startswith('Rule')]
+                #     if len(candidate_items) >= 1:
+                #         print("有可调用teacher")
+                #         candidate_items.sort(key=lambda x: x[1], reverse=True)
+                #         top_candidates = candidate_items[:10]
+                #         teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
 
-                        teacher_wrapper = None
-                        if teacher_key.startswith('Rule'):
-                            # 构建基于规则的teacher
-                            try:
-                                t_rule_num = int(teacher_key.split('_')[1])
-                            except (IndexError, ValueError):
-                                t_rule_num = 0
-                            print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
-                            teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
-                                                                 action_dims_dict, device,
-                                                                 label_smoothing=label_smoothing)
-                        else:
-                            teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
-                            if os.path.exists(teacher_path):
-                                print("teacher路径已获取")
-                                teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-                                teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
-                                teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
-                                teacher_wrapper.eval()
+                #         teacher_wrapper = None
+                #         if teacher_key.startswith('Rule'):
+                #             # 构建基于规则的teacher
+                #             try:
+                #                 t_rule_num = int(teacher_key.split('_')[1])
+                #             except (IndexError, ValueError):
+                #                 t_rule_num = 0
+                #             print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
+                #             teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
+                #                                                  action_dims_dict, device,
+                #                                                  label_smoothing=label_smoothing)
+                #         else:
+                #             teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
+                #             if os.path.exists(teacher_path):
+                #                 print("teacher路径已获取")
+                #                 teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+                #                 teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
+                #                 teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
+                #                 teacher_wrapper.eval()
 
-                        if teacher_wrapper is not None:
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
-                            logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
-                        else:
-                            RDistill_kl = None
-                    else:
-                        RDistill_kl = None
+                #         if teacher_wrapper is not None:
+                #             transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
+                #             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
+                #         else:
+                #             RDistill_kl = None
+                #     else:
+                #         RDistill_kl = None
 
-                if use_RND:
-                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
-                else:
-                    rnd_mse = None
+                # if use_RND:
+                #     transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
+                # else:
+                #     rnd_mse = None
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
@@ -2094,13 +2121,13 @@ def run_MLP_simulation(
 
                 alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
 
-                if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
-                    if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
-                                                  chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
-                                                  ppo_grad_val=ppo_grad_ema)
-                        # 不可以自模仿得过于频繁
-                        last_il_update_batch_idx = batch_idx
+                # if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
+                #     if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
+                #         student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
+                #                                   chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
+                #                                   ppo_grad_val=ppo_grad_ema)
+                #         # 不可以自模仿得过于频繁
+                #         last_il_update_batch_idx = batch_idx
                 
                 # 记录 Log
 

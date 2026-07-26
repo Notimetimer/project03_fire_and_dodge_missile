@@ -1178,16 +1178,20 @@ class Battle(object):
             if R_uav <= self.R_cage:
                 out = False
         
-        # 试验举措：敌机死后边界消失
-        # 敌机全都死了之后可以出界
-        # （警告，这样可能需要同步更改border观测项和奖励）
-        ego_side = UAV.side
-        enm_side = 'b' if ego_side == 'r' else 'r'
-        # 判断敌机阵营是否全灭
-        enm_uav = self.RUAV if enm_side =='r' else self.BUAV
-        if enm_uav.dead:
-            self.R_cage = np.inf
-            return False # 不出界
+        # 试验举措：保持对对手的锁定，就不算出界
+        if UAV.lock_on:
+            out = False
+
+        # # 试验举措：敌机死后边界消失
+        # # 敌机全都死了之后可以出界
+        # # （警告，这样可能需要同步更改border观测项和奖励）
+        # ego_side = UAV.side
+        # enm_side = 'b' if ego_side == 'r' else 'r'
+        # # 判断敌机阵营是否全灭
+        # enm_uav = self.RUAV if enm_side =='r' else self.BUAV
+        # if enm_uav.dead:
+        #     self.R_cage = np.inf
+        #     return False # 不出界
         return out
 
 

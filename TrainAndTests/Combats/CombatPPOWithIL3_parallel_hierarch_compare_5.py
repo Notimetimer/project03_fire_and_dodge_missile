@@ -43,7 +43,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_5 import * # 奖励函数 对比
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import * # 奖励函数 对比
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -51,7 +51,7 @@ from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 # 强制显式绑定：防止调用链中其它 import 污染 ChooseStrategyEnv
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_5 import ChooseStrategyEnv
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import ChooseStrategyEnv
 
 dt_move = 0.04
 
@@ -246,7 +246,7 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
 def synthesize_vector_rewards(td, killer_id=None):
     """
     将 transition_dict 中存储的 5 维奖励向量
-    [原始奖励, not ego.dead, 逃脱导弹瞬间布尔标识, enm.got_hit, 新发射导弹 ID]
+    [原始奖励, not ego.dead, 逃脱导弹瞬间布尔标识, enm.dead, 新发射导弹 ID]
     对后三个维度及导弹击杀溯源做指数时间回溯，再求和压成 1 维标量奖励。
     如果 rewards 已经是标量列表，则直接返回原 td。
     """
@@ -261,7 +261,7 @@ def synthesize_vector_rewards(td, killer_id=None):
 
     R = np.array(rewards, dtype=np.float32)
     T = R.shape[0]
-    q = (0.01) ** 0.1
+    q = (0.01) ** (1/10) # q的衰减率，10步后只剩0.01
 
     orig = R[:, 0]
     not_ego_dead = R[:, 1]
@@ -269,9 +269,10 @@ def synthesize_vector_rewards(td, killer_id=None):
     enm_hit = R[:, 3]
     missile_ids = R[:, 4]
 
-    def _decay(events, scale, use_first=True):
+    def _decay(events, scale, q=q, use_first=True):
         """events 中 1 表示事件发生，从该时刻向前按 q^k 衰减，
-        再除以无穷级数和 1/(1-q)，最后乘以 scale。"""
+        再除以无穷级数和 1/(1-q)，最后乘以 scale。
+        参数 q 允许为不同稀疏奖励单独指定衰减率。"""
         decay = np.zeros(T, dtype=np.float32)
         if use_first:
             # 仅取第一次发生的事件
@@ -295,18 +296,19 @@ def synthesize_vector_rewards(td, killer_id=None):
         if np.any(dead_mask):
             first_dead = int(np.argmax(dead_mask))
             death_events[first_dead] = 1.0
-        death_decay = _decay(death_events, scale=-10.0, use_first=True)
+        death_decay = _decay(death_events, scale=-500.0, q=0.63, use_first=True) # 0.8
 
-    # enm.got_hit：全为 0 时不回溯；否则从第一次命中向前衰减
+    # enm.dead：全为 0 时不回溯；否则从第一次命中向前衰减
     if np.all(enm_hit < 0.5):
         hit_decay = np.zeros(T, dtype=np.float32)
     else:
         hit_events = np.zeros(T, dtype=np.float32)
         first_hit = int(np.argmax(enm_hit > 0.5))
         hit_events[first_hit] = 1.0
-        hit_decay = _decay(hit_events, scale=10.0, use_first=True)
+        hit_decay = _decay(hit_events, scale=500.0, q=0.63, use_first=True) # 0.8
 
     # 逃脱导弹：每个 1 都向前（过去）指数扩散
+    q1 = 0.7
     if np.all(escape < 0.5):
         escape_decay = np.zeros(T, dtype=np.float32)
     else:
@@ -314,10 +316,10 @@ def synthesize_vector_rewards(td, killer_id=None):
         for t in range(T):
             if escape[t] > 0.5:
                 # 从 t 向前扩散：t 处为 1, t-1 处为 q, ...
-                escape_decay_raw[:t+1] += q ** np.arange(t, -1, -1)
+                escape_decay_raw[:t+1] += q1 ** np.arange(t, -1, -1)
         # 使用无穷级数和归一化：sum_{k=0}^inf q^k = 1/(1-q)
         # 乘以 (1-q)*10，单事件无穷时间奖励总和为 10
-        escape_decay = escape_decay_raw * (1.0 - q) * 10.0
+        escape_decay = escape_decay_raw * (1.0 - q1) * 10.0
         # 原先的整回合平均归一化（按 episode 内 raw 总和归一到 10）
         # eps = 1e-8
         # escape_decay = escape_decay_raw / (escape_decay_raw.sum() + eps) * 10.0
@@ -584,7 +586,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
     """
     try:  # <--- 【新增】添加此行，并将下方所有代码整体缩进
         # 在子进程内部再次显式绑定 ChooseStrategyEnv，避免全局命名空间被其它 import 污染
-        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_5 import ChooseStrategyEnv
+        from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_4 import ChooseStrategyEnv
         # --- 1. 初始化阶段 (只运行一次) ---
         
         # 确保每个进程种子不同，避免所有环境生成完全一样的随机数

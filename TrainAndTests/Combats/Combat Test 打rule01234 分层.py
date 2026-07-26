@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "有预训练compare4-run-20260721-225216" # "PFSP_0.15-run-20260717-230658"
+    dir_name = "PFSP0-run-20260723-215539" # "PFSP_0.15-run-20260717-230658"
     
     "SLWSA3C0.3-run-20260630-220403"
     
