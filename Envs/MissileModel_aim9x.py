@@ -148,7 +148,7 @@ class missile_class:
         self.kill_range = 30 # 85 # 20  # 为了提高训练效率，这个半径可以被放大，从而避免变步长
         # 最大过载
         self.max_g0 = 50
-        self.max_g1 = 40
+        self.max_g1 = 35
         self.max_g = self.max_g0
         # 最大马赫数
         self.max_mach = 4.0
@@ -158,7 +158,7 @@ class missile_class:
         # 最小速度
         self.speed_min = 0.65 * 340  # m/s
         # 最大视角
-        self.sight_angle_max = np.radians(75) # 极限离轴可能接近40度，也有用53度的，稳定跟踪区在正负25度以内
+        self.sight_angle_max = np.radians(90) # 极限离轴可能接近90度
         # 最大跟踪视角速度
         self.sight_angle_rate_max = np.radians(75) # 0.7  # rad/s
         # 被告警距离
@@ -191,9 +191,10 @@ class missile_class:
         self.target_close_v = None
         self.off_lock = False
         self.ground_close_rate = None
-        self.dt = 0.04 # 初始值
+        self.dt = 0.04 # 初始值 
         self.v_dot = 0
         self.gliding = 0
+        self.spotted_distance = 10e3
 
     def Cd(self, mach):
         lis0 = np.array([
@@ -275,13 +276,6 @@ class missile_class:
             ptt_predict = self.last_target_pos + vtt_predict*(self.t - self.last_target_t)
             ptt_predict[1] = max(ptt_predict[1], 200) # 禁止往地底下线性递推
 
-        if norm(ptt_predict-p_missile_) < self.detect_range:
-            self.radar_on = False
-        else:
-            self.radar_on = False
-        # 没电关雷达
-        if self.t > self.t_max:
-            self.radar_on = False
         # 输入参数
         vmt_ = v_missile_
         ptt_ = ptt_predict
@@ -317,10 +311,6 @@ class missile_class:
     # 末制导
     def terminal_guidance(self, v_missile_, v_target_, p_missile_, p_target_):
         
-        self.radar_on = True
-        # 没电关雷达
-        if self.t > self.t_max:
-            self.radar_on = False
         # 输入参数
         vmt_ = v_missile_
         vtt_ = v_target_
@@ -370,27 +360,16 @@ class missile_class:
 
     # 制导律选择
     def guidance(self, v_missile_, v_target_, p_missile_, p_target_, datalink):
-        ptt_ = p_target_
-        pmt_ = p_missile_
-        line_t_ = ptt_ - pmt_
-        distance = np.linalg.norm(line_t_)
-        if np.linalg.norm(distance) <= self.detect_range:
-            self.A_pole_moment = 0
-            # 捕获目标瞬间标志
-            if self.guidance_stage == 2:
-                self.A_pole_moment = 1
-            # print(str(self.t)+'s,末制导')
+        if self.lock_on:
+            self.A_pole_moment = int(self.guidance_stage == 2)
             self.guidance_stage = 3
-        # if self.A_pole_moment == 1:
-        #     print('A_pole')
-
-        if self.guidance_stage == 2:
-            return self.mid_term_guidance(v_missile_, v_target_, p_missile_, p_target_, datalink)
-        if self.guidance_stage == 3:
-            if not self.lock_time:
+            if self.lock_time is None:
                 self.lock_time = self.t
             return self.terminal_guidance(v_missile_, v_target_, p_missile_, p_target_)
-        # return self.terminal_guidance(v_missile_, v_target_, p_missile_, p_target_)
+
+        self.A_pole_moment = 0
+        self.guidance_stage = 2
+        return self.mid_term_guidance(v_missile_, v_target_, p_missile_, p_target_, datalink)
 
     def step(self, target_information, dt=0.02, datalink=True, record=False):
         '''
@@ -411,33 +390,30 @@ class missile_class:
         distance = np.linalg.norm(line_t_)
         self.distance = distance
         self.delta_height = line_t_[1] # 与目标的高度差
+        self.radar_on = self.t <= self.t_max and self.distance < self.spotted_distance
         # print('导弹感知到的距离:' + str(distance))
+
+        vmt = np.linalg.norm(vmt_)
+        if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):
+            self.in_angle = 1
+        else:
+            self.in_angle = 0
+        if self.distance < self.detect_range:
+            self.in_distance = 1
+        else:
+            self.in_distance = 0
+        self.lock_on = self.in_angle and self.in_distance and (not self.off_lock)
 
         case, temp = self.guidance(vmt_, vtt_, pmt_, ptt_, datalink=datalink)
 
         v_rel_ = vtt_-vmt_
         L_dot = np.dot(v_rel_, line_t_)/distance
-        self.t_go = -distance/L_dot # if L_dot<0 else self.t_max # 弹目距离
+        self.t_go = -distance/L_dot if abs(L_dot) > 1e-6 else self.t_max # 弹目距离
         self.t_go = max(self.t_go, 0.1)
-
-        vmt = np.linalg.norm(vmt_)
 
         # 试验：多普勒速度窗口相关计算
         self.target_close_v = - np.dot(vtt_, line_t_)/distance        
         self.ground_close_rate = vmt if self.theta < np.radians(-15) else 0
-
-        # 目标是否进入锁定角度范围
-        if np.dot(vmt_, line_t_) / vmt / distance > cos(self.sight_angle_max):
-            self.in_angle = 1
-        else:
-            self.in_angle = 0
-        # 目标是否进入探测距离
-        if self.distance < self.detect_range:
-            self.in_distance = 1
-        else:
-            self.in_distance = 0
-        
-        self.lock_on = self.in_angle and self.in_distance and (not self.off_lock)
 
         vtt = np.linalg.norm(vtt_)
         psi_mt = np.arctan2(vmt_[2], vmt_[0])
@@ -606,8 +582,8 @@ if __name__ == '__main__':
     # 平射
     p_carrier_ = np.array([0, 5e3, 0])
     v_carrier_ = np.array([300, 0, 0])
-    list_pt_ = np.array([6e3, 5e3, 6e3])  # 目标
-    list_vt_ = np.array([-200, 0, 0])
+    list_pt_ = np.array([14e3, 5e3, 0e3])  # 目标
+    list_vt_ = np.array([300, 0, 0])
 
     # # 抛射
     # p_carrier_ = np.array([0, 11e3, 0])
@@ -636,7 +612,7 @@ if __name__ == '__main__':
     # 遍历导弹列表，如果导弹炸了，则跳过
     # 如果导弹没炸，则获取目标位置、动力学计算以及毁伤判定、记录轨迹
     end_flag = 0
-    t_count_start = -5
+    t_count_start = -10
     tacview = Tacview()
     for i in i_list:
         t = np.round(i * dt, 2)
@@ -715,12 +691,13 @@ if __name__ == '__main__':
             for j, missile1 in enumerate(list_missiles):
                 if not missile1.dead:
                     loc_m = ENU2LLH(mark, missile1.pos_)
-                    data_to_send += f"#{send_t:.2f}\n{10+j},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}," \
+                    data_to_send += f"#{send_t:.2f}\n{10+j},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}|" \
+                                    f"{0.0:.6f}|{missile1.theta * 180 / pi:.6f}|{missile1.psi * 180 / pi:.6f}," \
                                     f"Name=AIM-9x,Color=Orange\n"
 
         tacview.send_data_to_client(data_to_send)
         if t % 1 == 0:
-            time.sleep(0.1)
+            time.sleep(0.5)
 
         if end_flag:
             break
