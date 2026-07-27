@@ -304,10 +304,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # 被目标锁定
         if locked_by_target:
-            r_constraint -= 1.0
+            r_constraint -= 1.0 * (1-ego.dead) * (1-enm.dead)
         # 锁定目标
         if target_locked:
-            r_constraint += 1.0
+            r_constraint += 1.0 * (1-ego.dead) * (1-enm.dead)
         
         # 密集奖励只有在agent活着的时候有意义
         # r_constraint *= (1-ego.dead)
@@ -355,19 +355,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         else:
             weight_temp = 1
 
-        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
+        # 记忆只能在奖励记录的时间点更新
+        if abs(self.t - step_idx * cycle_time) < self.dt_maneuver and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             threat_crossing_reward = 0.0
             if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
-                threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
+                threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
             if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
-                threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+                threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
             ego._threat_crossing_reward_t = self.t
             ego._threat_crossing_reward = threat_crossing_reward
             ego._last_phi_t = self.t
             # 上一步敌方受到的威胁距离
             ego._last_enm_threat_dist = enm_states["threat"][3]
 
-        if ego._threat_crossing_reward_t == self.t:
+        if ego._threat_crossing_reward_t is not None and\
+            abs(self.t - ego._threat_crossing_reward_t) < self.dt_maneuver:
             r_constraint += ego._threat_crossing_reward
 
             
