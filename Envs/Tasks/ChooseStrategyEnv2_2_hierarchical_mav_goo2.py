@@ -1,0 +1,423 @@
+'''
+增加开火惩罚
+三元组奖励
+'''
+
+from Controller.Controller_function import sub_of_radian
+import numpy as np
+from random import random
+import random
+from gym import spaces
+import copy
+import jsbsim
+import sys
+import os
+import importlib
+import copy
+from math import *
+
+
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 获取project目录
+def get_current_file_dir():
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+current_dir = get_current_file_dir()
+sys.path.append(os.path.dirname(os.path.dirname(current_dir)))
+
+from Envs.battle6dof1v1_missile0309_hierarchical import *
+from .ChooseStrategyEnv2_0_hierarchical import ChooseStrategyEnv as BaseChooseStrategyEnv
+from .ChooseStrategyEnv2_0_hierarchical import action_optionsLR
+
+# 通过继承构建观测空间、奖励函数和终止条件
+# 通过类的组合获取各子策略的观测量裁剪
+
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+def arcsigmoid(x):
+    return -np.log(1/(x)-1)
+def softplus(x):
+    return np.log(1+np.exp(x))
+
+class ChooseStrategyEnv(BaseChooseStrategyEnv):
+    """
+    Inherit everything from ChooseStrategyEnv2_0 except override
+    combat_terminate_and_reward (keeps other definitions/vars from base).
+    """
+    
+    def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
+        end_reward_weight=1.0, 
+        fire_reward_weight=None,
+        fire_inside_weight = None, ends_in_bvr=0,
+        proxy_warning_dist=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
+
+        if fire_reward_weight is None:
+            fire_reward_weight=1.0
+
+        if fire_inside_weight is None:
+            fire_inside_weight = np.array([
+            1, # 0 time
+            1, # 1 AA
+            1, # 2 Δψ
+            1, # 3 v
+            1, # 4 θ
+        ])
+
+        # --- 1. 参数初始化与状态获取 ---
+        # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
+        reward_weights = {
+            'missile_guidance': 0.04,
+            'target_locked': 0.06,
+            'locked_by_target': 0.05,
+            'missile_warning': 0.06,
+            'enemy_gets_warning': 0.05,
+            'alt_limit_penalty': 1.0,
+            'border_penalty_scale': 0.2,
+            'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
+            'angle_advantage': 0.01, # 0.007, # 0.03
+            'height_advantage': 0.01,
+            'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
+            'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
+            'to_center_reward' : 0.005, # 0.02 占领中心点的价值
+            'speed_penalty': 0.01, # 慢速惩罚
+        }
+
+        ego_win=0
+        ego_lose=0
+        ego_draw=0
+
+        # --- [新增] 态势记录 ---
+        # 计算是否到达记录周期
+        cycle_time = self.dt_maneuver * action_cycle_multiplier
+        step_idx = round(self.t / cycle_time)
+        
+        # 允许极小的误差，并通过 last_record_t 避免在一帧内被两个智能体调用时重复记录
+        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - self.last_record_t) > (cycle_time * 0.5):
+            r_dist = np.linalg.norm(np.array([self.RUAV.pos_[0] - self.horizontal_center[0], self.RUAV.pos_[2] - self.horizontal_center[1]]))
+            b_dist = np.linalg.norm(np.array([self.BUAV.pos_[0] - self.horizontal_center[0], self.BUAV.pos_[2] - self.horizontal_center[1]]))
+            self.r_dist_seq.append(r_dist)
+            self.b_dist_seq.append(b_dist)
+            self.last_record_t = self.t
+
+        if len(self.alive_missiles)==0:
+            self.close_range_kill() # 允许跑刀
+        self.update_missile_state()
+        
+        if side == 'r':
+            ego = self.RUAV
+            enm = self.BUAV
+            alive_enm_missiles = self.alive_b_missiles
+            alive_ally_missiles = self.alive_r_missiles
+            i_can_guide = self.r_can_guide
+        if side == 'b':
+            ego = self.BUAV
+            enm = self.RUAV
+            alive_enm_missiles = self.alive_r_missiles
+            alive_ally_missiles = self.alive_b_missiles
+            i_can_guide = self.b_can_guide
+
+        # 时间戳
+        if not hasattr(ego, '_all_missiles_wasted_t'):
+            ego._all_missiles_wasted_t = None
+        if not hasattr(ego, '_target_hit_reward_t'):
+            ego._target_hit_reward_t = None
+        if not hasattr(ego, '_missile_missed_t'):
+            ego._missile_missed_t = None
+        if not hasattr(ego, '_missile_evaded_t'):
+            ego._missile_evaded_t = None
+
+        # --- 2. 终止判定 ---
+        done = 0
+        
+        # 死亡时间戳
+        if ego.dead and ego.dead_time == None:
+            ego.dead_time = self.t
+        if enm.dead and enm.dead_time == None:
+            enm.dead_time = self.t
+
+        # --简单判定法--
+        # 严格回合时间限制
+        if self.t > self.game_time_limit:
+            done = 1
+        # 双杀
+        if enm.dead and ego.dead:
+            done = 1
+
+        # 如果敌方和敌方所有导弹都没了，且我方存活，判定为胜
+        if len(alive_enm_missiles) == 0 and enm.dead and not ego.dead:
+            ego_win = 1
+            done = 1
+        # 如果友方和友方的所有导弹都没了，且敌方存活，判定为负
+        elif len(alive_ally_missiles) == 0 and ego.dead and not enm.dead:
+            ego_lose = 1
+            done = 1
+        # 双杀双活时间到，就是平局
+        elif done: 
+            ego_draw = 1
+
+        # 是否让回合在超视距阶段结束
+        if ends_in_bvr:
+            if len(alive_ally_missiles) == 0 and len(alive_enm_missiles) == 0 \
+                and ego.ammo==0 and enm.ammo==0 \
+                    and (not ego.dead) and (not enm.dead):
+                    done = 1
+                    ego_draw = 1
+
+        # 回合的胜负取决于ego_side
+        if ego.side == self.ego_side:
+            self.win = ego_win
+            self.lose = ego_lose
+            self.draw = ego_draw
+        else:
+            self.win = ego_lose
+            self.lose = ego_win
+            self.draw = ego_draw
+        
+        # ego_states = self.get_state(side)
+        # enm_states = self.get_state(enm.side)
+        # --- 3. 基础变量计算 --- pomdp会导致观测污染奖励函数，必须重新获取一次状态变量
+        ego_states = copy.deepcopy(self.get_state(side))
+        enm_states = copy.deepcopy(self.get_state(enm.side))
+        # ego_states = ego.current_state
+        # enm_states = enm.current_state
+        dist_enm2ego = norm(ego.pos_ - enm.pos_)
+        
+        cos_ATA_enm = np.dot(enm.vel_, (ego.pos_ - enm.pos_)) / (norm(enm.vel_) * dist_enm2ego + 1e-3)
+        ATA_enm = np.arccos(np.clip(cos_ATA_enm, -1, 1))
+        delta_theta = ego_states["target_information"][2]
+        distance = ego_states["target_information"][3]
+        speed = ego_states["ego_main"][0]
+        alt = ego_states["ego_main"][1]
+        cos_delta_psi = ego_states["target_information"][0]
+        sin_delta_psi = ego_states["target_information"][1]
+        delta_psi = atan2(sin_delta_psi, cos_delta_psi)
+        alpha = ego_states["target_information"][4]
+        # 严格被锁判定
+        locked_by_target = ego_states["locked_by_target"] #  and (dist_enm2ego <= 80e3) and (ATA_enm <= self.RUAV.max_radar_angle_rad)
+        target_locked = ego_states["target_locked"]
+        AA_hor = ego_states["target_information"][-2]
+        warning = ego_states["warning"]
+        missile_in_mid_term = ego_states["missile_in_mid_term"]
+        missile_time_since_shoot = ego_states["weapon"] 
+        # ↑无法用在开火奖励函数里面，会随着执行顺序被覆盖掉
+        # ↑但是可以用在机动奖励函数里面，不论如何，只要刚发射导弹就应该crank
+        cos_delta_psi_threat = ego_states["threat"][0]
+        sin_delta_psi_threat = ego_states["threat"][1]
+        threat_distance = ego_states["threat"][3]
+        delta_psi_threat = atan2(sin_delta_psi_threat, cos_delta_psi_threat)
+        delta_theta_threat = ego_states["threat"][2]
+
+        # 有效威胁判断：真实 RWR 告警，或代理告警距离触发（critic能看到真实导弹方位）
+        if proxy_warning_dist is not None:
+            effective_threat = warning or (threat_distance < proxy_warning_dist)
+        else:
+            effective_threat = warning
+        
+        # 奖励项初始化
+        r_event = 0.0      # 结果奖励
+        r_maverick = 0.0 # 机动奖励
+        r_goose = 0.0    # 开火奖励
+
+        # --- 4. 约束奖励计算 (r_maverick) - 固定权重 ---
+        # # 高度限制奖励/惩罚
+        # r_maverick += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+        #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
+        
+        # # 靠近边界惩罚
+        # o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
+        # ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
+        # d_hor = ego_states["border"][0]
+        # if d_hor <= 50e3:
+        #     r_maverick -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+        # else:
+        #     r_maverick += reward_weights['border_reward']
+        
+        # 补充占领中心奖励
+        border_side = ego_states["border"][1]
+        
+        line2center = np.array([self.horizontal_center[0]-ego.pos_[0], self.horizontal_center[1]-ego.pos_[2]])
+        psi2center = np.arctan2(line2center[1], line2center[0])
+        dist2center = norm(line2center)
+        delta_psi_to_center = sub_of_radian(psi2center, ego.psi)
+
+        # 距离中心越远，指向中心的价值越高
+        r_maverick += (1 + dist2center/self.R_cage)/2 * \
+                        (1 - abs(delta_psi_to_center)/pi) * \
+                        reward_weights['to_center_reward']
+
+        r_maverick *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
+
+        # 开火代价控制
+        wasted = 0
+        now_dead = ego.dead or self.out_cage(ego)
+        if not getattr(ego, 'last_dead', False):
+            if now_dead:
+                shoot = 0 # 死亡瞬间，记录清仓惩罚
+                wasted = 0
+                ego.last_dead = True
+            else:
+                shoot = action_shoot # 还在飞，正常记录
+        else:
+            shoot = 0 # 死后不再记录任何幻影开火
+            wasted = 0
+
+
+        # 角度奖励
+        if not effective_threat:
+            # 进攻引导
+            if not missile_in_mid_term:
+                # if len(alive_ally_missiles) == 0:
+                # 瞄准奖励
+                r_maverick += 2 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
+                # r_maverick += 2 * cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
+                # 爬高奖励
+                r_maverick += 1 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+                r_maverick += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # crank引导
+            else:
+                # if len(alive_ally_missiles) > 0:
+                # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
+                r_maverick += 4 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                # r_maverick += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_maverick += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_maverick += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
+        # 防御引导（真实RWR告警或代理告警距离触发）
+        if effective_threat:
+            # 受到威胁应该三九线/置尾和下高
+            r_maverick += 2 * min(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # r_maverick += 2 * min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_maverick += 2 * (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_maverick += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+        
+        # 速度惩罚
+        slow_mach = 0.8 # 0.7
+        # if ego.speed < slow_mach*340:
+        r_maverick += 4 * ego.acceleration/9.8 * reward_weights['speed_penalty'] * (1-ego.dead)
+        # r_maverick -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
+
+        # 被目标锁定
+        if locked_by_target:
+            r_maverick -= 1.0
+        # 锁定目标
+        if target_locked:
+            r_maverick += 1.0
+        
+
+        # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
+        if shoot >= 1:
+            launch_times = getattr(ego, 'launch_times', [])
+            if len(launch_times) <= 1:
+                time_since_last_shoot = 120.0
+            else:
+                time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
+
+            r_goose -= 10 * (1.0 +np.tanh(
+                1 * 1 + # 3  (distance / 100e3) +
+                3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 60))) + # 至关重要
+                2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi * 2)) +
+                8 * (-1 + np.exp(1*np.abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) / np.pi)) + # 至关重要
+                2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
+                5 * (-ego.vu/100) # np.maximum(-ego.theta / np.pi * 3, - 1.0)
+            )/15 # 10
+            )
+        
+        # # 导弹用光没击落对手
+        # if ego.ammo == 0 and len(alive_ally_missiles) == 0 and not enm.dead \
+        #         and ego._all_missiles_wasted_t is None:
+        #     ego._all_missiles_wasted_t = self.t
+        # if ego._all_missiles_wasted_t is not None \
+        #         and self.t - ego._all_missiles_wasted_t < self.dt_maneuver:
+        #     # 在相隔cycle_time之间的数据并不会被额外记录，重复奖励给了就给了
+        #     r_goose -= 100
+        
+        # 击中目标
+        if enm.got_hit and ego._target_hit_reward_t is None:
+            ego._target_hit_reward_t = self.t
+        if ego._target_hit_reward_t is not None \
+                and self.t - ego._target_hit_reward_t < self.dt_maneuver:
+            # 不重复给命中奖励
+            r_goose += 100
+
+        # 目标逃脱时间更新
+        if enm.escape_once:
+            ego._missile_missed_t = self.t
+
+        # 导弹脱靶瞬间惩罚
+        if ego._missile_missed_t is not None \
+            and abs(self.t - ego._missile_missed_t) < self.dt_maneuver:
+            r_goose -= 10 * (1-enm.dead) # 20 # 10
+
+        if not hasattr(ego, '_last_phi_t'):
+            ego._last_phi_t = -cycle_time
+            ego._last_enm_threat_dist = enm_states["threat"][3]
+            ego._threat_crossing_reward_t = None
+            ego._threat_crossing_reward = 0.0
+
+        # 威胁目标
+        threat_distance_threshold1 = 12e3
+        threat_distance_threshold2 = 4e3
+
+        # 记忆只能在奖励记录的时间点更新
+        if abs(self.t - step_idx * cycle_time) < self.dt_maneuver and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
+            threat_crossing_reward = 0.0
+            if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
+                threat_crossing_reward += 4
+            if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
+                threat_crossing_reward += 8
+            ego._threat_crossing_reward_t = self.t
+            ego._threat_crossing_reward = threat_crossing_reward
+            ego._last_phi_t = self.t
+            # 上一步敌方受到的威胁距离
+            ego._last_enm_threat_dist = enm_states["threat"][3]
+
+        if abs(self.t - ego._threat_crossing_reward_t) < self.dt_maneuver:
+            r_goose += ego._threat_crossing_reward
+
+
+        # # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
+        # if wasted > 0:
+        #     r_event -= 10 * wasted # 20
+
+        # 我机逃脱攻击时间更新
+        if ego.escape_once:
+            ego._missile_evaded_t = self.t
+        
+        # 逃脱导弹瞬间奖励
+        if ego._missile_evaded_t is not None \
+            and self.t - ego._missile_evaded_t < self.dt_maneuver:
+            r_maverick += 10 * (1-ego.dead) # 20
+
+        "not done" # 胜负未分，所有偏好的奖励都一样
+        r_event1 = r_event
+        # r_event2 = r_event
+        # r_event3 = r_event
+
+        if done: # 胜负已分，所有类型各自有结果奖励
+            time_left = self.game_time_limit - self.t
+            steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
+            total_shaping_sum = sum(reward_weights.values())
+
+            if ego_win:
+                r_maverick += 100
+            elif ego_lose:
+                r_maverick -= 100
+            
+            # 近距杀同归于尽，不是飞行员的错，是武器操作员没做好
+            elif ego_draw and self.close_range_kill():
+                r_maverick += 100
+
+            # # 没有赢，一发导弹没打，也重罚
+            # if not ego_win and ego.fired == 0:
+            #     r_goose -= 100
+            
+            # 打印详细奖励组成，方便调试
+            print(f"--- Episode Done ---")
+            print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
+            print(f"R_Event1: {r_event1:.2f} | r_maverick: {r_maverick:.2f} | r_goose: {r_goose:.2f}")
+
+        # 返回 done 和三个分项奖励
+        return done, \
+                    r_event1+r_maverick+r_goose, \
+                        r_event1+r_maverick, \
+                            r_event1+r_goose

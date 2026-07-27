@@ -244,6 +244,7 @@ class Battle(object):
             UAV.launch_states_order = None
             UAV.init_ammo = red_init_ammo if is_red else blue_init_ammo
             UAV.ammo = red_init_ammo if is_red else blue_init_ammo
+            UAV.fired = 0
             UAV.id = (index_in_side + 1) if is_red else (index_in_side + 201)
             UAV.killer_id = None
             UAV.red = is_red
@@ -559,8 +560,8 @@ class Battle(object):
                 #     missile.dead = True
                 if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
                     missile.dead = True
-                # if missile.t > missile.t_max:  # 超时自爆
-                #     missile.dead = True
+                if missile.t > missile.t_max:  # 超时自爆
+                    missile.dead = True
                 # 超出电池工作时间引信不工作
                 if 0 + substep_dt <= missile.t <= missile.t_max and not target.dead:  # 只允许目标被命中一次, 在同一个判定时间区间内可能命中多次
                     hit, point_m, point_t = hit_target(last_pmt_, last_vmt_, last_ptt_, last_vtt_,
@@ -584,9 +585,6 @@ class Battle(object):
 
                 if missile.dead == True and not target.dead:
                     target.escape_once = 1
-                    # 目标逃脱
-                # else:
-                #     target.escape_once = 0
 
             # 飞机接收毁伤判别信息
             for i, UAV in enumerate(self.UAVs):
@@ -1288,7 +1286,7 @@ class Battle(object):
                     data_to_send += (
                                     f"#{send_t:.2f}\n{missile.id},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}|"
                                     f"{0.0:.6f}|{missile.theta * 180 / pi:.6f}|{missile.psi * 180 / pi:.6f},"
-                                    f"Name=AIM-120C,Color={color}\n"
+                                    f"Name={missile.WeaponType},Color={color}\n"
                                     )
                     # 导弹雷达波束显示
                     if getattr(missile, 'radar_on', 0):
@@ -1468,6 +1466,7 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
                 target_locked and ego_state["weapon"]>=0.1 and ATA<=env.RUAV.max_radar_angle_rad:
             new_missile = uav.launch_missile(target, env.t, missile_class)
             uav.ammo -= 1
+            uav.fired += 1
 
             # 记录导弹发射瞬间的 ATA、distance 和 AA_hor
             uav.launch_states_order = ['ATA', 'distance', 'AA_hor', 'target_locked', 't_go']

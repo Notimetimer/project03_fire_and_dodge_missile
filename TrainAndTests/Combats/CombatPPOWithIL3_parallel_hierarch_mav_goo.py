@@ -44,13 +44,14 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_mav_goo import *
+# from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_mav_goo import *
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_mav_goo2 import *
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
-from Algorithms.Utils import compute_monte_carlo_returns
+# from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch_mav_goo import test_worker
-from RewardWeightController import FireRewardWeightController
+# from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
 
@@ -485,9 +486,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # local_trans_goo 用于 goose PPO 更新 (bern动作，reward=[0,0,1])
                 local_trans_mav = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
                 local_trans_goo = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-                ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-                enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-
+                
                 # 新增: 开火角度参数及导弹存活期 ATA 的回合统计容器
                 # 红方（对手）统计
                 episode_red_fire_thetas = []      # 开火瞬间俯仰角
@@ -609,14 +608,12 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
                             append_experience(local_trans_mav, last_decision_obs, last_decision_state, current_action, reward_for_learn_mav, b_state_global, False, not dead_dict['b'])
                             append_experience(local_trans_goo, last_decision_obs, last_decision_state, current_action, reward_for_learn_goo, b_state_global, False, not dead_dict['b'])
-                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn_mav, b_state_global, False, not dead_dict['b'])
-                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
                         # 2.2 更新上一帧记录
                         last_decision_obs = b_obs
                         last_decision_state = b_state_global
-                        last_enm_decision_obs = r_obs
-                        last_enm_decision_state = r_state_global
+                        # last_enm_decision_obs = r_obs
+                        # last_enm_decision_state = r_state_global
                         
                         # 2.3 产生新动作 (No Grad)
                         with torch.no_grad():
@@ -657,17 +654,14 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         
                         # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
                         current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
-                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
+                        # current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
+                        # current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
 
-                    r_action_label_fire=None
-                    b_action_label_fire=None
-                    
-                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label_fire) if getattr(env.RUAV, 'about_to_fire', 0) else None
-                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label_fire) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                    r_m_id = launch_missile_immediately(env, 'r') if getattr(env.RUAV, 'about_to_fire', 0) else None
+                    b_m_id = launch_missile_immediately(env, 'b') if getattr(env.BUAV, 'about_to_fire', 0) else None
                     
                     if b_m_id: 
                         m_fired += 1
@@ -715,28 +709,21 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     
                     # 4. 奖励计算
                     done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
-                                                            action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
-                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
-                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_weight=0,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
+                                                            action_cycle_multiplier,)
+                    # _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,)
+                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier,)
 
                     reward_for_learn_mav = sum(np.array([b_reward1, b_reward2, b_reward3]) * np.array([0, 1, 0]))
                     reward_for_learn_goo = sum(np.array([b_reward1, b_reward2, b_reward3]) * np.array([0, 0, 1]))
-                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
+                    # reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
                         episode_return += b_reward1
                         episode_return_dense += b_dense_reward
-                    reward_for_learn = reward_for_learn_mav  # 兼容后续episode_return统计用
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
-                    next_r_state_global, _ = env.obs_1v1('r', reward_fn=1)
+                    # next_r_state_global, _ = env.obs_1v1('r', reward_fn=1)
                     dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
 
                 # --- End of Simulation Loop ---
@@ -750,9 +737,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 if last_decision_state is not None:
                     append_experience(local_trans_mav, last_decision_obs, last_decision_state, current_action, reward_for_learn_mav, next_b_state_global, True, not dead_dict['b'])
                     append_experience(local_trans_goo, last_decision_obs, last_decision_state, current_action, reward_for_learn_goo, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn_mav, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
-
+                    
                 # --- 序列时空修正 (Credit Assignment Fix) ---死后时间压缩
                 # 由于代理死亡后 active_mask 变为 False，回合结束时的同归于尽补偿等延迟奖励
                 # 无法回传(会乘以 mask=0)。因此将死亡后产生的所有收益收束到最后一个存活步，并截断死亡后的冗余数据。
@@ -781,8 +766,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 local_trans_mav = truncate_and_shift(local_trans_mav)
                 local_trans_goo = truncate_and_shift(local_trans_goo)
-                ego_trans = truncate_and_shift(ego_trans)
-                enm_trans = truncate_and_shift(enm_trans)
+                
                 # ----------------------------------------------
 
                 # 计算本回合红方开火与角度参数指标
@@ -870,8 +854,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 result_packet = {
                     'trans_mav': local_trans_mav, # 用于 maverick RL Update (cat, reward=[0,1,0])
                     'trans_goo': local_trans_goo, # 用于 goose RL Update (bern, reward=[0,0,1])
-                    'ego_trans': ego_trans, # 用于 SIL (win)
-                    'enm_trans': enm_trans, # 用于 SIL (lose)
+                    # 'ego_trans': ego_trans, # 用于 SIL (win)
+                    # 'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
                         'dense_return': b_dense_reward,
@@ -1122,7 +1106,7 @@ def run_MLP_simulation(
     fire_inside_weight = None
     fire_reward_weight = None
 
-    RWController = FireRewardWeightController(initial_fire_reward_weight=1.0)
+    # RWController = FireRewardWeightController(initial_fire_reward_weight=1.0)
 
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
@@ -1187,11 +1171,11 @@ def run_MLP_simulation(
             ema_ATA = special_data.get("ema_ATA", None)
             ema_delta_psi_threat = special_data.get("ema_delta_psi_threat", None)
             ema_delta_theta = special_data.get("ema_delta_theta", None)
-            # [新增] 恢复控制器状态
-            if "controller_state" in special_data:
-                RWController.load_state_dict(special_data["controller_state"])
-                print(f"Loaded controller state from: {special_json_path}")
-            print(f"Loaded special EMA states from: {special_json_path}")
+            # # [新增] 恢复控制器状态
+            # if "controller_state" in special_data:
+            #     RWController.load_state_dict(special_data["controller_state"])
+            #     print(f"Loaded controller state from: {special_json_path}")
+            # print(f"Loaded special EMA states from: {special_json_path}")
     
     # 保存onnx模型
     dummy_state = torch.randn(1, state_dim).to(device)
@@ -1577,26 +1561,26 @@ def run_MLP_simulation(
                 
                 trigger += trigger_delta
 
-            # --- 2. 准备训练 Batch (Synchronous) ---
-            # 改变环境奖励权重，超过100轮采样再更新权重，每次权重维持5轮采样
-            if adj_r_w and batch_idx > 10:
-                fire_inside_weight, fire_reward_weight = RWController.update({
-                    'ema_fire_interval': ema_fire_interval,
-                    'ema_fire_distance': ema_fire_distance,
-                    'ema_fire_altitude': ema_fire_altitude,
-                    'ema_fire_delta_psi': ema_fire_delta_psi,
-                    'ema_fire_theta': ema_fire_theta,
-                    'ema_ATA': ema_ATA,
-                    'ema_delta_psi_threat': ema_delta_psi_threat,
-                    'ema_delta_theta': ema_delta_theta
-                })
-                logger.add(f"SPECIAL/开火权重", fire_reward_weight, total_steps)
-                logger.add(f"SPECIAL/0 W_d_fire", fire_inside_weight[0], total_steps)
-                logger.add(f"SPECIAL/1 W_t_since_fire", fire_inside_weight[1], total_steps)
-                logger.add(f"SPECIAL/2 W_AA_fire", fire_inside_weight[2], total_steps)
-                logger.add(f"SPECIAL/3 W_psi_fire", fire_inside_weight[3], total_steps)
-                logger.add(f"SPECIAL/4 W_v_fire", fire_inside_weight[4], total_steps)
-                logger.add(f"SPECIAL/5 W_theta_fire", fire_inside_weight[5], total_steps)
+            # # --- 2. 准备训练 Batch (Synchronous) ---
+            # # 改变环境奖励权重，超过100轮采样再更新权重，每次权重维持5轮采样
+            # if adj_r_w and batch_idx > 10:
+            #     fire_inside_weight, fire_reward_weight = RWController.update({
+            #         'ema_fire_interval': ema_fire_interval,
+            #         'ema_fire_distance': ema_fire_distance,
+            #         'ema_fire_altitude': ema_fire_altitude,
+            #         'ema_fire_delta_psi': ema_fire_delta_psi,
+            #         'ema_fire_theta': ema_fire_theta,
+            #         'ema_ATA': ema_ATA,
+            #         'ema_delta_psi_threat': ema_delta_psi_threat,
+            #         'ema_delta_theta': ema_delta_theta
+            #     })
+            #     logger.add(f"SPECIAL/开火权重", fire_reward_weight, total_steps)
+            #     logger.add(f"SPECIAL/0 W_d_fire", fire_inside_weight[0], total_steps)
+            #     logger.add(f"SPECIAL/1 W_t_since_fire", fire_inside_weight[1], total_steps)
+            #     logger.add(f"SPECIAL/2 W_AA_fire", fire_inside_weight[2], total_steps)
+            #     logger.add(f"SPECIAL/3 W_psi_fire", fire_inside_weight[3], total_steps)
+            #     logger.add(f"SPECIAL/4 W_v_fire", fire_inside_weight[4], total_steps)
+            #     logger.add(f"SPECIAL/5 W_theta_fire", fire_inside_weight[5], total_steps)
             
             if not adj_r_w:
                 fire_inside_weight = None
@@ -1725,8 +1709,8 @@ def run_MLP_simulation(
             
             for res in batch_results:
                 # res 结构: {'trans_mav':..., 'trans_goo':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
-                ego_tr = res['ego_trans'] # SIL 蓝方数据
-                enm_tr = res['enm_trans'] # SIL 红方数据
+                # ego_tr = res['ego_trans'] # SIL 蓝方数据
+                # enm_tr = res['enm_trans'] # SIL 红方数据
                 metrics = res['metrics']
                 opp_name = res['opp_name']
                 
@@ -1838,19 +1822,19 @@ def run_MLP_simulation(
                 for k in transition_dict_goo:
                     transition_dict_goo[k].extend(l_tr_goo[k])
                 
-                # 3.2 SIL 数据收集 (需计算 return)
-                if use_sil:
-                    # ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    # il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
-                    # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
+                # # 3.2 SIL 数据收集 (需计算 return)
+                # if use_sil:
+                #     # ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                #     # il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
+                #     # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
 
-                    if not metrics['lose']: # 赢或平，学自己
-                        # 计算回报 (Master 端计算)
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
-                    if not metrics['win']: # 输或平，学对手
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
+                #     if not metrics['lose']: # 赢或平，学自己
+                #         # 计算回报 (Master 端计算)
+                #         ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                #         il_transition_buffer.add(ego_tr)
+                #     if not metrics['win']: # 输或平，学对手
+                #         enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                #         il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1961,7 +1945,7 @@ def run_MLP_simulation(
                 "ema_ATA": ema_ATA,
                 "ema_delta_psi_threat": ema_delta_psi_threat,
                 "ema_delta_theta": ema_delta_theta,
-                "controller_state": RWController.state_dict(),  # [新增] 保存控制器状态
+                # "controller_state": RWController.state_dict(),  # [新增] 保存控制器状态
             }
             with open(os.path.join(log_dir, "special.json"), "w", encoding="utf-8") as f:
                 json.dump(special_data, f, ensure_ascii=False, indent=2)

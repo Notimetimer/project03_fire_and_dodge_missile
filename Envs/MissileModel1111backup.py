@@ -115,6 +115,7 @@ def sub_of_radian(input1, input2):
 class missile_class:
     def __init__(self, pos0_, vel0_, pt0_, vt0_, launch_time=0):
         super(missile_class, self).__init__()
+        self.WeaponType = "AIM-120C"
         self.dead = False  # 导弹是否死亡
         self.hit = False  # 导弹是否命中目标
         self.launch_time = launch_time  # 导弹发射时间

@@ -116,6 +116,7 @@ def sub_of_radian(input1, input2):
 class missile_class:
     def __init__(self, pos0_, vel0_, pt0_, vt0_, launch_time=0):
         super(missile_class, self).__init__()
+        self.WeaponType = "AIM-9X"
         self.dead = False  # 导弹是否死亡
         self.hit = False  # 导弹是否命中目标
         self.launch_time = launch_time  # 导弹发射时间
@@ -693,7 +694,7 @@ if __name__ == '__main__':
                     loc_m = ENU2LLH(mark, missile1.pos_)
                     data_to_send += f"#{send_t:.2f}\n{10+j},T={loc_m[0]:.6f}|{loc_m[1]:.6f}|{loc_m[2]:.6f}|" \
                                     f"{0.0:.6f}|{missile1.theta * 180 / pi:.6f}|{missile1.psi * 180 / pi:.6f}," \
-                                    f"Name=AIM-9x,Color=Orange\n"
+                                    f"Name=AIM-9X,Color=Orange\n"
 
         tacview.send_data_to_client(data_to_send)
         if t % 1 == 0:
