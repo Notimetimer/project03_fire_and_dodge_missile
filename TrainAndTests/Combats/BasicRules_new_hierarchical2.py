@@ -53,17 +53,21 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
                                     ]) * 1e3
 
     # 1. 计算初始的开火意图：允许发射距离随我机高度线性插值
-    if sin_theta >= sin(30*pi/180):
-        launch_dist_table = np.array([
-            [2000, 40e3],
-            [8000, 95e3],
-        ])
-    else:
-        launch_dist_table = np.array([
-            [2000, 30e3],
-            [8000, 90e3],
-        ])
-    max_launch_dist = np.interp(alt, launch_dist_table[:, 0], launch_dist_table[:, 1])
+    level_launch_dist_table = np.array([
+        [2000, 30e3],
+        [8000, 90e3],
+    ])
+    climb_launch_dist_table = np.array([
+        [2000, 40e3],
+        [8000, 95e3],
+    ])
+    level_launch_dist = np.interp(alt, level_launch_dist_table[:, 0], level_launch_dist_table[:, 1])
+    climb_launch_dist = np.interp(alt, climb_launch_dist_table[:, 0], climb_launch_dist_table[:, 1])
+    max_launch_dist = np.interp(
+        sin_theta,
+        [0, sin(30*pi/180)],
+        [level_launch_dist, climb_launch_dist],
+    )
 
     fire_missile = False
     if ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180 and distance < max_launch_dist:
