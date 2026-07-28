@@ -1,6 +1,5 @@
 '''
-同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
-放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
+使用GRU根据S, A预测未来的Q值
 '''
 
 from typing import final
@@ -240,55 +239,6 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     td['dones'].append(done)
     td['active_masks'].append(active_mask) # 【新增】active_mask，转入多智能体
     return td
-
-
-def get_phase_masks(states):
-    states = np.asarray(states, dtype=np.float32)
-    warning = states[:, 5] > 0.5
-    missile_in_mid_term = states[:, 3] > 0.5
-    return {
-        'attack': ~warning & ~missile_in_mid_term,
-        'crank': ~warning & missile_in_mid_term,
-        'escape': warning,
-    }
-
-
-def get_phase_features(states):
-    return np.asarray(states, dtype=np.float32)[:, [6, 8, 2]]
-
-
-def get_phase_reference_vectors(states):
-    states = np.asarray(states, dtype=np.float32)
-    if states.ndim != 2 or states.shape[1] <= 8:
-        raise ValueError('IL states must be a 2D state vector containing indices 2, 3, 5, 6, and 8.')
-    features = get_phase_features(states)
-    return {
-        phase: features[mask].mean(axis=0) if np.any(mask) else None
-        for phase, mask in get_phase_masks(states).items()
-    }
-
-
-def add_phase_distance_rewards(transition_dict, phase_reference_vectors, weight=0.05):
-    states = np.asarray(transition_dict['states'], dtype=np.float32)
-    if states.ndim != 2 or len(states) == 0:
-        return {phase: 0 for phase in phase_reference_vectors}
-    rewards = np.asarray(transition_dict['rewards'], dtype=np.float32).reshape(-1)
-    if len(rewards) != len(states):
-        raise ValueError('transition_dict states and rewards must have matching lengths.')
-    features = get_phase_features(states)
-    phase_counts = {}
-    for phase, mask in get_phase_masks(states).items():
-        reference = phase_reference_vectors[phase]
-        phase_counts[phase] = int(mask.sum())
-        if reference is None or not np.any(mask):
-            continue
-        distances = np.linalg.norm(features[mask] - reference, axis=1)
-        distance_std = distances.std()
-        if distance_std > 1e-8:
-            dense_rewards = -np.clip((distances - distances.mean()) / distance_std, -1.0, 1.0) * weight
-            rewards[mask] += dense_rewards
-    transition_dict['rewards'] = rewards.tolist()
-    return phase_counts
 
 # ==========================================
 # 新增：混合缓冲区类
@@ -1146,10 +1096,6 @@ def run_MLP_simulation(
         if 'returns' in original_il_transition_dict:
             original_il_transition_dict['returns'] = np.array(original_il_transition_dict['returns'], dtype=np.float32)
         print(f"IL dataset processed. Samples: {len(original_il_transition_dict['states'] if original_il_transition_dict['states'] is not None else [])}")
-    else:
-        raise ValueError('Phase-distance reward requires original_il_transition_dict.')
-
-    phase_reference_vectors = get_phase_reference_vectors(original_il_transition_dict['states'])
     
     # 2. 参数与环境配置 (Master 用于获取维度)
     parser = argparse.ArgumentParser("UAV swarm confrontation")
@@ -2150,11 +2096,6 @@ def run_MLP_simulation(
                 #     transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
                 # else:
                 #     rnd_mse = None
-
-                # 替代引导奖励
-                # phase_sample_counts = add_phase_distance_rewards(transition_dict, phase_reference_vectors, weight=0.03) # 0.05
-                # for phase, sample_count in phase_sample_counts.items():
-                #     logger.add(f"train_plus/phase_samples_{phase}", sample_count, total_steps)
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)

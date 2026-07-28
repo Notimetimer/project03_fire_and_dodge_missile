@@ -378,20 +378,16 @@ class ChooseStrategyEnv(Battle):
                     # 角度优势杀
                     if cos_ATA_r >= cos(pi / 6) and cos_ATA_b < cos(pi / 6):
                         BUAV.dead = True
-                        # BUAV.got_hit = True
                         print('近距单杀')
                         WVR = 1
                     elif cos_ATA_r < cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
-                        # RUAV.got_hit = True
                         print('近距单杀')
                         WVR = 1
                     # 都在可攻击角度
                     elif cos_ATA_r >= cos(pi / 6) and cos_ATA_b >= cos(pi / 6):
                         RUAV.dead = True
                         BUAV.dead = True
-                        # RUAV.got_hit = True
-                        # BUAV.got_hit = True
                         print('近距双杀')
                         WVR = 1
 

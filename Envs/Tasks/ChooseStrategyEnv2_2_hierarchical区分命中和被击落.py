@@ -358,6 +358,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             ego._last_enm_threat_dist = enm_states["threat"][3]
             ego._threat_crossing_reward_t = None
             ego._threat_crossing_reward = 0.0
+            ego._got_a_kill = 0
+            ego._got_a_kill_t = None
+            ego._took_a_hit = 0
+            ego._took_a_hit_t = None
 
         # 威胁目标
         threat_distance_threshold1 = 12e3
@@ -394,23 +398,45 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if ego.escape_once:
             r_event += 10 * (1-ego.dead) # 20
 
+        # 击落敌机，记录时间，被击落，也记录时间
+        if abs(self.t - step_idx * cycle_time) < self.dt_maneuver and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
+            # 敌机被打、出界或者撞地
+            if ego._got_a_kill == 0 and (enm.got_hit or self.out_cage(enm) or self.crash(enm)):
+                ego._got_a_kill = 1
+                ego._got_a_kill_t = self.t
+            # 我机被打、出界或者撞地
+            if ego._took_a_hit == 0 and (ego.got_hit or self.out_cage(ego) or self.crash(ego)):
+                ego._took_a_hit = 1
+                ego._took_a_hit_t = self.t
+
+        # 有效期内给击落敌机的100奖励
+        if ego._got_a_kill_t is not None and\
+            abs(self.t - ego._got_a_kill_t) < self.dt_maneuver:
+            r_event += 100
+
+        # 有效期内给被击落的-100惩罚
+        if ego._took_a_hit_t is not None and\
+            abs(self.t - ego._took_a_hit_t) < self.dt_maneuver:
+            r_event -= 100
+        
+
         "not done" # 胜负未分，所有偏好的奖励都一样
         r_event1 = r_event
         r_event2 = r_event
         r_event3 = r_event
 
-        if done: # 胜负已分，所有类型各自有结果奖励
+        if done and (self.close_range_kill() or (ego.dead+enm.dead == 0)): # 近距杀或双存活，反正都没有被打死或者撞死
             time_left = self.game_time_limit - self.t
             steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event += 100
                 r_event1 = r_event
                 r_event2 = r_event
                 r_event3 = r_event
             elif ego_lose:
-                r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_event -= 100
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
                 r_event1 = r_event
