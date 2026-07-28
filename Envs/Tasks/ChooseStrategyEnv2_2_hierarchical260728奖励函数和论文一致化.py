@@ -47,7 +47,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_weight=1.0, 
+        end_reward_weight=0.556, 
         fire_reward_weight=None,
         fire_inside_weight = None, ends_in_bvr=0,
         proxy_warning_dist=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
@@ -388,9 +388,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_constraint += ego._threat_crossing_reward
 
             
-        # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
-        if wasted > 0:
-            r_event -= 10 * wasted # 20
+        # # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
+        # if wasted > 0:
+        #     r_event -= 10 * wasted # 20
 
         # 逃脱导弹
         if ego.escape_once:
