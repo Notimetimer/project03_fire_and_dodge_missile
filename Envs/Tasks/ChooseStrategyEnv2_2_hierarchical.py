@@ -47,7 +47,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_weight=1.0, 
+        end_reward_weight=0.556, 
         fire_reward_weight=None,
         fire_inside_weight = None, ends_in_bvr=0,
         proxy_warning_dist=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
@@ -75,11 +75,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             'alt_limit_penalty': 1.0,
             'border_penalty_scale': 0.2,
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
-            'angle_advantage': 0.01, # 0.007, # 0.03
-            'height_advantage': 0.01,
+            'angle_advantage': 0.05, # 0.007, # 0.03
+            'height_advantage': 0.05,
             'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
             'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
-            'to_center_reward' : 0.005, # 0.02 占领中心点的价值
+            'to_center_reward' : 0.025, # 0.01 占领中心点的价值
             'speed_penalty': 0.01, # 慢速惩罚
         }
 
@@ -214,14 +214,14 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
         #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
-        # 靠近边界惩罚
-        o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
-        ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
-        d_hor = ego_states["border"][0]
-        if d_hor <= 50e3:
-            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
-        else:
-            r_constraint += reward_weights['border_reward']
+        # # 靠近边界惩罚
+        # o002ego_ = np.array([ego.pos_[0], ego.pos_[2]]) # 北，东
+        # ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
+        # d_hor = ego_states["border"][0]
+        # if d_hor <= 50e3:
+        #     r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+        # else:
+        #     r_constraint += reward_weights['border_reward']
         
         # 补充占领中心奖励
         border_side = ego_states["border"][1]
@@ -276,25 +276,40 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 # if len(alive_ally_missiles) == 0:
                 # 瞄准奖励
                 r_constraint += 2 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
-                # r_constraint += 2 * cos(delta_psi) * reward_weights['angle_advantage'] * (1-ego.dead)
                 # 爬高奖励
-                r_constraint += 1 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
-                r_constraint += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_constraint += 2 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
             # crank引导
             else:
                 # if len(alive_ally_missiles) > 0:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-                r_constraint += 4 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
-                # r_constraint += 4 * (1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
-                r_constraint += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
-                r_constraint += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
+                r_constraint += 2 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_constraint += 2 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
+
+            # 锁定目标
+            if target_locked:
+                r_constraint += 5 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 10 *
+            # 被目标锁定
+            if locked_by_target:
+                r_constraint -= 5 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 10 *
+
         # 防御引导（真实RWR告警或代理告警距离触发）
         if effective_threat:
             # 受到威胁应该三九线/置尾和下高，始终用最近导弹方位
             r_constraint += 2 * min(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # r_constraint += 2 * min(abs(delta_psi_threat), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            r_constraint += 2 * (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # 下高奖励，用空气阻力消耗导弹能量
             r_constraint += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+
+            # 替代下高奖励：最近的还存活的敌导弹减速度，追求最大程度消耗敌导弹能量
+            selected_missile = None
+            missile_distance = 100e3
+            for missile in alive_enm_missiles:
+                dist2enm_missile = norm(ego.pos_-missile.pos_)
+                if dist2enm_missile < missile_distance and missile.gliding:
+                    selected_missile = missile
+                    missile_distance = dist2enm_missile
+            
+            if selected_missile:
+                r_constraint += 2 * (-missile.v_dot)/(9.8) * reward_weights['height_advantage'] * (1-ego.dead)
         
         # 速度惩罚
         slow_mach = 0.8 # 0.7
@@ -302,12 +317,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_constraint += 4 * ego.acceleration/9.8 * reward_weights['speed_penalty'] * (1-ego.dead)
         # r_constraint -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
-        # 被目标锁定
-        if locked_by_target:
-            r_constraint -= 1.0 * (1-ego.dead) * (1-enm.dead)
-        # 锁定目标
-        if target_locked:
-            r_constraint += 1.0 * (1-ego.dead) * (1-enm.dead)
+        # # 锁定目标
+        # if target_locked:
+        #     r_constraint += 1.0 * (1-ego.dead) * (1-enm.dead)
+        # # 被锁定
+        # if locked_by_target:
+        #     r_constraint -= 1.0 * (1-ego.dead) * (1-enm.dead)
         
         # 密集奖励只有在agent活着的时候有意义
         # r_constraint *= (1-ego.dead)
@@ -355,25 +370,27 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         else:
             weight_temp = 1
 
-        if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
+        # 记忆只能在奖励记录的时间点更新
+        if abs(self.t - step_idx * cycle_time) < self.dt_maneuver and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             threat_crossing_reward = 0.0
             if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
-                threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
+                threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
             if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
-                threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+                threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
             ego._threat_crossing_reward_t = self.t
             ego._threat_crossing_reward = threat_crossing_reward
             ego._last_phi_t = self.t
             # 上一步敌方受到的威胁距离
             ego._last_enm_threat_dist = enm_states["threat"][3]
 
-        if ego._threat_crossing_reward_t == self.t:
+        if ego._threat_crossing_reward_t is not None and\
+            abs(self.t - ego._threat_crossing_reward_t) < self.dt_maneuver:
             r_constraint += ego._threat_crossing_reward
 
             
-        # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
-        if wasted > 0:
-            r_event -= 10 * wasted # 20
+        # # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
+        # if wasted > 0:
+        #     r_event -= 10 * wasted # 20
 
         # 逃脱导弹
         if ego.escape_once:
@@ -414,9 +431,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         ego_avg_dist = b_avg_dist
                         enm_avg_dist = r_avg_dist
                     
-                    # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
-                    r_event += (-30 - 20 * (ego_avg_dist-enm_avg_dist)/self.R_cage0) * end_reward_weight
-                    self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
+                    # # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
+                    # r_event += (-30 - 20 * (ego_avg_dist-enm_avg_dist)/self.R_cage0) * end_reward_weight
+                    # self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
                     
