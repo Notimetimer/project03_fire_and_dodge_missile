@@ -150,9 +150,17 @@ if __name__ == "__main__":
                 'time': [],
                 'r_ny': [], 'r_alpha': [], 'r_alt': [], 'r_mach': [],
                 'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
+                'r_cat_entropy': [],
+                'r_cat_conf': [], 'r_bern_fire_prob': [],
+                'r_warning': [], 'r_missile_in_mid_term': [],
             }
 
             fire_time = -120
+            r_cat_entropy = 0.0
+            r_bern_fire_prob = 0.0
+            r_cat_conf = 0.0
+            r_warning = 0.0
+            r_missile_in_mid_term = 0.0
 
             # 回合仿真循环
             for count in range(round(env_args.max_episode_len / dt_maneuver)):
@@ -161,6 +169,9 @@ if __name__ == "__main__":
 
                 r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
                 b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
+                r_state_check = env.unscale_state(r_check_obs)
+                r_warning = float(r_state_check['warning'])
+                r_missile_in_mid_term = float(r_state_check['missile_in_mid_term'])
 
                 # 决策
                 if count % action_cycle_multiplier == 0:
@@ -174,7 +185,27 @@ if __name__ == "__main__":
                     r_action_label = r_action_exec['cat'] # [0]
                     r_fire = r_action_exec['bern'][0]
                     last_r_action_label = r_action_label
-                    print(f"红方(RL) 开火概率: {r_action_check['bern'][0]:.4f}")
+
+                    # 计算并记录 cat 熵与 bern 熵
+                    eps = 1e-8
+                    r_cat_entropy = 0.0
+                    cat_top1_list = []
+                    if 'cat' in r_action_check and r_action_check['cat'] is not None:
+                        for cat_probs in r_action_check['cat']:
+                            p = np.asarray(cat_probs).flatten()
+                            p = np.clip(p, eps, 1.0)
+                            r_cat_entropy += -np.sum(p * np.log(p))
+                            cat_top1_list.append(np.max(p))
+                    # cat 多头的 top-1 置信度（几何平均）
+                    if len(cat_top1_list) > 0:
+                        r_cat_conf = np.exp(np.mean(np.log(np.clip(cat_top1_list, eps, 1.0))))
+                        print(f"红方(RL) cat 综合置信度: {r_cat_conf:.4f}")
+
+                    r_bern_fire_prob = 0.0
+                    if 'bern' in r_action_check and r_action_check['bern'] is not None:
+                        p = np.asarray(r_action_check['bern']).flatten()
+                        r_bern_fire_prob = float(p[0])
+                        print(f"红方(RL) 开火概率: {r_bern_fire_prob:.4f}")
 
                     if r_fire:
                         env.RUAV.about_to_fire = 1
@@ -227,6 +258,11 @@ if __name__ == "__main__":
                 history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
                 history['b_alt'].append(env.BUAV.alt)
                 history['b_mach'].append(env.BUAV.mach)
+                history['r_cat_entropy'].append(r_cat_entropy)
+                history['r_bern_fire_prob'].append(r_bern_fire_prob)
+                history['r_cat_conf'].append(r_cat_conf)
+                history['r_warning'].append(r_warning)
+                history['r_missile_in_mid_term'].append(r_missile_in_mid_term)
 
                 env.render(t_bias=t_bias)
 
@@ -289,8 +325,40 @@ if __name__ == "__main__":
             plt.grid(True, alpha=0.3)
             
             plt.tight_layout()
+
+            # --- Figure2: 动作分布熵、置信度与状态 ---
+            plt.figure(2, figsize=(10, 9))
+            plt.clf()
+
+            plt.subplot(3, 1, 1)
+            plt.plot(history['time'], history['r_cat_conf'], label='Cat Top-1 Confidence', color='crimson')
+            plt.ylabel('Confidence')
+            plt.title(f'Test vs Rule {rule_num}: Categorical Top-1 Confidence')
+            plt.ylim([0, 1])
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(3, 1, 2)
+            plt.plot(history['time'], history['r_bern_fire_prob'], label='Bern Fire Probability', color='crimson')
+            plt.ylabel('Fire Probability')
+            plt.title(f'Test vs Rule {rule_num}: Bernoulli Fire Probability')
+            plt.ylim([0, 1])
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.subplot(3, 1, 3)
+            plt.plot(history['time'], history['r_warning'], label='Red Warning', color='orange')
+            plt.plot(history['time'], history['r_missile_in_mid_term'], label='Red Missile Mid-Term', color='green')
+            plt.ylabel('State')
+            plt.xlabel('Time (s)')
+            plt.title(f'Test vs Rule {rule_num}: Red State Flags')
+            plt.ylim([-0.2, 1.2])
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.tight_layout()
             plt.show()
-            
+
             # input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:

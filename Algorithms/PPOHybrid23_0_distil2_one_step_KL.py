@@ -3,17 +3,100 @@
 '''
 
 import numpy as np
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical, Bernoulli
-
+import copy
 import os, sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
 from Algorithms.MLP_heads import ValueNet
+
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+
+# =============================================================================
+# 0. RND 网络定义
+# =============================================================================
+
+class RNDTargetNet(nn.Module):
+    """
+    RND 目标网络（权重冻结）。
+    - 2层全连接，LeakyReLU，防止负权重初始化后神经元死亡。
+    - 正交初始化所有线性层。
+    - 内置状态运行时归一化（Welford 在线算法）。
+    """
+    def __init__(self, state_dim, output_dim=128, hidden_dim=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight)
+                nn.init.zeros_(m.bias)
+        for p in self.parameters():
+            p.requires_grad = False
+        # 运行时状态归一化统计量
+        self.register_buffer('obs_mean', torch.zeros(state_dim))
+        self.register_buffer('obs_var', torch.ones(state_dim))
+        self.register_buffer('obs_count', torch.tensor(1e-4))
+
+    def update_obs_stats(self, obs_batch):
+        """Welford 在线算法更新均值和方差"""
+        batch_mean = obs_batch.mean(0)
+        batch_var = obs_batch.var(0, unbiased=False)
+        batch_count = float(obs_batch.size(0))
+        total = self.obs_count + batch_count
+        delta = batch_mean - self.obs_mean
+        new_mean = self.obs_mean + delta * batch_count / total
+        M2 = self.obs_var * self.obs_count + batch_var * batch_count + delta ** 2 * self.obs_count * batch_count / total
+        self.obs_mean = new_mean
+        self.obs_var = torch.clamp(M2 / total, min=1e-8)
+        self.obs_count = total
+
+    def normalize(self, obs):
+        return (obs - self.obs_mean) / (self.obs_var.sqrt() + 1e-8)
+
+    def forward(self, x):
+        return self.net(self.normalize(x))
+
+
+class RNDPredictionNet(nn.Module):
+    """
+    RND 预测网络（持续更新）。
+    - 3层全连接，ReLU，表达能力大于 Target 以保证充分拟合。
+    - 使用 Kaiming Normal 初始化（与 Target 的正交初始化不同，确保两网络初始参数不同）。
+    - 直接接受已归一化的状态向量（由 RNDTargetNet.normalize 提供）。
+    """
+    def __init__(self, state_dim, output_dim=128, hidden_dim=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+        # Kaiming Normal 初始化，与 Target 的正交初始化区分开
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x_normalized):
+        return self.net(x_normalized)
+
 
 # =============================================================================
 # 1. 神经网络定义 (保持不变，只负责 forward 计算)
@@ -537,7 +620,8 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7):
+                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7, # ):
+                 rnd_state_dim=None, rnd_lr=3e-4, rnd_output_dim=128, rnd_hidden_dim=256):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
         self.critic = critic
@@ -592,6 +676,74 @@ class PPOHybrid:
         
         self.dis_actor_loss = 0
         self.dis_actor_grad = 0
+
+        # RND 网络（可选）
+        if rnd_state_dim is not None:
+            self.rnd_target = RNDTargetNet(rnd_state_dim, output_dim=rnd_output_dim, hidden_dim=rnd_hidden_dim).to(device)
+            self.rnd_prediction = RNDPredictionNet(rnd_state_dim, output_dim=rnd_output_dim, hidden_dim=rnd_hidden_dim).to(device)
+            self.rnd_optimizer = torch.optim.Adam(self.rnd_prediction.parameters(), lr=rnd_lr)
+        else:
+            self.rnd_target = None
+            self.rnd_prediction = None
+            self.rnd_optimizer = None
+
+    def RND_calc(self, transition_dict, beta):
+        """
+        计算 RND 内在奖励并叠加到外在奖励上。
+
+        步骤：
+          1. 用当前 batch 更新状态归一化统计量（Welford 在线算法）
+          2. 优化预测网络（蒸馏损失 = MSE(pred, target)）
+          3. 计算内在奖励 i = ||pred - target||^2 per sample
+          4. 归一化内在奖励（减均值除标准差）
+          5. reward_aug = reward + beta * i_normalized
+
+        Args:
+            transition_dict: 包含 'states', 'rewards' 等键的字典
+            beta: 内在奖励缩放倍率
+
+        Returns:
+            new_dict: 奖励已被修改的新字典（浅拷贝，rewards 为新数组）
+        """
+        assert self.rnd_target is not None and self.rnd_prediction is not None and self.rnd_optimizer is not None, \
+            "RND 未初始化，请在 PPOHybrid.__init__ 中传入 rnd_state_dim"
+
+        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+
+        # 1. 更新状态归一化统计量
+        with torch.no_grad():
+            self.rnd_target.update_obs_stats(states)
+            states_norm = self.rnd_target.normalize(states)
+
+        # 2. 优化预测网络
+        pred = self.rnd_prediction(states_norm)
+        with torch.no_grad():
+            target = self.rnd_target.net(states_norm)
+        distill_loss = F.mse_loss(pred, target)
+        self.rnd_optimizer.zero_grad()
+        distill_loss.backward()
+        self.rnd_optimizer.step()
+
+        # 3. 计算内在奖励（每个样本的特征 MSE）
+        with torch.no_grad():
+            pred_det = self.rnd_prediction(states_norm)
+            target_det = self.rnd_target.net(states_norm)
+            intrinsic = ((pred_det - target_det) ** 2).mean(dim=-1, keepdim=True)  # (N, 1)
+
+            # 4. 归一化内在奖励
+            i_mean = intrinsic.mean()
+            i_std = intrinsic.std() + 1e-8
+            intrinsic_norm = (intrinsic - i_mean) / i_std
+
+        # 5. 叠加到外在奖励
+        rewards = np.array(transition_dict['rewards'], dtype=np.float32).reshape(-1, 1)
+        intrinsic_np = intrinsic_norm.cpu().numpy()
+        rewards_aug = rewards + beta * intrinsic_np
+
+        new_dict = dict(transition_dict)
+        new_dict['rewards'] = rewards_aug
+        mse_raw = i_mean.item()  # 归一化前的原始 MSE 均值，用于监控
+        return new_dict, mse_raw
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
