@@ -457,9 +457,16 @@ class track_env():
         r_alt += -0.01 * abs(np.clip(self.RUAV.vu / 100, -1, 1)) * (1-abs(height2req)/5000)  # 距离越近，调节越需要轻微的调节
         # 0.15 可能有些大
 
-        # 高度限制奖励/惩罚，临时更改，在不安全高度往里没有奖励，往外跑有惩罚
-        r_alt += 2*((alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 0) + \
-                (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 0))
+        # 安全高度奖励
+        # 使用圆周运动近似预测是否处于不安全状态
+        if self.RUAV.vu < 0:
+            N_pull_up = (speed**2 * (1-cos(theta_v)) / (9.8 * (alt-self.min_alt)))
+            r_alt -= N_pull_up / (self.max_ny-1) # 随着改平需要的过载量越大，惩罚就越大
+
+
+        # # 高度限制奖励/惩罚，临时更改，在不安全高度往里没有奖励，往外跑有惩罚
+        # r_alt += 2*((alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 0) + \
+        #         (alt >= self.max_alt_safe) * np.clip(-self.RUAV.vu / 100, -1, 0))
 
         # 航向误差惩罚
         r_angle = 0  # 1 # DEBUG
@@ -549,6 +556,7 @@ class track_env():
         reward = np.sum([
             1 * reward_alive,
             1 * reward_end,
+            
             1 * r_angle,
             1 * r_alt,
             1 * r_speed,
