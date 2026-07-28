@@ -154,11 +154,11 @@ class Battle(object):
             "ego_main",  # 7
             "ego_control",  # 7
             "weapon",  # 1 仅用于动作切换
-            "threat",  # 4
+            "threat",  # 5
             "border",  # 2
             "out_locked", # 1
         ]
-        self.full_obs_dim = 1*6+8+7+7+1+4+2+1
+        self.full_obs_dim = 1*6+8+7+7+1+5+2+1
 
         self.RED_BIRTH_STATE = {'position': np.array([R_birth * cos(-pi/2), 8000.0, R_birth * sin(-pi/2)]),
                                         'psi': pi/2,
@@ -756,6 +756,7 @@ class Battle(object):
         threat_delta_psi = pi  # pi 0
         threat_delta_theta = 0
         threat_distance = self.RWR_distance
+        closing_label = - 1
         direct_threat = 0 # 是否受到导弹的直接威胁
         if alive_enm_missiles:
             # 存在敌导弹
@@ -777,6 +778,16 @@ class Battle(object):
                         dist_closest = distance_this_one # 这个导弹目前最近
                         threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
                         threat_delta_theta = -missile.q_epsilon
+                        missile_closing_rate = getattr(missile, 'closing_rate', None)
+                        if missile_closing_rate is not None:
+                            if missile_closing_rate > 150:
+                                closing_label = 2
+                            elif missile_closing_rate > 50:
+                                closing_label = 1
+                            elif missile_closing_rate < -50:
+                                closing_label = -1
+                            else:
+                                closing_label = 0
                     # 如果处于可测距范围(当作和告警距离一样远)，就报告威胁距离
                     if 1:
                         threat_distance = min(threat_distance, missile.distance)
@@ -897,6 +908,7 @@ class Battle(object):
                 float(sin(threat_delta_psi)),  # 1
                 float(threat_delta_theta),  # 2
                 float(threat_distance),  # 3
+                float(closing_label), # 4
             ]),
 
             # "threat": np.array([
@@ -991,6 +1003,7 @@ class Battle(object):
             state["threat"][1] = sin(pi)   # sin(threat_delta_psi默认值pi)
             state["threat"][2] = 0.0        # threat_delta_theta默认值0
             state["threat"][3] = self.RWR_distance  # threat_distance默认值
+            state["threat"][4] = -1
 
         # [新增] 增加时间戳，用于状态管理
         state['t'] = self.t
@@ -1020,7 +1033,7 @@ class Battle(object):
         self.state_init["ego_control"] = np.array(
             [0, 0, 0, 0, 0, 0, 0, 0])
         self.state_init["weapon"] = 120
-        self.state_init["threat"] = np.array([1, 0, 0, self.RWR_distance])
+        self.state_init["threat"] = np.array([1, 0, 0, self.RWR_distance, -1])
         self.state_init["border"] = np.array([50e3, 0])
         self.state_init["out_locked"] = 0.0
 

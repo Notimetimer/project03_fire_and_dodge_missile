@@ -67,7 +67,7 @@ class ChooseStrategyEnv(Battle):
             "border",  # 2
             "out_locked", # 1
         ]
-        self.obs_dim = 1*6+8+7+1+4+2+1
+        self.obs_dim = self.full_obs_dim - 7 # 砍去ego_control
         self.fly_act_dim = [5, 7] # [5,7] 14
         self.fly_act_dim_circ = [5, 6]
         self.fire_dim = 1

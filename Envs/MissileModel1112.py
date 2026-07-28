@@ -158,7 +158,7 @@ class missile_class:
         self.area = 0.4 # 425 435 0.405  # m2
         # 阻力系数是一个函数，不在这里定义
         # 最小速度
-        self.speed_min = 0.8 * 340  # m/s
+        self.speed_min = 0.7 * 340  # m/s
         # 最大视角
         self.sight_angle_max = np.radians(40) # 极限离轴可能接近40度，也有用53度的，稳定跟踪区在正负25度以内
         # 最大跟踪视角速度
@@ -189,6 +189,7 @@ class missile_class:
         self.A_pole_moment = None
         self.delta_height = 0
         self.target_close_v = None
+        self.closing_rate = None
         self.off_lock = False
         self.ground_close_rate = None
         self.dt = 0.04 # 初始值
@@ -542,6 +543,7 @@ class missile_class:
 
         v_rel_ = vtt_-vmt_
         L_dot = np.dot(v_rel_, line_t_)/distance
+        self.closing_rate = - L_dot
         self.t_go = -distance/L_dot # if L_dot<0 else self.t_max # 弹目距离
         self.t_go = max(self.t_go, 0.1)
 
@@ -610,10 +612,10 @@ class missile_class:
         
         self.v_dot = v_dot
 
-        # # 速度过低没有舵效
-        # if vmt < self.speed_min:
-        #     nzt = np.clip(nzt, -1, 1)
-        #     nyt = np.clip(nyt, -1, 1)
+        # 速度过低没有舵效
+        if vmt < self.speed_min:
+            nzt = 0 # np.clip(nzt, -1, 1)
+            nyt = 0 # np.clip(nyt, -1, 1)
 
         # 电池耗尽也没有舵效
         if self.t > self.t_max:
