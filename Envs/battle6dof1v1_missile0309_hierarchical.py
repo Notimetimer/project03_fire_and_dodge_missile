@@ -575,6 +575,14 @@ class Battle(object):
                                 self.b_can_guide = max(1, self.b_can_guide)
                 last_vmt_, last_pmt_, _, _, _, _, _, _, _, _ = \
                     missile.step(target_info, dt=substep_dt, datalink=has_datalink)
+                
+                # 把导弹进入末制导的时间记录到导弹上
+                if missile.A_pole_moment:
+                    missile.A_pole_moment_time = self.t
+                    missile.reward_function_info["time"] = self.t
+                else:
+                    missile.A_pole_moment_time = None
+
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
                 # 导弹慢速自爆，节省计算量
@@ -609,20 +617,21 @@ class Battle(object):
 
                 if missile.dead == True and not target.dead:
                     target.escape_once = 1
+                    missile.miss = 1
 
             # 飞机接收毁伤判别信息
             for i, UAV in enumerate(self.UAVs):
                 # 飞机被导弹命中判断
                 if UAV.red:
-                    adv = self.BUAV
+                    enm = self.BUAV
                 if UAV.blue:
-                    adv = self.RUAV
+                    enm = self.RUAV
                 if self.UAV_hit[i]:
                     UAV.dead = True
                     UAV.got_hit = True
                 # 其他毁伤判断
-                adv = self.UAVs[1 - i]
-                pt_ = adv.pos_
+                enm = self.UAVs[1 - i]
+                pt_ = enm.pos_
                 L_ = pt_ - UAV.pos_
                 distance = np.linalg.norm(L_)
 
@@ -672,11 +681,11 @@ class Battle(object):
 
         if side == 'r':
             ego = self.RUAV
-            adv = self.BUAV
+            enm = self.BUAV
 
         else:  # if side=='b':
             ego = self.BUAV
-            adv = self.RUAV
+            enm = self.RUAV
 
 
         alive_r_missiles, alive_b_missiles = self.alive_r_missiles, self.alive_b_missiles
@@ -690,13 +699,13 @@ class Battle(object):
         # 留下一个小bug，没有考虑双法是否存活
         ego_alive = not ego.dead
         # 目标存活标志
-        target_alive = not adv.dead
+        target_alive = not enm.dead
         # 目标可见性标志 0 完全不可见 1 可获取角度信息 2 可获取全部信息
         target_observable = 2  # 难保不搞成one-hot的形式
         # 目标相对高度
-        delta_alt_obs = adv.alt - ego.alt
+        delta_alt_obs = enm.alt - ego.alt
         # 目标相对方位角
-        L_ = adv.pos_ - ego.pos_
+        L_ = enm.pos_ - ego.pos_
         q_beta = atan2(L_[2], L_[0])
         L_h = np.sqrt(L_[0] ** 2 + L_[2] ** 2)
         L_v = L_[1]
@@ -756,7 +765,7 @@ class Battle(object):
         # 然后判断该导弹的 .guidance_stage是否<3
 
         # 目标雷达跟踪标志 bool
-        alpha_enm = np.arccos(np.dot(-L_, adv.vel_) / (norm(adv.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
+        alpha_enm = np.arccos(np.dot(-L_, enm.vel_) / (norm(enm.vel_) * dist + 0.01))  # 防止计算误差导致分子>分母
         if alpha_enm < ego.max_radar_angle_rad and dist < ego.max_radar_range and target_alive and ego_alive: # 留下一个小bug，没有考虑双法是否存活
             locked_by_target = 1
         else:
@@ -790,8 +799,7 @@ class Battle(object):
                         threat_delta_psi = sub_of_radian(pi + missile.q_beta, ego.psi)
                         threat_delta_theta = -missile.q_epsilon
                     # 如果处于可测距范围(当作和告警距离一样远)，就报告威胁距离
-                    if 1:
-                        threat_distance = min(threat_distance, missile.distance)
+                    threat_distance = min(threat_distance, missile.distance)
                 else:
                     pass
                     # if locked_by_target:  # 导弹未进入告警距离但我机仍被敌机锁定
@@ -815,10 +823,10 @@ class Battle(object):
         alpha_air = ego.alpha_air # 弧度制
         beta_air = ego.beta_air # 弧度制
 
-        speed_T = adv.speed
+        speed_T = enm.speed
 
         # 目标相对方位角速度 (rad/s) / 0.35 与 目标相对俯仰角速度 (rad/s) / 0.35
-        vT_ = adv.vel_
+        vT_ = enm.vel_
 
         psi_vT = atan2(vT_[2], vT_[0])
         theta_vT = atan2(vT_[1], sqrt(vT_[0] ** 2 + vT_[2] ** 2))
@@ -1500,6 +1508,9 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
             if not hasattr(uav, 'launch_times'):
                 uav.launch_times = []
             uav.launch_times.append(env.t)
+            # 在导弹里面记录发射时间
+            new_missile.shoot_time = env.t
+            new_missile.reward_function_info["time"] = env.t
 
             new_missile.side = 'r' if side == 'r' else 'b'
             new_missile_id = new_missile.id

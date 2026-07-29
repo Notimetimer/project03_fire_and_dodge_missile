@@ -118,6 +118,7 @@ class missile_class:
         self.WeaponType = "AIM-120C"
         self.exhausted = False # 导弹是否没电
         self.dead = False  # 导弹是否死亡
+        self.miss = False
         self.hit = False  # 导弹是否命中目标
         self.launch_time = launch_time  # 导弹发射时间
         self.lock_time = None
@@ -187,6 +188,12 @@ class missile_class:
         self.side = None
         self.datalink = None
         self.A_pole_moment = None
+        self.A_pole_moment_time = None
+        self.shoot_time = None
+        self.reward_function_info={"time":None ,"value":0}
+        self.get_in_12km = 0
+        self.get_in_4km = 0
+        self.force_enm_out = 0
         self.delta_height = 0
         self.target_close_v = None
         self.closing_rate = None

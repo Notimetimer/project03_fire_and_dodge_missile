@@ -1,5 +1,5 @@
 '''
-使用GRU根据S, A预测未来的Q值
+把导弹威胁目标/命中/脱靶 挤压到发射瞬间/进入末制导瞬间
 '''
 
 from typing import final
@@ -43,7 +43,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_pro import * # 奖励函数
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_trace_back_reward import * # 奖励函数
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -613,6 +613,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 red_out_cage_time = None
                 blue_out_cage = False
                 blue_out_cage_time = None
+
+                reward_time_list = []
                 
                 # --- E. 仿真循环 (核心物理逻辑) ---
                 # 计算最大步数
@@ -667,8 +669,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             # 注意：这里调用你原文件里的 append_experience 辅助函数
                             # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
                             append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
+                            # append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
+                            # append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
                         # 2.2 更新上一帧记录
                         last_decision_obs = b_obs
@@ -781,19 +783,20 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                                                             action_cycle_multiplier, end_reward_weight=end_reward_weight,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
-                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
-                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_weight=0,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
+                    # _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
+                    #                                         fire_reward_weight=fire_reward_weight,
+                    #                                         fire_inside_weight=fire_inside_weight)
+                    # _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_weight=0,
+                    #                                         fire_reward_weight=fire_reward_weight,
+                    #                                         fire_inside_weight=fire_inside_weight)
+                    reward_time_list.append(env.t)
 
                     reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
-                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
+                    # reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
                         episode_return += b_reward1
-                        episode_return_dense += b_dense_reward
+                        # episode_return_dense += b_dense_reward
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -807,11 +810,35 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier, end_reward_weight=end_reward_weight,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
+                reward_time_list.append(env.t)
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+                    # append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
+                    # append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
+
+                # --- 导弹延迟奖励回溶 (Missile Delayed Reward Backfill) ---
+                # 威胁目标/脱靶/命中等奖励不再直接计入 r_event，而是累加在各自导弹的
+                # missile.reward_function_info = {"time": ..., "value": ...} 上。
+                # 这里按 reward_function_info["time"] 与 reward_time_list（每个物理步 env.t 的记录）
+                # 做最近时间匹配，换算成对应的决策周期下标，回填进 local_trans / ego_trans 的 rewards。
+                if reward_time_list:
+                    reward_time_arr = np.array(reward_time_list)
+                    backfill_debug = []
+                    for missile in env.Bmissiles:
+                        info = getattr(missile, 'reward_function_info', None)
+                        if not info or info.get('time') is None or info.get('value', 0) == 0:
+                            continue
+                        nearest_step_idx = int(np.argmin(np.abs(reward_time_arr - info['time'])))
+                        cycle_idx = nearest_step_idx // action_cycle_multiplier
+                        for trans in (local_trans, ego_trans):
+                            if trans and len(trans.get('rewards', [])) > 0:
+                                clamped_idx = min(cycle_idx, len(trans['rewards']) - 1)
+                                trans['rewards'][clamped_idx] += info['value']
+                        backfill_debug.append((cycle_idx, info['value']))
+                    if backfill_debug:
+                        print(f"[导弹延迟奖励回溶] 决策步(cycle_idx)->奖励值: {backfill_debug}")
+                # ----------------------------------------------
 
                 # --- 序列时空修正 (Credit Assignment Fix) ---死后时间压缩
                 # 由于代理死亡后 active_mask 变为 False，回合结束时的同归于尽补偿等延迟奖励
@@ -932,7 +959,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': b_dense_reward,
+                        # 'dense_return': b_dense_reward,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -1735,7 +1762,7 @@ def run_MLP_simulation(
             batch_draw_cnt = 0        # 新增统计
             batch_bvr_perish_together_cnt = 0 # 新增统计
             batch_total_return = 0    # 新增统计
-            batch_total_dense_return = 0
+            # batch_total_dense_return = 0
             batch_total_m_fired = 0   # 新增统计
             
             # 新增: 批次开火策略指标统计
@@ -1819,7 +1846,7 @@ def run_MLP_simulation(
                 
                 batch_total_steps += metrics['steps']
                 batch_total_return += metrics['return']
-                batch_total_dense_return += metrics['dense_return']
+                # batch_total_dense_return += metrics['dense_return']
                 batch_total_m_fired += metrics['m_fired']
                 if metrics.get('BVR_perish_together', False):
                     batch_bvr_perish_together_cnt += 1
@@ -2001,7 +2028,7 @@ def run_MLP_simulation(
             
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
-            logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
+            # logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
