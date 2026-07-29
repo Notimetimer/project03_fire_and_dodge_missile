@@ -1038,7 +1038,7 @@ def run_MLP_simulation(
     action_cycle_multiplier=30,
     trigger0=50e3,
     trigger_delta=50e3,
-    weight_reward_0=None,
+    weight_reward_0=np.array([1,0,0]),
     IL_rule=2,
     no_crash=1,
     dt_move=0.05,
