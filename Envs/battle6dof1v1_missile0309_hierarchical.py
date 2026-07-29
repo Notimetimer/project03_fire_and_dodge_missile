@@ -171,7 +171,7 @@ class Battle(object):
         self.tacview_show = tacview_show
 
         # 动作平滑参数
-        self.action_ema_beta = 0.006 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至5%
+        self.action_ema_beta = 0.2 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至 0.006
         self.r_actions_ema = None
         self.b_actions_ema = None
         
@@ -362,16 +362,27 @@ class Battle(object):
         actions = [r_actions] + [b_actions]
 
         # 动作 EMA 平滑
+        heading_dead = np.deg2rad(15.0)  # 航向变化小于 15 度时不平滑
         if self.r_actions_ema is None:
             self.r_actions_ema = r_actions.copy()
         else:
-            self.r_actions_ema = r_actions.copy()
+            # 高度仍做 EMA
             self.r_actions_ema[0] = self.action_ema_beta * self.r_actions_ema[0] + (1 - self.action_ema_beta) * r_actions[0]
+            # 航向：小指令或符号切换时直出，避免相位滞后导致蛇行
+            if abs(r_actions[1]) < heading_dead or np.sign(r_actions[1]) != np.sign(self.r_actions_ema[1]):
+                self.r_actions_ema[1] = r_actions[1]
+            else:
+                self.r_actions_ema[1] = self.action_ema_beta * self.r_actions_ema[1] + (1 - self.action_ema_beta) * r_actions[1]
         if self.b_actions_ema is None:
             self.b_actions_ema = b_actions.copy()
         else:
-            self.b_actions_ema = b_actions.copy()
+            # 高度仍做 EMA
             self.b_actions_ema[0] = self.action_ema_beta * self.b_actions_ema[0] + (1 - self.action_ema_beta) * b_actions[0]
+            # 航向：小指令或符号切换时直出，避免相位滞后导致蛇行
+            if abs(b_actions[1]) < heading_dead or np.sign(b_actions[1]) != np.sign(self.b_actions_ema[1]):
+                self.b_actions_ema[1] = b_actions[1]
+            else:
+                self.b_actions_ema[1] = self.action_ema_beta * self.b_actions_ema[1] + (1 - self.action_ema_beta) * b_actions[1]
         # 使用平滑后的动作执行
         actions = [self.r_actions_ema] + [self.b_actions_ema]
 
@@ -520,7 +531,8 @@ class Battle(object):
                     control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                     aileron, elevator, rudder, throttle = control_action['cont']
 
-                    elevator*=0.75 # 弱化俯仰控制
+                    # 弱化俯仰控制
+                    elevator*=0.75
                     if UAV.mach > 0.85:
                         elevator=np.clip(elevator, -0.72, 0.72)
 
