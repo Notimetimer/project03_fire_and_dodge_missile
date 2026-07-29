@@ -207,7 +207,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
         r_constraint = 0.0 # 约束与代价
-        r_shaping = 0.0    # 战术引导
 
         # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
         # # 高度限制奖励/惩罚
@@ -326,7 +325,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 密集奖励只有在agent活着的时候有意义
         # r_constraint *= (1-ego.dead)
-        # r_shaping *= (1-ego.dead)
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
@@ -385,7 +383,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         if ego._threat_crossing_reward_t is not None and\
             abs(self.t - ego._threat_crossing_reward_t) < self.dt_maneuver:
-            r_constraint += ego._threat_crossing_reward
+            r_event += ego._threat_crossing_reward
 
             
         # # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
@@ -460,10 +458,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
-            print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
+            print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f}")
 
         # 返回 done 和三个分项奖励
         return done, \
-                    r_event1+r_constraint+r_shaping, \
-                        r_event2+r_constraint+r_shaping, \
-                            r_event3+r_constraint+r_shaping
+                    r_event1+r_constraint,\
+                        r_event2+r_constraint,\
+                            r_event3+r_constraint

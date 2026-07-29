@@ -422,16 +422,16 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 有效期内给击落敌机的100奖励
         if ego._got_a_kill_t is not None and\
             abs(self.t - ego._got_a_kill_t) < self.dt_maneuver:
-            r_event += 100
-            r_delayed += 100
+            r_event += 10
+            r_delayed += 10
 
         # 有效期内给被击落的-100惩罚
         if ego._took_a_hit_t is not None and\
             abs(self.t - ego._took_a_hit_t) < self.dt_maneuver:
-            r_event -= 100
-            r_current_event -= 100
+            r_event -= 10
+            r_current_event -= 10
 
-        if done and (self.close_range_kill() or (ego.dead+enm.dead == 0)): # 近距杀或双存活，反正都没有被打死或者撞死
+        if done: #  and (self.close_range_kill() or (ego.dead+enm.dead == 0)): # 近距杀或双存活，反正都没有被打死或者撞死
             time_left = self.game_time_limit - self.t
             steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())

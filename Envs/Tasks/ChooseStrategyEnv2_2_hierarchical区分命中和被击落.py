@@ -409,15 +409,15 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 ego._took_a_hit = 1
                 ego._took_a_hit_t = self.t
 
-        # 有效期内给击落敌机的100奖励
+        # 有效期内给击落敌机的10奖励
         if ego._got_a_kill_t is not None and\
             abs(self.t - ego._got_a_kill_t) < self.dt_maneuver:
-            r_event += 100
+            r_event += 10
 
-        # 有效期内给被击落的-100惩罚
+        # 有效期内给被击落的-10惩罚
         if ego._took_a_hit_t is not None and\
             abs(self.t - ego._took_a_hit_t) < self.dt_maneuver:
-            r_event -= 100
+            r_event -= 10
         
 
         "not done" # 胜负未分，所有偏好的奖励都一样
@@ -425,7 +425,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_event2 = r_event
         r_event3 = r_event
 
-        if done and (self.close_range_kill() or (ego.dead+enm.dead == 0)): # 近距杀或双存活，反正都没有被打死或者撞死
+        if done: # and (self.close_range_kill() or (ego.dead+enm.dead == 0)): # 近距杀或双存活，反正都没有被打死或者撞死
             time_left = self.game_time_limit - self.t
             steps_left = time_left / (action_cycle_multiplier * self.dt_maneuver/0.2)
             total_shaping_sum = sum(reward_weights.values())
@@ -480,7 +480,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     r_event2 = r_event - 180 * end_reward_weight # 双杀策略
                     r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
 
-            
+        if done:
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
