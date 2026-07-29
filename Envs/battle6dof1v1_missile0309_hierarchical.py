@@ -171,7 +171,7 @@ class Battle(object):
         self.tacview_show = tacview_show
 
         # 动作平滑参数
-        self.action_ema_beta = 0.2 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至 0.006
+        self.action_ema_beta = 0.006 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至 0.006 0.2
         self.r_actions_ema = None
         self.b_actions_ema = None
         
