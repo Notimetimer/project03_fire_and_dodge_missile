@@ -372,7 +372,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 脱靶（missile.miss 已在 battle.step 里一次性置位）
             if missile.miss and not info.get("miss_applied", False):
                 info["miss_applied"] = True
-                info["value"] -= 10 #  * (1 - enm.dead)
+                info["value"] -= 10 * (1 - enm.dead)
                 if (missile.get_in_4km + missile.get_in_12km)==0:
                     info["time"] = self.t
 
