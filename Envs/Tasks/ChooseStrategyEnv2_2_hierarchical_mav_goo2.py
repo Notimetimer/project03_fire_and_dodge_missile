@@ -47,7 +47,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_weight=1.0, 
+        end_reward_weight=0.556, 
         fire_reward_weight=None,
         fire_inside_weight = None, ends_in_bvr=0,
         proxy_warning_dist=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
@@ -367,7 +367,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         if ego._target_hit_reward_t is not None \
                 and self.t - ego._target_hit_reward_t < self.dt_maneuver:
             # 不重复给命中奖励
-            r_goose += 100
+            r_goose += 10
 
         # 目标逃脱时间更新
         if enm.escape_once:
@@ -405,7 +405,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             and abs(self.t - ego._threat_crossing_reward_t) < self.dt_maneuver:
             r_goose += ego._threat_crossing_reward
 
-
+            
         # # 死了也当剩下导弹全被逃脱处理 (死亡代价追加)
         # if wasted > 0:
         #     r_event -= 10 * wasted # 20
@@ -431,8 +431,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
             if ego_win:
                 r_maverick += 100
+                r_goose += 100
             elif ego_lose:
                 r_maverick -= 100
+                r_goose -= 100
             
             # 近距杀同归于尽，不是飞行员的错，是武器操作员没做好
             elif ego_draw and self.close_range_kill():

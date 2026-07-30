@@ -2048,7 +2048,9 @@ def run_MLP_simulation(
                 
                 # 清空 Buffer（在保存之后）
                 transition_dict_mav = copy.deepcopy(empty_transition_dict)
-                transition_dict_goo = copy.deepcopy(empty_transition_dict)
+                # goose缺样本，减缓清空频率
+                if batch_idx % 5 == 0:
+                    transition_dict_goo = copy.deepcopy(empty_transition_dict)
 
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
