@@ -1140,6 +1140,8 @@ def run_MLP_simulation(
         rnd_state_dim=state_dim,
     )
     
+    # ADistill 用：cat 熵系数的基准值（在 agent 类属性上动态缩放）
+    base_k_cat = student_agent.k_entropy.get('cat', 0.008)
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
@@ -2106,10 +2108,21 @@ def run_MLP_simulation(
                 # ADistill alpha 退火：0.1 -> 0，在总步数达到 1/3 时降到 0
                 if use_ADistill:
                     alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps / 3.0))
+                    # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
+                    k_entropy_cat_scale = 1.0 + 4.0 * (alpha_distill / beta_ADistill)
+
+                    # 若 cat 熵已过高，临时取消额外熵奖励，压回基准值
+                    if getattr(student_agent, 'entropy_cat', 0.0) > 2.5:
+                        k_entropy_cat_scale = 1.0
+                        
                     logger.add("train_plus/alpha_distill", alpha_distill, total_steps)
+                    logger.add("train_plus/k_entropy_cat_scale", k_entropy_cat_scale, total_steps)
                 else:
                     alpha_distill = 0
                     teacher_wrapper = None
+                    k_entropy_cat_scale = 1.0
+
+                student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
