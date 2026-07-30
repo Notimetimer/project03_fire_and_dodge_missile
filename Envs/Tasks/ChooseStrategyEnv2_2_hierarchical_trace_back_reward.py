@@ -293,7 +293,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 r_constraint += 5 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 10 *
             # 被目标锁定
             if locked_by_target:
-                r_constraint -= 5 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 10 *
+                r_constraint -= 3 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 10 *
 
         # 防御引导（真实RWR告警或代理告警距离触发）
         if effective_threat:
