@@ -405,12 +405,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event += 100
                 r_event1 = r_event
                 r_event2 = r_event
                 r_event3 = r_event
             elif ego_lose:
-                r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_event -= 100
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
                 r_event1 = r_event
@@ -454,7 +454,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                     r_event2 = r_event - 180 * end_reward_weight # 双杀策略
                     r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
 
-            
+        if done:
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
