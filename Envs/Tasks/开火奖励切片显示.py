@@ -10,8 +10,8 @@ from mpl_toolkits.mplot3d import Axes3D
 # --- 1. 定义变量范围和初始值 ---
 # 格式: '变量名': (最小值, 最大值, 初始值)
 VAR_DEFS = {
-    'distance': (0, 100e3, 50e3),
-    'missile_time_since_shoot': (0, 120, 60),
+    'distance': (8e3, 100e3, 50e3),
+    'missile_time_since_shoot': (30, 120, 60),
     'AA_hor': (-np.pi, np.pi, 0),
     'delta_psi': (-np.pi, np.pi, 0),
     'vu': (-100, 100, 10),
@@ -24,17 +24,24 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 def compute_reward(distance, missile_time_since_shoot, AA_hor, delta_psi, vu, theta):
-    inner = (
-        # 1 * 1 + # 3  (distance / 100e3) +
-        3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 60))) + # 至关重要
-        2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi *2)) +
-        8 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
-        # 2 * 1 + # np.exp(np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.6)) +
-        2 + 
-        5 * (-vu/100)
-        # 3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -50) # 相当重要
-    )/15  # 10
-    r_event =  - 10 * (1.0 + np.tanh(inner))
+    # inner = (
+    #     1 + 
+    #     3 * (-1 + np.exp(2*np.maximum(0, 1 - missile_time_since_shoot / 60))) + # 至关重要
+    #     2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi *2)) +
+    #     3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
+    #     # 2 * 1 + # np.exp(np.maximum(1.0 - speed / 340, 0) / (1.0 - 0.6)) +
+    #     2 + 
+    #     5 * (-vu/100)
+    #     # 3 * np.maximum(-1 + np.exp(- 2 * theta / np.pi * 2), -50) # 相当重要
+    # )/15  # 10
+    # r_event =  - 10 * (1.0 + np.tanh(inner))
+
+    r_event = -15 * (
+        1.0 + 
+        0.1 * (abs(delta_psi) > np.radians(40)) +
+        0.1 * np.clip(-vu/100, -1, 1) +
+        0.2 * np.clip(1 - missile_time_since_shoot/80, 0, 1)
+    )
     return r_event
 
 # --- 3. GUI 与 可视化逻辑 ---
@@ -226,6 +233,13 @@ class RewardVisualizer:
                 
         # 3. 计算 Z 值
         Z = compute_reward(**kwargs)
+        Z = np.asarray(Z)
+        if Z.shape != X.shape:
+            # 如果 compute_reward 没有使用 X/Y 变量，结果可能是标量；广播到网格形状
+            try:
+                Z = np.broadcast_to(Z, X.shape)
+            except ValueError:
+                Z = np.full(X.shape, Z)
         
         # 4. 重绘曲面
         self.ax.clear()

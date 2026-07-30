@@ -337,18 +337,25 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 time_since_last_shoot = 120.0
             else:
                 time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
-
-            r_event -= 10 * fire_reward_weight * (1.0 +np.tanh(
-                1 * 1 + # 3  (distance / 100e3) +
-                fire_inside_weight[0] * 3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 60))) + # 至关重要
-                fire_inside_weight[1] * 2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi * 2)) +
-                fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) / np.pi)) + # 至关重要
-                # fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(delta_psi) / np.pi)) + # 至关重要
-                fire_inside_weight[3] * 2 * 1 + # np.exp(np.maximum(1.0 - ego.speed / 340, 0) / (1.0 - 0.6)) +
-                fire_inside_weight[4] * 5 * (-ego.vu/100) # np.maximum(-ego.theta / np.pi * 3, - 1.0)
-                # 3 * np.maximum(-1 + np.exp(- 2 * ego.theta / np.pi * 2), -50) # 相当重要
-            )/15 # 10
+            # 利用速度偏角滤波
+            delta_psi_filt = sub_of_radian(delta_psi+ego.psi, ego.psi_v)
+            # r_event -= 10 * fire_reward_weight * (1.0 +np.tanh(
+            #     1 * 1 + # 3  (distance / 100e3) +
+            #     fire_inside_weight[0] * 3 * (-1 + np.exp(2*np.maximum(0, 1 - time_since_last_shoot / 60))) + # 至关重要
+            #     fire_inside_weight[1] * 2 * (-1 + np.exp(1-np.abs(AA_hor) / np.pi * 2)) +
+            #     fire_inside_weight[2] * 3 * (-1 + np.exp(1*np.abs(delta_psi_filt) / np.pi)) + # 至关重要
+            #     fire_inside_weight[3] * 2 * 1 +
+            #     fire_inside_weight[4] * 5 * (-ego.vu/100)
+            # )/15 # 10
+            # )
+            # 距离不罚，AAhor的关系很难罚，尺度调整
+            r_event = -15 * (
+                1.0 + 
+                0.1 * (abs(delta_psi_filt) > np.radians(40)) +
+                0.1 * np.clip(-ego.vu/100, -1, 1) +
+                0.2 * np.clip(1 - time_since_last_shoot/80, 0, 1)
             )
+
 
         # 威胁阈值/权重（用于导弹自身延迟奖励，见下方 all_ally_missiles 循环）
         threat_distance_threshold1 = 12e3
@@ -364,10 +371,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 dist_missile2enm = norm(missile.pos_ - enm.pos_)
                 if not missile.get_in_12km and dist_missile2enm <= threat_distance_threshold1:
                     missile.get_in_12km = 1
-                    info["value"] += 4 #  * fire_reward_weight * weight_temp
+                    info["value"] += 3 # 4 * fire_reward_weight * weight_temp
                 if not missile.get_in_4km and dist_missile2enm <= threat_distance_threshold2:
                     missile.get_in_4km = 1
-                    info["value"] += 8 #  * fire_reward_weight * weight_temp
+                    info["value"] += 6 # 8 * fire_reward_weight * weight_temp
             # 命中（missile.hit 已在 battle.step 里一次性置位）
             if missile.hit and not info.get("hit_applied", False):
                 info["hit_applied"] = True

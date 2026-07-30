@@ -579,7 +579,8 @@ class Battle(object):
                 # 把导弹进入末制导的时间记录到导弹上
                 if missile.A_pole_moment:
                     missile.A_pole_moment_time = self.t
-                    missile.reward_function_info["time"] = self.t
+                    # 奖励尺度问题？还是时间问题？统一转到开火时间如何？
+                    # missile.reward_function_info["time"] = self.t
                 else:
                     missile.A_pole_moment_time = None
 
