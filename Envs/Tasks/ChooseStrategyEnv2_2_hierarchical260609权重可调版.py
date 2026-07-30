@@ -187,12 +187,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
-        r_constraint = 0.0 # 约束与代价
-        r_shaping = 0.0    # 战术引导
+        r_shaping = 0.0 # 约束与代价
 
-        # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
+        # --- 4. 约束奖励计算 (r_shaping) - 固定权重 ---
         # # 高度限制奖励/惩罚
-        # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+        # r_shaping += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
         #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
         reward_weights['border_penalty_scale']=0.2
@@ -205,9 +204,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
         d_hor = ego_states["border"][0]
         if d_hor <= 50e3:
-            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+            r_shaping -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
         else:
-            r_constraint += reward_weights['border_reward']
+            r_shaping += reward_weights['border_reward']
         
         # 补充占领中心奖励
         border_side = ego_states["border"][1]
@@ -218,12 +217,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_psi_to_center = sub_of_radian(psi2center, ego.psi)
 
         # 距离中心越远，指向中心的价值越高
-        r_constraint += (1 + dist2center/self.R_cage)/2 * \
+        r_shaping += (1 + dist2center/self.R_cage)/2 * \
                         (1 - abs(delta_psi_to_center)/pi) * \
                         reward_weights['to_center_reward']
         
 
-        r_constraint *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
+        r_shaping *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
 
         # 战术引导奖励
@@ -292,21 +291,21 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # if len(alive_ally_missiles) == 0:
             if not missile_in_mid_term:
                 delta_phi = gamma*phi_attack - ego._last_phi_attack
-                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
+                r_shaping += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
             
             # crank期：如果导弹飞在正确的方向上，做crank下高
             else:
                 delta_phi = gamma*phi_crank - ego._last_phi_crank
-                r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
+                r_shaping += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
         
         # 防御期：如果有告警，不论如何都置尾下高
         elif warning:
             delta_phi = gamma * phi_defense - ego._last_phi_defense
-            r_constraint += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
+            r_shaping += np.clip((delta_phi / (dt_phi + 1e-6)) * reward_weights['angle_advantage'], -6, 6) * (1-ego.dead)
         
         # 速度奖励（速度势能变化）
         delta_phi_speed = gamma * phi_speed - ego._last_phi_speed
-        r_constraint += np.clip((delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'], -6, 6) * (1-ego.dead)
+        r_shaping += np.clip((delta_phi_speed / (dt_phi + 1e-6)) * reward_weights['speed_penalty'], -6, 6) * (1-ego.dead)
         
         # 4. 时间戳保护：旧势能更新（守卫内）
         # 注意：时间戳必须挂在 ego 上，而非 self，否则红蓝双方共享同一个时间戳，
@@ -376,9 +375,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         else:
             weight_temp = 1
         if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
-            r_constraint += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
+            r_shaping += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算                   
         if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
-            r_constraint += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
+            r_shaping += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励，导弹送进10km以内就给，便于跟开火惩罚换算
 
         if abs(self.t - step_idx * cycle_time) < 1e-4 and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             ego._last_phi_t = self.t
@@ -446,10 +445,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
-            print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
+            print(f"R_Event: {r_event:.2f} | r_shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
         return done, \
-                    r_event1+r_constraint+r_shaping, \
-                        r_event2+r_constraint+r_shaping, \
-                            r_event3+r_constraint+r_shaping
+                    r_event1+r_shaping, \
+                        r_event2+r_shaping, \
+                            r_event3+r_shaping

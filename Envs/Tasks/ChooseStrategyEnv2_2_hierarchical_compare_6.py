@@ -206,12 +206,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
-        r_constraint = 0.0 # 约束与代价
-        r_shaping = 0.0    # 战术引导
+        r_shaping = 0.0 # 约束与代价
 
-        # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
+        # --- 4. 约束奖励计算 (r_shaping) - 固定权重 ---
         # # 高度限制奖励/惩罚
-        # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+        # r_shaping += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
         #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
         # 靠近边界惩罚
@@ -219,9 +218,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
         d_hor = ego_states["border"][0]
         if d_hor <= 50e3:
-            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+            r_shaping -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
         else:
-            r_constraint += reward_weights['border_reward']
+            r_shaping += reward_weights['border_reward']
         
         # 补充占领中心奖励
         border_side = ego_states["border"][1]
@@ -232,17 +231,17 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_psi_to_center = sub_of_radian(psi2center, ego.psi)
 
         # 距离中心越远，指向中心的价值越高
-        r_constraint += (1 + dist2center/self.R_cage)/2 * \
+        r_shaping += (1 + dist2center/self.R_cage)/2 * \
                         (1 - abs(delta_psi_to_center)/pi) * \
                         reward_weights['to_center_reward']
         
         # # 迎角惩罚
-        # r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
+        # r_shaping -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
         #                                                  (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
         # # 俯仰角惩罚
-        # r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
+        # r_shaping -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
-        r_constraint *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
+        r_shaping *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
         # 开火代价控制
         wasted = 0
@@ -344,7 +343,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 ego._last_sideslip_potential,
             )
             if all(value is not None for value in last_potential_values):
-                r_constraint += sum(
+                r_shaping += sum(
                     current - previous
                     for current, previous in zip(potential_values, last_potential_values)
                 ) * (1 - ego.dead)
@@ -362,7 +361,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             ego._last_enm_threat_dist = enm_states["threat"][3]
 
         if ego._threat_crossing_reward_t == self.t:
-            r_constraint += ego._threat_crossing_reward
+            r_shaping += ego._threat_crossing_reward
 
 
         # 逃脱导弹
@@ -393,10 +392,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
-            print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
+            print(f"R_Event: {r_event:.2f} | r_shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
         return done, \
-                    r_event1+r_constraint+r_shaping, \
-                        r_event2+r_constraint+r_shaping, \
-                            r_event3+r_constraint+r_shaping
+                    r_event1+r_shaping, \
+                        r_event2+r_shaping, \
+                            r_event3+r_shaping

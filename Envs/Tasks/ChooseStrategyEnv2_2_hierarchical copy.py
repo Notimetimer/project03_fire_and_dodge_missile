@@ -167,12 +167,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         r_event2 = r_event
         r_event3 = r_event
         
-        r_constraint = 0.0 # 约束与代价
-        r_shaping = 0.0    # 战术引导
+        r_shaping = 0.0 # 约束与代价
 
-        # --- 4. 约束奖励计算 (r_constraint) - 固定权重 ---
+        # --- 4. 约束奖励计算 (r_shaping) - 固定权重 ---
         # # 高度限制奖励/惩罚
-        # r_constraint += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
+        # r_shaping += ((alt <= self.min_alt_safe) * np.clip(ego.vu / 100, -1, 1) + \
         #                 (alt >= self.max_alt_safe) * np.clip(-ego.vu / 100, -1, 1)) * reward_weights['alt_limit_penalty']
         
         reward_weights['border_penalty_scale']=0.2
@@ -185,9 +184,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         ego_vh_ = np.array([ego.vel_[0], ego.vel_[2]])
         d_hor = ego_states["border"][0]
         if d_hor <= 50e3:
-            r_constraint -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
+            r_shaping -= (1-d_hor/50e3) * np.dot(ego_vh_, o002ego_)/norm(o002ego_ + 1e-3)/340 * reward_weights['border_penalty_scale']
         else:
-            r_constraint += reward_weights['border_reward']
+            r_shaping += reward_weights['border_reward']
         
         # 补充占领中心奖励
         border_side = ego_states["border"][1]
@@ -198,17 +197,17 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         delta_psi_to_center = sub_of_radian(psi2center, ego.psi)
 
         # 距离中心越远，指向中心的价值越高
-        r_constraint += ((1 + dist2center/self.R_cage)/2) * \
+        r_shaping += ((1 + dist2center/self.R_cage)/2) * \
                         ((1 - abs(delta_psi_to_center)/pi)) * \
                         reward_weights['to_center_reward']
         
         # # 迎角惩罚
-        # r_constraint -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
+        # r_shaping -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
         #                                                  (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
         # # 俯仰角惩罚
-        # r_constraint -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
+        # r_shaping -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
 
-        r_constraint *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
+        r_shaping *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
         # 开火代价控制
         wasted = 0
@@ -229,11 +228,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # # 1. 进攻态势：我方导弹是否横在两机之间 (敌机感受到的威胁距离 < 两机距离)
         # enm_threat_dist = enm_states["threat"][3]
         # if enm_threat_dist < distance:
-        #     r_constraint += 0.002 * (1 - ego.dead) # 0.001
+        #     r_shaping += 0.002 * (1 - ego.dead) # 0.001
 
         # # 2. 防御态势：敌方导弹是否横在两机之间 (我方感受到的威胁距离 < 两机距离)
         # if threat_distance < distance:
-        #     r_constraint -= 0.002 * (1 - ego.dead) # 0.001
+        #     r_shaping -= 0.002 * (1 - ego.dead) # 0.001
 
         # 战术引导奖励
         reward_weights['angle_advantage']=0.05 # 0.01, # 0.03
@@ -242,25 +241,25 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 进攻引导
         if len(alive_ally_missiles) == 0 and not warning:
             # 瞄准奖励
-            r_constraint += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
             # 爬高奖励
-            r_constraint += np.clip(ego.vu/100, -1, 1) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
+            r_shaping += np.clip(ego.vu/100, -1, 1) * reward_weights['height_advantage'] * (1-ego.dead) # 0.5 * 
 
             # dist_thres = 20e3
             # target_delta_theta = -pi/4 * sigmoid(21*(distance-dist_thres))
             # sigma = 0.7
-            # r_constraint += np.exp(-(delta_theta-target_delta_theta)**2/(2*sigma**2)) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+            # r_shaping += np.exp(-(delta_theta-target_delta_theta)**2/(2*sigma**2)) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
 
             # target_delta_theta = -pi/4 * sigmoid(10*(distance-dist_thres)/100e3) # 21*
-            # r_constraint += (1-(delta_theta-target_delta_theta)**2/(2*1.1**2)) *\
+            # r_shaping += (1-(delta_theta-target_delta_theta)**2/(2*1.1**2)) *\
             #         reward_weights['angle_advantage'] * (1-ego.dead)
 
             # # WVR进攻
             # if distance <= 20e3: # 落入敌机的不可逃逸区，banzai
-            #     r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+            #     r_shaping += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             # # BVR进攻
             # else:
-            r_constraint += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+            r_shaping += min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             
         # crank引导
         enm_threat_dist = enm_states["threat"][3]
@@ -268,18 +267,18 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             if len(alive_enm_missiles) == 0 and abs(AA_hor) < radians(90):
                 # 如果对手没有开火而且没有还手之力，直接乘胜追击
                 # 瞄准奖励
-                r_constraint += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
-                r_constraint += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
-                # r_constraint += (1-2*(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
-                # r_constraint += (1-(delta_theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+                r_shaping += (1-(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_shaping += max(1 - abs(delta_theta)/pi*2, 0) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
+                # r_shaping += (1-2*(abs(delta_psi)*2/pi)**2) * reward_weights['angle_advantage'] * (1-ego.dead)
+                # r_shaping += (1-(delta_theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 0.5 * 
             else:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-                r_constraint += 1.2*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
-                r_constraint += 1.2*((-ego.theta) / (pi/2)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
+                r_shaping += 1.2*(1 - abs(pi/3-abs(delta_psi))/(pi/3)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+                r_shaping += 1.2*((-ego.theta) / (pi/2)) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
                 
-                # r_constraint += 1.2*(1-3*(abs(delta_psi)-pi/3)**2) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
+                # r_shaping += 1.2*(1-3*(abs(delta_psi)-pi/3)**2) * reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead) # 4 * 
                 # target_theta = -pi/2*softplus((ego.alt-5000)/10e3)
-                # r_constraint += 1.2*(1-abs(ego.theta-target_theta)**1.2/(2*1.0**2)) *\
+                # r_shaping += 1.2*(1-abs(ego.theta-target_theta)**1.2/(2*1.0**2)) *\
                 #         reward_weights['angle_advantage'] * i_can_guide * (1-ego.dead)
 
 
@@ -296,22 +295,22 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         #         # ((ego.alt > 8000.0) & (distance < 70e3))
         #     )
         # if maybe_in_DOR:
-        #     r_constraint += 0.6*((-ego.alt)/1e5) * reward_weights['height_advantage'] * (1-ego.dead)  # 进入DOR提前下高
-        #     # r_constraint += 0.6*min(abs(delta_psi)-pi/2, 0)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 进入DOR提前脱离
+        #     r_shaping += 0.6*((-ego.alt)/1e5) * reward_weights['height_advantage'] * (1-ego.dead)  # 进入DOR提前下高
+        #     # r_shaping += 0.6*min(abs(delta_psi)-pi/2, 0)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)  # 进入DOR提前脱离
 
         # RWR防御引导
         if warning:
             # 受到威胁应该置尾和下高
-            # r_constraint += 2*(-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            # r_constraint += 2*(1-np.exp(-abs(delta_psi_threat)**0.7)) * reward_weights['angle_advantage'] * (1-ego.dead)
-            r_constraint += 2*(1-(1+ego.theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            r_constraint += 2*(min(abs(delta_psi_threat), pi)/pi) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # r_shaping += 2*(-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # r_shaping += 2*(1-np.exp(-abs(delta_psi_threat)**0.7)) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 2*(1-(1+ego.theta/(pi/2))**2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 2*(min(abs(delta_psi_threat), pi)/pi) * reward_weights['angle_advantage'] * (1-ego.dead)
         
         # 速度惩罚
         target_mach = 1.0
         if ego.speed < target_mach*340:
-            r_constraint -= (target_mach-ego.speed/340)/(target_mach - 0.8) * reward_weights['speed_penalty'] * (1-ego.dead)
-            r_constraint -= (max(ego.theta, 0)/(pi/2)) * reward_weights['angle_advantage'] * (1-ego.dead) # 速度太慢，惩罚上仰过度
+            r_shaping -= (target_mach-ego.speed/340)/(target_mach - 0.8) * reward_weights['speed_penalty'] * (1-ego.dead)
+            r_shaping -= (max(ego.theta, 0)/(pi/2)) * reward_weights['angle_advantage'] * (1-ego.dead) # 速度太慢，惩罚上仰过度
 
 
         # --- 6. 事件奖励计算 (r_event) - 核心稀疏奖励 ---
@@ -417,10 +416,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             # 打印详细奖励组成，方便调试
             print(f"--- Episode Done ---")
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
-            print(f"R_Event: {r_event:.2f} | R_Constraint: {r_constraint:.2f} | R_Shaping: {r_shaping:.2f}")
+            print(f"R_Event: {r_event:.2f} | r_shaping: {r_shaping:.2f}")
 
         # 返回 done 和三个分项奖励
         return done, \
-                    r_event1+r_constraint+r_shaping, \
-                        r_event2+r_constraint+r_shaping, \
-                            r_event3+r_constraint+r_shaping
+                    r_event1+r_shaping, \
+                        r_event2+r_shaping, \
+                            r_event3+r_shaping
