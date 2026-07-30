@@ -18,7 +18,8 @@ import matplotlib.pyplot as plt
 
 from _context import *
 
-from BasicRules_new_hierarchical import basic_rules
+# from BasicRules_new_hierarchical import basic_rules
+from BasicRules_new_hierarchical2 import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
@@ -46,7 +47,10 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SLWSPFSP0.3导弹奖励回溯_高密集奖励-run-20260730-105408"
+
+    dir_name = "结果奖励污染实验SLWSPFSP0.3-run-20260728-114717"
+    
+    "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
     
     "SLWSA3C0.3-run-20260630-220403"
@@ -226,7 +230,7 @@ if __name__ == "__main__":
                 
                 # 测试时限制开火后爬升
                 if getattr(env.RUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'r', tabu=0, action_label=None) # r_action_label)
+                    launch_missile_immediately(env, 'r', tabu=1, action_label=None) # r_action_label)
                     print("Shoot")
                     print()
                     fire_time = env.t
