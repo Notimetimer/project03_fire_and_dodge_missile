@@ -1701,9 +1701,9 @@ class PPOHybrid:
         if self.max_fire_prob < 0.05:
             # case1: 概率塌缩到接近0 → 用0.5拉高熵
             target_prob = 0.5
-        elif self.min_fire_prob > 0.1:
+        elif self.min_fire_prob > 0.05:
             # case2: 概率整体过高 → 用1e-3压低
-            target_prob = 1e-3
+            target_prob = 1e-2
         else:
             return  # 不满足任何触发条件
 

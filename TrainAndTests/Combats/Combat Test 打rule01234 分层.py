@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SLWS-PFSP-run-20260618-221044"
+    dir_name = "SLWSPFSP0.3导弹奖励回溯_高密集奖励-run-20260730-105408"
 
     
     "SLWSA3C0.3-run-20260630-220403"
@@ -178,7 +178,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.072,
                             temperature={'cat':1.0, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
@@ -231,7 +231,7 @@ if __name__ == "__main__":
                     print()
                     fire_time = env.t
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', tabu=1, action_label=None) # b_action_label)
+                    launch_missile_immediately(env, 'b', tabu=0, action_label=None) # b_action_label)
                 
 
                 if (action_cycle_multiplier-1) * env.dt_maneuver <= env.t-fire_time < 2 * action_cycle_multiplier * env.dt_maneuver:
