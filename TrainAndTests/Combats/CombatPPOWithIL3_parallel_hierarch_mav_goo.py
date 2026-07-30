@@ -976,7 +976,7 @@ def run_MLP_simulation(
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
-    use_RDistill = 0, # 温和蒸馏机制
+    use_ADistill = 0, # 温和蒸馏机制
 ):
 
     actor_lr0 = actor_lr

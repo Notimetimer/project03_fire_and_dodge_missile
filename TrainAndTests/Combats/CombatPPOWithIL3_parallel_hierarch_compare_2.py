@@ -1042,8 +1042,8 @@ def run_MLP_simulation(
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
     beta_RND = 0.3,
-    use_RDistill = 0, # 温和蒸馏机制
-    beta_distill = 0.04,
+    use_ADistill = 0, # 温和蒸馏机制
+    beta_ADistill = 0.04,
     no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
     distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
@@ -2031,7 +2031,7 @@ def run_MLP_simulation(
                 max_fire_logits = 4.0
 
                 # 随机拜师法
-                if use_RDistill and batch_idx > 50:
+                if use_ADistill and batch_idx > 50:
                     # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
                     # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
                     candidate_items = [(k, v) for k, v in elo_ratings.items()
@@ -2063,7 +2063,7 @@ def run_MLP_simulation(
                                 teacher_wrapper.eval()
 
                         if teacher_wrapper is not None:
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
+                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_ADistill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
                             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
                         else:
                             RDistill_kl = None

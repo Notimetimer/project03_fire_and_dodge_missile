@@ -1007,8 +1007,8 @@ def run_MLP_simulation(
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
     beta_RND = 0.3,
-    use_RDistill = 0, # 温和蒸馏机制
-    beta_distill = 0.2,
+    use_ADistill = 0, # 温和蒸馏机制
+    beta_ADistill = 0.2,
 ):
 
     actor_lr0 = actor_lr

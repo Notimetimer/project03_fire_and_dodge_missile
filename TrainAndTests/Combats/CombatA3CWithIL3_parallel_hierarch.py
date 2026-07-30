@@ -973,7 +973,7 @@ def run_MLP_simulation(
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
-    use_RDistill = 0, # 温和蒸馏机制
+    use_ADistill = 0, # 温和蒸馏机制
 ):
 
     actor_lr0 = actor_lr
@@ -1947,7 +1947,7 @@ def run_MLP_simulation(
                 max_fire_logits = 4.0
 
                 # 随机拜师法
-                if use_RDistill:
+                if use_ADistill:
                     # 从 elo_ratings 中筛选 actor_rein 开头的策略，取分值最高的前10个随机抽1个
                     rein_elo_items = [(k, v) for k, v in elo_ratings.items() if k.startswith('actor_rein')]
                     if len(rein_elo_items) >= 1:

@@ -1098,6 +1098,62 @@ class PPOHybrid:
         dist_mean_raw = dist_mean.item()  # 归一化前的距离均值，用于监控
         return new_dict, dist_mean_raw
 
+    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None):
+        """
+        ADistill (Advantage Distillation):
+        根据 teacher_actor 在 transition_dict['obs']（或 states）上的 cat 动作预测，
+        对 active_mask=1 且实际 cat 动作与 teacher 一致的样本，在其优势度上加上
+        advantage.std() * alpha_distill。
+        返回修改后的 advantage，在优势归一化之前使用。
+        """
+        if alpha_distill <= 0 or teacher_actor is None:
+            return advantage
+
+        # 输入状态（优先使用 obs，与 update 中 actor_inputs 保持一致）
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            states = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+        else:
+            states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+
+        # active mask
+        if 'active_masks' in transition_dict:
+            active_masks = torch.tensor(np.array(transition_dict['active_masks']), dtype=torch.float).to(self.device).view(-1, 1)
+        else:
+            active_masks = torch.ones_like(advantage)
+
+        # 实际 cat 动作
+        actions = transition_dict['actions']
+        if isinstance(actions, dict):
+            cat_actions = torch.as_tensor(np.array(actions['cat']), dtype=torch.long, device=self.device)
+        else:
+            cat_vals = [d['cat'] for d in actions]
+            cat_actions = torch.as_tensor(np.array(cat_vals), dtype=torch.long, device=self.device)
+
+        if cat_actions.dim() == 1:
+            cat_actions = cat_actions.unsqueeze(-1)
+
+        with torch.no_grad():
+            if getattr(teacher_actor, 'is_rule_teacher', False):
+                teacher_outputs = teacher_actor.predict_distributions(states)
+            else:
+                teacher_outputs = teacher_actor.net(states)
+
+            teacher_cat = teacher_outputs.get('cat')
+            if teacher_cat is None or len(teacher_cat) == 0:
+                return advantage
+
+            # 逐个 head 判断实际动作是否与 teacher 预测一致
+            match = active_masks.bool().squeeze(-1)
+            for h, teacher_probs in enumerate(teacher_cat):
+                teacher_act = teacher_probs.argmax(dim=-1)
+                match = match & (cat_actions[:, h] == teacher_act)
+
+            if match.any():
+                adv_std = advantage.std(unbiased=False)
+                advantage = advantage + match.float().view_as(advantage) * (adv_std * alpha_distill)
+
+        return advantage
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
@@ -1152,7 +1208,7 @@ class PPOHybrid:
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, 
-                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0): 
+                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0, alpha_distill=0, teacher_actor=None): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1256,7 +1312,12 @@ class PPOHybrid:
                 # Critic 使用全局 states 计算当前 Value
                 td_delta = td_target - self.critic(critic_inputs)
                 advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
+
                 
+        # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
+        if alpha_distill > 0 and teacher_actor is not None:
+            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor)
+        
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)

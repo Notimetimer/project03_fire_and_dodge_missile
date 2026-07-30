@@ -1057,8 +1057,8 @@ def run_MLP_simulation(
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     use_RND = 0, # 好奇心机制
     beta_RND = 0.3,
-    use_RDistill = 0, # 温和蒸馏机制
-    beta_distill = 0.04,
+    use_ADistill = 0, # 温和蒸馏机制
+    beta_ADistill = 0.1,
     no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
     distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
@@ -1110,6 +1110,11 @@ def run_MLP_simulation(
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
     rule_teacher_env = copy.deepcopy(dummy_env)
+    # 固定规则5作为 ADistill 的教师（直接修改优势度）
+    teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, rule_num=5,
+                                         action_dims_dict=action_dims_dict,
+                                         device=device,
+                                         label_smoothing=label_smoothing)
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -2054,7 +2059,7 @@ def run_MLP_simulation(
                 max_fire_logits = 4.0
 
                 # # 随机拜师法
-                # if use_RDistill and batch_idx > 50:
+                # if use_ADistill and batch_idx > 50:
                 #     # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
                 #     # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
                 #     candidate_items = [(k, v) for k, v in elo_ratings.items()
@@ -2086,7 +2091,7 @@ def run_MLP_simulation(
                 #                 teacher_wrapper.eval()
 
                 #         if teacher_wrapper is not None:
-                #             transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_distill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
+                #             transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_ADistill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
                 #             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
                 #         else:
                 #             RDistill_kl = None
@@ -2098,8 +2103,17 @@ def run_MLP_simulation(
                 # else:
                 #     rnd_mse = None
 
+                # ADistill alpha 退火：0.1 -> 0，在总步数达到 1/3 时降到 0
+                if use_ADistill:
+                    alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps / 3.0))
+                    logger.add("train_plus/alpha_distill", alpha_distill, total_steps)
+                else:
+                    alpha_distill = 0
+                    teacher_wrapper = None
+
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
-                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
+                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
+                                     alpha_distill=alpha_distill, teacher_actor=teacher_wrapper)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:
