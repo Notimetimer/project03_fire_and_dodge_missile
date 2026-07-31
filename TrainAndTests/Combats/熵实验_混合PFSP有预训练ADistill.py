@@ -145,6 +145,7 @@ if __name__=='__main__':
         adj_r_w=0, # 奖励函数权重可调
         use_ADistill=1, # 温和蒸馏
         beta_ADistill=0.1, # 0.003
+        AFiltered = 1, # 温和蒸馏是否需要优势滤波，仅加强teacher和student都统一的样本的优势度
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

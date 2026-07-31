@@ -1323,7 +1323,7 @@ class PPOHybrid:
                 
         # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
         if alpha_distill > 0 and teacher_actor is not None:
-            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor)
+            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered)
         
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
