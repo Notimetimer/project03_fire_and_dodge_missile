@@ -1098,12 +1098,13 @@ class PPOHybrid:
         dist_mean_raw = dist_mean.item()  # 归一化前的距离均值，用于监控
         return new_dict, dist_mean_raw
 
-    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None):
+    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0):
         """
         ADistill (Advantage Distillation):
         根据 teacher_actor 在 transition_dict['obs']（或 states）上的 cat 动作预测，
         对 active_mask=1 且实际 cat 动作与 teacher 一致的样本，在其优势度上加上
         advantage.std() * alpha_distill。
+        若 AFiltered=1，则只对那些优势度高于均值（advantage > mean(advantage)）的样本进行提升。
         返回修改后的 advantage，在优势归一化之前使用。
         """
         if alpha_distill <= 0 or teacher_actor is None:
@@ -1147,6 +1148,11 @@ class PPOHybrid:
             for h, teacher_probs in enumerate(teacher_cat):
                 teacher_act = teacher_probs.argmax(dim=-1)
                 match = match & (cat_actions[:, h] == teacher_act)
+
+            # AFiltered：只对那些优势度高于均值的样本进行蒸馏加成
+            if AFiltered:
+                adv_pos = (advantage > advantage.mean()).squeeze(-1)
+                match = match & adv_pos
 
             if match.any():
                 adv_std = advantage.std(unbiased=False)
@@ -1208,7 +1214,8 @@ class PPOHybrid:
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, 
-                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0, alpha_distill=0, teacher_actor=None): 
+                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0, alpha_distill=0, teacher_actor=None,
+                AFiltered=0): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
