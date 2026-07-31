@@ -745,6 +745,127 @@ class PPOHybrid:
         mse_raw = i_mean.item()  # 归一化前的原始 MSE 均值，用于监控
         return new_dict, mse_raw
 
+
+    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0):
+        """
+        ADistill (Advantage Distillation):
+        cat head：teacher 动作预测一致则权重 +1。
+        cont head：计算实际 cont 动作与 teacher cont 输出之间的欧氏距离 dist，
+                   按 dist/4 归一化到 [0,1]，权重 = 1 - dist_norm（越近越大，最大距离时 0）。
+        最终只对 active_mask=1 的样本加成：
+            advantage += weights * advantage.std() * alpha_distill
+        若 AFiltered=1，则额外只保留 advantage > mean(advantage) 的样本。
+        返回修改后的 advantage，在优势归一化之前使用。
+        """
+        if alpha_distill <= 0 or teacher_actor is None:
+            return advantage
+
+        # 输入状态（优先使用 obs，与 update 中 actor_inputs 保持一致）
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            states = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+        else:
+            states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+
+        # active mask
+        if 'active_masks' in transition_dict:
+            active_masks = torch.tensor(np.array(transition_dict['active_masks']), dtype=torch.float).to(self.device).view(-1, 1)
+        else:
+            active_masks = torch.ones_like(advantage)
+
+        # 实际 cat 动作
+        actions = transition_dict['actions']
+        N = advantage.size(0)
+        weights = torch.zeros(N, device=self.device, dtype=torch.float)
+        base_mask = active_masks.bool().squeeze(-1)
+
+        # ===================== cat head（原有逻辑） =====================
+        has_cat = False
+        cat_actions = None
+        if (isinstance(actions, dict) and 'cat' in actions and len(actions['cat']) > 0) or \
+           (isinstance(actions, (list, tuple)) and len(actions) > 0 and isinstance(actions[0], dict) and 'cat' in actions[0]):
+            if isinstance(actions, dict):
+                cat_actions = torch.as_tensor(np.array(actions['cat']), dtype=torch.long, device=self.device)
+            else:
+                cat_vals = [d['cat'] for d in actions]
+                cat_actions = torch.as_tensor(np.array(cat_vals), dtype=torch.long, device=self.device)
+
+            if cat_actions.dim() == 1:
+                cat_actions = cat_actions.unsqueeze(-1)
+            has_cat = True
+
+        if has_cat:
+            if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+                states = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+            else:
+                states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+
+            with torch.no_grad():
+                if getattr(teacher_actor, 'is_rule_teacher', False):
+                    teacher_outputs = teacher_actor.predict_distributions(states)
+                elif getattr(teacher_actor, 'is_pid_teacher', False):
+                    teacher_outputs = None
+                else:
+                    teacher_outputs = teacher_actor.net(states)
+
+                if teacher_outputs is not None:
+                    teacher_cat = teacher_outputs.get('cat')
+                    if teacher_cat is not None and len(teacher_cat) > 0:
+                        match = base_mask.clone()
+                        for h, teacher_probs in enumerate(teacher_cat):
+                            teacher_act = teacher_probs.argmax(dim=-1)
+                            match = match & (cat_actions[:, h] == teacher_act)
+                        weights = weights + match.float()
+
+        # ===================== cont head（PID / NN teacher） =====================
+        has_cont = False
+        cont_actions = None
+        if (isinstance(actions, dict) and 'cont' in actions and len(actions['cont']) > 0) or \
+           (isinstance(actions, (list, tuple)) and len(actions) > 0 and isinstance(actions[0], dict) and 'cont' in actions[0]):
+            if isinstance(actions, dict):
+                cont_actions = torch.as_tensor(np.array(actions['cont']), dtype=torch.float, device=self.device)
+            else:
+                cont_vals = [d['cont'] for d in actions]
+                cont_actions = torch.as_tensor(np.array(cont_vals), dtype=torch.float, device=self.device)
+            has_cont = True
+
+        if has_cont:
+            teacher_cont = None
+            with torch.no_grad():
+                if getattr(teacher_actor, 'is_pid_teacher', False):
+                    # PID wrapper 输入 raw obs，逐条调用 get_action
+                    states_np = np.array(transition_dict['states'])
+                    teacher_cont_list = []
+                    for obs in states_np:
+                        t_act = teacher_actor.get_action(obs)
+                        teacher_cont_list.append(np.asarray(t_act['cont'], dtype=np.float32))
+                    teacher_cont = torch.as_tensor(np.array(teacher_cont_list), dtype=torch.float, device=self.device)
+                elif getattr(teacher_actor, 'is_rule_teacher', False):
+                    teacher_cont = None
+                else:
+                    if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+                        states = torch.tensor(np.array(transition_dict['obs']), dtype=torch.float).to(self.device)
+                    else:
+                        states = torch.tensor(np.array(transition_dict['states']), dtype=torch.float).to(self.device)
+                    teacher_outputs = teacher_actor.net(states)
+                    teacher_cont = teacher_outputs.get('cont')
+
+                if teacher_cont is not None and teacher_cont.numel() > 0:
+                    dist = torch.norm(cont_actions - teacher_cont, dim=1)
+                    dist_norm = torch.clamp(dist / 4.0, 0.0, 1.0)
+                    cont_weight = 1.0 - dist_norm
+                    weights = weights + cont_weight
+
+        # AFiltered：只保留优势度高于均值的样本
+        if AFiltered:
+            adv_pos = (advantage > advantage.mean()).squeeze(-1)
+            weights = weights * adv_pos.float()
+
+        if weights.any():
+            adv_std = advantage.std(unbiased=False)
+            advantage = advantage + weights.view_as(advantage) * (adv_std * alpha_distill)
+
+        return advantage
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
@@ -791,7 +912,11 @@ class PPOHybrid:
     def update(self, transition_dict, adv_normed=False, 
                 clip_vf=False, clip_range=0.2, shuffled=1, 
                 mini_batch_size=None, alpha_logit_reg=0.05,
-                v_trace=None):
+                v_trace=None, target_p1=0.65, target_p1_b=0.8, 
+                k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0, alpha_distill=0, teacher_actor=None,
+                AFiltered=0): 
+                # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
+                # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
         # RL 更新阶段：确保所有分布参数都参与梯度更新
         if hasattr(self.actor.net, 'log_std_cont'):
@@ -893,7 +1018,12 @@ class PPOHybrid:
                 # Critic 使用全局 states 计算当前 Value
                 td_delta = td_target - self.critic(critic_inputs)
                 advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
+
                 
+        # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
+        if alpha_distill > 0 and teacher_actor is not None:
+            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered)
+        
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
             # Actor 使用 actor_inputs (可能是 obs)
