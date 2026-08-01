@@ -18,7 +18,8 @@ import matplotlib.pyplot as plt
 
 from _context import *
 
-from BasicRules_new_hierarchical import basic_rules
+# from BasicRules_new_hierarchical import basic_rules
+from BasicRules_new_hierarchical2 import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
@@ -46,7 +47,8 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "Mav_Goo纯Rule-run-20260626-120716"
+    dir_name = "Mav_Goo0.3-run-20260727-235915"
+    "Mav_Goo纯Rule-run-20260626-120716"
 
     "PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_反向SIL-run-20260612-234557"
     
@@ -139,7 +141,8 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3,4] # [0,1,2]
+    rule_opponents = [3,3,3] # [0,1,2,3,4] # [3]
+
     t_bias = 0
 
     try:
@@ -181,7 +184,7 @@ if __name__ == "__main__":
                         # maverick负责机动动作（cat）
                         r_mav_exec, _, _, _ = mav_actor.get_action(
                             r_obs, explore={'cont': 0, 'cat': 1, 'bern': 1}, check_obs=None,
-                            temperature={'cat': 0.3, 'bern': 1}
+                            temperature={'cat': 1, 'bern': 1}
                         )
                         # goose负责开火动作（bern）
                         r_goo_exec, _, _, r_goo_check = goo_actor.get_action(

@@ -1241,7 +1241,7 @@ def run_MLP_simulation(
             original_il_transition_dict, 
             beta=beta_mixed, 
             batch_size=il_batch_size, # 显存如果够大可以适当调大
-            label_smoothing=label_smoothing,
+            label_smoothing=0, # goose 不要随机
             action_heads_mask={'cont': False, 'cat': False, 'bern': True}, # goose只训练bern
         )
         
@@ -1316,7 +1316,8 @@ def run_MLP_simulation(
     # 强化学习 (Self-Play / PFSP) 阶段
     # ==============================================================================
     maverick.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
-    goose.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
+    # goose actor 学习率设为 maverick 的 1/5，抑制开火头过度调整
+    goose.set_learning_rate(actor_lr=actor_lr/5, critic_lr=critic_lr)
     # ----------------------------------------------------
     # 并行环境初始化 (Worker Setup)
     # ----------------------------------------------------
@@ -2003,11 +2004,14 @@ def run_MLP_simulation(
                 max_fire_logits = 4.0
 
                 # 重构action格式后分别更新两个agent
-                transition_dict_mav['actions'] = restructure_actions(transition_dict_mav['actions'])
-                transition_dict_goo['actions'] = restructure_actions(transition_dict_goo['actions'])
-                maverick.update(transition_dict_mav, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
+                # 注意：不要覆盖全局Buffer中的actions列表，以免影响后续extend聚合
+                update_dict_mav = dict(transition_dict_mav)
+                update_dict_goo = dict(transition_dict_goo)
+                update_dict_mav['actions'] = restructure_actions(transition_dict_mav['actions'])
+                update_dict_goo['actions'] = restructure_actions(transition_dict_goo['actions'])
+                maverick.update(update_dict_mav, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
                                 k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
-                goose.update(transition_dict_goo, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
+                goose.update(update_dict_goo, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
                              k_nonlinear=k_nonlinear, mask_on=0, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
 
                 # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
@@ -2049,7 +2053,7 @@ def run_MLP_simulation(
                 # 清空 Buffer（在保存之后）
                 transition_dict_mav = copy.deepcopy(empty_transition_dict)
                 # goose缺样本，减缓清空频率
-                if batch_idx % 5 == 0:
+                if batch_idx % 2 == 0: # 5
                     transition_dict_goo = copy.deepcopy(empty_transition_dict)
 
                 # B. 经典胜率精英池维护
