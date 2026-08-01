@@ -839,7 +839,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if isinstance(td[k], list):
                                 td[k] = td[k][:last_idx+1]
                     return td
-                
+                    
+                # 执行死后奖励压缩
                 local_trans = truncate_and_shift(local_trans)
                 ego_trans = truncate_and_shift(ego_trans)
                 enm_trans = truncate_and_shift(enm_trans)
@@ -2108,7 +2109,7 @@ def run_MLP_simulation(
 
                 # ADistill alpha 退火：0.1 -> 0，在总步数达到 1/3 时降到 0
                 if use_ADistill:
-                    alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps / 3.0))
+                    alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps / 4.0))
                     # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
                     k_entropy_cat_scale = 1.0 + 4.0 * (alpha_distill / beta_ADistill)
 
