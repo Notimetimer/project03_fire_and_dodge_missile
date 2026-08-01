@@ -30,6 +30,7 @@ class UnifiedPolicyWrapper:
         self.device = device if device is not None else torch.device("cpu")
         self.PIDController = F16PIDController()
         self.dt = dt_decide
+        self.is_pid_teacher = True
     
     def get_action(self, obs, weights=1, explore=None):
 

@@ -71,7 +71,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
             if cmd == 'EXIT':
                 break
             if cmd == 'RUN_EPISODE':
-                actor_weights, warm_up, shared_random_packet = packet
+                actor_weights, warm_up = packet
+                shared_random_packet = None
                 local_agent.actor.load_state_dict(actor_weights)
 
                 # 正弦叠加参数
@@ -122,7 +123,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
 
                 while not done:
                     # 目标会跑
-                    if shared_random_packet is None:
+                    if 1: # shared_random_packet is None:
                         height_req += np.random.randn() * 80 * dt_decide # 每秒动 80m
                         psi_req += np.random.randn() * 10 *pi/180 * dt_decide # 每秒动10°
                         v_req += np.random.randn() * 3 * dt_decide # 速度目标也在动
@@ -133,10 +134,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim, action_dims_dict, ac
                         env.height_req = np.clip(height_req + sin_h, 1000, 13000)
                         env.psi_req = sub_of_radian(psi_req + sin_psi)
                         env.v_req = np.clip(v_req + sin_v, 0.5 * 340, 1.3 * 340)
-                    else:
-                        env.height_req = height_req_seq[steps_run]
-                        env.psi_req = psi_req_seq[steps_run]
-                        env.v_req = v_req_seq[steps_run]
+                    # else:
+                        # env.height_req = height_req_seq[steps_run]
+                        # env.psi_req = psi_req_seq[steps_run]
+                        # env.v_req = v_req_seq[steps_run]
 
                     obs, obs_check = env.get_obs()
                     action, u, _, _ = local_agent.take_action(obs, explore=True)

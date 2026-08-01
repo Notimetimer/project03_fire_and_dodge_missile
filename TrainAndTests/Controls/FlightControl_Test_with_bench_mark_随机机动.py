@@ -40,7 +40,9 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
+mission_name = "超控标准差"
+
+"FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
@@ -77,7 +79,9 @@ time_limit = 5 * 60  # 每组测试限时 5 分钟
 
 realistic = 1
 
-
+Cmd_smoothed = 0 # 指令是否被平滑
+ema_beta = 0.6  # 平滑系数（越大越保留旧值）
+change_cmd_interval = 30 # 每4s改变一次指令  # 30
 
 test_name1 = "mild_wave"
 test_name2 = ""
@@ -114,7 +118,7 @@ env.realistic = realistic
 pidcontroller = UnifiedPolicyWrapper(env, dt_decide=dt_decide) # 
 
 # 随机游走参数
-psi_step_max = 90 * (pi / 180)  # 航向角每步最大变化 5度
+psi_step_max = 90 * (pi / 180)  # 航向角每步最大变化 180
 height_step_max = 4000          # 高度每步最大变化 50m
 
 total_cases = len(height_list) * len(speed_list)
@@ -192,7 +196,7 @@ for init_h in height_list:
             current_t = env.t
             
             # 航向角随机游走
-            if current_t % 30 ==0:
+            if current_t % change_cmd_interval == 0:
                 psi_delta = np.random.uniform(-psi_step_max, psi_step_max)
                 env.psi_req += psi_delta
                 env.psi_req = sub_of_radian(env.psi_req, 0)
@@ -205,6 +209,27 @@ for init_h in height_list:
             # 根据高度差计算俯仰角指令
             theta_req = (env.height_req - env.RUAV.alt) / 5000 * pi/2
             env.theta_req = theta_req
+
+            # 指令 EMA 平滑
+            if Cmd_smoothed:
+                if not hasattr(env, 'ema_height_req') or env.t < 1e-6:
+                    env.ema_height_req = env.height_req
+                    env.ema_psi_req = env.psi_req
+                    env.ema_v_req = env.v_req
+                env.ema_height_req = ema_beta * env.ema_height_req + (1 - ema_beta) * env.height_req
+                # psi 指令：15度内或符号变化时直出，避免相位滞后
+                heading_dead = np.deg2rad(15.0)
+                if abs(env.psi_req - env.ema_psi_req) < heading_dead or np.sign(env.psi_req) != np.sign(env.ema_psi_req):
+                    env.ema_psi_req = env.psi_req
+                else:
+                    env.ema_psi_req = ema_beta * env.ema_psi_req + (1 - ema_beta) * env.psi_req
+                # env.ema_v_req = ema_beta * env.ema_v_req + (1 - ema_beta) * env.v_req
+                env.height_req = env.ema_height_req
+                env.psi_req = env.ema_psi_req
+                env.v_req = env.ema_v_req
+                # 用平滑后的高度重新计算俯仰角指令
+                theta_req = (env.height_req - env.RUAV.alt) / 5000 * pi/2
+                env.theta_req = theta_req
 
             # 俯仰指令保护(防撞地超高)
             min_theta_req = np.arcsin(np.clip(6*9.8*(env.min_alt_safe-env.RUAV.alt)/(2124/3.6)**2, -0.999, 0.999))
