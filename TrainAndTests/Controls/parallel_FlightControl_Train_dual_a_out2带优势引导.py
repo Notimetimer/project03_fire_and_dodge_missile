@@ -187,6 +187,7 @@ hidden_dim = [128, 128] # [128, 128]
 action_dim = 4 # test
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 # action_bound = np.array([[-1,1]]*action_dim)  # 动作幅度限制, 必须使用双方括号，否则不能将不同维度分离
+# action_bound = np.array([[-1,1],[-1,1],[-1,1],[0,1]])
 action_bound = np.array([[-1.1,1.1],[-1.1,1.1],[-1.1,1.1],[-0.2,1.2]])  # aileron, elevator, rudder, throttle
 mission_name = '加优势度偏移'
 

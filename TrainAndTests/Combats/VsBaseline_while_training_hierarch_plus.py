@@ -30,7 +30,8 @@ def test_worker(model_state_dict, rule_num,
                 env_args, state_dim, hidden_dim,
                 action_dims_dict, dt_maneuver_val,
                 device_name='cpu', num_runs=1, action_cycle_multiplier=10,
-                no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0, Temperature=None):
+                no_out=0, deterministic=False, restrict_fire=False, vertices=None, auto_regressive=0, Temperature=None,
+                red_init_ammo=6, blue_init_ammo=6):
     seed = 42
     random.seed(seed)
     np.random.seed(seed)
@@ -67,7 +68,7 @@ def test_worker(model_state_dict, rule_num,
     BVR_perish_togethers = 0
 
     for _ in range(num_runs):
-        test_env.reset(red_init_ammo=6, blue_init_ammo=6, pomdp=1) # 0
+        test_env.reset(red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=1) # 0
         
         steps = 0
         done = False

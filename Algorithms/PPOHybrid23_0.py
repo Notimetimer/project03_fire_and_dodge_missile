@@ -1098,7 +1098,7 @@ class PPOHybrid:
         dist_mean_raw = dist_mean.item()  # 归一化前的距离均值，用于监控
         return new_dict, dist_mean_raw
 
-    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0):
+    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0, conf_thres=0.7):
         """
         ADistill (Advantage Distillation):
         根据 teacher_actor 在 transition_dict['obs']（或 states）上的 cat 动作预测，
@@ -1106,6 +1106,8 @@ class PPOHybrid:
         advantage.std() * alpha_distill。
         若 AFiltered=1，则只对那些优势度高于均值（advantage > mean(advantage)）的样本进行提升。
         返回修改后的 advantage，在优势归一化之前使用。
+        conf_thres 是一道用于防止过度诱导的锁，当student执行和teacher相同动作的概率超过conf_thres的时候，就不再能改动advantage去引导了
+        如果要全程引导，把conf_thres设置为>=1
         """
         if alpha_distill <= 0 or teacher_actor is None:
             return advantage
@@ -1139,15 +1141,24 @@ class PPOHybrid:
             else:
                 teacher_outputs = teacher_actor.net(states)
 
+            # 同时调用 student actor，获取其在当前 obs 下的 cat 动作分布
+            student_outputs = self.actor.net(states)
+
             teacher_cat = teacher_outputs.get('cat')
-            if teacher_cat is None or len(teacher_cat) == 0:
+            student_cat = student_outputs.get('cat')
+            if teacher_cat is None or len(teacher_cat) == 0 or \
+               student_cat is None or len(student_cat) == 0:
                 return advantage
 
-            # 逐个 head 判断实际动作是否与 teacher 预测一致
+            # 逐个 head 判断实际动作是否与 teacher 预测一致，并且 student 对
+            # 该相同动作的概率不超过 conf_thres（超过则不进行蒸馏加成）
             match = active_masks.bool().squeeze(-1)
             for h, teacher_probs in enumerate(teacher_cat):
                 teacher_act = teacher_probs.argmax(dim=-1)
-                match = match & (cat_actions[:, h] == teacher_act)
+                student_probs = student_cat[h]
+                student_act = cat_actions[:, h]
+                p_student = student_probs.gather(-1, student_act.unsqueeze(-1)).squeeze(-1)
+                match = match & (student_act == teacher_act) & (p_student <= conf_thres)
 
             # AFiltered：只对那些优势度高于均值的样本进行蒸馏加成
             if AFiltered:
@@ -1215,7 +1226,7 @@ class PPOHybrid:
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, 
                 k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0, alpha_distill=0, teacher_actor=None,
-                AFiltered=0): 
+                AFiltered=0, conf_thres=0.7): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1323,7 +1334,7 @@ class PPOHybrid:
                 
         # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
         if alpha_distill > 0 and teacher_actor is not None:
-            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered)
+            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres)
         
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():

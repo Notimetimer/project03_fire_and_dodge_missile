@@ -54,6 +54,10 @@ from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
 
+# 测试对战初始弹药（可调）
+test_red_init_ammo = 6
+test_blue_init_ammo = 6
+
 
 class RuleTeacherWrapper:
     """
@@ -1061,6 +1065,7 @@ def run_MLP_simulation(
     use_ADistill = 0, # 温和蒸馏机制
     beta_ADistill = 0.1,
     AFiltered = 0, # 温和蒸馏是否需要优势滤波
+    conf_thres = 0.7,
     no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
     distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
@@ -1534,6 +1539,8 @@ def run_MLP_simulation(
                             'deterministic': False,
                             'restrict_fire': True, # False, 和采样保持一致
                             'vertices': vertices,
+                            'red_init_ammo': test_red_init_ammo,
+                            'blue_init_ammo': test_blue_init_ammo,
                         }
                     )
                     test_tasks.append(obj)
@@ -1558,6 +1565,8 @@ def run_MLP_simulation(
                             'deterministic': True,     # 机动动作确定化
                             'restrict_fire': True,      # 动作次序限制打开
                             'vertices': vertices,
+                            'red_init_ammo': test_red_init_ammo,
+                            'blue_init_ammo': test_blue_init_ammo,
                         }
                     )
                     test_tasks_no_random.append(obj)
@@ -2129,7 +2138,7 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
                                      alpha_distill=alpha_distill, teacher_actor=teacher_wrapper,
-                                     AFiltered=AFiltered)
+                                     AFiltered=AFiltered, conf_thres=conf_thres)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:
