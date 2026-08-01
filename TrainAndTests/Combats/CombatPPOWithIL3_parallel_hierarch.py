@@ -1066,6 +1066,8 @@ def run_MLP_simulation(
     beta_ADistill = 0.1,
     AFiltered = 0, # 温和蒸馏是否需要优势滤波
     conf_thres = 0.7,
+    bern_included = 1, # 开火也一起上
+    adistill_anneal_factor = 0.5, # ADistill alpha 退火速度系数
     no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
     distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
@@ -2118,7 +2120,7 @@ def run_MLP_simulation(
 
                 # ADistill alpha 退火：0.1 -> 0，在总步数达到 1/3 时降到 0
                 if use_ADistill:
-                    alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps / 4.0))
+                    alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps * adistill_anneal_factor))
                     # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
                     k_entropy_cat_scale = 1.0 + 4.0 * (alpha_distill / beta_ADistill)
 
@@ -2138,7 +2140,7 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
                                      alpha_distill=alpha_distill, teacher_actor=teacher_wrapper,
-                                     AFiltered=AFiltered, conf_thres=conf_thres)
+                                     AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:

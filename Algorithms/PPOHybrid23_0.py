@@ -1098,7 +1098,7 @@ class PPOHybrid:
         dist_mean_raw = dist_mean.item()  # 归一化前的距离均值，用于监控
         return new_dict, dist_mean_raw
 
-    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0, conf_thres=0.7):
+    def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0, conf_thres=0.7, bern_included=0):
         """
         ADistill (Advantage Distillation):
         根据 teacher_actor 在 transition_dict['obs']（或 states）上的 cat 动作预测，
@@ -1108,6 +1108,7 @@ class PPOHybrid:
         返回修改后的 advantage，在优势归一化之前使用。
         conf_thres 是一道用于防止过度诱导的锁，当student执行和teacher相同动作的概率超过conf_thres的时候，就不再能改动advantage去引导了
         如果要全程引导，把conf_thres设置为>=1
+        bern_included 是否还要顺带学开火
         """
         if alpha_distill <= 0 or teacher_actor is None:
             return advantage
@@ -1126,14 +1127,22 @@ class PPOHybrid:
 
         # 实际 cat 动作
         actions = transition_dict['actions']
+        bern_actions = None
         if isinstance(actions, dict):
             cat_actions = torch.as_tensor(np.array(actions['cat']), dtype=torch.long, device=self.device)
+            if 'bern' in actions and len(actions['bern']) > 0:
+                bern_actions = torch.as_tensor(np.array(actions['bern']), dtype=torch.float, device=self.device)
         else:
             cat_vals = [d['cat'] for d in actions]
             cat_actions = torch.as_tensor(np.array(cat_vals), dtype=torch.long, device=self.device)
+            if len(actions) > 0 and isinstance(actions[0], dict) and 'bern' in actions[0] and len(actions[0]['bern']) > 0:
+                bern_vals = [d['bern'] for d in actions]
+                bern_actions = torch.as_tensor(np.array(bern_vals), dtype=torch.float, device=self.device)
 
         if cat_actions.dim() == 1:
             cat_actions = cat_actions.unsqueeze(-1)
+        if bern_actions is not None and bern_actions.dim() == 1:
+            bern_actions = bern_actions.unsqueeze(-1)
 
         with torch.no_grad():
             if getattr(teacher_actor, 'is_rule_teacher', False):
@@ -1150,15 +1159,25 @@ class PPOHybrid:
                student_cat is None or len(student_cat) == 0:
                 return advantage
 
-            # 逐个 head 判断实际动作是否与 teacher 预测一致，并且 student 对
-            # 该相同动作的概率不超过 conf_thres（超过则不进行蒸馏加成）
+            # 逐个 head 判断实际动作是否与 teacher 预测一致，并把各 head 上
+            # student 对该动作的概率相乘，得到联合概率。只有当所有 head 动作都
+            # 一致且联合概率不超过 conf_thres 时，才进行蒸馏加成。
             match = active_masks.bool().squeeze(-1)
+            joint_p = torch.ones(advantage.size(0), device=self.device, dtype=torch.float)
             for h, teacher_probs in enumerate(teacher_cat):
                 teacher_act = teacher_probs.argmax(dim=-1)
                 student_probs = student_cat[h]
                 student_act = cat_actions[:, h]
                 p_student = student_probs.gather(-1, student_act.unsqueeze(-1)).squeeze(-1)
-                match = match & (student_act == teacher_act) & (p_student <= conf_thres)
+                match = match & (student_act == teacher_act)
+                joint_p = joint_p * p_student
+            match = match & (joint_p <= conf_thres)
+
+            # 若 bern_included=1，同时匹配 bern 头动作（不应用 conf_thres）
+            if bern_included and bern_actions is not None and teacher_outputs.get('bern') is not None:
+                teacher_bern_probs = torch.sigmoid(teacher_outputs['bern'])
+                teacher_bern_act = (teacher_bern_probs > 0.2).float() # 开火贪婪判决阈值 必须小于0.5
+                match = match & (bern_actions == teacher_bern_act).all(dim=-1)
 
             # AFiltered：只对那些优势度高于均值的样本进行蒸馏加成
             if AFiltered:
@@ -1226,7 +1245,7 @@ class PPOHybrid:
                 mini_batch_size=None, alpha_logit_reg=0.05,
                 v_trace=None, target_p1=0.65, target_p1_b=0.8, 
                 k_nonlinear=0.89, mask_on=0, actor_frozen=0, bern_max_logits=4.0, alpha_distill=0, teacher_actor=None,
-                AFiltered=0, conf_thres=0.7): 
+                AFiltered=0, conf_thres=0.7, bern_included=0): 
                 # [新增] target_p1 默认“一超”概率，剩下来的留给“多强”)
                 # [修改] 增加 target_p1_b 参数，对应开火控制的“笃定程度”
 
@@ -1334,7 +1353,7 @@ class PPOHybrid:
                 
         # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
         if alpha_distill > 0 and teacher_actor is not None:
-            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres)
+            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
         
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():

@@ -7,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"Adistill_0.3-run-20260730-174142")
+    r"Adistill_0.3-run-20260801-211552")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -144,8 +144,11 @@ if __name__=='__main__':
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
         use_ADistill=1, # 温和蒸馏
-        beta_ADistill=0.1, # 0.003
+        beta_ADistill=0.2, # 0.003
         AFiltered = 1, # 温和蒸馏是否需要优势滤波，仅加强teacher和student都统一的样本的优势度
+        conf_thres = 0.7, # 温和蒸馏不应该把概率压得太死
+        bern_included = 1, # 开火也一起
+        adistill_anneal_factor = 0.3, # ADistill alpha 维持步数比例
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
