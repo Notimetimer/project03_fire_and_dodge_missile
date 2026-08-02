@@ -58,9 +58,6 @@ dt_move = 0.04
 test_red_init_ammo = 6
 test_blue_init_ammo = 6
 
-# 周期性测试所对抗的规则对手编号
-TEST_RULE_IDS = [0, 1, 2, 3, 4, 5, 6]
-
 
 class RuleTeacherWrapper:
     """
@@ -1071,8 +1068,6 @@ def run_MLP_simulation(
     conf_thres = 0.7,
     bern_included = 1, # 开火也一起上
     adistill_anneal_factor = 0.5, # ADistill alpha 退火速度系数
-    adistill_teacher_rule = 6, # ADistill 初始固定 teacher 的规则编号
-    adistill_teacher_elo_steps = 1e6, # 总步数超过该值后，改用 Elo 最高的 Rule 作为 teacher
     no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
     distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
@@ -1124,10 +1119,8 @@ def run_MLP_simulation(
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
     rule_teacher_env = copy.deepcopy(dummy_env)
-    # 初始固定规则作为 ADistill 的教师（直接修改优势度）
-    # 总步数超过 adistill_teacher_elo_steps 后，会在训练循环中切换为 Elo 最高的 Rule
-    teacher_rule_num_cur = adistill_teacher_rule
-    teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, rule_num=teacher_rule_num_cur,
+    # 固定规则5作为 ADistill 的教师（直接修改优势度）
+    teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, rule_num=5,
                                          action_dims_dict=action_dims_dict,
                                          device=device,
                                          label_smoothing=label_smoothing)
@@ -1527,7 +1520,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in TEST_RULE_IDS:
+                for r_idx in [0, 1, 2, 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1556,7 +1549,7 @@ def run_MLP_simulation(
                 
                 # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
                 test_tasks_no_random = []
-                for r_idx in TEST_RULE_IDS:
+                for r_idx in [0, 1, 2, 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         kwds={
@@ -2127,24 +2120,6 @@ def run_MLP_simulation(
 
                 # ADistill alpha 退火：0.1 -> 0，在总步数达到 1/3 时降到 0
                 if use_ADistill:
-                    # 总步数达到阈值后，改用 Elo 最高的 Rule 作为 teacher
-                    if total_steps >= adistill_teacher_elo_steps:
-                        rule_elo_items = [(k, v) for k, v in elo_ratings.items() if k.startswith("Rule_")]
-                        if rule_elo_items:
-                            best_rule_key = max(rule_elo_items, key=lambda x: x[1])[0]
-                            try:
-                                best_rule_num = int(best_rule_key.split('_')[1])
-                            except (IndexError, ValueError):
-                                best_rule_num = teacher_rule_num_cur
-                            if best_rule_num != teacher_rule_num_cur:
-                                teacher_rule_num_cur = best_rule_num
-                                teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, rule_num=teacher_rule_num_cur,
-                                                                     action_dims_dict=action_dims_dict,
-                                                                     device=device,
-                                                                     label_smoothing=label_smoothing)
-                                print(f"[ADistill] teacher 切换为 Elo 最高规则 {best_rule_key} (Elo={elo_ratings[best_rule_key]:.0f})")
-                    logger.add("train_plus/adistill_teacher_rule", teacher_rule_num_cur, total_steps)
-
                     alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps * adistill_anneal_factor))
                     # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
                     k_entropy_cat_scale = 1.0 + 4.0 * (alpha_distill / beta_ADistill)
@@ -2159,8 +2134,6 @@ def run_MLP_simulation(
                     alpha_distill = 0
                     teacher_wrapper = None
                     k_entropy_cat_scale = 1.0
-
-                alpha_distill = max(alpha_distill, 0.05) # 不松开
 
                 student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
 

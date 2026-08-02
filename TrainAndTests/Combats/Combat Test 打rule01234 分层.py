@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 
 from _context import *
 
-# from BasicRules_new_hierarchical import basic_rules
-from BasicRules_new_hierarchical2 import basic_rules
+from BasicRules_new_hierarchical import basic_rules
+# from BasicRules_new_hierarchical2 import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "Adistill_NoIL-run-20260801-115350"
+    dir_name = "Adistill_0.3-run-20260801-211552"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
