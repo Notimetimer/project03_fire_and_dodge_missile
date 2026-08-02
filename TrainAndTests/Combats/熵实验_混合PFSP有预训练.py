@@ -6,14 +6,14 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"结果奖励污染实验SLWSPFSP0.3-run-20260729-090719")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"结果奖励污染实验SLWSPFSP0.3-run-20260729-090719")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = '结果奖励污染实验SLWSPFSP0.3'
+mission_name = 'SLWSPFSP0.3'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -121,7 +121,8 @@ if __name__=='__main__':
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_5': 1200,
+            'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈

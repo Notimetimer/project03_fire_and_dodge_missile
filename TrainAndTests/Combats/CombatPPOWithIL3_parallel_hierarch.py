@@ -2152,15 +2152,17 @@ def run_MLP_simulation(
                     # 若 cat 熵已过高，临时取消额外熵奖励，压回基准值
                     if getattr(student_agent, 'entropy_cat', 0.0) > 2.5:
                         k_entropy_cat_scale = 1.0
-                        
+                    
+
+                    alpha_distill = max(alpha_distill, 0.05) # 不松开
+
+
                     logger.add("train_plus/alpha_distill", alpha_distill, total_steps)
                     logger.add("train_plus/k_entropy_cat_scale", k_entropy_cat_scale, total_steps)
                 else:
                     alpha_distill = 0
                     teacher_wrapper = None
                     k_entropy_cat_scale = 1.0
-
-                alpha_distill = max(alpha_distill, 0.05) # 不松开
 
                 student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
 
