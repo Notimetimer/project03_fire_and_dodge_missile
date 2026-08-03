@@ -13,7 +13,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'PFSP_0.15'
+mission_name = 'SLWSPFSP_0.15'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -121,7 +121,8 @@ if __name__=='__main__':
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_5': 1200,
+            'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,
