@@ -78,25 +78,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             1, # 4 θ
         ])
 
-        # --- 1. 参数初始化与状态获取 ---
-        # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
-        reward_weights = {
-            'missile_guidance': 0.04,
-            'target_locked': 0.06,
-            'locked_by_target': 0.05,
-            'missile_warning': 0.06,
-            'enemy_gets_warning': 0.05,
-            'alt_limit_penalty': 1.0,
-            'border_penalty_scale': 0.2,
-            'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
-            'angle_advantage': 0.01, # 0.007, # 0.03
-            'height_advantage': 0.01,
-            'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
-            'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
-            'to_center_reward' : 0.005, # 0.02 占领中心点的价值
-            'speed_penalty': 0.01, # 慢速惩罚
-        }
-
         ego_win=0
         ego_lose=0
         ego_draw=0

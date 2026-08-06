@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "Adistill_0.3-run-20260801-211552"
+    dir_name = "SLWSPFSP0.3-run-20260804-221605"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
@@ -182,8 +182,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=None, bern_threshold=0.072,
-                            temperature={'cat':1.0, 'bern':0.97}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
+                            temperature={'cat':0.3, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]

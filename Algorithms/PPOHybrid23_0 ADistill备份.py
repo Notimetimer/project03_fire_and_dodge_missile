@@ -290,11 +290,11 @@ class PolicyNetHybrid(torch.nn.Module):
                 xb = xb.unsqueeze(0)
 
             # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
-            cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
-            delta_theta = xb[:, 8]
+            # cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
+            # delta_theta = xb[:, 8]
             ata = xb[:, 10]
             # alt = xb[:, 15] * 5e3
-            sin_theta = xb[:, 17]
+            # sin_theta = xb[:, 17]
             # locked = xb[:, 2]
             ammo = xb[:, 20]
             dist = xb[:, 9] * 10e3
@@ -309,15 +309,6 @@ class PolicyNetHybrid(torch.nn.Module):
             ata_cond = ata < math.pi / 2
             # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
             can_fire = ammo_cond & time_const_cond & ata_cond
-
-            # 禁止大离轴发射导弹                        
-            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(25))
-            can_fire = can_fire & delta_psi_cond
-            # 禁止俯冲发射导弹
-            theta = torch.arcsin(sin_theta)
-            azimuth = theta + delta_theta
-            theta_cond = theta >= azimuth - np.radians(15)
-            can_fire = can_fire & theta_cond
             
             # if not can_fire:
             #     print("禁止开火")
@@ -1110,15 +1101,14 @@ class PPOHybrid:
     def ADistill(self, transition_dict, advantage, alpha_distill, teacher_actor=None, AFiltered=0, conf_thres=0.7, bern_included=0):
         """
         ADistill (Advantage Distillation):
-        [当前版本] 不再引导 cat 机动动作，仅对 bern 开火动作做规则共识引导。
-        只在学生**实际执行了开火**（bern=1）的样本上调节 advantage；不开火的样本完全不管。
-        若所有 teacher_actor（规则教师列表）在 bern 头上达成共识：
-          - 全认为该开火 → 给 advantage 加正偏移 (+ adv_std * alpha_distill)
-          - 全认为不该开火 → 给 advantage 加负偏移 (- adv_std * alpha_distill)
-          - 意见不一致 → 不修改
-        teacher_actor 支持单教师或教师列表；列表时取所有教师 bern 决策的一致交集。
-        AFiltered=1 时双向过滤：正偏移只在 advantage 高于均值时生效，负偏移只在 advantage 低于均值时生效。
-        conf_thres / bern_included 原用于 cat/bern 联合引导，现已不再生效，保留参数仅作接口兼容。
+        根据 teacher_actor 在 transition_dict['obs']（或 states）上的 cat 动作预测，
+        对 active_mask=1 且实际 cat 动作与 teacher 一致的样本，在其优势度上加上
+        advantage.std() * alpha_distill。
+        若 AFiltered=1，则只对那些优势度高于均值（advantage > mean(advantage)）的样本进行提升。
+        返回修改后的 advantage，在优势归一化之前使用。
+        conf_thres 是一道用于防止过度诱导的锁，当student执行和teacher相同动作的概率超过conf_thres的时候，就不再能改动advantage去引导了
+        如果要全程引导，把conf_thres设置为>=1
+        bern_included 是否还要顺带学开火
         """
         if alpha_distill <= 0 or teacher_actor is None:
             return advantage
@@ -1135,272 +1125,70 @@ class PPOHybrid:
         else:
             active_masks = torch.ones_like(advantage)
 
-        # 实际 bern 动作
+        # 实际 cat 动作
         actions = transition_dict['actions']
         bern_actions = None
         if isinstance(actions, dict):
+            cat_actions = torch.as_tensor(np.array(actions['cat']), dtype=torch.long, device=self.device)
             if 'bern' in actions and len(actions['bern']) > 0:
                 bern_actions = torch.as_tensor(np.array(actions['bern']), dtype=torch.float, device=self.device)
         else:
+            cat_vals = [d['cat'] for d in actions]
+            cat_actions = torch.as_tensor(np.array(cat_vals), dtype=torch.long, device=self.device)
             if len(actions) > 0 and isinstance(actions[0], dict) and 'bern' in actions[0] and len(actions[0]['bern']) > 0:
                 bern_vals = [d['bern'] for d in actions]
                 bern_actions = torch.as_tensor(np.array(bern_vals), dtype=torch.float, device=self.device)
 
-        if bern_actions is None:
-            return advantage
-        if bern_actions.dim() == 1:
+        if cat_actions.dim() == 1:
+            cat_actions = cat_actions.unsqueeze(-1)
+        if bern_actions is not None and bern_actions.dim() == 1:
             bern_actions = bern_actions.unsqueeze(-1)
 
         with torch.no_grad():
-            # ---- 规则教师在 bern 头上的共识聚合 ----
-            def _get_teacher_outputs(t):
-                if getattr(t, 'is_rule_teacher', False):
-                    return t.predict_distributions(states)
-                else:
-                    return t.net(states)
-
-            # 统一为列表处理
-            if isinstance(teacher_actor, (list, tuple)):
-                teacher_list = list(teacher_actor)
+            if getattr(teacher_actor, 'is_rule_teacher', False):
+                teacher_outputs = teacher_actor.predict_distributions(states)
             else:
-                teacher_list = [teacher_actor]
+                teacher_outputs = teacher_actor.net(states)
 
-            if len(teacher_list) == 0:
+            # 同时调用 student actor，获取其在当前 obs 下的 cat 动作分布
+            student_outputs = self.actor.net(states)
+
+            teacher_cat = teacher_outputs.get('cat')
+            student_cat = student_outputs.get('cat')
+            if teacher_cat is None or len(teacher_cat) == 0 or \
+               student_cat is None or len(student_cat) == 0:
                 return advantage
 
-            # 收集每个教师的 bern 决策：logit > 0 视为开火（与 RuleTeacherWrapper 的 ±3.0 对应）
-            teacher_bern_decisions = []
-            for t in teacher_list:
-                t_out = _get_teacher_outputs(t)
-                t_bern_logits = t_out.get('bern')
-                if t_bern_logits is None:
-                    return advantage
-                teacher_bern_decisions.append(t_bern_logits > 0.0)
-            # 形状 (num_teachers, B, bern_dim)，bool
-            teacher_bern_decisions = torch.stack(teacher_bern_decisions, dim=0)
+            # 逐个 head 判断实际动作是否与 teacher 预测一致，并把各 head 上
+            # student 对该动作的概率相乘，得到联合概率。只有当所有 head 动作都
+            # 一致且联合概率不超过 conf_thres 时，才进行蒸馏加成。
+            match = active_masks.bool().squeeze(-1)
+            joint_p = torch.ones(advantage.size(0), device=self.device, dtype=torch.float)
+            for h, teacher_probs in enumerate(teacher_cat):
+                teacher_act = teacher_probs.argmax(dim=-1)
+                student_probs = student_cat[h]
+                student_act = cat_actions[:, h]
+                p_student = student_probs.gather(-1, student_act.unsqueeze(-1)).squeeze(-1)
+                match = match & (student_act == teacher_act)
+                joint_p = joint_p * p_student
+            match = match & (joint_p <= conf_thres)
 
-            # 所有教师一致认为开火 / 一致认为不开火
-            all_fire = teacher_bern_decisions.all(dim=0)       # (B, bern_dim)
-            all_no_fire = (~teacher_bern_decisions).all(dim=0)
-            has_consensus = all_fire | all_no_fire              # 存在共识的样本
+            # 若 bern_included=1，同时匹配 bern 头动作（不应用 conf_thres）
+            if bern_included and bern_actions is not None and teacher_outputs.get('bern') is not None:
+                teacher_bern_probs = torch.sigmoid(teacher_outputs['bern'])
+                teacher_bern_act = (teacher_bern_probs > 0.2).float() # 开火贪婪判决阈值 必须小于0.5
+                match = match & (bern_actions == teacher_bern_act).all(dim=-1)
 
-            # 只在学生实际执行了开火（bern=1）的样本上做偏移；不开火的样本完全不管
-            student_fired = (bern_actions[:, 0] == 1.0)
-
-            # 匹配条件：active=1 且 学生实际开火 且 教师有共识
-            match = active_masks.bool().squeeze(-1) & student_fired & has_consensus[:, 0]
-
-            # 符号：全教师认为该开火 → 正偏移（鼓励学生继续开火）
-            #       全教师认为不该开火 → 负偏移（惩罚不该开火时开火）
-            sign = torch.zeros(advantage.size(0), device=self.device, dtype=torch.float)
-            sign[match & all_fire[:, 0]] = 1.0
-            sign[match & all_no_fire[:, 0]] = -1.0
-
-            # AFiltered 分方向过滤：
-            # - 教师一致认为该开火（正偏移）：只在 advantage 高于均值时强化
-            # - 教师一致认为不该开火（负偏移）：只在 advantage 低于均值时压制
+            # AFiltered：只对那些优势度高于均值的样本进行蒸馏加成
             if AFiltered:
-                adv_mean = advantage.mean()
-                adv_high = (advantage > adv_mean).squeeze(-1)
-                adv_low = (advantage < adv_mean).squeeze(-1)
-                valid = ((sign == 1.0) & adv_high) | ((sign == -1.0) & adv_low)
-                sign = sign * valid.float()
+                adv_pos = (advantage > advantage.mean()).squeeze(-1)
+                match = match & adv_pos
 
-            if sign.abs().sum() > 0:
+            if match.any():
                 adv_std = advantage.std(unbiased=False)
-                advantage = advantage + sign.view_as(advantage) * (adv_std * alpha_distill)
+                advantage = advantage + match.float().view_as(advantage) * (adv_std * alpha_distill)
 
         return advantage
-
-    # =========================================================================
-    #  BernDistill: 直接对 bern 头做有监督蒸馏（规则教师共识驱动）
-    # =========================================================================
-    def BernDistill(self, transition_dict, teacher_actor=None,
-                    shuffled=1, mini_batch_size=None, epochs=1, alpha=1.0,
-                    grad_clip_ratio=0.5):
-        """
-        对 bern（开火）头做直接有监督蒸馏，梯度只流过 bern 头参数，
-        不影响 backbone / cat 头 / cont 头，彻底隔离对机动策略的干扰。
-
-        教师共识逻辑与 ADistill 一致：
-        - teacher_actor 支持单教师或列表；
-        - 只在所有教师对 bern 达成一致（全开火 or 全不开火）的样本上施加监督；
-        - 只在学生实际执行了开火（bern=1）的样本上施加监督；
-        - 教师意见不一致 / 学生未开火 的样本不参与 loss。
-
-        监督目标（微摄动）：
-        - 不使用 0/1 硬标签，而是在学生当前开火概率基础上微调：
-        - 教师共识=开火 → target = clamp(student_p + 0.01, 0, 1)
-        - 教师共识=不开火 → target = clamp(student_p - 0.01, 0, 1)
-        - 每次蒸馏只提供微小的概率推力，避免对策略造成大的突变。
-
-        梯度安全：
-        - backbone (self.actor.net.net) 和非 bern 头全部 detach（不回传梯度）
-        - 双道锁：clip_grad_value_ + 自适应 clip_grad_norm_（锚定 PPO actor_grad）
-        """
-        if teacher_actor is None or alpha == 0.0 or epochs == 0:
-            return
-
-        # 辅助函数
-        def to_tensor(x, dtype):
-            if isinstance(x, np.ndarray):
-                return torch.tensor(x, dtype=dtype).to(self.device)
-            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
-
-        # 1. 准备输入
-        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
-            states = to_tensor(transition_dict['obs'], torch.float)
-        else:
-            states = to_tensor(transition_dict['states'], torch.float)
-
-        # active mask
-        if 'active_masks' in transition_dict:
-            active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1)
-        else:
-            active_masks = torch.ones(states.size(0), device=self.device)
-
-        # 实际 bern 动作
-        actions = transition_dict['actions']
-        bern_actions = None
-        if isinstance(actions, dict):
-            if 'bern' in actions and len(actions['bern']) > 0:
-                bern_actions = to_tensor(actions['bern'], torch.float)
-        else:
-            if len(actions) > 0 and isinstance(actions[0], dict) and 'bern' in actions[0] and len(actions[0]['bern']) > 0:
-                bern_vals = [d['bern'] for d in actions]
-                bern_actions = to_tensor(np.array(bern_vals), torch.float)
-
-        if bern_actions is None:
-            return
-        if bern_actions.dim() == 1:
-            bern_actions = bern_actions.unsqueeze(-1)
-
-        num_samples = states.size(0)
-        mb = mini_batch_size if mini_batch_size is not None else num_samples
-
-        # 2. 教师共识判定（全量，一次性算好）
-        with torch.no_grad():
-            def _get_teacher_outputs(t):
-                if getattr(t, 'is_rule_teacher', False):
-                    return t.predict_distributions(states)
-                else:
-                    return t.net(states)
-
-            if isinstance(teacher_actor, (list, tuple)):
-                teacher_list = list(teacher_actor)
-            else:
-                teacher_list = [teacher_actor]
-
-            if len(teacher_list) == 0:
-                return
-
-            teacher_bern_decisions = []
-            for t in teacher_list:
-                t_out = _get_teacher_outputs(t)
-                t_bern_logits = t_out.get('bern')
-                if t_bern_logits is None:
-                    return
-                teacher_bern_decisions.append(t_bern_logits > 0.0)
-            teacher_bern_decisions = torch.stack(teacher_bern_decisions, dim=0)  # (K, B, 1)
-
-            all_fire = teacher_bern_decisions.all(dim=0)[:, 0]        # (B,)
-            all_no_fire = (~teacher_bern_decisions).all(dim=0)[:, 0]   # (B,)
-            has_consensus = all_fire | all_no_fire
-
-            student_fired = (bern_actions[:, 0] == 1.0)
-
-            # 有效样本：active=1 & 学生开了火 & 教师有共识
-            valid_mask = active_masks.bool() & student_fired & has_consensus
-
-            # 构造摄动方向：
-            # [注释掉] 教师共识=开火 → 提高开火概率（避免引导过度开火）
-            # 教师共识=不开火 → 压低开火概率，目标设为当前概率的 0.8 倍
-            nudge_dir = torch.zeros(num_samples, device=self.device)
-            # nudge_dir[all_fire] = 1.0
-            nudge_dir[all_no_fire] = -1.0
-
-            # [关键] 在循环开始前一次性算好固定的 target_p，后续 epoch 不再变动
-            with torch.no_grad():
-                baseline_features = self.actor.net.net(states)
-                baseline_logits = self.actor.net.fc_bern(baseline_features)[:, 0]  # (B,)
-                baseline_p = torch.sigmoid(baseline_logits)
-
-                # 仅当教师一致认为不该开火时，才压低目标概率
-                target_p = baseline_p.clone()
-                target_p[all_no_fire] = baseline_p[all_no_fire] * 0.8
-
-        # 若无有效样本，跳过
-        if not valid_mask.any():
-            return
-
-        # 3. 提取只有 bern 头的参数（隔离 backbone / cat / cont）
-        bern_params = list(self.actor.net.fc_bern.parameters())
-        if len(bern_params) == 0:
-            return
-
-        # 4. 蒸馏训练循环
-        distil_loss_list = []
-        distil_grad_list = []
-        indices = np.arange(num_samples)
-
-        for _ in range(int(epochs)):
-            if shuffled:
-                np.random.shuffle(indices)
-
-            for start in range(0, num_samples, mb):
-                end = min(start + mb, num_samples)
-                batch_idx = indices[start:end]
-
-                mb_states = states[batch_idx]
-                mb_valid = valid_mask[batch_idx]
-                mb_target = target_p[batch_idx]
-
-                if not mb_valid.any():
-                    continue
-
-                # 前向：backbone 不回传梯度，只让 bern 头出梯度
-                with torch.no_grad():
-                    shared_features = self.actor.net.net(mb_states)
-                # bern 头正常前向（有梯度）
-                bern_logits = self.actor.net.fc_bern(shared_features)  # (mb, 1)
-
-                # 只在有效样本上计算 BCE loss（target 是提前固定好的）
-                logits_valid = bern_logits[:, 0][mb_valid]
-                target_valid = mb_target[mb_valid]
-
-                loss = F.binary_cross_entropy_with_logits(logits_valid, target_valid, reduction='mean')
-                final_loss = alpha * loss
-
-                # 只对 bern_params 做反向传播和更新
-                self.actor_optimizer.zero_grad()
-                final_loss.backward()
-
-                # 安全起见：清零非 bern 参数的梯度（防止 optimizer 对它们做动量更新）
-                for p in self.actor.parameters():
-                    if not any(p is bp for bp in bern_params):
-                        if p.grad is not None:
-                            p.grad.zero_()
-
-                # 双道梯度锁
-                nn.utils.clip_grad_value_(bern_params, clip_value=0.5)
-                adaptive_l2_limit = max(self.actor_grad, 1e-4) * grad_clip_ratio
-                nn.utils.clip_grad_norm_(bern_params, max_norm=adaptive_l2_limit)
-
-                self.actor_optimizer.step()
-
-                distil_loss_list.append(final_loss.item())
-                distil_grad_list.append(
-                    sum(p.grad.norm().item() for p in bern_params if p.grad is not None) / max(len(bern_params), 1)
-                )
-
-        # 5. 记录指标
-        if len(distil_loss_list) > 0:
-            self.bern_distil_loss = np.mean(distil_loss_list)
-            self.bern_distil_grad = np.mean(distil_grad_list)
-            check_weights_bias_nan(self.actor, "actor", "BernDistill后")
-        else:
-            self.bern_distil_loss = 0.0
-            self.bern_distil_grad = 0.0
 
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:

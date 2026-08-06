@@ -1124,17 +1124,13 @@ def run_MLP_simulation(
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
     rule_teacher_env = copy.deepcopy(dummy_env)
-    # ADistill 用：Rule_0 ~ Rule_6 共识集合（每个规则独立包装，列表传入 ADistill）
-    adistill_rule_wrappers = [
-        RuleTeacherWrapper(rule_teacher_env, rule_num=r,
-                           action_dims_dict=action_dims_dict,
-                           device=device,
-                           label_smoothing=label_smoothing)
-        for r in TEST_RULE_IDS
-    ]
-    # 保留单个 teacher_wrapper 仅用于日志 / 兼容其它旧逻辑
+    # 初始固定规则作为 ADistill 的教师（直接修改优势度）
+    # 总步数超过 adistill_teacher_elo_steps 后，会在训练循环中切换为 Elo 最高的 Rule
     teacher_rule_num_cur = adistill_teacher_rule
-    teacher_wrapper = adistill_rule_wrappers[TEST_RULE_IDS.index(teacher_rule_num_cur)]
+    teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, rule_num=teacher_rule_num_cur,
+                                         action_dims_dict=action_dims_dict,
+                                         device=device,
+                                         label_smoothing=label_smoothing)
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -2158,7 +2154,7 @@ def run_MLP_simulation(
                         k_entropy_cat_scale = 1.0
                     
 
-                    alpha_distill = max(alpha_distill, 0.05) # 不松开
+                    alpha_distill = max(alpha_distill, 0.001) # 不松开
 
 
                     logger.add("train_plus/alpha_distill", alpha_distill, total_steps)
@@ -2170,9 +2166,9 @@ def run_MLP_simulation(
 
                 student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
 
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
-                                     alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
+                                     alpha_distill=alpha_distill, teacher_actor=teacher_wrapper,
                                      AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
