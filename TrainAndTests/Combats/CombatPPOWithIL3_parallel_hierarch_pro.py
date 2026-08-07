@@ -1530,7 +1530,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in [0, 1, 2, 3, 4]:
+                for r_idx in [0, 1, 2, 3, 4, 5, 6]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1557,7 +1557,7 @@ def run_MLP_simulation(
                 
                 # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
                 test_tasks_no_random = []
-                for r_idx in [0, 1, 2, 3, 4]:
+                for r_idx in [0, 1, 2, 3, 4, 5, 6]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         kwds={

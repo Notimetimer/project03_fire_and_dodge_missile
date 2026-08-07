@@ -1,5 +1,6 @@
 '''
 论文名称：
+深度强化学习驱动的超视距空战自主决策方法
 An Autonomous Decision-making Method for Beyond Visual Range Air Combat Driven by Deep Reinforcement Learning
 2026
 '''

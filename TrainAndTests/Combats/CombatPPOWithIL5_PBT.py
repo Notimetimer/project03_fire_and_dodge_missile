@@ -719,7 +719,7 @@ def run_MLP_simulation(
             current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
             
             # 2. 异步启动 3 个对战
-            for r_idx in [0, 1, 2, 3, 4]:
+            for r_idx in [0, 1, 2, 3, 4, 5, 6]:
                 res_obj = test_pool.apply_async(
                     test_worker, 
                     args=(current_weights, r_idx, args, state_dim, hidden_dim, action_dims_dict, dt_maneuver, 'cpu') # [修改] 显式传入 dt_maneuver
