@@ -203,17 +203,15 @@ def restructure_actions(actions_data):
         if cat_arr.ndim == 1:
             cat_arr = cat_arr.reshape(-1, 1)
         
-        # 2. 'bern': 伯努利动作，转为 float32 (BCE Loss需要)，Reshape 为 (N, 1)
-        bern_arr = np.array(new_actions['bern'], dtype=np.float32)
-        if bern_arr.ndim == 1:
-            bern_arr = bern_arr.reshape(-1, 1)
-
-        result = {
-            'cat': cat_arr,
-            'bern': bern_arr
-        }
+        result = {'cat': cat_arr}
+        if len(new_actions['bern']) > 0:
+            bern_arr = np.array(new_actions['bern'], dtype=np.float32)
+            if bern_arr.ndim == 1:
+                bern_arr = bern_arr.reshape(-1, 1)
+            result['bern'] = bern_arr
         
-        print(f"Structure fixed: 'cat' shape={cat_arr.shape}, 'bern' shape={bern_arr.shape}")
+        bern_shape_str = f"{result['bern'].shape}" if 'bern' in result else "None"
+        print(f"Structure fixed: 'cat' shape={cat_arr.shape}, 'bern' shape={bern_shape_str}")
         return result
 
     return actions_data

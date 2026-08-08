@@ -611,7 +611,7 @@ class HybridActorWrapper(nn.Module):
             entropy_details['cat'] = e_cat_sum # [修改] 保持 Tensor 用于 Loss 计算
 
         # --- Bern ---
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and 'bern' in actions_raw:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and 'bern' in actions_raw and actions_raw['bern'] is not None and actions_raw['bern'].numel() > 0:
             bern_logits = actor_outputs['bern']
             # Replace -inf logits (from masking) with a large negative finite value for numerical stability during training
             bern_logits = bern_logits.clamp(min=-1e8)
@@ -1511,6 +1511,8 @@ class PPOHybrid:
         # Buffer 传来的 actions 已经是 dict of arrays
         if isinstance(actions_from_buffer, dict):
             for key, val in actions_from_buffer.items():
+                if val is None or (isinstance(val, (np.ndarray, torch.Tensor, list)) and len(val) == 0):
+                    continue
                 if key == 'cat':
                     actions_on_device[key] = to_tensor(val, torch.long)
                 else:
@@ -1520,7 +1522,9 @@ class PPOHybrid:
             # 旧逻辑：List of Dicts (较慢)
             all_keys = actions_from_buffer[0].keys()
             for key in all_keys:
-                vals = [d[key] for d in actions_from_buffer]
+                vals = [d[key] for d in actions_from_buffer if key in d]
+                if len(vals) == 0:
+                    continue
                 if key == 'cat':
                     actions_on_device[key] = torch.tensor(np.array(vals), dtype=torch.long).to(self.device)
                 else:

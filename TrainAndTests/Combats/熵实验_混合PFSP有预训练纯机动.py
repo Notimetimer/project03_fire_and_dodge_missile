@@ -12,7 +12,7 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'SLWSPFSP0.3'
+mission_name = 'SLWSPFSP0.3开火外包'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
