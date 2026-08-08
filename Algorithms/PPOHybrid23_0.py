@@ -611,7 +611,7 @@ class HybridActorWrapper(nn.Module):
             entropy_details['cat'] = e_cat_sum # [修改] 保持 Tensor 用于 Loss 计算
 
         # --- Bern ---
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and 'bern' in actions_raw:
             bern_logits = actor_outputs['bern']
             # Replace -inf logits (from masking) with a large negative finite value for numerical stability during training
             bern_logits = bern_logits.clamp(min=-1e8)
@@ -724,7 +724,7 @@ class HybridActorWrapper(nn.Module):
 
         # --- 3. 伯努利动作 (Bernoulli) ---
         # -- Focal Loss --
-        if action_heads_mask.get('bern', False) and 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+        if action_heads_mask.get('bern', False) and 'bern' in self.action_dims and self.action_dims['bern'] > 0 and 'bern' in expert_actions:
             bern_logits = actor_outputs['bern']
             # Clamp masked -inf logits to a large negative finite value for stable sigmoid/log calculations
             bern_logits = bern_logits.clamp(min=-1e8)
@@ -819,7 +819,7 @@ class HybridActorWrapper(nn.Module):
             metrics['accuracy_cat'] = (correct_cat_sum / total_cat_dims).mean().item()
 
         # --- Bern ---
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and actor_outputs.get('bern') is not None:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and actor_outputs.get('bern') is not None and 'bern' in expert_actions:
             bern_logits = actor_outputs['bern'].clamp(min=-1e8)
             dist = Bernoulli(logits=bern_logits)
             target = expert_actions['bern']
