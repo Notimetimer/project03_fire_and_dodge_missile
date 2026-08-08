@@ -94,9 +94,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     if rules_num == 0:
         # 规则0: 纯进攻
         action_number = [1, 0] # base_offensive_action
-        if ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180 and distance < max_launch_dist:
-            if t_fired >= 10 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
-                fire_missile = True
+        # if (distance < 95e3) and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+        #     if t_fired >= 10 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
+        #         fire_missile = True
         fire_missile_affirmative = fire_missile
 
     elif rules_num == 1:
