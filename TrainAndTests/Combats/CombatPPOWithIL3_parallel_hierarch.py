@@ -60,6 +60,8 @@ test_blue_init_ammo = 6
 
 # 周期性测试所对抗的规则对手编号
 TEST_RULE_IDS = [0, 1, 2, 3, 4, 5, 6]
+# 蒸馏/引导用的教师规则列表（排除 Rule 0，避免其在上一枚导弹中制导时仍开火的激进行为）
+TEACHER_RULE_IDS = [1, 2, 3, 4, 5, 6]
 
 
 class RuleTeacherWrapper:
@@ -1071,6 +1073,9 @@ def run_MLP_simulation(
     conf_thres = 0.7,
     bern_included = 1, # 开火也一起上
     adistill_anneal_factor = 0.5, # ADistill alpha 退火速度系数
+    Bdistill = 0, # 是否启用Bdistill
+    Bdistill_alpha = 1.0, # BernDistill alpha
+    Bdistill_epochs = 3, # BernDistill epochs
     adistill_teacher_rule = 6, # ADistill 初始固定 teacher 的规则编号
     adistill_teacher_elo_steps = 1e6, # 总步数超过该值后，改用 Elo 最高的 Rule 作为 teacher
     no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
@@ -1124,17 +1129,17 @@ def run_MLP_simulation(
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
     # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
     rule_teacher_env = copy.deepcopy(dummy_env)
-    # ADistill 用：Rule_0 ~ Rule_6 共识集合（每个规则独立包装，列表传入 ADistill）
+    # ADistill/BernDistill 用：Rule_1 ~ Rule_6 共识集合（排除 Rule 0）
     adistill_rule_wrappers = [
         RuleTeacherWrapper(rule_teacher_env, rule_num=r,
                            action_dims_dict=action_dims_dict,
                            device=device,
                            label_smoothing=label_smoothing)
-        for r in TEST_RULE_IDS
+        for r in TEACHER_RULE_IDS
     ]
     # 保留单个 teacher_wrapper 仅用于日志 / 兼容其它旧逻辑
     teacher_rule_num_cur = adistill_teacher_rule
-    teacher_wrapper = adistill_rule_wrappers[TEST_RULE_IDS.index(teacher_rule_num_cur)]
+    teacher_wrapper = adistill_rule_wrappers[TEACHER_RULE_IDS.index(teacher_rule_num_cur)]
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -2174,6 +2179,17 @@ def run_MLP_simulation(
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
                                      alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
                                      AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
+
+                # BernDistill：在 PPO 更新后单独对 bern 头做规则教师共识驱动的有监督蒸馏
+                if Bdistill:
+                    student_agent.BernDistill(transition_dict,
+                                              teacher_actor=adistill_rule_wrappers,
+                                              shuffled=1,
+                                              mini_batch_size=mini_batch_size_mixed,
+                                              epochs=Bdistill_epochs,
+                                              alpha=Bdistill_alpha)
+                    logger.add("train_plus/bern_distil_loss", student_agent.bern_distil_loss, total_steps)
+                    logger.add("train_plus/bern_distil_grad", student_agent.bern_distil_grad, total_steps)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:
