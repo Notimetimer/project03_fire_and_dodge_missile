@@ -65,13 +65,9 @@ class track_env():
         self.max_alt = 15e3
 
         # Realistic flight limits
-        self.min_alpha_air = -10 # -5
-        self.max_alpha_air = 26 # 23
-        self.min_alpha_air_safe = -4
-        self.max_alpha_air_safe = 20
+        self.min_alpha_air = -5 # -8
+        self.max_alpha_air = 23 # 26
         self.max_beta_air = 15
-        self.min_ny_safe = 0
-        self.max_ny_safe = 5
         self.min_ny = -3
         self.max_ny = 9
 
@@ -339,9 +335,6 @@ class track_env():
         self.action = action
         # action['cont'] 由 PID 输出，顺序为 [aileron, elevator, rudder, throttle]
         aileron, elevator, rudder, throttle = action['cont']
-        if self.RUAV.mach > 0.8:
-            elevator = elevator * 0.9
-
         self.t += self.dt_report
         self.t = round(self.t, 2) # 保留两位小数
         time_rate = int(round(self.dt_report/self.dt_move))
@@ -447,7 +440,7 @@ class track_env():
         self.get_done()
 
         # 存活奖励
-        reward_alive = 0 # 0.01 + 0.5 # 10
+        reward_alive = 0.01 + 0.5 # 10
 
         # 失败惩罚
         reward_end = 0
@@ -467,11 +460,9 @@ class track_env():
         # 安全高度奖励
         # 使用圆周运动近似预测是否处于不安全状态
         if self.RUAV.vu < 0:
-            N_pull_up = max(0, (speed**2 * (1-cos(theta_v)) / (9.8 * (alt-self.min_alt))))
+            N_pull_up = (speed**2 * (1-cos(theta_v)) / (9.8 * (alt-self.min_alt)))
             r_alt -= N_pull_up / (self.max_ny-1) # 随着改平需要的过载量越大，惩罚就越大
-        if self.RUAV.vu > 0:
-            N_pull_down = max(0, (speed**2 * (1-cos(theta_v)) / (9.8 * (self.max_alt-alt))))
-            r_alt -= N_pull_down / (self.max_ny-1)
+
 
         # # 高度限制奖励/惩罚，临时更改，在不安全高度往里没有奖励，往外跑有惩罚
         # r_alt += 2*((alt <= self.min_alt_safe) * np.clip(self.RUAV.vu / 100, -1, 0) + \
@@ -480,14 +471,16 @@ class track_env():
         # 航向误差惩罚
         r_angle = 0  # 1 # DEBUG
         psi_dot = sub_of_radian(self.RUAV.psi_v, self.RUAV.last_psi_v)/self.dt_report  # 使用航迹角而非航向角，减少噪声
-        vice_psi_dot = np.clip(psi_dot, -5*pi/180, 5*pi/180)
-        r_angle += 2 * np.sign(delta_psi_v) * vice_psi_dot  # 转弯角速度的奖励 10 *
-        r_angle += - 0.5 * abs(vice_psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
+        
+        r_angle += 10 * np.sign(delta_psi_v) * psi_dot  # 转弯角速度的奖励
+        r_angle += - 0.5 * abs(psi_dot) * (1-abs(delta_psi_v)/pi)  # 遏制超调
         r_angle += - 5 * abs(delta_psi)/pi  # 航向误差绝对值的惩罚还是要存在
 
 
-        # 俯仰误差惩罚
+        # 俯仰角惩罚
         desired_theta = height2req/5000*pi/2  # 去除 pi/3 约束
+                        # (height2req>=0)*height2req/5000*pi/3 + \
+                        # (height2req<0)*height2req/5000*pi/2
         r_angle += - 5 * abs(theta - desired_theta) # 应和desired_theta保持一致  3小了
 
         # 和奖励无关，方便画图
@@ -507,32 +500,31 @@ class track_env():
         if abs(theta)*180/pi <= 70:
             # 需要右拐的时候 左倾带来惩罚，需要左拐的时候右倾带来惩罚
             sin_phi = np.sin(phi)  # (abs(sub_of_radian(phi,-pi/2))-abs(sub_of_radian(phi, pi/2)))/2
-            # 2 *
-            r_angle += 0.01 * ((delta_psi > 0) * min(sin_phi, 0) +\
-                        (delta_psi < 0) * -max(sin_phi, 0))
+
+            r_angle += 2 * ((delta_psi > 0) * min(sin_phi, 0)/pi +\
+                        (delta_psi < 0) * -max(sin_phi, 0)/pi)
 
 
         # 滚转角速度惩罚
-        r_angle += -0.1 * (p/pi)**2
-        # if abs(psi2req) < 15 * pi/180 \
-        #     or abs(theta)*180/pi > 75:  # 大俯仰机动应该降低滚转角速度
-        #     # 原有写法
-        #     # r_angle += -0.2 * abs(p)/pi  # 0.4 偏强？ 0.1偏弱？
-        #     # 平方项修改
-        #     r_angle += -0.1 * (p/pi)**2
-        # else:
-        #     # 原有写法
-        #     # r_angle += -0.05 * abs(p)/pi # 0.01 可能有些弱？
-        #     # 平方项修改
-        #     r_angle += -0.05 * (p/pi)**2
+        if abs(psi2req) < 15 * pi/180 \
+            or abs(theta)*180/pi > 75:  # 大俯仰机动应该降低滚转角速度
+            # 原有写法
+            # r_angle += -0.2 * abs(p)/pi  # 0.4 偏强？ 0.1偏弱？
+            # 平方项修改
+            r_angle += -0.1 * (p/pi)**2
+        else:
+            # 原有写法
+            # r_angle += -0.05 * abs(p)/pi # 0.01 可能有些弱？
+            # 平方项修改
+            r_angle += -0.05 * (p/pi)**2
         
         # 平方项修改
         r_angle -= (0.1 * (r/pi)**2) # 加r的惩罚
 
         # 速度奖励: 使用纵向加速度 Nx 作为引导因子，加速收敛
         # 当速度偏低(speed2req > 0)时，正的纵向过载 Nx 会产生正向奖励
-        r_speed = np.clip(self.RUAV.Nx/2 * np.sign(speed2req), -1, 1)  # 0.5 小了
-        
+        r_speed = self.RUAV.Nx * np.sign(speed2req) * 2  # 0.5 小了
+        # r_speed += -0.002 * min(abs(speed2req), 30) # 速度误差绝对值惩罚还是别给了，免得淹没其他微小的奖励信号
 
         # 迎角过载惩罚(惩罚负迎角和过大的正迎角)
         reward_alpha = 0.0 # 0.5
@@ -540,19 +532,19 @@ class track_env():
         #     reward_alpha -= (alpha_air-15) * 5/(26-15) # 10 可能有些大，没有把大迎角的全部优势拿出来
         # if alpha_air < -2:
         #     reward_alpha -= ((-2) - alpha_air) * 15/((-2) - (-5))
-        if alpha_air > self.max_alpha_air_safe/2:
-            reward_alpha -= 5 * ((alpha_air)/self.max_alpha_air_safe)**2
-        if alpha_air < self.min_alpha_air_safe/2:
-            reward_alpha -= 5 * ((alpha_air)/self.min_alpha_air_safe)**2
+        if alpha_air > self.max_alpha_air/2:
+            reward_alpha -= 5 * ((alpha_air)/self.max_alpha_air)**2
+        if alpha_air < self.min_alpha_air/2:
+            reward_alpha -= 5 * ((alpha_air)/self.min_alpha_air)**2
         ny = self.RUAV.Ny
         # if ny<=-1:
         #     reward_alpha -= 3 + ((-1)-ny)*6 *2
         # if ny >= 7:
         #     reward_alpha -= 3 + (ny-7)*3 *2
-        if ny > self.max_ny_safe:
-            reward_alpha -= 12 * abs((ny/self.max_ny)) # 10
-        if ny < self.min_ny_safe:
-            reward_alpha -= 15 * abs((ny/self.min_ny)) # 10
+        if ny > self.max_ny/2:
+            reward_alpha -= 10 * abs((ny/self.max_ny)) # 10
+        if ny < 0:
+            reward_alpha -= 10 * abs((ny/self.min_ny)) # 10
         
         # 侧滑角惩罚（尽量少侧滑）
         # 原有写法
@@ -564,6 +556,7 @@ class track_env():
         reward = np.sum([
             1 * reward_alive,
             1 * reward_end,
+            
             1 * r_angle,
             1 * r_alt,
             1 * r_speed,

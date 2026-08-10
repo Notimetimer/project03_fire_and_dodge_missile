@@ -40,9 +40,9 @@ actor = HybridActorWrapper(policy_net, action_dims_dict, action_bounds=action_bo
 
 # 模型加载逻辑
 pre_log_dir = os.path.join(project_root, "logs/control")
-mission_name = "超控标准差"
+mission_name = "加优势度偏移"
 
-"超控标准差"
+"加优势度偏移"
 "FlightControl_parallel目标会动_高度可超调_有过载限制_动态lr"
 # 可选其它控制器
 "PID"
@@ -73,8 +73,8 @@ if mission_name != "PID":
 height_list = [5000]
 speed_list = [300]
 dt_decide = 0.02
-dt_move = 0.01
-time_limit = 5 * 60  # 每组测试限时 5 分钟
+dt_move = 0.02
+time_limit = 3 * 60  # 每组测试限时 5 分钟
 
 # 是否跟踪动目标（会导致超调量记录失效）
 
@@ -166,11 +166,46 @@ i=0
 for init_h in height_list:
     for target_v in speed_list:
         i+=1
-        print(f"\n>>> 正在测试: 初始高度 {init_h}m, 目标速度 {target_v}m/s (t_bias: {t_bias:.1f}s)")
-        
-        # 固定初始化
-        birth_state = {'position': np.array([0.0, init_h, 0.0]), 'psi': 3*pi/180}
-        env.reset(birth_state=birth_state, height_req=init_h, psi_req=0, v_req=target_v, dt_report=dt_decide)
+        # 正弦叠加参数（与训练期间一致）
+        sin_period = 3 * 60        # 正弦周期 3 分钟 (s)
+        sin_amp_height = 2000      # 高度正弦幅度 (m)
+        sin_amp_psi = pi / 2       # 航向正弦幅度 (rad)
+        sin_amp_v = 80             # 速度正弦幅度 (m/s)
+
+        # 随机初始化（与训练期间一致）
+        init_height = np.random.uniform(4000, 10000)
+        init_psi = np.random.uniform(-pi/6, pi/6)
+        birth_state = {'position': np.array([0.0, init_height, 0.0]),
+                       'psi': init_psi}
+
+        height_req0 = np.clip(init_height + np.random.uniform(-1, 1) * 5000, 1000, 15000)
+        psi_req0 = np.random.uniform(-pi, pi)
+        v_req0 = np.random.uniform(0.5, 1.3) * 340
+
+        max_decisions = int(np.ceil(time_limit / dt_decide)) + 10
+
+        height_noise = np.random.randn(max_decisions) * 80 * dt_decide
+        psi_noise = np.random.randn(max_decisions) * 10 * pi/180 * dt_decide
+        v_noise = np.random.randn(max_decisions) * 3 * dt_decide
+
+        # 随机游走基线
+        height_base = height_req0 + np.cumsum(height_noise)
+        psi_base = psi_req0 + np.cumsum(psi_noise)
+        v_base = v_req0 + np.cumsum(v_noise)
+
+        # 叠加正弦信号
+        t_arr = np.arange(max_decisions) * dt_decide
+        phase_h = np.random.uniform(0, 2 * pi)
+        phase_psi = np.random.uniform(0, 2 * pi)
+        phase_v = np.random.uniform(0, 2 * pi)
+
+        height_req_seq = np.clip(height_base + sin_amp_height * np.sin(2 * pi / sin_period * t_arr + phase_h), 1000, 13000)
+        psi_req_seq = sub_of_radian(psi_base + sin_amp_psi * np.sin(2 * pi / sin_period * t_arr + phase_psi))
+        v_req_seq = np.clip(v_base + sin_amp_v * np.sin(2 * pi / sin_period * t_arr + phase_v), 0.5 * 340, 1.3 * 340)
+
+        print(f"\n>>> 正在测试: 初始高度 {init_height:.0f}m, 目标速度 {v_req0:.0f}m/s (t_bias: {t_bias:.1f}s)")
+
+        env.reset(birth_state=birth_state, height_req=height_req0, psi_req=psi_req0, v_req=v_req0, dt_report=dt_decide)
         
         obs, obs_check = env.get_obs()
         done = False
@@ -193,49 +228,11 @@ for init_h in height_list:
         steps_in_episode = 0
 
         while not done:
-            # 更新动态目标 (随机游走)
-            current_t = env.t
-            
-            # 航向角随机游走
-            if current_t % change_cmd_interval == 0:
-                psi_delta = np.random.uniform(-psi_step_max, psi_step_max)
-                env.psi_req += psi_delta
-                env.psi_req = sub_of_radian(env.psi_req, 0)
-                
-                # 高度随机游走
-                height_delta = np.random.uniform(-height_step_max, height_step_max)
-                env.height_req += height_delta
-                env.height_req = np.clip(env.height_req, 3000, 13000)
-            
-            # 根据高度差计算俯仰角指令
-            theta_req = (env.height_req - env.RUAV.alt) / 5000 * pi/2
-            env.theta_req = theta_req
+            # 与训练期间相同的机动指令序列
+            env.height_req = height_req_seq[steps_in_episode]
+            env.psi_req = psi_req_seq[steps_in_episode]
+            env.v_req = v_req_seq[steps_in_episode]
 
-            # 指令 EMA 平滑
-            if Cmd_smoothed:
-                if not hasattr(env, 'ema_height_req') or env.t < 1e-6:
-                    env.ema_height_req = env.height_req
-                    env.ema_psi_req = env.psi_req
-                    env.ema_v_req = env.v_req
-                env.ema_height_req = ema_beta * env.ema_height_req + (1 - ema_beta) * env.height_req
-                # psi 指令：15度内或符号变化时直出，避免相位滞后
-                heading_dead = np.deg2rad(15.0)
-                if abs(env.psi_req - env.ema_psi_req) < heading_dead or np.sign(env.psi_req) != np.sign(env.ema_psi_req):
-                    env.ema_psi_req = env.psi_req
-                else:
-                    env.ema_psi_req = ema_beta * env.ema_psi_req + (1 - ema_beta) * env.psi_req
-                # env.ema_v_req = ema_beta * env.ema_v_req + (1 - ema_beta) * env.v_req
-                env.height_req = env.ema_height_req
-                env.psi_req = env.ema_psi_req
-                env.v_req = env.ema_v_req
-                # 用平滑后的高度重新计算俯仰角指令
-                theta_req = (env.height_req - env.RUAV.alt) / 5000 * pi/2
-                env.theta_req = theta_req
-
-            # 俯仰指令保护(防撞地超高)
-            min_theta_req = np.arcsin(np.clip(6*9.8*(env.min_alt_safe-env.RUAV.alt)/(2124/3.6)**2, -0.999, 0.999))
-            max_theta_req = np.arcsin(np.clip(6*9.8*(env.max_alt_safe-env.RUAV.alt)/(2124/3.6)**2, -0.999, 0.999))
-            env.theta_req = np.clip(theta_req, min_theta_req, max_theta_req)
             # 决策
             obs, obs_check = env.get_obs()
             if mission_name != "PID":

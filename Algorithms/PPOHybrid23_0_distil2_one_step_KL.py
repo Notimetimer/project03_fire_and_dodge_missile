@@ -1518,11 +1518,11 @@ class PPOHybrid:
                 s_action_expected = torch.tanh(s_mu)
                 
                 # 原有MSE损失
-                # cont_loss = F.mse_loss(s_action_expected, t_mu, reduction='mean')
+                cont_loss = F.mse_loss(s_action_expected, t_mu, reduction='mean')
 
-                # 计算 Huber Loss (Smooth L1) 以提高对离散/异常样本的鲁棒性
-                # beta=0.2 意味着当误差大于 0.2 时，梯度不再随误差平方增长，而是线性增长
-                cont_loss = F.smooth_l1_loss(s_action_expected, t_mu, reduction='mean', beta=0.2)
+                # # 计算 Huber Loss (Smooth L1) 以提高对离散/异常样本的鲁棒性
+                # # beta=0.2 意味着当误差大于 0.2 时，梯度不再随误差平方增长，而是线性增长
+                # cont_loss = F.smooth_l1_loss(s_action_expected, t_mu, reduction='mean', beta=0.2)
                 
                 # 乘上蒸馏强度系数 (Alpha)
                 final_loss = alpha * cont_loss

@@ -204,7 +204,7 @@ if __name__=='__main__':
     dt_move = 0.02
     k_entropy={'cont':0.5, 'cat':0.0, 'bern':0.0} # 0.01
 
-    interval_of_Bradley_Tarry_update = 2
+    interval_of_Bradley_Tarry_update = 0 # 2 # 设置为0或者负数则不启用统一指令
 
     # --- EMA 统计参数设定 ---
     # 学术设定：将 10s 设为 95% 权重的历史长度 (Cumulative Weight = 0.95)
@@ -287,7 +287,8 @@ if __name__=='__main__':
             # 2. 生成统一随机信号
             # batch_idx 被 interval_of_Bradley_Tarry_update 整除时，所有 worker 用同样的初始位置和指令信号（用于 Bradley-Terry 比较）
             # 否则各 worker 各自独立采样
-            if batch_idx % interval_of_Bradley_Tarry_update != 0:
+            if interval_of_Bradley_Tarry_update <= 0 or \
+                batch_idx % interval_of_Bradley_Tarry_update != 0:
                 shared_random_packet = None
             else:
                 max_decisions = int(np.ceil(args.max_episode_len / dt_decide)) + 10
