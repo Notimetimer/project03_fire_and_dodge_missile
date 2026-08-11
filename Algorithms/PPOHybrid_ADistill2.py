@@ -1188,6 +1188,196 @@ class PPOHybrid:
 
         return {"cat": cat_score, "bern": bern_score}
 
+    # =========================================================================
+    #  BernDistill: 直接对 bern 头做有监督蒸馏（规则教师共识驱动）
+    # =========================================================================
+    def BernDistill(self, transition_dict, teacher_actor=None,
+                    shuffled=1, mini_batch_size=None, epochs=1, alpha=1.0,
+                    grad_clip_ratio=0.5):
+        """
+        对 bern（开火）头做直接有监督蒸馏，梯度只流过 bern 头参数，
+        不影响 backbone / cat 头 / cont 头，彻底隔离对机动策略的干扰。
+
+        教师共识逻辑与 ADistill 一致：
+        - teacher_actor 支持单教师或列表；
+        - 只在所有教师对 bern 达成一致（全开火 or 全不开火）的样本上施加监督；
+        - 只在学生实际执行了开火（bern=1）的样本上施加监督；
+        - 教师意见不一致 / 学生未开火 的样本不参与 loss。
+
+        监督目标（微摄动）：
+        - 不使用 0/1 硬标签，而是在学生当前开火概率基础上微调：
+        - 教师共识=开火 → target = clamp(student_p + 0.01, 0, 1)
+        - 教师共识=不开火 → target = clamp(student_p - 0.01, 0, 1)
+        - 每次蒸馏只提供微小的概率推力，避免对策略造成大的突变。
+
+        梯度安全：
+        - backbone (self.actor.net.net) 和非 bern 头全部 detach（不回传梯度）
+        - 双道锁：clip_grad_value_ + 自适应 clip_grad_norm_（锚定 PPO actor_grad）
+        """
+        if teacher_actor is None or alpha == 0.0 or epochs == 0:
+            return
+
+        # 辅助函数
+        def to_tensor(x, dtype):
+            if isinstance(x, np.ndarray):
+                return torch.tensor(x, dtype=dtype).to(self.device)
+            return torch.tensor(np.array(x), dtype=dtype).to(self.device)
+
+        # 1. 准备输入
+        if 'obs' in transition_dict and len(transition_dict['obs']) > 0:
+            states = to_tensor(transition_dict['obs'], torch.float)
+        else:
+            states = to_tensor(transition_dict['states'], torch.float)
+
+        # active mask
+        if 'active_masks' in transition_dict:
+            active_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1)
+        else:
+            active_masks = torch.ones(states.size(0), device=self.device)
+
+        # 实际 bern 动作
+        actions = transition_dict['actions']
+        bern_actions = None
+        if isinstance(actions, dict):
+            if 'bern' in actions and len(actions['bern']) > 0:
+                bern_actions = to_tensor(actions['bern'], torch.float)
+        else:
+            if len(actions) > 0 and isinstance(actions[0], dict) and 'bern' in actions[0] and len(actions[0]['bern']) > 0:
+                bern_vals = [d['bern'] for d in actions]
+                bern_actions = to_tensor(np.array(bern_vals), torch.float)
+
+        if bern_actions is None:
+            return
+        if bern_actions.dim() == 1:
+            bern_actions = bern_actions.unsqueeze(-1)
+
+        num_samples = states.size(0)
+        mb = mini_batch_size if mini_batch_size is not None else num_samples
+
+        # 2. 教师共识判定（全量，一次性算好）
+        with torch.no_grad():
+            def _get_teacher_outputs(t):
+                if getattr(t, 'is_rule_teacher', False):
+                    return t.predict_distributions(states)
+                else:
+                    return t.net(states)
+
+            if isinstance(teacher_actor, (list, tuple)):
+                teacher_list = list(teacher_actor)
+            else:
+                teacher_list = [teacher_actor]
+
+            if len(teacher_list) == 0:
+                return
+
+            teacher_bern_decisions = []
+            for t in teacher_list:
+                t_out = _get_teacher_outputs(t)
+                t_bern_logits = t_out.get('bern')
+                if t_bern_logits is None:
+                    return
+                teacher_bern_decisions.append(t_bern_logits > 0.0)
+            teacher_bern_decisions = torch.stack(teacher_bern_decisions, dim=0)  # (K, B, 1)
+
+            all_fire = teacher_bern_decisions.all(dim=0)[:, 0]        # (B,)
+            all_no_fire = (~teacher_bern_decisions).all(dim=0)[:, 0]   # (B,)
+            has_consensus = all_fire | all_no_fire
+
+            student_fired = (bern_actions[:, 0] == 1.0)
+
+            # 有效样本：active=1 & 学生开了火 & 教师有共识
+            valid_mask = active_masks.bool() & student_fired & has_consensus
+
+            # 构造摄动方向：
+            # [注释掉] 教师共识=开火 → 提高开火概率（避免引导过度开火）
+            # 教师共识=不开火 → 压低开火概率，目标设为当前概率的 0.8 倍
+            nudge_dir = torch.zeros(num_samples, device=self.device)
+            # nudge_dir[all_fire] = 1.0
+            nudge_dir[all_no_fire] = -1.0
+
+            # [关键] 在循环开始前一次性算好固定的 target_p，后续 epoch 不再变动
+            with torch.no_grad():
+                baseline_features = self.actor.net.net(states)
+                baseline_logits = self.actor.net.fc_bern(baseline_features)[:, 0]  # (B,)
+                baseline_p = torch.sigmoid(baseline_logits)
+
+                # 仅当教师一致认为不该开火时，才压低目标概率
+                target_p = baseline_p.clone()
+                target_p[all_no_fire] = baseline_p[all_no_fire] * 0.8
+
+        # 若无有效样本，跳过
+        if not valid_mask.any():
+            return
+
+        # 3. 提取只有 bern 头的参数（隔离 backbone / cat / cont）
+        bern_params = list(self.actor.net.fc_bern.parameters())
+        if len(bern_params) == 0:
+            return
+
+        # 4. 蒸馏训练循环
+        distil_loss_list = []
+        distil_grad_list = []
+        indices = np.arange(num_samples)
+
+        for _ in range(int(epochs)):
+            if shuffled:
+                np.random.shuffle(indices)
+
+            for start in range(0, num_samples, mb):
+                end = min(start + mb, num_samples)
+                batch_idx = indices[start:end]
+
+                mb_states = states[batch_idx]
+                mb_valid = valid_mask[batch_idx]
+                mb_target = target_p[batch_idx]
+
+                if not mb_valid.any():
+                    continue
+
+                # 前向：backbone 不回传梯度，只让 bern 头出梯度
+                with torch.no_grad():
+                    shared_features = self.actor.net.net(mb_states)
+                # bern 头正常前向（有梯度）
+                bern_logits = self.actor.net.fc_bern(shared_features)  # (mb, 1)
+
+                # 只在有效样本上计算 BCE loss（target 是提前固定好的）
+                logits_valid = bern_logits[:, 0][mb_valid]
+                target_valid = mb_target[mb_valid]
+
+                loss = F.binary_cross_entropy_with_logits(logits_valid, target_valid, reduction='mean')
+                final_loss = alpha * loss
+
+                # 只对 bern_params 做反向传播和更新
+                self.actor_optimizer.zero_grad()
+                final_loss.backward()
+
+                # 安全起见：清零非 bern 参数的梯度（防止 optimizer 对它们做动量更新）
+                for p in self.actor.parameters():
+                    if not any(p is bp for bp in bern_params):
+                        if p.grad is not None:
+                            p.grad.zero_()
+
+                # 双道梯度锁
+                nn.utils.clip_grad_value_(bern_params, clip_value=0.5)
+                adaptive_l2_limit = max(self.actor_grad, 1e-4) * grad_clip_ratio
+                nn.utils.clip_grad_norm_(bern_params, max_norm=adaptive_l2_limit)
+
+                self.actor_optimizer.step()
+
+                distil_loss_list.append(final_loss.item())
+                distil_grad_list.append(
+                    sum(p.grad.norm().item() for p in bern_params if p.grad is not None) / max(len(bern_params), 1)
+                )
+
+        # 5. 记录指标
+        if len(distil_loss_list) > 0:
+            self.bern_distil_loss = np.mean(distil_loss_list)
+            self.bern_distil_grad = np.mean(distil_grad_list)
+            check_weights_bias_nan(self.actor, "actor", "BernDistill后")
+        else:
+            self.bern_distil_loss = 0.0
+            self.bern_distil_grad = 0.0
+
     def set_learning_rate(self, actor_lr=None, critic_lr=None):
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
