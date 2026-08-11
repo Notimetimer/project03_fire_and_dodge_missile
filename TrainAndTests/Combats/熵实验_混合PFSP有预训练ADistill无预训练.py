@@ -1,6 +1,6 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
-from CombatPPOWithIL3_parallel_hierarch import *
+from CombatPPOWithIL3_parallel_hierarch2 import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
@@ -16,7 +16,7 @@ collape_recover={ # 是否是崩盘后恢复
 mission_name = 'Adistill_NoIL'
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
+actor_lr = 3e-5 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0
 max_steps = 20e6 # 1320e4
@@ -24,7 +24,7 @@ hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
-eps = 0.2
+eps = 0.15
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
@@ -121,10 +121,12 @@ if __name__=='__main__':
             "Rule_2": 1200,
             'Rule_3': 1200,
             'Rule_4': 1200,
-            # 'Rule_5': 1200,
+            'Rule_5': 1200,
+            'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
+        sigma_elo = 400,
+        hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
@@ -147,7 +149,7 @@ if __name__=='__main__':
         beta_ADistill=0.2, # 0.003
         AFiltered = 1, # 温和蒸馏是否需要优势滤波，仅加强teacher和student都统一的样本的优势度
         conf_thres = 0.7, # 温和蒸馏不应该把概率压得太死
-        bern_included = 1, # 开火也一起
+        bern_included = 0, # 开火也一起
         adistill_anneal_factor = 0.3, # ADistill alpha 维持步数比例
     )
     end_time = datetime.now()
