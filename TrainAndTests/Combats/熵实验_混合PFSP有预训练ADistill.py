@@ -6,8 +6,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"Adistill_0.3_update-run-20260804-155939")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"Adistill_0.3_update-run-20260811-133736")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -84,7 +84,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=17, # 15,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -150,7 +150,7 @@ if __name__=='__main__':
         AFiltered = 1, # 温和蒸馏是否需要优势滤波，仅加强teacher和student都统一的样本的优势度
         conf_thres = 0.7, # 温和蒸馏不应该把概率压得太死
         bern_included = 0, # 开火也一起
-        adistill_anneal_factor = 0.3, # ADistill alpha 维持步数比例
+        adistill_anneal_factor = 0.2, # ADistill alpha 维持步数比例
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

@@ -84,7 +84,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=17, # 15,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -151,6 +151,7 @@ if __name__=='__main__':
         conf_thres = 0.7, # 温和蒸馏不应该把概率压得太死
         bern_included = 0, # 开火也一起
         adistill_anneal_factor = 0.3, # ADistill alpha 维持步数比例
+        # Bdistill = 1, # 开火策略蒸馏
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

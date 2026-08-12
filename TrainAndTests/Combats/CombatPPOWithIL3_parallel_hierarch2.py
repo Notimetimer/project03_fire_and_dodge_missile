@@ -1323,6 +1323,16 @@ def run_MLP_simulation(
     # 保持您原有的 logger 初始化方式
     logger = TensorBoardLogger(log_root=log_dir, host="127.0.0.1", port=6006, use_log_root=True, auto_show=False)
 
+    # [新增] 给 logger.add 包一层保护：tensorboard 后台写线程偶发因外部原因（如日志目录被意外删除）
+    # 抛出的异常会在下次 flush 时被重新抛出到调用方，这里直接跳过该次记录，避免打断训练主循环。
+    _logger_add_raw = logger.add
+    def _safe_logger_add(tag, value, step):
+        try:
+            _logger_add_raw(tag, value, step)
+        except Exception as e:
+            print(f"[logger] 记录失败，跳过本次: tag={tag}, step={step}, err={e}")
+    logger.add = _safe_logger_add
+
     # 5. 模仿学习预训练 (Serial Execution on Master)
     # [MAPPO] 集中式 Critic 输入为红蓝拼接，IL 数据只有单方 state，因此只预训练 actor；
     # critic 输入用 [state, state] 复制拼接，仅用于 MARWIL 的权重计算 (train_critic=False)
@@ -1348,7 +1358,7 @@ def run_MLP_simulation(
             batch_size=il_batch_size, # 显存如果够大可以适当调大
             label_smoothing=label_smoothing,
             no_bern = 0, # 0
-            train_critic=False, # [MAPPO] 只预训练 actor
+            # train_critic=False, # [MAPPO] 只预训练 actor
         )
         
         # 记录
@@ -2157,11 +2167,12 @@ def run_MLP_simulation(
                 if use_ADistill:
                     # 固定使用 rule6 作为常驻 teacher，不进行 Elo 切换
                     teacher_rule_num_cur = 6
+                    teacher_wrapper = adistill_rule_wrappers[TEACHER_RULE_IDS.index(teacher_rule_num_cur)]
                     logger.add("train_plus/adistill_teacher_rule", teacher_rule_num_cur, total_steps)
 
-                    alpha_distill = max(0.001, beta_ADistill * (1.0 - total_steps / 6e6))
+                    alpha_distill = max(0.001, beta_ADistill * (1.0 - total_steps / (max_steps * adistill_anneal_factor)))
                     # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
-                    k_entropy_cat_scale = 1.0 + 4.0 * (alpha_distill / beta_ADistill)
+                    k_entropy_cat_scale = 1.0 # + 4.0 * (alpha_distill / beta_ADistill)
 
                     # 若 cat 熵已过高，临时取消额外熵奖励，压回基准值
                     if getattr(student_agent, 'entropy_cat', 0.0) > 2.5:
@@ -2178,21 +2189,21 @@ def run_MLP_simulation(
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
-                                     alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
+                                     alpha_distill=alpha_distill, teacher_actor=teacher_wrapper,
                                      AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included,
                                      alpha_distill_cat=alpha_distill, alpha_distill_bern=0,
                                      use_cat_distill=True, use_bern_distill=False)
 
-                # BernDistill：在 PPO 更新后单独对 bern 头做规则教师共识驱动的有监督蒸馏
-                if Bdistill:
-                    student_agent.BernDistill(transition_dict,
-                                              teacher_actor=adistill_rule_wrappers,
-                                              shuffled=1,
-                                              mini_batch_size=mini_batch_size_mixed,
-                                              epochs=Bdistill_epochs,
-                                              alpha=Bdistill_alpha)
-                    logger.add("train_plus/bern_distil_loss", student_agent.bern_distil_loss, total_steps)
-                    logger.add("train_plus/bern_distil_grad", student_agent.bern_distil_grad, total_steps)
+                # # BernDistill：在 PPO 更新后单独对 bern 头做规则教师共识驱动的有监督蒸馏
+                # if Bdistill:
+                #     student_agent.BernDistill(transition_dict,
+                #                               teacher_actor=adistill_rule_wrappers,
+                #                               shuffled=1,
+                #                               mini_batch_size=mini_batch_size_mixed,
+                #                               epochs=Bdistill_epochs,
+                #                               alpha=Bdistill_alpha)
+                #     logger.add("train_plus/bern_distil_loss", student_agent.bern_distil_loss, total_steps)
+                #     logger.add("train_plus/bern_distil_grad", student_agent.bern_distil_grad, total_steps)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:

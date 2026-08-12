@@ -300,6 +300,7 @@ class PolicyNetHybrid(torch.nn.Module):
             dist = xb[:, 9] * 10e3
             # AA_hor = xb[:, 12]
             t_since_launch = xb[:, 21] * 120
+            missile_in_mid_term = xb[:, 3] > 1e-6
 
             ammo_cond = (ammo > 0.0)
             # time_const_cond = t_since_launch >= torch.max(dist/(3*340)/2, torch.as_tensor(10.0, device=dist.device, dtype=dist.dtype))
@@ -318,6 +319,9 @@ class PolicyNetHybrid(torch.nn.Module):
             azimuth = theta + delta_theta
             theta_cond = theta >= azimuth - np.radians(15)
             can_fire = can_fire & theta_cond
+
+            # 禁止中制导下开火
+            can_fire = can_fire & ~missile_in_mid_term
             
             # if not can_fire:
             #     print("禁止开火")

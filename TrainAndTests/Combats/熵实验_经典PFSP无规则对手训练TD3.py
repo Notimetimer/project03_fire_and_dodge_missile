@@ -17,7 +17,7 @@ collape_recover={ # 是否是崩盘后恢复
 mission_name = 'TD3_PFSP_0.3'
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
+actor_lr = 1e-5 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30 # 180
 max_steps = 20e6 # 1320e4
@@ -26,7 +26,7 @@ gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.01, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.1, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4

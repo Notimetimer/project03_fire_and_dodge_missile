@@ -6,8 +6,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"SLWSPFSP_0.15-run-20260803-153900")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"SLWSPFSP_0.15-run-20260803-153900")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -16,7 +16,7 @@ collape_recover={ # 是否是崩盘后恢复
 mission_name = 'SLWSPFSP_0.15'
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
+actor_lr = 1e-5 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30 # 180
 max_steps = 20e6 # 1320e4
@@ -24,7 +24,7 @@ hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
-eps = 0.2
+eps = 0.1 # 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
@@ -84,7 +84,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=20, # 15,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
