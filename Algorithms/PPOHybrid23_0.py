@@ -298,7 +298,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # locked = xb[:, 2]
             ammo = xb[:, 20]
             dist = xb[:, 9] * 10e3
-            # AA_hor = xb[:, 12]
+            AA_hor = xb[:, 12]
             t_since_launch = xb[:, 21] * 120
             missile_in_mid_term = xb[:, 3] > 1e-6
 
@@ -322,6 +322,10 @@ class PolicyNetHybrid(torch.nn.Module):
 
             # 禁止中制导下开火
             can_fire = can_fire & ~missile_in_mid_term
+            
+            # 禁止尾追长距离开火
+            far_chase = (AA_hor < math.pi/2) & (dist > 25e3)
+            can_fire = can_fire & ~ far_chase
             
             # if not can_fire:
             #     print("禁止开火")
@@ -470,7 +474,7 @@ class HybridActorWrapper(nn.Module):
                 ata_hor      = torch.acos(cos_ata_hor)
                 ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 20.0 * pi / 180.0)
                 locked_cond  = (locked > 0)
-                dist_cond    = (dist < 105e3)
+                dist_cond    = (dist < 90e3) # 105e3)
                 delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
                 wait_til_last_missile_ends = not missile_in_mid_term
                 can_fire_full = (ata_cond & locked_cond & dist_cond
@@ -2547,7 +2551,7 @@ class PPOHybrid:
     
     # --- 修改后的 MARWIL_update， 注意原先是0 ---
     def MARWIL_update(self, il_transition_dict, beta=1.0, batch_size=64, alpha=1.0, c_v=1.0, shuffled=1, label_smoothing=0.3, max_weight=100.0,
-                      tau=0.8, action_heads_mask=None, no_bern=None, no_cat=None):
+                      tau=0.8, action_heads_mask=None, no_bern=None, no_cat=None, train_critic=True):
         """
         MARWIL 离线更新函数
         输入 actions 结构支持: [{'cat': array([v]), 'bern': array([v])}, ...]
@@ -2691,13 +2695,14 @@ class PPOHybrid:
 
             # D. Optimize
             self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
             actor_loss.backward()
-            critic_loss.backward()
             nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.actor_max_grad)
-            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
             self.actor_optimizer.step()
-            self.critic_optimizer.step()
+            if train_critic:
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_max_grad)
+                self.critic_optimizer.step()
 
             total_actor_loss += actor_loss.item()
             total_critic_loss += critic_loss.item()

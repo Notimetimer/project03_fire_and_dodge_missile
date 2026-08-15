@@ -16,7 +16,8 @@ collape_recover={ # 是否是崩盘后恢复
 mission_name = 'SLWSPFSP_0.15'
 
 # 超参数
-actor_lr = 1e-5 # 4 1e-4
+
+actor_lr = 3e-5 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30 # 180
 max_steps = 20e6 # 1320e4
@@ -24,7 +25,7 @@ hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
-eps = 0.1 # 0.2
+eps = 0.15
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
@@ -125,6 +126,7 @@ if __name__=='__main__':
             'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        sigma_elo = 400,
         hist_agent_as_opponent = 1,
         use_sil = 0,
         p_factor = 0.23,

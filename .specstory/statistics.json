@@ -1,0 +1,1192 @@
+{
+  "sessions": {
+    "019e02e6-8c2a-7672-bd53-9d39bff4e789": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2026-05-07T14:45:32.242Z",
+      "end_timestamp": "2026-05-07T14:45:24.174Z",
+      "markdown_size_bytes": 916,
+      "provider": "codex-cli",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "019e06cb-82e4-7893-b0ce-6b46ff97192d": {
+      "user_message_count": 2,
+      "agent_message_count": 0,
+      "start_timestamp": "2026-05-08T08:54:41.212Z",
+      "end_timestamp": "2026-05-08T08:54:21.157Z",
+      "markdown_size_bytes": 536,
+      "provider": "codex-cli",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "02082eb9-2427-4677-bad4-5fe07434fa07": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:19:25+08:00",
+      "end_timestamp": "2025-10-29T17:19:25+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "060940c3-9dda-4d8c-b262-744092dfd510": {
+      "user_message_count": 1,
+      "agent_message_count": 1,
+      "start_timestamp": "2026-01-20T10:51:49+08:00",
+      "end_timestamp": "2026-01-20T10:51:49+08:00",
+      "markdown_size_bytes": 2326,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "08a3e0fa-33d2-4f16-adbc-8a81aae50d84": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2026-01-03T18:49:38+08:00",
+      "end_timestamp": "2026-01-03T18:53:23+08:00",
+      "markdown_size_bytes": 9286,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "0a43a1e4-9375-44e2-ac9f-ecfbce44d981": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-08T15:42:33+08:00",
+      "end_timestamp": "2025-11-08T15:42:33+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "0a817ba3-fa0a-452e-971a-357d1d1e7082": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-21T10:48:14+08:00",
+      "end_timestamp": "2025-10-21T10:48:14+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "0a87959e-28a1-4b9e-8035-eec7a76d45f9": {
+      "user_message_count": 1,
+      "agent_message_count": 1,
+      "start_timestamp": "2026-02-03T22:38:34+08:00",
+      "end_timestamp": "2026-02-03T22:38:34+08:00",
+      "markdown_size_bytes": 2752,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "19aa9738-7582-49b9-bb9e-31f795742a34": {
+      "user_message_count": 6,
+      "agent_message_count": 6,
+      "start_timestamp": "2025-12-22T22:37:55+08:00",
+      "end_timestamp": "2025-12-23T15:15:09+08:00",
+      "markdown_size_bytes": 21760,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "1fff5ac8-2e9e-4fe7-a360-90756606f800": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-04T10:55:31+08:00",
+      "end_timestamp": "2025-11-04T10:55:31+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "20635bc5-64ea-41a3-8746-5cca687a06c7": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:56:16+08:00",
+      "end_timestamp": "2025-09-16T16:56:16+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "21b30448-c988-4013-96ca-2da5a0601ae2": {
+      "user_message_count": 6,
+      "agent_message_count": 6,
+      "start_timestamp": "2025-11-10T11:21:34+08:00",
+      "end_timestamp": "2025-11-10T21:36:11+08:00",
+      "markdown_size_bytes": 15127,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "21be5063-214d-48d8-b5cf-aecb6c05d8af": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-05T11:49:21+08:00",
+      "end_timestamp": "2025-11-05T11:49:21+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "22faa2d5-f7ce-4387-8b30-051ee79ccb4d": {
+      "user_message_count": 6,
+      "agent_message_count": 6,
+      "start_timestamp": "2026-01-13T10:12:29+08:00",
+      "end_timestamp": "2026-01-13T10:38:20+08:00",
+      "markdown_size_bytes": 11433,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "2322cd9d-456c-4fcd-a027-6bd2807b1bd1": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:06:58+08:00",
+      "end_timestamp": "2025-09-16T16:06:58+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "2731224a-edea-4258-b47e-de700cc416c0": {
+      "user_message_count": 6,
+      "agent_message_count": 6,
+      "start_timestamp": "2025-12-19T12:12:41+08:00",
+      "end_timestamp": "2025-12-19T17:13:10+08:00",
+      "markdown_size_bytes": 23744,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "28b96e6e-cf9e-49c9-baea-7f67e904912b": {
+      "user_message_count": 35,
+      "agent_message_count": 34,
+      "start_timestamp": "2025-12-15T11:17:49+08:00",
+      "end_timestamp": "2025-12-19T11:01:28+08:00",
+      "markdown_size_bytes": 112023,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "28fdb5ab-80a2-4fbf-9024-805cf79efb9e": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:11:10+08:00",
+      "end_timestamp": "2025-10-29T17:11:10+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "2b0daed8-80f3-47ae-8e2d-f6ec9f9d9145": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2026-01-16T17:26:09+08:00",
+      "end_timestamp": "2026-01-16T17:29:51+08:00",
+      "markdown_size_bytes": 1524,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "2ca247a0-eeb6-41f5-bd3f-d5e87fcd24b9": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:58:49+08:00",
+      "end_timestamp": "2025-10-29T17:58:49+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "2db008d6-7655-4843-8100-e20ae1594dbb": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T15:10:01+08:00",
+      "end_timestamp": "2025-09-16T15:10:01+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "2f946d9f-6aaf-446c-9258-8bfac974878b": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-10T21:14:49+08:00",
+      "end_timestamp": "2025-11-10T21:14:49+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "306d0ac5-c835-4419-a6bd-3a93104b5de1": {
+      "user_message_count": 4,
+      "agent_message_count": 4,
+      "start_timestamp": "2026-01-23T17:22:58+08:00",
+      "end_timestamp": "2026-01-23T17:33:06+08:00",
+      "markdown_size_bytes": 5082,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "312eb8e3-4096-4fd4-a1c7-0e04e6de52b2": {
+      "user_message_count": 3,
+      "agent_message_count": 3,
+      "start_timestamp": "2025-12-21T11:34:33+08:00",
+      "end_timestamp": "2025-12-21T11:42:02+08:00",
+      "markdown_size_bytes": 5647,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "31b88168-fa8b-4cea-959e-5d6ceed4c4b5": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:21:11+08:00",
+      "end_timestamp": "2025-10-29T17:21:11+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "31dec3d1-abf9-4de2-b338-a9099843a19c": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-09T21:53:43+08:00",
+      "end_timestamp": "2025-11-09T21:53:43+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "333780b9-5b17-480d-8161-4eab7c27e5f1": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-20T16:26:46+08:00",
+      "end_timestamp": "2025-10-20T16:26:46+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "33e7623e-4354-45d2-a19f-8a86239ee74b": {
+      "user_message_count": 13,
+      "agent_message_count": 13,
+      "start_timestamp": "2025-12-24T11:57:12+08:00",
+      "end_timestamp": "2025-12-26T10:34:50+08:00",
+      "markdown_size_bytes": 37043,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "355ca6a1-8eb8-4e04-b10c-018bda30aacd": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:07:17+08:00",
+      "end_timestamp": "2025-09-16T16:07:17+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3562784b-a12f-41d5-a221-2d0183ee041a": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-30T22:53:41+08:00",
+      "end_timestamp": "2025-10-30T22:53:41+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "36c8feb3-92b4-4b57-abad-d70c96e7d1f1": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2025-12-10T20:44:56+08:00",
+      "end_timestamp": "2025-12-10T21:36:37+08:00",
+      "markdown_size_bytes": 3478,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3ae6c760-08f6-494f-8716-99a45b11f8cd": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-24T21:50:11+08:00",
+      "end_timestamp": "2025-09-24T21:50:11+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3c43590f-f137-49b1-8b75-f76aadca745c": {
+      "user_message_count": 124,
+      "agent_message_count": 122,
+      "start_timestamp": "2025-09-22T20:48:33+08:00",
+      "end_timestamp": "2025-10-29T20:29:24+08:00",
+      "markdown_size_bytes": 303574,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3c57b3bd-aebd-4b92-9c6e-4571c0928294": {
+      "user_message_count": 11,
+      "agent_message_count": 11,
+      "start_timestamp": "2025-11-18T22:15:55+08:00",
+      "end_timestamp": "2025-11-19T11:38:36+08:00",
+      "markdown_size_bytes": 37422,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3c5e1b4b-0624-4768-8174-7728451f1018": {
+      "user_message_count": 8,
+      "agent_message_count": 8,
+      "start_timestamp": "2025-09-21T11:57:12+08:00",
+      "end_timestamp": "2025-09-22T16:15:02+08:00",
+      "markdown_size_bytes": 9648,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3e015a98-2180-4b97-84f8-8820ff4d4e9b": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-30T10:25:42+08:00",
+      "end_timestamp": "2025-10-30T10:25:42+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3e358872-e0c2-4615-ac39-01ecc00e216e": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-10T11:58:03+08:00",
+      "end_timestamp": "2025-11-10T11:58:03+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "3e4c6303-558b-403c-ae32-ebe1fae2f986": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:21:46+08:00",
+      "end_timestamp": "2025-10-29T17:21:46+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "42353869-2603-4f92-be99-7b47601634d1": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-24T21:40:05+08:00",
+      "end_timestamp": "2025-09-24T21:40:05+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "439c5574-eace-4693-9b6b-99d43bfb57b3": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:21:50+08:00",
+      "end_timestamp": "2025-09-16T16:21:50+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "443b7778-9539-4f27-83ad-b79be362e140": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2026-01-14T21:50:54+08:00",
+      "end_timestamp": "2026-01-14T21:51:56+08:00",
+      "markdown_size_bytes": 3618,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "45db1954-9826-4578-a34d-1ad5f20582da": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T18:15:51+08:00",
+      "end_timestamp": "2025-10-29T18:15:51+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "460c991f-ba06-4b92-99ff-752f54246f95": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:59:59+08:00",
+      "end_timestamp": "2025-10-29T17:59:59+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "4ad76561-f777-4697-8f78-c530498d4c66": {
+      "user_message_count": 20,
+      "agent_message_count": 20,
+      "start_timestamp": "2026-01-07T10:51:30+08:00",
+      "end_timestamp": "2026-01-09T17:31:58+08:00",
+      "markdown_size_bytes": 89095,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "4bc3543d-a770-4bb3-bf50-b0d6b88b0b1a": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2025-12-22T09:54:07+08:00",
+      "end_timestamp": "2025-12-22T09:55:08+08:00",
+      "markdown_size_bytes": 1565,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "4f3b6595-25e4-45bf-8e72-d31583dba7d1": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-08T11:46:10+08:00",
+      "end_timestamp": "2025-10-08T11:46:10+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "4f62bbf1-5469-4962-84bb-f4c0c322471a": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-30T23:03:17+08:00",
+      "end_timestamp": "2025-10-30T23:03:17+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "50590984-5a37-40cf-b36d-dfc538b0ef51": {
+      "user_message_count": 3,
+      "agent_message_count": 3,
+      "start_timestamp": "2026-01-29T18:16:27+08:00",
+      "end_timestamp": "2026-01-30T16:18:24+08:00",
+      "markdown_size_bytes": 11646,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "51133d95-28cb-43fd-a7c9-085e4d6751e9": {
+      "user_message_count": 7,
+      "agent_message_count": 7,
+      "start_timestamp": "2025-10-29T20:38:50+08:00",
+      "end_timestamp": "2025-10-30T09:50:26+08:00",
+      "markdown_size_bytes": 23752,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "54f0ee87-9a2b-4a70-8ddb-de6ccf7ab575": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2025-12-14T11:03:35+08:00",
+      "end_timestamp": "2025-12-14T11:10:25+08:00",
+      "markdown_size_bytes": 4351,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "56c3812d-c38d-4aac-b338-5aa11dcc4f38": {
+      "user_message_count": 15,
+      "agent_message_count": 15,
+      "start_timestamp": "2026-01-28T17:55:36+08:00",
+      "end_timestamp": "2026-01-29T16:54:41+08:00",
+      "markdown_size_bytes": 58267,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "578f659b-f9f8-4f6c-88c9-b57c8858e95c": {
+      "user_message_count": 20,
+      "agent_message_count": 19,
+      "start_timestamp": "2025-12-08T18:26:43+08:00",
+      "end_timestamp": "2025-12-10T20:39:47+08:00",
+      "markdown_size_bytes": 64063,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "57c0d5ec-eb89-401f-8666-c3823ec304cf": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:00:54+08:00",
+      "end_timestamp": "2025-09-16T16:00:54+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "60b3a77d-223a-4f0d-90dd-d5984ca9c30a": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:36:30+08:00",
+      "end_timestamp": "2025-10-29T17:36:30+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "67894649-fae7-49e2-ad6f-177f72f6acad": {
+      "user_message_count": 7,
+      "agent_message_count": 7,
+      "start_timestamp": "2025-12-22T11:47:50+08:00",
+      "end_timestamp": "2025-12-22T15:45:36+08:00",
+      "markdown_size_bytes": 18590,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "67c260c7-4b35-4b6b-85b1-cef8910b7a31": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:50:56+08:00",
+      "end_timestamp": "2025-10-29T17:50:56+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "683a24aa-11eb-4b01-81f6-a398d603bdd8": {
+      "user_message_count": 1,
+      "agent_message_count": 1,
+      "start_timestamp": "2025-12-08T18:09:23+08:00",
+      "end_timestamp": "2025-12-08T18:09:23+08:00",
+      "markdown_size_bytes": 3021,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "690791fd-c119-4c7d-9a68-97a658bf3de3": {
+      "user_message_count": 3,
+      "agent_message_count": 3,
+      "start_timestamp": "2026-01-22T17:06:52+08:00",
+      "end_timestamp": "2026-01-23T15:52:52+08:00",
+      "markdown_size_bytes": 13167,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "6a4eef85-26de-46bf-9d46-b6548bec2b4e": {
+      "user_message_count": 40,
+      "agent_message_count": 40,
+      "start_timestamp": "2025-11-28T16:58:42+08:00",
+      "end_timestamp": "2025-12-05T19:30:24+08:00",
+      "markdown_size_bytes": 150446,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "6c5e9d56-07ab-4f1a-a7a5-a77436ed2b0e": {
+      "user_message_count": 7,
+      "agent_message_count": 28,
+      "start_timestamp": "2026-02-05T18:07:08+08:00",
+      "end_timestamp": "2026-02-05T18:07:08+08:00",
+      "markdown_size_bytes": 465890,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "6c7db21e-23b8-4142-904e-1ebf12605e05": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-31T11:07:03+08:00",
+      "end_timestamp": "2025-10-31T11:07:03+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "6ef041d3-d70b-4dd1-b98f-abdd49e4fc8b": {
+      "user_message_count": 9,
+      "agent_message_count": 9,
+      "start_timestamp": "2025-10-30T09:54:39+08:00",
+      "end_timestamp": "2025-10-31T11:06:43+08:00",
+      "markdown_size_bytes": 43041,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "725665b0-ac21-42ed-a4f8-bffd43f2993a": {
+      "user_message_count": 7,
+      "agent_message_count": 42,
+      "start_timestamp": "2025-09-16T20:39:11+08:00",
+      "end_timestamp": "2025-09-16T20:39:11+08:00",
+      "markdown_size_bytes": 50795,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    },
+    "75b4f2a7-c258-4c1a-a142-2e4f858c8e31": {
+      "user_message_count": 32,
+      "agent_message_count": 31,
+      "start_timestamp": "2025-11-19T15:30:02+08:00",
+      "end_timestamp": "2025-11-28T15:53:51+08:00",
+      "markdown_size_bytes": 104477,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "772c7e5c-c413-45cf-9cd1-6936552e77f9": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-04T20:56:04+08:00",
+      "end_timestamp": "2025-11-04T20:56:04+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "7c12efcb-2593-4eae-a6e6-e8320dff30d8": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-22T10:14:48+08:00",
+      "end_timestamp": "2025-10-22T10:14:48+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "80b608c2-af04-47bf-a0b7-57cb8ae9cf63": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-05T11:53:08+08:00",
+      "end_timestamp": "2025-11-05T11:53:08+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "826546ce-9f41-4c0b-8bfc-62ab4191e7b3": {
+      "user_message_count": 11,
+      "agent_message_count": 11,
+      "start_timestamp": "2025-12-10T23:39:03+08:00",
+      "end_timestamp": "2025-12-11T22:22:04+08:00",
+      "markdown_size_bytes": 18405,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "82882308-d98a-4360-b515-0f0d3ee214d1": {
+      "user_message_count": 5,
+      "agent_message_count": 5,
+      "start_timestamp": "2025-12-30T20:47:59+08:00",
+      "end_timestamp": "2025-12-31T15:38:24+08:00",
+      "markdown_size_bytes": 11520,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "82e891f2-bdbf-4317-aec3-90628093cff1": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T18:13:22+08:00",
+      "end_timestamp": "2025-10-29T18:13:22+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "86e3550e-57c4-4d2f-9595-fc9c807880a2": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:07:49+08:00",
+      "end_timestamp": "2025-09-16T16:07:49+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "8b1fd2bf-b187-4f91-af62-2f3da8dc04dd": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T11:28:16+08:00",
+      "end_timestamp": "2025-10-29T11:28:16+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "8f86a4a9-fe2e-4a9a-b3a4-c9c09f7f20ac": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-29T18:13:12+08:00",
+      "end_timestamp": "2025-09-29T18:13:12+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "903a9318-0e8c-457f-8acd-7aae2efd576d": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-29T11:14:54+08:00",
+      "end_timestamp": "2025-09-29T11:14:54+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "9153e5e9-8f66-4cd3-b1b8-1a07643241ec": {
+      "user_message_count": 1,
+      "agent_message_count": 1,
+      "start_timestamp": "2026-02-27T17:37:39+08:00",
+      "end_timestamp": "2026-02-27T17:37:39+08:00",
+      "markdown_size_bytes": 3541,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    },
+    "9378c896-c199-4eaa-b349-023448bb1466": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-13T15:21:55+08:00",
+      "end_timestamp": "2025-10-13T15:21:55+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "937f067f-6000-4d29-8ad5-b0459f2d7dd6": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-29T18:13:39+08:00",
+      "end_timestamp": "2025-09-29T18:13:39+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "9427935f-d5e8-4d3b-bb91-ce0c71c4b3be": {
+      "user_message_count": 3,
+      "agent_message_count": 3,
+      "start_timestamp": "2025-12-11T23:14:05+08:00",
+      "end_timestamp": "2025-12-12T11:09:40+08:00",
+      "markdown_size_bytes": 18422,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "995f09ff-1704-47ee-a4da-5edba234d697": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-10T11:22:36+08:00",
+      "end_timestamp": "2025-11-10T11:22:36+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "9c32cdfc-4666-4c9d-8506-8dacd8497ce2": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-04T09:52:50+08:00",
+      "end_timestamp": "2025-11-04T09:52:50+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "9eb596d2-5b6f-4c4b-91c9-669eb044d24b": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-21T16:16:24+08:00",
+      "end_timestamp": "2025-10-21T16:16:24+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "9f2e9bb5-3e76-4576-b9e7-02eaf863c6d0": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:00:42+08:00",
+      "end_timestamp": "2025-09-16T16:00:42+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "9f5a161d-be31-45b4-85a9-2b899d66901c": {
+      "user_message_count": 0,
+      "agent_message_count": 16,
+      "start_timestamp": "2026-04-01T15:14:16+08:00",
+      "end_timestamp": "2026-04-01T15:14:16+08:00",
+      "markdown_size_bytes": 22073,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    },
+    "9fb6920d-780b-49ea-bd7f-105e857a0ee2": {
+      "user_message_count": 64,
+      "agent_message_count": 62,
+      "start_timestamp": "2025-08-29T12:04:02+08:00",
+      "end_timestamp": "2025-09-16T16:22:55+08:00",
+      "markdown_size_bytes": 126772,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "a109099c-2728-4729-a367-12a7badcc3fc": {
+      "user_message_count": 23,
+      "agent_message_count": 23,
+      "start_timestamp": "2025-10-31T15:10:56+08:00",
+      "end_timestamp": "2025-11-09T21:54:18+08:00",
+      "markdown_size_bytes": 50458,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "a81ff618-1c75-4aa2-a16c-a2f5d4521016": {
+      "user_message_count": 2,
+      "agent_message_count": 9,
+      "start_timestamp": "2026-02-15T10:15:14+08:00",
+      "end_timestamp": "2026-02-15T10:15:14+08:00",
+      "markdown_size_bytes": 11702,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    },
+    "af015b19-3120-41fd-89ef-fececbbd8fd7": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-30T10:28:42+08:00",
+      "end_timestamp": "2025-10-30T10:28:42+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "afea6b67-f855-4f32-8da3-b4e0c22c8272": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-10T15:26:19+08:00",
+      "end_timestamp": "2025-11-10T15:26:19+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "b26ea1c3-3bc2-47de-aedc-314c79a6bf76": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-30T23:12:27+08:00",
+      "end_timestamp": "2025-10-30T23:12:27+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:19Z"
+    },
+    "b28ce1f1-a7ae-4202-91fc-2b53a60572d8": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-07T16:09:53+08:00",
+      "end_timestamp": "2025-11-07T16:09:53+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "b3919c91-f477-440a-9977-d7bed6ec79a9": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-05T16:01:31+08:00",
+      "end_timestamp": "2025-11-05T16:01:31+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "b538bf7b-432d-46fe-80e2-b671d2c7447b": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T11:52:03+08:00",
+      "end_timestamp": "2025-10-29T11:52:03+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "b731c223-4b6b-426d-ad3f-366874e88264": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-10T11:41:28+08:00",
+      "end_timestamp": "2025-11-10T11:41:28+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "bea72765-b1b5-4a03-9801-87b03c56f6dc": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-09T21:53:13+08:00",
+      "end_timestamp": "2025-11-09T21:53:13+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "bf3d3563-5327-4d59-88e4-4bb80dd6c1ae": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-21T10:47:50+08:00",
+      "end_timestamp": "2025-10-21T10:47:50+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "c190d04b-6679-4658-813a-6b7012029690": {
+      "user_message_count": 1,
+      "agent_message_count": 1,
+      "start_timestamp": "2026-01-14T23:03:24+08:00",
+      "end_timestamp": "2026-01-14T23:03:24+08:00",
+      "markdown_size_bytes": 3160,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "c23095b1-3a6e-4884-a26c-5f4c1f7a6299": {
+      "user_message_count": 3,
+      "agent_message_count": 3,
+      "start_timestamp": "2026-01-15T11:04:21+08:00",
+      "end_timestamp": "2026-01-15T15:46:40+08:00",
+      "markdown_size_bytes": 5953,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "c407515d-83ce-4194-9e57-64abd4e5aeb3": {
+      "user_message_count": 1,
+      "agent_message_count": 1,
+      "start_timestamp": "2026-01-31T17:44:26+08:00",
+      "end_timestamp": "2026-01-31T17:44:26+08:00",
+      "markdown_size_bytes": 2244,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "c64fbd09-990f-4558-8825-14b8c17eee5e": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:01:14+08:00",
+      "end_timestamp": "2025-09-16T16:01:14+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "c9c06861-0ef3-4aa2-b223-465354a51ddd": {
+      "user_message_count": 2,
+      "agent_message_count": 4,
+      "start_timestamp": "2026-02-05T16:17:03+08:00",
+      "end_timestamp": "2026-02-05T16:17:03+08:00",
+      "markdown_size_bytes": 11449,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    },
+    "c9ffcf66-71d6-4d75-b691-971d8a813495": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:13:24+08:00",
+      "end_timestamp": "2025-09-16T16:13:24+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "cc1aca11-42a4-4923-8bfe-36fb531b18b2": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-07T15:57:45+08:00",
+      "end_timestamp": "2025-11-07T15:57:45+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "cdda53bf-a6b4-44ea-8588-cdf283e2f280": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-29T15:09:31+08:00",
+      "end_timestamp": "2025-09-29T15:09:31+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "cfb8f5e1-0f93-4624-86a0-33bdf54e4c57": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-29T11:13:25+08:00",
+      "end_timestamp": "2025-09-29T11:13:25+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "cfe58418-318a-4ebf-9523-548d0769af98": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-21T11:06:09+08:00",
+      "end_timestamp": "2025-10-21T11:06:09+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "d04fb4d0-c411-46b3-8860-a3c233a528f7": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T20:41:43+08:00",
+      "end_timestamp": "2025-10-29T20:41:43+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "d0675b34-9fe1-4379-86f8-6411389badb2": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-29T17:16:00+08:00",
+      "end_timestamp": "2025-10-29T17:16:00+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "d52c8f58-e08c-4b9f-a3b3-1aeb5bc60179": {
+      "user_message_count": 8,
+      "agent_message_count": 8,
+      "start_timestamp": "2026-02-04T11:31:52+08:00",
+      "end_timestamp": "2026-02-04T15:46:46+08:00",
+      "markdown_size_bytes": 36220,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "d66a2f20-d3c4-4f1d-a5e5-3e9af17fae89": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-30T11:43:41+08:00",
+      "end_timestamp": "2025-09-30T11:43:41+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "d8ac952d-c349-44f1-97c2-c121c03b107c": {
+      "user_message_count": 15,
+      "agent_message_count": 15,
+      "start_timestamp": "2026-01-04T22:09:06+08:00",
+      "end_timestamp": "2026-01-07T10:14:03+08:00",
+      "markdown_size_bytes": 30864,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "daf15f80-1ea2-4915-b99a-1d52010b2b3e": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-26T11:26:35+08:00",
+      "end_timestamp": "2025-09-26T11:26:35+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "db9bfe6c-05d4-4440-9ded-61b9ad4b562e": {
+      "user_message_count": 9,
+      "agent_message_count": 9,
+      "start_timestamp": "2026-01-10T16:06:00+08:00",
+      "end_timestamp": "2026-01-12T10:57:33+08:00",
+      "markdown_size_bytes": 64556,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "dddcc1b2-b3e2-4cc5-b934-51121727f18d": {
+      "user_message_count": 9,
+      "agent_message_count": 9,
+      "start_timestamp": "2026-01-20T19:52:25+08:00",
+      "end_timestamp": "2026-01-22T15:28:07+08:00",
+      "markdown_size_bytes": 19542,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "e1901d00-acaf-452d-9cc5-43b0844d3953": {
+      "user_message_count": 20,
+      "agent_message_count": 20,
+      "start_timestamp": "2025-09-16T16:43:25+08:00",
+      "end_timestamp": "2025-09-20T20:44:53+08:00",
+      "markdown_size_bytes": 50715,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "e2760ba7-17bd-47ef-ad99-b3b3213d0de0": {
+      "user_message_count": 6,
+      "agent_message_count": 6,
+      "start_timestamp": "2026-02-02T10:50:24+08:00",
+      "end_timestamp": "2026-02-03T18:18:07+08:00",
+      "markdown_size_bytes": 28415,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "e3c85cab-eeda-4431-8ec7-2fa594ebe793": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-15T20:54:00+08:00",
+      "end_timestamp": "2025-09-15T20:54:00+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "e46a8be3-c797-44ad-94e8-1db66659e679": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-21T10:47:10+08:00",
+      "end_timestamp": "2025-10-21T10:47:10+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "e5c1faf3-3a2c-4d64-8f99-8ba160869ee0": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-16T11:57:56+08:00",
+      "end_timestamp": "2025-10-16T11:57:56+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "eaef73cb-dcfc-4016-baeb-a5929d3bb1e3": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-10T21:38:37+08:00",
+      "end_timestamp": "2025-11-10T21:38:37+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "ebc5829b-a221-4ae8-b011-bc4a3e6bd461": {
+      "user_message_count": 8,
+      "agent_message_count": 8,
+      "start_timestamp": "2025-11-16T15:27:44+08:00",
+      "end_timestamp": "2025-11-18T21:44:41+08:00",
+      "markdown_size_bytes": 28694,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "ebdd6599-3340-4af3-8353-0035e55e06b0": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-25T20:36:53+08:00",
+      "end_timestamp": "2025-09-25T20:36:53+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "ec655f24-e4ba-4d61-8253-a83bacb1c2b8": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-09T21:55:05+08:00",
+      "end_timestamp": "2025-11-09T21:55:05+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "eef40df8-16ec-41a7-aba7-fb6d02d854a2": {
+      "user_message_count": 22,
+      "agent_message_count": 21,
+      "start_timestamp": "2025-12-08T09:46:30+08:00",
+      "end_timestamp": "2025-12-08T16:51:36+08:00",
+      "markdown_size_bytes": 95449,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "efdf2d47-da40-47f3-a405-59445eb2784b": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-16T16:01:29+08:00",
+      "end_timestamp": "2025-09-16T16:01:29+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "efeb1644-bfee-40dd-801a-c8438635681c": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-10-13T15:10:55+08:00",
+      "end_timestamp": "2025-10-13T15:10:55+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "f041ac6f-ec1c-4da3-a1d2-745b3f6046a4": {
+      "user_message_count": 18,
+      "agent_message_count": 18,
+      "start_timestamp": "2026-01-26T10:24:56+08:00",
+      "end_timestamp": "2026-01-28T17:07:02+08:00",
+      "markdown_size_bytes": 54520,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "f2d6fa4f-eff8-4dc0-91ce-cf9c72139eef": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-09-28T21:25:57+08:00",
+      "end_timestamp": "2025-09-28T21:25:57+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "f7cd03f3-6fbe-4bb6-88d7-2602a26a65a1": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-07T16:08:11+08:00",
+      "end_timestamp": "2025-11-07T16:08:11+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "f816666b-a7f6-45d4-864c-ba7592bb4b4a": {
+      "user_message_count": 1,
+      "agent_message_count": 2,
+      "start_timestamp": "2026-02-27T21:16:57+08:00",
+      "end_timestamp": "2026-02-27T21:16:57+08:00",
+      "markdown_size_bytes": 6036,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    },
+    "f94e4ccd-e2c6-46b7-a22a-ceca3bd5bd51": {
+      "user_message_count": 1,
+      "agent_message_count": 0,
+      "start_timestamp": "2025-11-05T16:00:41+08:00",
+      "end_timestamp": "2025-11-05T16:00:41+08:00",
+      "markdown_size_bytes": 206,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "faef3812-df66-4e0d-bb8c-b26a8ef6ea00": {
+      "user_message_count": 2,
+      "agent_message_count": 2,
+      "start_timestamp": "2025-12-29T16:21:15+08:00",
+      "end_timestamp": "2025-12-29T16:23:22+08:00",
+      "markdown_size_bytes": 3178,
+      "provider": "copilotide",
+      "last_updated": "2026-08-12T11:26:20Z"
+    },
+    "fd72e12d-d1be-4b69-b28d-0f27296c201e": {
+      "user_message_count": 1,
+      "agent_message_count": 2,
+      "start_timestamp": "2026-02-09T08:38:46+08:00",
+      "end_timestamp": "2026-02-09T08:38:46+08:00",
+      "markdown_size_bytes": 5287,
+      "provider": "cursoride",
+      "last_updated": "2026-08-12T11:26:30Z"
+    }
+  }
+}
