@@ -1166,10 +1166,7 @@ def run_MLP_simulation(
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
     
-    # MARWIL 结束后恢复 bern bias，防止稀疏开火动作被拉向高熵中间态（无济于事）
-    if hasattr(student_agent.actor.net, 'fc_bern'):
-        with torch.no_grad():
-            student_agent.actor.net.fc_bern[-1].bias.clamp_(max=-2.5)
+    
     
     if IL_epoches > 0:
         print("IL Training Finished.")

@@ -85,7 +85,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # # 原·单层输出
             # self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            # nn.init.constant_(self.fc_bern.bias, -2.0)
+            # # nn.init.constant_(self.fc_bern.bias, -2.0)
 
             # 现·2层输出
             layers = []
@@ -101,7 +101,7 @@ class PolicyNetHybrid(torch.nn.Module):
             保险起见折个半，在18s内取憋着不开火的概率为p18=0.5，这样就是同时满足开火概率p18=(1-p0)^9=0.5,
             (1-1/(1+e^x))^9=0.5, 解出bern_logits=-2.5
             """
-            nn.init.constant_(self.fc_bern[-1].bias, -2.5) # 2.0
+            nn.init.constant_(self.fc_bern[-1].bias, 0.5) # 2.0
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temperature=1.0)

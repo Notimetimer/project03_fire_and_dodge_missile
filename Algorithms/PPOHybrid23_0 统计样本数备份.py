@@ -67,7 +67,7 @@ class PolicyNetHybrid(torch.nn.Module):
             bern_dim = self.action_dims['bern']
             self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            nn.init.constant_(self.fc_bern.bias, -2.0)
+            # nn.init.constant_(self.fc_bern.bias, -2.0)
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temperature=1.0)

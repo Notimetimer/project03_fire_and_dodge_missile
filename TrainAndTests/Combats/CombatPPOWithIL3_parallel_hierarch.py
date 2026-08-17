@@ -974,7 +974,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'red_out_cage': red_out_cage,
                     'red_out_cage_time': red_out_cage_time,
                     'blue_out_cage': blue_out_cage,
-                    'blue_out_cage_time': blue_out_cage_time
+                    'blue_out_cage_time': blue_out_cage_time,
                 }
                 
                 # 8. 发送回 Master
@@ -1364,11 +1364,6 @@ def run_MLP_simulation(
                     logger.add(_name, _val, epoch)
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
-    
-    # MARWIL 结束后恢复 bern bias，防止稀疏开火动作被拉向高熵中间态（无济于事）
-    if hasattr(student_agent.actor.net, 'fc_bern'):
-        with torch.no_grad():
-            student_agent.actor.net.fc_bern[-1].bias.clamp_(max=-2.5)
     
     if IL_epoches > 0:
         print("IL Training Finished.")
@@ -2161,10 +2156,6 @@ def run_MLP_simulation(
                     # 若 cat 熵已过高，临时取消额外熵奖励，压回基准值
                     if getattr(student_agent, 'entropy_cat', 0.0) > 2.5:
                         k_entropy_cat_scale = 1.0
-                    
-
-                    alpha_distill = max(alpha_distill, 0.05) # 不松开
-
 
                     logger.add("train_plus/alpha_distill", alpha_distill, total_steps)
                     logger.add("train_plus/k_entropy_cat_scale", k_entropy_cat_scale, total_steps)

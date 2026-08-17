@@ -214,7 +214,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # # 原·单层输出
             # self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            # nn.init.constant_(self.fc_bern.bias, -2.0)
+            # # nn.init.constant_(self.fc_bern.bias, -2.0)
 
             # 现·2层输出
             layers = []

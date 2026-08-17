@@ -79,7 +79,7 @@ class PolicyNetHybrid(torch.nn.Module):
         
         if hasattr(self, 'fc_bern'):
             # 关键：手动设置负偏置，使初始开火概率较低 (约 0.12)
-            nn.init.constant_(self.fc_bern.bias, -2.0)
+            # nn.init.constant_(self.fc_bern.bias, -2.0)
             nn.init.normal_(self.fc_bern.weight, std=0.01)
         
         # 离散动作 (fc_cat)：不需要特殊技巧

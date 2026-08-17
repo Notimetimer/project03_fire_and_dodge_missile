@@ -193,7 +193,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # # 原·单层输出
             # self.fc_bern = nn.Linear(prev_size, bern_dim)
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            # nn.init.constant_(self.fc_bern.bias, -2.0)
+            # # nn.init.constant_(self.fc_bern.bias, -2.0)
 
             # 现·2层输出
             layers = []
@@ -290,16 +290,17 @@ class PolicyNetHybrid(torch.nn.Module):
                 xb = xb.unsqueeze(0)
 
             # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
-            # cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
-            # delta_theta = xb[:, 8]
+            cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
+            delta_theta = xb[:, 8]
             ata = xb[:, 10]
             # alt = xb[:, 15] * 5e3
-            # sin_theta = xb[:, 17]
+            sin_theta = xb[:, 17]
             # locked = xb[:, 2]
             ammo = xb[:, 20]
             dist = xb[:, 9] * 10e3
-            # AA_hor = xb[:, 12]
+            AA_hor = xb[:, 12]
             t_since_launch = xb[:, 21] * 120
+            missile_in_mid_term = xb[:, 3] > 1e-6
 
             ammo_cond = (ammo > 0.0)
             # time_const_cond = t_since_launch >= torch.max(dist/(3*340)/2, torch.as_tensor(10.0, device=dist.device, dtype=dist.dtype))
@@ -309,6 +310,22 @@ class PolicyNetHybrid(torch.nn.Module):
             ata_cond = ata < math.pi / 2
             # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
             can_fire = ammo_cond & time_const_cond & ata_cond
+
+            # 禁止大离轴发射导弹                        
+            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(25))
+            can_fire = can_fire & delta_psi_cond
+            # 禁止俯冲发射导弹
+            theta = torch.arcsin(sin_theta)
+            azimuth = theta + delta_theta
+            theta_cond = theta >= azimuth - np.radians(15)
+            can_fire = can_fire & theta_cond
+
+            # 禁止中制导下开火
+            can_fire = can_fire & ~missile_in_mid_term
+            
+            # 禁止尾追长距离开火
+            far_chase = (AA_hor < math.pi/2) & (dist > 25e3)
+            can_fire = can_fire & ~ far_chase
             
             # if not can_fire:
             #     print("禁止开火")
@@ -457,7 +474,7 @@ class HybridActorWrapper(nn.Module):
                 ata_hor      = torch.acos(cos_ata_hor)
                 ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 20.0 * pi / 180.0)
                 locked_cond  = (locked > 0)
-                dist_cond    = (dist < 105e3)
+                dist_cond    = (dist < 90e3) # 105e3)
                 delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
                 wait_til_last_missile_ends = not missile_in_mid_term
                 can_fire_full = (ata_cond & locked_cond & dist_cond
@@ -821,7 +838,7 @@ class HybridActorWrapper(nn.Module):
             metrics['accuracy_cat'] = (correct_cat_sum / total_cat_dims).mean().item()
 
         # --- Bern ---
-        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and actor_outputs.get('bern') is not None:
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0 and actor_outputs.get('bern') is not None and 'bern' in expert_actions:
             bern_logits = actor_outputs['bern'].clamp(min=-1e8)
             dist = Bernoulli(logits=bern_logits)
             target = expert_actions['bern']
@@ -1170,7 +1187,7 @@ class PPOHybrid:
                 cat_match = cat_match & (joint_p <= conf_thres)
 
                 if AFiltered:
-                    cat_match = cat_match & adv_pos
+                    cat_match = cat_match # & adv_pos
 
                 cat_score = cat_match.float().view_as(mb_advantage) * alpha_distill_cat
 
@@ -1182,7 +1199,7 @@ class PPOHybrid:
                 bern_match = active & (bern_actions == teacher_bern_act).all(dim=-1)
 
                 if AFiltered:
-                    bern_match = bern_match & adv_pos
+                    bern_match = bern_match # & adv_pos
 
                 bern_score = bern_match.float().view_as(mb_advantage) * alpha_distill_bern
 

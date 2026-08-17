@@ -156,8 +156,8 @@ class PolicyNetHybrid(torch.nn.Module):
             # self.fc_bern = nn.Sequential(*layers)
 
             # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            nn.init.constant_(self.fc_bern.bias, -2.0) # 原·单层输出
-            # nn.init.constant_(self.fc_bern[-1].bias, -2.0) # 现·多层输出
+            # nn.init.constant_(self.fc_bern.bias, -2.0) # 原·单层输出
+            # nn.init.constant_(self.fc_bern[-1].bias, 0.0) # 现·多层输出
             
             # 为每一个伯努利动作维度创建一个温度参数
             # 初始化为 0 (即 temperature=1.0)

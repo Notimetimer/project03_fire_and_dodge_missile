@@ -1393,10 +1393,7 @@ def run_MLP_simulation(
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
     
-    # MARWIL 结束后恢复 bern bias，防止稀疏开火动作被拉向高熵中间态（无济于事）
-    if hasattr(student_agent.actor.net, 'fc_bern'):
-        with torch.no_grad():
-            student_agent.actor.net.fc_bern[-1].bias.clamp_(max=-2.5)
+    
     
     if IL_epoches > 0:
         print("IL Training Finished.")
@@ -2170,7 +2167,7 @@ def run_MLP_simulation(
                     teacher_wrapper = adistill_rule_wrappers[TEACHER_RULE_IDS.index(teacher_rule_num_cur)]
                     logger.add("train_plus/adistill_teacher_rule", teacher_rule_num_cur, total_steps)
 
-                    alpha_distill = max(0.001, beta_ADistill * (1.0 - total_steps / (max_steps * adistill_anneal_factor)))
+                    alpha_distill = max(0, beta_ADistill * (1.0 - total_steps / (max_steps * adistill_anneal_factor)))
                     # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
                     k_entropy_cat_scale = 1.0 # + 4.0 * (alpha_distill / beta_ADistill)
 

@@ -81,7 +81,7 @@ class PolicyNetHybrid(torch.nn.Module):
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             self.fc_bern = nn.Linear(prev_size, self.action_dims['bern'])
             # 伯努利头特殊初始化：使初始开火概率偏低
-            nn.init.constant_(self.fc_bern.bias, -2.0)
+            # nn.init.constant_(self.fc_bern.bias, -2.0)
             torch.nn.init.normal_(self.fc_bern.weight, mean=0.0, std=1e-3)
 
     def forward(self, x, h_in=None, max_std=1.0, action_masks=None):
