@@ -59,3 +59,5 @@ firing_probability_results.npz
 firing_probability_target_center.npz
 firing_probability_target_center.png
 结果展示/outputs/combat_matrix.csv
+*.csv
+*.png
