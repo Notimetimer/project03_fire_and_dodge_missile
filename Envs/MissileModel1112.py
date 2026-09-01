@@ -202,6 +202,7 @@ class missile_class:
         self.dt = 0.04 # 初始值
         self.v_dot = 0
         self.gliding = 0
+        self.energy_chage_rate = 0
 
     def Cd(self, mach):
         lis0 = np.array([
@@ -618,6 +619,7 @@ class missile_class:
         vmt += v_dot * dt
         
         self.v_dot = v_dot
+        self.energy_chage_rate = vmt * self.v_dot + g * vmt_[1]  # 对机械能求导
 
         # 速度过低没有舵效
         if vmt < self.speed_min:
