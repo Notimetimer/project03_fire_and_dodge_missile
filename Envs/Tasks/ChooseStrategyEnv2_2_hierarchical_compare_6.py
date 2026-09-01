@@ -206,6 +206,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         
         # 奖励项初始化
         r_event = 0.0      # 结果奖励
+        r_event1 = 0.0
+        r_event2 = 0.0
+        r_event3 = 0.0
         r_shaping = 0.0 # 约束与代价
 
         # --- 4. 约束奖励计算 (r_shaping) - 固定权重 ---
@@ -259,35 +262,36 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
 
 
-        # 角度奖励
+        # 角度/距离优势势函数 A：论文式(8)
         A_ego = 0.0
-        if not effective_threat:
-            case1 = distance <= 20e3
-            case2 = distance > 20e3
-            if distance < 20e3:
-                A_ego = 30 * np.exp(-np.degrees(ATA)**2 / 1300) * \
-                    (
-                        case1 * (39e3-distance)/38e3+
-                        case2 * 10e3/distance
-                    )
+        theta_e_deg = abs(np.degrees(ATA))
+        if 0 <= distance <= 1e3:
+            distance_factor = distance / 1e3
+        elif distance <= 20e3:
+            distance_factor = (39e3 - distance) / 38e3
+        else:
+            distance_factor = 10e3 / max(distance, 1.0)
+        A_ego = 30 * np.exp(-(theta_e_deg ** 2) / 1300.0) * distance_factor
 
-        # 防御引导（真实RWR告警或代理告警距离触发）
-        # if effective_threat:
-        # 替代下高奖励：最近的还存活的敌导弹减速度，追求最大程度消耗敌导弹能量
+        # 导弹威胁势函数 T：论文式(10)，只对最近的有效来袭导弹计算
         selected_missile = None
         missile_distance = 100e3
+        t_left = None
         for missile in alive_enm_missiles:
             dist2enm_missile = norm(ego.pos_-missile.pos_)
             if dist2enm_missile < missile_distance and missile.gliding:
+                close_rate = getattr(missile, 'target_close_v', 0.0)
+                if close_rate <= 1e-6:
+                    continue
                 selected_missile = missile
                 missile_distance = dist2enm_missile
-                missile_close_rate = missile.target_close_v
-                t_left = missile_distance/missile_close_rate
+                t_left = missile_distance / close_rate
         
-        T=0
-        if selected_missile:
+        T = 0.0
+        if selected_missile and effective_threat and t_left is not None:
             if 0<=t_left <= 50:
-                T = - 50 * exp(-np.degrees(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v))) ** 2) * (50-t_left/50)
+                theta_a_deg = abs(np.degrees(delta_psi_threat))
+                T = -50 * exp(-4.0 * (theta_a_deg ** 2) / 900.0) * ((50.0 - t_left) / 50.0)
 
         # 速度势能
         if speed<=80:
@@ -306,13 +310,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
 
         # --- 6. 结果奖励计算 (r_event) - 核心稀疏奖励 ---
         if shoot >= 1:
-            launch_times = getattr(ego, 'launch_times', [])
-            if len(launch_times) <= 1:
-                time_since_last_shoot = 120.0
-            else:
-                time_since_last_shoot = np.clip(self.t - launch_times[-2], 0, 120)
-
-            r_event -= (7-(ego.ammo+1))
+            # launch_missile_immediately 已先扣弹；6 枚初始弹时依次给 -2, -3, ..., -6
+            r_event -= np.clip(7 - ego.ammo, 2, 6) * fire_reward_weight
 
         if not hasattr(ego, '_last_phi_t'):
             ego._last_phi_t = -cycle_time
@@ -324,6 +323,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             ego._last_missile_potential = None
             ego._last_speed_potential = None
             ego._last_sideslip_potential = None
+        if not hasattr(ego, '_paper_last_target_locked'):
+            ego._paper_last_target_locked = target_locked
+            ego._paper_close_pass_rewarded = False
 
         # 威胁目标
         threat_distance_threshold1 = 12e3
@@ -364,9 +366,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             r_shaping += ego._threat_crossing_reward
 
 
-        # 逃脱导弹
+        # 扫描/锁定敌机：论文事件奖励 +10
+        if target_locked and not ego._paper_last_target_locked:
+            r_event += 10 * (1 - ego.dead)
+        ego._paper_last_target_locked = target_locked
+
+        # 近距离经过敌机：论文事件奖励 +10，单回合只记一次
+        if (not ego._paper_close_pass_rewarded) and distance <= 1e3:
+            r_event += 10 * (1 - ego.dead)
+            ego._paper_close_pass_rewarded = True
+
+        # 近距离躲避敌方导弹/威胁：论文事件奖励 +50
         if ego.escape_once:
-            r_event += 10 * (1-ego.dead) # 20
+            r_event += 50 * (1-ego.dead)
 
         "not done" # 胜负未分，所有偏好的奖励都一样
 
