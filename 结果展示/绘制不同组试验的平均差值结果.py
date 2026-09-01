@@ -255,9 +255,13 @@ def plot_interpolated_win_rates(exp_csv_dir,
                                 algo_labels=None,
                                 opp_list=None,
                                 display_titles=None,
+                                show_title=False,
+                                layout="2x2",
                                 smooth_window=61,
                                 fill_alpha=0.10,
-                                linewidth=1.2,
+                                linewidth=1.08,
+                                legend_alpha=0.35,
+                                legend_linewidth=2.2,
                                 invert_y=False,
                                 show_grid=True,
                                 save_path=None):
@@ -273,9 +277,13 @@ def plot_interpolated_win_rates(exp_csv_dir,
         algo_labels (dict or list): 算法在图例中的显示名称
         opp_list (list): 指定绘制的对手标识列表，None 则为所有
         display_titles (list or dict): 每个对手子图的标题
+        show_title (bool): 是否在子图上方显示标题（False 则彻底不绘制标题）
+        layout (str): 子图排布方式，可选 "2x2"(2行2列网格), "vertical"(上下排列), "horizontal"(左右单行)
         smooth_window (int): 平均曲线平滑窗口大小（值越大越平滑，<=1 表示不平滑）
         fill_alpha (float): 极值阴影区透明度（较小值使色块更浅）
-        linewidth (float): 平均值实线粗细（高不透明度实线）
+        linewidth (float): 绘制的曲线线宽（默认 1.08）
+        legend_alpha (float): 图例背景透明度（较小值更透明）
+        legend_linewidth (float): 图例中线条粗细
         invert_y (bool): 是否使用 1 - y 翻转数值
         show_grid (bool): 是否显示网格
         save_path (str): 图片保存路径（可选）
@@ -318,32 +326,37 @@ def plot_interpolated_win_rates(exp_csv_dir,
         else:
             algo_name_map[algo] = algo
 
-    # 子图布局（若子图 <= 4 则单行展开，否则多行网格）
-    if n_opps <= 4:
+    # 子图布局（支持 2x2 网格、垂直 vertical、横排 horizontal）
+    if layout in ["2x2", "grid"]:
+        n_rows, n_cols = 2, 2
+        fig_w, fig_h = 10.0, 7.2
+    elif layout == "vertical":
+        n_rows, n_cols = n_opps, 1
+        fig_w, fig_h = 8.0, 2.8 * n_opps + 0.6
+    elif layout == "horizontal":
         n_rows, n_cols = 1, n_opps
         fig_w, fig_h = 4.2 * n_cols, 4.5
     else:
-        n_cols = 4
+        n_cols = min(4, n_opps)
         n_rows = int(np.ceil(n_opps / n_cols))
-        fig_w, fig_h = 4.2 * n_cols, 3.8 * n_rows
+        fig_w, fig_h = 4.2 * n_cols, 3.5 * n_rows
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h), squeeze=False)
-    fig.suptitle("多组实验对手胜率评估 (均值实线与极值范围)", fontsize=16, y=0.98 if n_rows == 1 else 0.99)
     axes_flat = axes.flatten()
 
     for i, opp_id in enumerate(active_opponents):
         ax = axes_flat[i]
         
-        # 确定子图标题（若 opp_id 为数字 0, 1, 2, 3，显示为 Vs Rule0 / Rule1 等）
+        # 确定子图标题
         if display_titles is not None:
             if isinstance(display_titles, dict) and opp_id in display_titles:
                 title = display_titles[opp_id]
             elif isinstance(display_titles, list) and i < len(display_titles):
                 title = display_titles[i]
             else:
-                title = f"Vs Rule{opp_id}" if str(opp_id).isdigit() else f"Vs {opp_id}"
+                title = f"Agents WinRate Vs Opp. {i+1}"
         else:
-            title = f"Vs Rule{opp_id}" if str(opp_id).isdigit() else f"Vs {opp_id}"
+            title = f"Agents WinRate Vs Opp. {i+1}"
 
         has_plotted = False
         y_min_total, y_max_total = float('inf'), float('-inf')
@@ -362,15 +375,15 @@ def plot_interpolated_win_rates(exp_csv_dir,
                 max_y = smooth_curve(raw_max, smooth_window)
 
                 color = palette[j % len(palette)]
-                label_text = f"{algo_name_map[algo]} (N={num_runs})" if num_runs > 1 else str(algo_name_map[algo])
+                label_text = str(algo_name_map[algo])
 
-                # 1. 绘制平均值曲线：必须为纯实线 (linestyle='-')，完全不透明 (alpha=1.0)
+                # 1. 绘制平均值曲线：纯实线 (linestyle='-')，完全不透明 (alpha=1.0)
                 ax.plot(x_target, mean_y, label=label_text, color=color, 
                         linewidth=linewidth, linestyle='-', alpha=1.0, zorder=3)
                 
-                # 2. 绘制极值半透明浅色阴影
+                # 2. 绘制极值半透明浅色阴影（无边缘描边，纯阴影）
                 ax.fill_between(x_target, min_y, max_y, color=color, 
-                                alpha=fill_alpha, zorder=2)
+                                alpha=fill_alpha, edgecolor='none', linewidth=0, zorder=2)
 
                 y_min_total = min(y_min_total, np.nanmin(min_y))
                 y_max_total = max(y_max_total, np.nanmax(max_y))
@@ -380,10 +393,21 @@ def plot_interpolated_win_rates(exp_csv_dir,
         for hval in [0, 0.5, 1.0]:
             ax.axhline(hval, color='gray', linestyle='-', linewidth=0.8, alpha=0.8, zorder=1)
 
+        # 确定 y 轴标签（直接显示 WinRate Vs Opp. 1 ~ 4）
+        if display_titles is not None:
+            if isinstance(display_titles, dict) and opp_id in display_titles:
+                ylabel_text = display_titles[opp_id]
+            elif isinstance(display_titles, list) and i < len(display_titles):
+                ylabel_text = display_titles[i]
+            else:
+                ylabel_text = f"WinRate Vs Opp. {i+1}"
+        else:
+            ylabel_text = f"WinRate Vs Opp. {i+1}"
+
         # 坐标轴设置
         ax.set_xlabel('Step', fontweight='bold')
-        ax.set_ylabel('Win Rate', fontweight='bold')
-        ax.set_title(title, fontweight='bold')
+        ax.set_ylabel(ylabel_text, fontweight='bold')
+
         ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
 
         # 调整 y 轴范围
@@ -398,15 +422,33 @@ def plot_interpolated_win_rates(exp_csv_dir,
             ax.set_axisbelow(True)
             ax.grid(True, alpha=0.4)
 
-        # 图例
+        # 图例：超紧凑面积（1/3大小）、多列排布、半透明背景、线条加粗、支持鼠标拖动
         if has_plotted:
-            ax.legend(loc="lower right", fontsize='small', framealpha=0.85)
+            leg = ax.legend(
+                loc="lower right", 
+                ncol=2, 
+                fontsize=8, 
+                framealpha=legend_alpha,
+                borderpad=0.25,
+                labelspacing=0.2,
+                handlelength=1.0,
+                handletextpad=0.3,
+                columnspacing=0.6
+            )
+            if leg is not None:
+                # 允许鼠标拖动图例
+                leg.set_draggable(True)
+                # 设置图例中的线条加粗突出
+                for legobj in leg.get_lines():
+                    legobj.set_linewidth(legend_linewidth)
+                    legobj.set_alpha(1.0)
 
     # 隐藏多余子图
     for k in range(n_opps, len(axes_flat)):
         fig.delaxes(axes_flat[k])
 
-    fig.tight_layout(pad=1.2, w_pad=0.5, h_pad=0.8, rect=[0, 0, 1, 0.93])
+    # 上下左右充足间距 (pad=2.0, w_pad=2.2, h_pad=2.2)
+    fig.tight_layout(pad=2.0, w_pad=2.2, h_pad=2.2)
 
     if save_path:
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
@@ -429,12 +471,19 @@ if __name__ == "__main__":
     ALGO_LIST = None      # 算法列表，None 表示自动扫描 exp_csv 目录下所有子文件夹
     ALGO_LABELS = None    # 算法图例别名映射，支持 dict 如 {"PFSP_0": "PFSP (delta=0)"} 或 list
     OPP_LIST = None       # 对手列表，None 表示自动按 0, 1, 2, 3 排序读取
-    DISPLAY_TITLES = ['Agent Vs Rule0', 'Agent Vs Rule1', 'Agent Vs Rule2', 'Agent Vs Rule3'] # 各子图标题
+    
+    # 子图标题配置（已注释留作调试，SHOW_TITLE=False 默认彻底不绘制子图标题）
+    # DISPLAY_TITLES = ['Agents WinRate Vs Opp. 1', 'Agents WinRate Vs Opp. 2', 'Agents WinRate Vs Opp. 3', 'Agents WinRate Vs Opp. 4']
+    DISPLAY_TITLES = None
+    SHOW_TITLE = False    # 是否显示各子图上方的标题（设为 False 则彻底不显示任何标题）
 
-    # ==================== 3. 曲线平滑与视觉样式设置（可在此调节） ====================
+    # ==================== 3. 子图布局与视觉样式设置（可在此调节） ====================
+    LAYOUT = "2x2"        # 子图排列方式："2x2"(2行2列网格), "vertical"(上下垂直), "horizontal"(左右单行)
     SMOOTH_WINDOW = 61    # 平均曲线的滑动平均平滑窗口大小（推荐 51 ~ 101，数值越大越平滑，<=1 不平滑）
     FILL_ALPHA = 0.10     # 极值阴影区透明度（0.05 ~ 0.15，使阴影块更浅）
-    LINEWIDTH = 1.2       # 平均值实线粗细（原1.8的2/3，高不透明度纯实线）
+    LINEWIDTH = 1.08      # 平均值实线粗细（原1.2的0.9倍：1.08）
+    LEGEND_ALPHA = 0.35   # 图例背景透明度（更通透）
+    LEGEND_LINEWIDTH = 2.2 # 图例中展示的线条粗细（加粗便于辨认）
     INVERT_Y = False      # 是否 1 - y 反转数值（默认 False）
 
     # ==================== 4. 执行绘图 ====================
@@ -447,9 +496,13 @@ if __name__ == "__main__":
         algo_labels=ALGO_LABELS,
         opp_list=OPP_LIST,
         display_titles=DISPLAY_TITLES,
+        show_title=SHOW_TITLE,
+        layout=LAYOUT,
         smooth_window=SMOOTH_WINDOW,
         fill_alpha=FILL_ALPHA,
         linewidth=LINEWIDTH,
+        legend_alpha=LEGEND_ALPHA,
+        legend_linewidth=LEGEND_LINEWIDTH,
         invert_y=INVERT_Y,
         save_path=None
     )
