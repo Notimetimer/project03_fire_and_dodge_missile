@@ -23,7 +23,7 @@ collape_recover={ # 是否是崩盘后恢复
 mission_name = 'PFSP0_comapre1'
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
+actor_lr = 4e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30 # 180
 max_steps = 20e6 # 1320e4

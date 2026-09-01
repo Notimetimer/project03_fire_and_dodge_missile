@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "SLWSPFSP0.3-run-20260804-221605"
+    dir_name = "无预训练-run-20260817-222029" # "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [3,3,3] # [0,1,2,3,4] # [3]
+    rule_opponents = [3,5,6] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 

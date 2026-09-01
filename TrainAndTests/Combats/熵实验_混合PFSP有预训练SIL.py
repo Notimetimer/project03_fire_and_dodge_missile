@@ -6,19 +6,19 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"无预训练-run-20260817-225310")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"SLWSPFSP0.3SIL-run-20260818-003154")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = '无预训练'
+mission_name = 'SLWSPFSP0.3SIL'
 
 # 超参数
 actor_lr = 3e-5 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 0
+IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.995
@@ -26,7 +26,7 @@ lmbda = 0.995
 epochs = 4 # 10
 eps = 0.1 # 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
-alpha_il = 0.0  # 设置为0就是纯强化学习
+alpha_il = 0.05  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
@@ -125,12 +125,16 @@ if __name__=='__main__':
             'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1,
-        use_sil = 0,
+        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
+        use_sil = 1, # 启用自模仿学习
+        sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
+        chosen_quantile = 0.5, # 取最好的一半样本做自模仿
+        DARK_SIDE = 0, # sil找最好（0）还是最差（1）
+        RE_EXPLAIN = 1, # 启用动作重解释
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = -1,
-        MAX_HISTORY_SIZE = 50, # 300 # 100
+        ADMISSION_THRESHOLD = -1,  # 0.5,
+        MAX_HISTORY_SIZE = 50, # 150  # 300
         compete_old_rate = 0.0, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,

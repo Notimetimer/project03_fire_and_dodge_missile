@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "无预训练-run-20260817-222351"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
+    dir_name = "无预训练-run-20260829-233532"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 

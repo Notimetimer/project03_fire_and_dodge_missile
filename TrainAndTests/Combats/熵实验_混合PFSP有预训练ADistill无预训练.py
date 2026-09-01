@@ -47,7 +47,7 @@ dt_move = 0.07 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这�
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
+transition_dict_threshold = 8 * max_episode_duration//dt_action_cycle + 1  # 5*
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -116,13 +116,13 @@ if __name__=='__main__':
         transition_dict_threshold=transition_dict_threshold,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
-            'Rule_5': 1200,
-            'Rule_6': 1200,
+            # 'Rule_0': 1200, # debug
+            # "Rule_1": 1200,
+            # "Rule_2": 1200,
+            # 'Rule_3': 1200,
+            # 'Rule_4': 1200,
+            # 'Rule_5': 1200,
+            # 'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         sigma_elo = 400,
@@ -146,11 +146,11 @@ if __name__=='__main__':
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
         use_ADistill=1, # 温和蒸馏
-        beta_ADistill=0.2, # 0.003
+        beta_ADistill=1.0, # 0.003
         AFiltered = 1, # 温和蒸馏是否需要优势滤波，仅加强teacher和student都统一的样本的优势度
         conf_thres = 0.7, # 温和蒸馏不应该把概率压得太死
         bern_included = 0, # 开火也一起
-        adistill_anneal_factor = 0.3, # ADistill alpha 维持步数比例
+        adistill_anneal_factor = 0.2, # ADistill alpha 维持步数比例
         # Bdistill = 1, # 开火策略蒸馏
     )
     end_time = datetime.now()

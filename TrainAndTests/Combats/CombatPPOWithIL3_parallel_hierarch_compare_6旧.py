@@ -45,7 +45,8 @@ sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical_compare_6 import * # 奖励函数
-from Algorithms.PPOHybrid23_0_ARM import PPOHybrid, PolicyNetHybrid, HybridActorWrapper, ValueNet
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
 from VsBaseline_while_training_hierarch_plus import test_worker
@@ -996,23 +997,23 @@ def run_MLP_simulation(
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
     n_clusters=5,
     mission_name='无名',
-    actor_lr=5e-4,
-    critic_lr=2e-4,
-    actor_lr_init_il = 5e-4,
-    critic_lr_init_il = 2e-4,
+    actor_lr=1e-4,
+    critic_lr=5e-4,
+    actor_lr_init_il = 1e-4,
+    critic_lr_init_il = 5e-4,
     IL_epoches=180,
     max_steps=4 * 165e4,
     hidden_dim=None,
-    gamma=0.99,
-    lmbda=0.95,
+    gamma=0.995,
+    lmbda=0.995,
     epochs=4,
-    eps=0.1,
+    eps=0.2,
     k_entropy=None,
     alpha_il=0.05,
     il_batch_size=128,
     il_batch_size2=None,
     il_buffer_max_size=2e4,
-    mini_batch_size_mixed=120,
+    mini_batch_size_mixed=64,
     beta_mixed=1.0,
     label_smoothing=0.3,
     label_smoothing_mixed=0.01,
@@ -1160,7 +1161,7 @@ def run_MLP_simulation(
     )
     
     # ADistill 用：cat 熵系数的基准值（在 agent 类属性上动态缩放）
-    base_k_cat = student_agent.k_entropy.get('cat', 0.01)
+    base_k_cat = student_agent.k_entropy.get('cat', 0.008)
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
