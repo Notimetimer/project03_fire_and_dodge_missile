@@ -1,3 +1,6 @@
+
+
+
 '''
 actor内置开火mask
 '''
@@ -10,7 +13,6 @@ import torch.nn.functional as F
 from torch.distributions import Normal, Categorical, Bernoulli
 import copy
 import os, sys
-import json
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
@@ -19,24 +21,6 @@ from Algorithms.MLP_heads import ValueNet
 
 def sigmoid(x):
     return 1/(1+np.exp(-x))
-
-# =============================================================================
-#  机动mask(manu_mask) 开关配置
-#  由同目录下的 mask_config.json 控制该开关的默认取值。
-#  该配置只在 PolicyNetHybrid.__init__ 中读取一次，缓存为实例属性 self.manu_mask，
-#  forward() 直接使用该实例属性控制机动mask，不会重复读盘。
-# =============================================================================
-_MASK_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mask_config.json')
-
-def load_mask_config():
-    cfg = {'manu_mask': 0}
-    try:
-        with open(_MASK_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            loaded = json.load(f)
-        cfg['manu_mask'] = int(loaded.get('manu_mask', 0))
-    except Exception as e:
-        print(f"[mask_config] 加载 {_MASK_CONFIG_PATH} 失败，使用默认值 manu_mask=0。错误: {e}")
-    return cfg
 
 # =============================================================================
 # 0. RND 网络定义
@@ -129,10 +113,6 @@ class PolicyNetHybrid(torch.nn.Module):
     def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
-
-        # [新增] 机动mask(manu_mask) 开关：只在网络初始化时从
-        # mask_config.json 读取一次，永久保存为实例属性，forward() 不再重复读取磁盘。
-        self.manu_mask = load_mask_config()['manu_mask']
         # self.Autoregressive = Autoregressive
         # # 确定bern_dim和主干网络输入维度
         # bern_dim = self.action_dims.get('bern', 0)
@@ -239,9 +219,7 @@ class PolicyNetHybrid(torch.nn.Module):
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temperature 参数
-    # [新增] manu_mask: 机动mask开关，仅由 self.manu_mask 控制（__init__ 时从 mask_config.json 读取一次，不重复读盘）
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=0):
-        manu_mask = self.manu_mask
         if isinstance(temperature, dict):
             temp_cat = temperature.get('cat', 1.0)
             temp_bern = temperature.get('bern', 1.0)
@@ -281,46 +259,8 @@ class PolicyNetHybrid(torch.nn.Module):
             cat_logits_all = self.fc_cat(shared_features)
             
             # 1. 切分 Logits
-            cat_logits_list = list(torch.split(cat_logits_all, self.cat_dims, dim=-1))
-
-            # [新增] 机动 mask：仅对 action_hor (index 1) 屏蔽非法动作，由 self.manu_mask 控制
-            # (mask_on 未使用，保留参数仅为与 PPOHybrid23_0.py 接口保持一致，减小对原代码的修改面)
-            #   warning==1                          -> 屏蔽动作 0/1/5/6
-            #   warning==0 & missile_in_mid_term==1  -> 屏蔽动作 0/2/4
-            #   warning==0 & missile_in_mid_term==0  -> 屏蔽动作 2/3/4
-            if manu_mask and len(cat_logits_list) > 1:
-                # print("已启用动作头屏蔽")
-                xb_cat = x
-                if xb_cat.dim() == 1:
-                    xb_cat = xb_cat.unsqueeze(0)
-                warning_flag_cat = xb_cat[:, 5] > 1e-6
-                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
-                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
-                cond_no_warn_no_mid = (~warning_flag_cat) & (~missile_in_mid_term_cat)
-
-                hor_logits = cat_logits_list[1]
-                # # 黑名单
-                # illegal_mask = torch.zeros_like(hor_logits, dtype=torch.bool)
-                # illegal_mask[:, [0, 1, 5, 6]] = illegal_mask[:, [0, 1, 5, 6]] | warning_flag_cat.unsqueeze(1)
-                # illegal_mask[:, [0, 2, 4]] = illegal_mask[:, [0, 2, 4]] | cond_no_warn_mid.unsqueeze(1)
-                # illegal_mask[:, [2, 3, 4]] = illegal_mask[:, [2, 3, 4]] | cond_no_warn_no_mid.unsqueeze(1)
-                # cat_logits_list[1] = hor_logits.masked_fill(illegal_mask, -1e8)
-                
-                # 白名单
-                # 3种互斥状态下 7维动作的白名单向量 (1/True 表示允许执行，0/False 表示屏蔽)
-                #                             追击,左偏,左3,置尾,右9,右偏,占中
-                m_warn_allow   = torch.tensor([0,   0,  1,  1,  1,  0,   0], dtype=torch.bool, device=x.device) # 告警: 允许 2,3,4
-                m_mid_allow    = torch.tensor([0,   1,  0,  1,  0,  1,   0], dtype=torch.bool, device=x.device) # 无告警+有中导: 允许 1,3,5
-                m_no_mid_allow = torch.tensor([1,   1,  0,  0,  0,  1,   0], dtype=torch.bool, device=x.device) # 无告警+无中导: 允许 0,1,5
-
-                # 利用广播合成批量的 2D 白名单矩阵，取反 (~legal_mask) 得到屏蔽掩码
-                legal_mask = (
-                    warning_flag_cat.unsqueeze(1) & m_warn_allow |
-                    cond_no_warn_mid.unsqueeze(1) & m_mid_allow |
-                    cond_no_warn_no_mid.unsqueeze(1) & m_no_mid_allow
-                )
-                cat_logits_list[1] = hor_logits.masked_fill(~legal_mask, -1e8)
-
+            cat_logits_list = torch.split(cat_logits_all, self.cat_dims, dim=-1)
+            
             # 2. 获取温度 (temperature = exp(log_temp))
             # temp_cat 形状: (num_heads, )
             # temperatures = 1.0  # [修改] 使用传入的 temperature
@@ -2248,9 +2188,6 @@ class PPOHybrid:
             env_masks = to_tensor(transition_dict['active_masks'], torch.float).view(-1, 1)
         else:
             env_masks = torch.ones(num_samples, 1, device=self.device)
-
-        if env_masks.sum() < 1:
-            return  # 没有可用样本，直接跳过
 
         # ── 冻结 backbone / 其他动作头，仅放开 fc_cat ────────────────────────
         net = self.actor.net

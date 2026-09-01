@@ -6,14 +6,19 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"SLWSPFSP0.3-run-20260817-100110")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"SLWSPFSP0.3-run-20260817-100110")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'SLWSPFSP0.3'
+# 读取 mask_config.json 中的 manu_mask 状态 (相对路径)
+mask_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Algorithms', 'mask_config.json')
+with open(mask_config_path, 'r', encoding='utf-8') as f:
+    manu_mask = json.load(f).get('manu_mask', 0)
+
+mission_name = f'SLWSPFSP0.3_flymask_{manu_mask}'
 
 # 超参数
 actor_lr = 3e-5 # 4 1e-4
