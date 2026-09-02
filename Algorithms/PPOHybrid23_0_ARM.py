@@ -10,33 +10,75 @@ import torch.nn.functional as F
 from torch.distributions import Normal, Categorical, Bernoulli
 import copy
 import os, sys
-import json
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
-from Algorithms.MLP_heads import ValueNet
 
 def sigmoid(x):
     return 1/(1+np.exp(-x))
 
-# =============================================================================
-#  机动mask(manu_mask) 开关配置
-#  由同目录下的 mask_config.json 控制该开关的默认取值。
-#  该配置只在 PolicyNetHybrid.__init__ 中读取一次，缓存为实例属性 self.manu_mask，
-#  forward() 直接使用该实例属性控制机动mask，不会重复读盘。
-# =============================================================================
-_MASK_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mask_config.json')
 
-def load_mask_config():
-    cfg = {'manu_mask': 0}
-    try:
-        with open(_MASK_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            loaded = json.load(f)
-        cfg['manu_mask'] = int(loaded.get('manu_mask', 0))
-    except Exception as e:
-        print(f"[mask_config] 加载 {_MASK_CONFIG_PATH} 失败，使用默认值 manu_mask=0。错误: {e}")
-    return cfg
+class ValueNet(torch.nn.Module):
+    """
+    ARM-PPO critic: global obs -> MLP -> LSTM -> value.
+    Keeps the old ValueNet(state_dim, hidden_dim) construction signature.
+    """
+    def __init__(self, state_dim, hidden_dim, lstm_hidden_size=None, lstm_num_layers=1):
+        super(ValueNet, self).__init__()
+        if hidden_dim is None:
+            hidden_dim = [256, 256]
+        if isinstance(hidden_dim, int):
+            hidden_dim = [hidden_dim]
+
+        layers = []
+        prev_size = state_dim
+        for layer_size in hidden_dim:
+            layers.append(torch.nn.Linear(prev_size, layer_size))
+            layers.append(nn.ReLU())
+            prev_size = layer_size
+        self.net = nn.Sequential(*layers)
+
+        self.lstm_num_layers = int(lstm_num_layers)
+        self.lstm_hidden_size = int(lstm_hidden_size or prev_size)
+        self.lstm = nn.LSTM(prev_size, self.lstm_hidden_size,
+                            num_layers=self.lstm_num_layers,
+                            batch_first=True)
+        self.fc_out = torch.nn.Linear(self.lstm_hidden_size, 1)
+
+    def _normalize_lstm_h(self, h, batch_size, device, dtype):
+        if h is None:
+            return None
+        if isinstance(h, tuple):
+            h0, c0 = h
+        else:
+            h0 = h
+            c0 = torch.zeros_like(h0)
+        h0 = h0.to(device=device, dtype=dtype)
+        c0 = c0.to(device=device, dtype=dtype)
+        if h0.dim() == 2:
+            h0 = h0.unsqueeze(1)
+            c0 = c0.unsqueeze(1)
+        if h0.size(1) == 1 and batch_size > 1:
+            h0 = h0.expand(-1, batch_size, -1).contiguous()
+            c0 = c0.expand(-1, batch_size, -1).contiguous()
+        return h0, c0
+
+    def forward(self, x, h=None, return_h=False):
+        if x.dim() == 1:
+            x = x.unsqueeze(0).unsqueeze(0)
+        elif x.dim() == 2:
+            x = x.unsqueeze(1)
+
+        B, T, D = x.shape
+        x_flat = x.reshape(B * T, D)
+        features = self.net(x_flat).view(B, T, -1)
+        h_in = self._normalize_lstm_h(h, B, x.device, x.dtype)
+        lstm_out, h_out = self.lstm(features, h_in)
+        values = self.fc_out(lstm_out.reshape(B * T, -1))
+        if return_h:
+            return values, h_out
+        return values
 
 # =============================================================================
 # 0. RND 网络定义
@@ -123,41 +165,24 @@ class RNDPredictionNet(nn.Module):
 
 class PolicyNetHybrid(torch.nn.Module):
     """
-    支持混合动作空间的策略网络 (纯 MLP)。
-    引入了可学习的温度参数来控制离散和伯努利动作的熵。
-    """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0):
-        super(PolicyNetHybrid, self).__init__()
-        self.action_dims = action_dims_dict
+    ARM-PPO policy net.
 
-        # [新增] 机动mask(manu_mask) 开关：只在网络初始化时从
-        # mask_config.json 读取一次，永久保存为实例属性，forward() 不再重复读取磁盘。
-        self.manu_mask = load_mask_config()['manu_mask']
-        # self.Autoregressive = Autoregressive
-        # # 确定bern_dim和主干网络输入维度
-        # bern_dim = self.action_dims.get('bern', 0)
-        
-        # # 如果需要Autoregressive，bern头网络直接处理原始state，输出再拼接到state后面
-        # if self.Autoregressive == 1 and bern_dim > 0:
-        #     # bern头网络：从原始state直接计算bern_logits
-        #     layers_bern = []
-        #     prev_size_bern = state_dim
-        #     for layer_size in hidden_dims:
-        #         layers_bern.append(nn.Linear(prev_size_bern, layer_size))
-        #         layers_bern.append(nn.ReLU())
-        #         prev_size_bern = layer_size
-        #     layers_bern.append(nn.Linear(prev_size_bern, int(prev_size_bern/2)))
-        #     layers_bern.append(nn.ReLU())
-        #     layers_bern.append(nn.Linear(int(prev_size_bern/2), bern_dim))
-        #     self.fc_bern = nn.Sequential(*layers_bern)
-        #     nn.init.constant_(self.fc_bern[-1].bias, 0)
-        #     # 主干网络输入维度增加bern_dim
-        #     backbone_input_dim = state_dim + bern_dim
-        # else:
-        #     backbone_input_dim = state_dim
+    Paper alignment:
+      local obs -> MLP -> LSTM -> maneuver head -> sampled maneuver m
+      parameter heads use concat([z, embed(m)]) so x = f(z, m).
+    """
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5,
+                 head_hidden_layer_num=1, Autoregressive=1,
+                 use_lstm=True, lstm_hidden_size=None, lstm_num_layers=1):
+        super(PolicyNetHybrid, self).__init__()
+        self.action_dims = copy.deepcopy(action_dims_dict)
+        self.Autoregressive = int(Autoregressive)
+        if hidden_dims is None:
+            hidden_dims = [256, 256]
+        if isinstance(hidden_dims, int):
+            hidden_dims = [hidden_dims]
         backbone_input_dim = state_dim
 
-        # 共享主干网络
         layers = []
         prev_size = backbone_input_dim
         for layer_size in hidden_dims:
@@ -166,82 +191,111 @@ class PolicyNetHybrid(torch.nn.Module):
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
 
-        # 1. 连续动作头 (Continuous)
-        # 参数: log_std (控制高斯分布宽度)
+        self.use_lstm = bool(use_lstm)
+        self.lstm_num_layers = int(lstm_num_layers)
+        self.lstm_hidden_size = int(lstm_hidden_size or prev_size)
+        if self.use_lstm:
+            self.lstm = nn.LSTM(prev_size, self.lstm_hidden_size,
+                                num_layers=self.lstm_num_layers,
+                                batch_first=True)
+            prev_size = self.lstm_hidden_size
+
+        self.feature_dim = prev_size
+
         if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
             cont_dim = self.action_dims['cont']
             self.log_std_cont = nn.Parameter(torch.log(torch.ones(cont_dim) * init_std))
 
-            # # # 原·单层动作头
-            # self.fc_mu = nn.Linear(prev_size, cont_dim)
-            
-            # 现·2层动作头
             layers = []
-            # for _ in range(head_hidden_layer_num):
             layers.append(nn.Linear(prev_size, int(prev_size/2)))
             layers.append(nn.ReLU())
             layers.append(nn.Linear(int(prev_size/2), cont_dim))
             self.fc_mu = nn.Sequential(*layers)
-            
 
-        # 2. 离散动作头 (Categorical)
-        # 参数: log_temp_cat (控制 Softmax 温度)
         if 'cat' not in self.action_dims:
             self.action_dims['cat'] = []
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            self.cat_dims = self.action_dims['cat']  # list, e.g., [4, 10]
-            total_cat_dim = sum(self.cat_dims)
-            # # 原·单层输出
-            # self.fc_cat = nn.Linear(prev_size, total_cat_dim)
-            # 现·2层动作头
-            layers = []
-            # for _ in range(head_hidden_layer_num):
-            layers.append(nn.Linear(prev_size, int(prev_size/2)))
-            layers.append(nn.ReLU())
-            layers.append(nn.Linear(int(prev_size/2), total_cat_dim))
-            self.fc_cat = nn.Sequential(*layers)
-            
-            # 为每一个独立的离散头 (Head) 创建一个温度参数
-            # 比如有 [4, 10] 两个头，我们就需要 2 个温度参数
-            # 初始化为 0 (即 temperature=1.0)，保持原网络特性，让网络自己学去增大熵
-            # self.log_temp_cat = nn.Parameter(torch.zeros(len(self.cat_dims))) 
+            self.cat_dims = list(self.action_dims['cat'])
+            self.autoregressive_cat = bool(self.Autoregressive and len(self.cat_dims) > 1)
+            if self.autoregressive_cat:
+                maneuver_dim = self.cat_dims[0]
+                param_total_dim = sum(self.cat_dims[1:])
+                self.fc_maneuver = nn.Sequential(
+                    nn.Linear(prev_size, int(prev_size/2)),
+                    nn.ReLU(),
+                    nn.Linear(int(prev_size/2), maneuver_dim),
+                )
+                self.maneuver_embedding = nn.Embedding(maneuver_dim, prev_size)
+                self.fc_cat_params = nn.Sequential(
+                    nn.Linear(prev_size * 2, int(prev_size/2)),
+                    nn.ReLU(),
+                    nn.Linear(int(prev_size/2), param_total_dim),
+                )
+                self.fc_cat = nn.ModuleList([self.fc_maneuver, self.fc_cat_params])
+            else:
+                total_cat_dim = sum(self.cat_dims)
+                self.fc_cat = nn.Sequential(
+                    nn.Linear(prev_size, int(prev_size/2)),
+                    nn.ReLU(),
+                    nn.Linear(int(prev_size/2), total_cat_dim),
+                )
 
-        # 3. 伯努利动作头 (Bernoulli)
-        # 参数: log_temp_bern (控制 Sigmoid 陡峭度)
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
             bern_dim = self.action_dims['bern']
-            
-            # # 仅在非Autoregressive模式下才创建共享特征层的bern头
-            # if self.Autoregressive != 1:
-            # # 原·单层输出
-            # self.fc_bern = nn.Linear(prev_size, bern_dim)
-            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            # # nn.init.constant_(self.fc_bern.bias, -2.0)
 
-            # 现·2层输出
             layers = []
-            # for _ in range(head_hidden_layer_num):
             layers.append(nn.Linear(prev_size, int(prev_size/2)))
             layers.append(nn.ReLU())
             layers.append(nn.Linear(int(prev_size/2), bern_dim))
             self.fc_bern = nn.Sequential(*layers)
-            # 初始化 bias 为 -2，使初始开火概率较低（sigmoid(-2) ≈ 0.12）
-            """
-            bern头的logits必须偏置初始化为负数，假设为x, 那么每一步的开火概率为p0=1/(1+e^x)
-            t0=2s为一个决策周期，从105km（刚允许开火）到80km（威胁比较大）开火，双方以两马赫平均接近速率接近，历时36s，
-            保险起见折个半，在18s内取憋着不开火的概率为p18=0.5，这样就是同时满足开火概率p18=(1-p0)^9=0.5,
-            (1-1/(1+e^x))^9=0.5, 解出bern_logits=-2.5
-            """
-            nn.init.constant_(self.fc_bern[-1].bias, 0.0) # -2.5) # 2.0
-            
-            # 为每一个伯努利动作维度创建一个温度参数
-            # 初始化为 0 (即 temperature=1.0)
-            # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
+            nn.init.constant_(self.fc_bern[-1].bias, -1.0)
+
+    def _normalize_lstm_h(self, h, batch_size, device, dtype):
+        if h is None:
+            return None
+        if isinstance(h, tuple):
+            h0, c0 = h
+        else:
+            h0 = h
+            c0 = torch.zeros_like(h0)
+        h0 = h0.to(device=device, dtype=dtype)
+        c0 = c0.to(device=device, dtype=dtype)
+        if h0.dim() == 2:
+            h0 = h0.unsqueeze(1)
+            c0 = c0.unsqueeze(1)
+        if h0.size(1) == 1 and batch_size > 1:
+            h0 = h0.expand(-1, batch_size, -1).contiguous()
+            c0 = c0.expand(-1, batch_size, -1).contiguous()
+        return h0, c0
+
+    def extract_features(self, x, h=None, return_h=False):
+        squeeze_out = False
+        if x.dim() == 1:
+            x = x.unsqueeze(0).unsqueeze(0)
+        elif x.dim() == 2:
+            x = x.unsqueeze(1)
+            squeeze_out = True
+
+        B, T, D = x.shape
+        x_flat = x.reshape(B * T, D)
+        mlp_features = self.net(x_flat)
+
+        h_out = None
+        if self.use_lstm:
+            lstm_input = mlp_features.view(B, T, -1)
+            h_in = self._normalize_lstm_h(h, B, x.device, x.dtype)
+            lstm_out, h_out = self.lstm(lstm_input, h_in)
+            shared_features = lstm_out.reshape(B * T, -1)
+        else:
+            shared_features = mlp_features
+
+        if return_h:
+            return shared_features, x_flat, h_out
+        return shared_features
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temperature 参数
-    # [新增] manu_mask: 机动mask开关，仅由 self.manu_mask 控制（__init__ 时从 mask_config.json 读取一次，不重复读盘）
-    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=0):
-        manu_mask = self.manu_mask
+    def forward(self, x, h=None, min_std=1e-6, max_std=1.0, action_masks=None,
+                temperature=1.0, mask_on=0, cat_actions=None, return_h=False):
         if isinstance(temperature, dict):
             temp_cat = temperature.get('cat', 1.0)
             temp_bern = temperature.get('bern', 1.0)
@@ -249,19 +303,7 @@ class PolicyNetHybrid(torch.nn.Module):
             temp_cat = temperature
             temp_bern = temperature
 
-        # # --- 处理Autoregressive模式 ---
-        # if self.Autoregressive == 1 and hasattr(self, 'fc_bern'):
-        #     # 1. 先从原始state计算bern_logits（无mask）
-        #     bern_logits_direct = self.fc_bern(x)
-        #     # 2. 将bern输出拼接到state后面
-        #     x_enhanced = torch.cat([x, bern_logits_direct], dim=-1)
-        #     # 3. 使用增强后的输入通过主干网络
-        #     shared_features = self.net(x_enhanced)
-        # else:
-        #     shared_features = self.net(x)
-        #     bern_logits_direct = None
-        shared_features = self.net(x)
-        bern_logits_direct = None
+        shared_features, x_flat, h_out = self.extract_features(x, h=h, return_h=True)
 
         outputs = {'cont': None, 'cat': None, 'bern': None}
 
@@ -278,65 +320,38 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # --- Categorical ---
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
-            cat_logits_all = self.fc_cat(shared_features)
-            
-            # 1. 切分 Logits
-            cat_logits_list = list(torch.split(cat_logits_all, self.cat_dims, dim=-1))
+            if getattr(self, 'autoregressive_cat', False):
+                maneuver_logits = self.fc_maneuver(shared_features)
+                maneuver_probs = F.softmax(maneuver_logits / (temp_cat + 1e-8), dim=-1)
 
-            # [新增] 机动 mask：仅对 action_hor (index 1) 屏蔽非法动作，由 self.manu_mask 控制
-            # (mask_on 未使用，保留参数仅为与 PPOHybrid23_0.py 接口保持一致，减小对原代码的修改面)
-            #   warning==1                          -> 屏蔽动作 0/1/5/6
-            #   warning==0 & missile_in_mid_term==1  -> 屏蔽动作 0/2/4
-            #   warning==0 & missile_in_mid_term==0  -> 屏蔽动作 2/3/4
-            if manu_mask and len(cat_logits_list) > 1:
-                print("已启用动作头屏蔽")
-                xb_cat = x
-                if xb_cat.dim() == 1:
-                    xb_cat = xb_cat.unsqueeze(0)
-                warning_flag_cat = xb_cat[:, 5] > 1e-6
-                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
-                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
-                cond_no_warn_no_mid = (~warning_flag_cat) & (~missile_in_mid_term_cat)
+                if cat_actions is not None:
+                    if not isinstance(cat_actions, torch.Tensor):
+                        cat_actions = torch.tensor(np.array(cat_actions), device=shared_features.device)
+                    cat_actions = cat_actions.to(device=shared_features.device, dtype=torch.long)
+                    if cat_actions.dim() == 3:
+                        maneuver_idx = cat_actions.reshape(-1, cat_actions.shape[-1])[:, 0]
+                    elif cat_actions.dim() == 2:
+                        maneuver_idx = cat_actions[:, 0]
+                    else:
+                        maneuver_idx = cat_actions.reshape(-1)
+                    maneuver_embed = self.maneuver_embedding(maneuver_idx)
+                else:
+                    maneuver_embed = maneuver_probs @ self.maneuver_embedding.weight
 
-                hor_logits = cat_logits_list[1]
-                # # 黑名单
-                # illegal_mask = torch.zeros_like(hor_logits, dtype=torch.bool)
-                # illegal_mask[:, [0, 1, 5, 6]] = illegal_mask[:, [0, 1, 5, 6]] | warning_flag_cat.unsqueeze(1)
-                # illegal_mask[:, [0, 2, 4]] = illegal_mask[:, [0, 2, 4]] | cond_no_warn_mid.unsqueeze(1)
-                # illegal_mask[:, [2, 3, 4]] = illegal_mask[:, [2, 3, 4]] | cond_no_warn_no_mid.unsqueeze(1)
-                # cat_logits_list[1] = hor_logits.masked_fill(illegal_mask, -1e8)
-                
-                # 白名单
-                # 3种互斥状态下 7维动作的白名单向量 (1/True 表示允许执行，0/False 表示屏蔽)
-                #                             追击,左偏,左3,置尾,右9,右偏,占中
-                m_warn_allow   = torch.tensor([0,   0,  1,  1,  1,  0,   0], dtype=torch.bool, device=x.device) # 告警: 允许 2,3,4
-                m_mid_allow    = torch.tensor([0,   1,  0,  1,  0,  1,   0], dtype=torch.bool, device=x.device) # 无告警+有中导: 允许 1,3,5
-                m_no_mid_allow = torch.tensor([1,   0,  0,  0,  0,  0,   1], dtype=torch.bool, device=x.device) # 无告警+无中导: 允许 0,1,5
-
-                # 利用广播合成批量的 2D 白名单矩阵，取反 (~legal_mask) 得到屏蔽掩码
-                legal_mask = (
-                    warning_flag_cat.unsqueeze(1) & m_warn_allow |
-                    cond_no_warn_mid.unsqueeze(1) & m_mid_allow |
-                    cond_no_warn_no_mid.unsqueeze(1) & m_no_mid_allow
-                )
-                cat_logits_list[1] = hor_logits.masked_fill(~legal_mask, -1e8)
-
-            # 2. 获取温度 (temperature = exp(log_temp))
-            # temp_cat 形状: (num_heads, )
-            # temperatures = 1.0  # [修改] 使用传入的 temperature
-            # >2 强随机，<0.1 强确定性
-            
-            # 3. 应用温度缩放 (Logits / temperature) 并 Softmax
-            # 较高的 temperature -> Logits 数值变小 -> Softmax 后分布趋向均匀 (熵增大)
-            # 较低的 temperature -> Logits 数值差距拉大 -> Softmax 后分布趋向 One-hot (熵减小)
-            final_probs_list = []
-            for i, logits in enumerate(cat_logits_list):
-                # 对应的温度: temperatures[i]
-                # 使用 temp_cat 进行缩放, 防止除0
-                scaled_logits = logits / (temp_cat + 1e-8)
-                final_probs_list.append(F.softmax(scaled_logits, dim=-1))
-            
-            outputs['cat'] = final_probs_list
+                param_input = torch.cat([shared_features, maneuver_embed], dim=-1)
+                param_logits_all = self.fc_cat_params(param_input)
+                param_logits_list = torch.split(param_logits_all, self.cat_dims[1:], dim=-1)
+                final_probs_list = [maneuver_probs]
+                for logits in param_logits_list:
+                    final_probs_list.append(F.softmax(logits / (temp_cat + 1e-8), dim=-1))
+                outputs['cat'] = final_probs_list
+            else:
+                cat_logits_all = self.fc_cat(shared_features)
+                cat_logits_list = torch.split(cat_logits_all, self.cat_dims, dim=-1)
+                outputs['cat'] = [
+                    F.softmax(logits / (temp_cat + 1e-8), dim=-1)
+                    for logits in cat_logits_list
+                ]
 
         # --- Bernoulli (核心修改区域) ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
@@ -348,9 +363,7 @@ class PolicyNetHybrid(torch.nn.Module):
             bern_logits = self.fc_bern(shared_features)
 
             # Compute can_fire mask from flattened observation x (always applied)
-            xb = x
-            if xb.dim() == 1:
-                xb = xb.unsqueeze(0)
+            xb = x_flat
 
             # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
             cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
@@ -436,6 +449,8 @@ class PolicyNetHybrid(torch.nn.Module):
             # [新增] 返回 fire_mask，用于在 update 中过滤 Bernoulli 熵计算
             outputs['fire_mask'] = mask.float()  # shape: (batch, bern_dim)
             
+        if return_h:
+            return outputs, h_out
         return outputs
 
 # =============================================================================
@@ -466,6 +481,21 @@ class HybridActorWrapper(nn.Module):
 
     def _scale_action_to_exec(self, a_norm):
         return self.amin + (a_norm + 1.0) * 0.5 * self.action_span
+
+    def _call_policy(self, state, h=None, max_std=None, temperature=1.0,
+                     mask_on=0, cat_actions=None, return_h=False):
+        result = self.net(
+            state,
+            h=h,
+            max_std=max_std,
+            temperature=temperature,
+            mask_on=mask_on,
+            cat_actions=cat_actions,
+            return_h=return_h,
+        )
+        if return_h:
+            return result
+        return result, None
 
     # [修改] 增加 check_obs 参数，默认为 None， [新增] 增加 temperature 参数
     def get_action(self, state, h=None, explore=True, max_std=None, check_obs=None, bern_threshold=0.5, temperature=1.0, mask_on=0): # 1
@@ -546,7 +576,10 @@ class HybridActorWrapper(nn.Module):
                 _deploy_can_fire = can_fire_full.all().item()  # 转成 bool
 
         # 调用网络（net 内部只施加弹药+冷却 mask）
-        actor_outputs = self.net(state, max_std=max_std, temperature=temperature, mask_on=mask_on)
+        actor_outputs, h_out = self._call_policy(
+            state, h=h, max_std=max_std, temperature=temperature,
+            mask_on=mask_on, return_h=True
+        )
         
         # # [原有] 调用网络
         # actor_outputs = self.net(state, max_std=max_std)  # 如果需要gru，改动这一行
@@ -583,10 +616,26 @@ class HybridActorWrapper(nn.Module):
             cat_exec_list = []      # 用于 actions_exec
             cat_indices_raw_list = [] # 用于 actions_raw
             cat_probs_check_list = [] #  记录 Cat 概率
-            
-            for probs in cat_probs_list:
+            forced_first_idx = None
+
+            if getattr(self.net, 'autoregressive_cat', False) and len(cat_probs_list) > 1:
+                first_probs = cat_probs_list[0]
+                first_dist = Categorical(probs=first_probs)
+                first_idx = first_dist.sample() if explore_opts['cat'] else torch.argmax(first_dist.probs, dim=-1)
+                forced_first_idx = first_idx
+                conditioned_cat = first_idx.view(-1, 1)
+                conditioned_outputs, _ = self._call_policy(
+                    state, h=h, max_std=max_std, temperature=temperature,
+                    mask_on=mask_on, cat_actions=conditioned_cat, return_h=True
+                )
+                cat_probs_list = conditioned_outputs['cat']
+
+            for i, probs in enumerate(cat_probs_list):
                 dist = Categorical(probs=probs)
-                idx = dist.sample() if explore_opts['cat'] else torch.argmax(dist.probs, dim=-1)
+                if i == 0 and forced_first_idx is not None:
+                    idx = forced_first_idx
+                else:
+                    idx = dist.sample() if explore_opts['cat'] else torch.argmax(dist.probs, dim=-1)
                 
                 if is_batch:
                     cat_exec_list.append(idx.cpu().detach().numpy()) # (Batch, )
@@ -626,7 +675,7 @@ class HybridActorWrapper(nn.Module):
                 actions_raw['bern'] = actions_exec['bern']
                 actions_dist_check['bern'] = dist.probs[0].cpu().detach().numpy().flatten()
 
-        return actions_exec, actions_raw, None, actions_dist_check # None for hidden state
+        return actions_exec, actions_raw, h_out, actions_dist_check
 
     def evaluate_actions(self, states, actions_raw, h=None, max_std=None, mask_on=0):
         """
@@ -640,7 +689,12 @@ class HybridActorWrapper(nn.Module):
             next_h: None
             actor_outputs: dict (raw outputs from net) [新增]
         """
-        actor_outputs = self.net(states, max_std=max_std, mask_on=mask_on)
+        actor_outputs = self.net(
+            states,
+            max_std=max_std,
+            mask_on=mask_on,
+            cat_actions=actions_raw.get('cat') if isinstance(actions_raw, dict) else None,
+        )
         log_probs = torch.zeros(states.size(0), 1).to(self.device)
         entropy = torch.zeros(states.size(0), 1).to(self.device)
         
@@ -726,7 +780,11 @@ class HybridActorWrapper(nn.Module):
             if no_cat is not None:
                 action_heads_mask['cat'] = not no_cat
         
-        actor_outputs = self.net(states, mask_on=mask_on) # 获取 raw output (mu/std, logits)
+        actor_outputs = self.net(
+            states,
+            mask_on=mask_on,
+            cat_actions=expert_actions.get('cat') if isinstance(expert_actions, dict) else None,
+        ) # 获取 raw output (mu/std, logits)
         
         # 初始化一个全 0 的 loss tensor，形状 (Batch, )
         total_loss_per_sample = torch.zeros(states.size(0), device=self.device)
@@ -844,7 +902,11 @@ class HybridActorWrapper(nn.Module):
             dict: 包含 nll_cont/nll_cat/nll_bern/entropy_cont/entropy_cat/entropy_bern/adv_positive_frac,
                   缺失的动作头或未传入 advantages 时对应键返回 None。
         """
-        actor_outputs = self.net(states, mask_on=mask_on)
+        actor_outputs = self.net(
+            states,
+            mask_on=mask_on,
+            cat_actions=expert_actions.get('cat') if isinstance(expert_actions, dict) else None,
+        )
         metrics = {
             'nll_cont': None, 'nll_cat': None, 'nll_bern': None,
             'entropy_cont': None, 'entropy_cat': None, 'entropy_bern': None,
@@ -916,7 +978,7 @@ class HybridActorWrapper(nn.Module):
 class PPOHybrid:
     def __init__(self, actor, critic, actor_lr, critic_lr,
                  lmbda, epochs, eps, gamma, device, 
-                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7, # ):
+                 k_entropy=None, critic_max_grad=2, actor_max_grad=2, max_std=0.7, # ):
                  rnd_state_dim=None, rnd_lr=3e-4, rnd_output_dim=128, rnd_hidden_dim=256):
         
         self.actor = actor # 这是一个 HybridActorWrapper 实例
@@ -940,14 +1002,16 @@ class PPOHybrid:
         self.eps = eps
         self.device = device
         
-        # [修改] 解析 k_entropy，支持字典输入
-        if isinstance(k_entropy, dict):
-            self.k_entropy = k_entropy
+        # [修改] 解析 k_entropy，支持字典输入；None 时采用论文表 4 的熵系数 0.01
+        if k_entropy is None:
+            self.k_entropy = {'cont': 0.0, 'cat': 0.01, 'bern': 0.01}
+        elif isinstance(k_entropy, dict):
+            self.k_entropy = copy.deepcopy(k_entropy)
         else:
             self.k_entropy = {'cont': k_entropy, 'cat': k_entropy, 'bern': k_entropy}
         
         # [新增] SAC 风格的可学习 Cat 熵系数 (初始值对应原配置)
-        init_k_cat = k_entropy.get('cat', k_entropy)
+        init_k_cat = self.k_entropy.get('cat', 0.01)
         self.log_k_cat = torch.nn.Parameter(torch.log(torch.tensor(init_k_cat, device=device)))
         # [新增] 为自适应熵系数配备独立的优化器 (学习率通常与 Actor 保持一致或略大)
         self.k_cat_optim = torch.optim.Adam([self.log_k_cat], lr=actor_lr)
@@ -1306,7 +1370,7 @@ class PPOHybrid:
         - 每次蒸馏只提供微小的概率推力，避免对策略造成大的突变。
 
         梯度安全：
-        - backbone (self.actor.net.net) 和非 bern 头全部 detach（不回传梯度）
+        - backbone/LSTM 和非 bern 头全部 detach（不回传梯度）
         - 双道锁：clip_grad_value_ + 自适应 clip_grad_norm_（锚定 PPO actor_grad）
         """
         if teacher_actor is None or alpha == 0.0 or epochs == 0:
@@ -1392,7 +1456,7 @@ class PPOHybrid:
 
             # [关键] 在循环开始前一次性算好固定的 target_p，后续 epoch 不再变动
             with torch.no_grad():
-                baseline_features = self.actor.net.net(states)
+                baseline_features = self.actor.net.extract_features(states)
                 baseline_logits = self.actor.net.fc_bern(baseline_features)[:, 0]  # (B,)
                 baseline_p = torch.sigmoid(baseline_logits)
 
@@ -1429,9 +1493,9 @@ class PPOHybrid:
                 if not mb_valid.any():
                     continue
 
-                # 前向：backbone 不回传梯度，只让 bern 头出梯度
+                # 前向：backbone/LSTM 不回传梯度，只让 bern 头出梯度
                 with torch.no_grad():
-                    shared_features = self.actor.net.net(mb_states)
+                    shared_features = self.actor.net.extract_features(mb_states)
                 # bern 头正常前向（有梯度）
                 bern_logits = self.actor.net.fc_bern(shared_features)  # (mb, 1)
 
@@ -1638,9 +1702,9 @@ class PPOHybrid:
                 advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
 
                 
-        # # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
-        # if alpha_distill > 0 and teacher_actor is not None:
-        #     advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
+        # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
+        if alpha_distill > 0 and teacher_actor is not None:
+            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
         
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():
@@ -2124,6 +2188,8 @@ class PPOHybrid:
 
         # 逐模块冻结（backbone + 其它动作头）
         set_requires_grad(net.net, False)  # 共享backbone
+        if hasattr(net, 'lstm'):
+            set_requires_grad(net.lstm, False)
         if hasattr(net, 'fc_mu'):
             set_requires_grad(net.fc_mu, False)
         if hasattr(net, 'log_std_cont'):
@@ -2172,6 +2238,8 @@ class PPOHybrid:
 
         # ── 恢复所有actor模块的梯度反向传播 ──────────────────────────────────
         set_requires_grad(net.net, True)
+        if hasattr(net, 'lstm'):
+            set_requires_grad(net.lstm, True)
         if hasattr(net, 'fc_mu'):
             set_requires_grad(net.fc_mu, True)
         if hasattr(net, 'log_std_cont'):
@@ -2226,7 +2294,8 @@ class PPOHybrid:
         # 满足条件1: missile_in_mid_term~0 且 warning~0 → 目标索引 0
         # 满足条件2: warning~1                          → 目标索引 2/3/4 均等
         # 其余: 跳过 (mask=0)
-        n_h = self.actor.net.cat_dims[1]  # 水平头类别数，应为 7
+        cond1 = (missile_in_mid_term < 0.5) & (warning_flag < 0.5)  # 追踪
+        cond2 = (warning_flag > 0.5) & (threat_distance < 15e3)       # 防御（近距告警）
 
         cond1 = (missile_in_mid_term < 0.5) & (warning_flag < 0.5)  # 追踪
         cond2 = (warning_flag > 0.5) & (threat_distance < 15e3)       # 防御（近距告警）
@@ -2249,9 +2318,6 @@ class PPOHybrid:
         else:
             env_masks = torch.ones(num_samples, 1, device=self.device)
 
-        if env_masks.sum() < 1:
-            return  # 没有可用样本，直接跳过
-
         # ── 冻结 backbone / 其他动作头，仅放开 fc_cat ────────────────────────
         net = self.actor.net
 
@@ -2263,6 +2329,8 @@ class PPOHybrid:
                 module_or_param.requires_grad_(flag)
 
         set_requires_grad(net.net, False)
+        if hasattr(net, 'lstm'):
+            set_requires_grad(net.lstm, False)
         if hasattr(net, 'fc_mu'):
             set_requires_grad(net.fc_mu, False)
         if hasattr(net, 'log_std_cont'):
@@ -2315,6 +2383,8 @@ class PPOHybrid:
 
         # ── 恢复所有模块梯度 ─────────────────────────────────────────────────
         set_requires_grad(net.net, True)
+        if hasattr(net, 'lstm'):
+            set_requires_grad(net.lstm, True)
         if hasattr(net, 'fc_mu'):
             set_requires_grad(net.fc_mu, True)
         if hasattr(net, 'log_std_cont'):
@@ -3023,6 +3093,7 @@ class PPOHybrid:
         else:
             bad_obs = bad_states
 
+        
         # =====================================================================
         # [新增 1]：在开始 mini-batch 更新前，统一提取当前网络对这些样本的 log_probs 作为“旧策略锚点”
         # =====================================================================

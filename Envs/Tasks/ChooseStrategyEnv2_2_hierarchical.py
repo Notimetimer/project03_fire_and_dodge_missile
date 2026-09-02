@@ -313,7 +313,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 防御引导（真实RWR告警或代理告警距离触发）
         if effective_threat:
             # 受到威胁应该三九线/置尾和下高，始终用最近导弹方位
-            r_shaping += 2 * min(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 2 * -cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
+            # r_shaping += 2 * min(abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
             ego.stage = 2
             # # 受到威胁应该三九线/置尾和下高，始终用最近导弹方位
             # # # 奖励意图

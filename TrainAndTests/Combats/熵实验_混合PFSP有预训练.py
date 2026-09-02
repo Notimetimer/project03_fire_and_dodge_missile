@@ -7,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"SLWSPFSP0.3-run-20260817-100110")
+    # r"SLWSPFSP0.3_flymask_1-run-20260902-112917")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -89,7 +89,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=20, # 15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -125,9 +125,9 @@ if __name__=='__main__':
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
-            'Rule_4': 1200,
-            'Rule_5': 1200,
-            'Rule_6': 1200,
+            # 'Rule_4': 1200,
+            # 'Rule_5': 1200,
+            # 'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈

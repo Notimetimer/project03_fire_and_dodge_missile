@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "无预训练-run-20260814-105541" # "SLWSPFSP0.3-run-20260704-175531" # "无预训练-run-20260814-105541"  # "无预训练-run-20260817-225310"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
+    dir_name = "SLWSPFSP0.3_flymask_0-run-20260902-145451" # "无预训练-run-20260814-105541" # "SLWSPFSP0.3-run-20260704-175531" # "无预训练-run-20260814-105541"  # "无预训练-run-20260817-225310"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
@@ -120,6 +120,7 @@ if __name__ == "__main__":
     # --- 4. 在内存中跑真实对抗，收集策略自己的轨迹 ---
     rule_opponents = [3, 5, 6]
     t_bias = 0
+    episodes_data = []  # 记录每个 episode 的完整时间序列数据
     all_r_obs = []
     all_warning = []
     all_missile = []
@@ -143,6 +144,15 @@ if __name__ == "__main__":
             b_action_label = (0, 0)
             fire_time = -120
 
+            ep_times = []
+            ep_cat_probs = []
+            ep_bern_probs = []
+            ep_r_action_labels = []
+            ep_r_fire = []
+            ep_r_obs = []
+            ep_warning = []
+            ep_missile = []
+
             for count in range(round(env_args.max_episode_len / dt_maneuver)):
                 if not env.running or done:
                     break
@@ -157,7 +167,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.3, 'bern':0.97}
+                            temperature={'cat':0.99, 'bern':0.97}
                         )
                     r_action_label = r_action_exec['cat']
                     r_fire = r_action_exec['bern'][0]
@@ -172,8 +182,20 @@ if __name__ == "__main__":
                         env.BUAV.about_to_fire = 1
 
                     cat_probs = r_action_check.get('cat', [])
-                    all_cat_probs.append([np.asarray(p) for p in cat_probs])
-                    all_bern_probs.append(np.asarray(r_action_check.get('bern', [0])).flatten())
+                    cat_probs_arr = [np.asarray(p) for p in cat_probs]
+                    bern_prob_arr = np.asarray(r_action_check.get('bern', [0])).flatten()
+
+                    ep_times.append(env.t)
+                    ep_cat_probs.append(cat_probs_arr)
+                    ep_bern_probs.append(bern_prob_arr)
+                    ep_r_action_labels.append(r_action_label)
+                    ep_r_fire.append(r_fire)
+                    ep_r_obs.append(r_obs.copy())
+                    ep_warning.append(r_warning)
+                    ep_missile.append(r_missile)
+
+                    all_cat_probs.append(cat_probs_arr)
+                    all_bern_probs.append(bern_prob_arr)
                     all_r_action_labels.append(r_action_label)
                     all_r_fire.append(r_fire)
                     all_r_obs.append(r_obs.copy())
@@ -206,65 +228,151 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
 
+            episodes_data.append({
+                'rule_num': rule_num,
+                'result': result,
+                'times': np.array(ep_times),
+                'cat_probs': ep_cat_probs,
+                'bern_probs': np.array(ep_bern_probs),
+                'action_labels': np.array(ep_r_action_labels),
+                'fires': np.array(ep_r_fire),
+                'warning': np.array(ep_warning),
+                'missile': np.array(ep_missile),
+            })
+
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")
     finally:
         env.end_render()
 
-    # --- 5. 在内存中对自己轨迹做阶段动作分布分析 ---
-    if len(all_r_obs) > 0:
+    # --- 5. 绘制与时间相关的动作分布归一化热度图 ---
+    if len(episodes_data) > 0:
         try:
-            all_r_obs = np.asarray(all_r_obs, dtype=np.float32)
-            all_warning = np.asarray(all_warning)
-            all_missile = np.asarray(all_missile)
-            all_bern_probs = np.asarray(all_bern_probs).flatten()
-            all_cat_probs = [np.stack([h[head_i] for h in all_cat_probs], axis=0) for head_i in range(len(all_cat_probs[0]))]
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
 
-            real_phase_conditions = [
-                ("RWR_on",   all_warning > 0.5),
-                ("Approach", (all_warning < 0.5) & (all_missile < 0.5)),
-                ("Guide",    (all_warning < 0.5) & (all_missile > 0.5)),
-            ]
+            try:
+                from Envs.Tasks.ChooseStrategyEnv2_0_hierarchical import action_optionsLR
+            except Exception:
+                action_optionsLR = {}
 
-            fig = plt.figure(figsize=(10, 10))
-            for head_i, cat_probs in enumerate(all_cat_probs):
-                n_classes = cat_probs.shape[-1]
-                mean_probs = np.stack([
-                    cat_probs[mask].mean(axis=0) if mask.any() else np.zeros(n_classes)
-                    for _, mask in real_phase_conditions
-                ], axis=0)
+            # 分层动作头 Y 轴刻度标签精确映射定义
+            HEAD_ACTION_LABELS = {
+                # Head 0: 垂直方向 (5动作: 0到4依次为最大角度爬升到急俯冲)
+                (0, 5): [
+                    "0: +45° Climb (爬升)",
+                    "1: +20° Climb (爬升)",
+                    "2: Level/Track (平飞)",
+                    "3: -30° Dive (俯冲)",
+                    "4: Max Dive (急俯冲)"
+                ],
+                # Head 1: 水平方向 (7动作)
+                (1, 7): [
+                    "0: Track (追踪)",
+                    "1: Left Crank (左crank)",
+                    "2: Left 3-9 (左39)",
+                    "3: Tail (尾后)",
+                    "4: Right 3-9 (右39)",
+                    "5: Right Crank (右crank)",
+                    "6: Center (占中)"
+                ]
+            }
 
-                ax = plt.subplot(3, 1, head_i + 1)
-                im = ax.imshow(mean_probs, aspect='auto', cmap='viridis', vmin=0, vmax=1)
-                plt.colorbar(im, ax=ax, label='Mean Probability')
-                ax.set_xticks(range(n_classes))
-                ax.set_xticklabels([f'A{j}' for j in range(n_classes)], rotation=45, ha='right')
-                ax.set_yticks(range(len(real_phase_conditions)))
-                ax.set_yticklabels([c[0] for c in real_phase_conditions])
-                ax.set_title(f'Own Trajectory Cat Head {head_i}')
-                ax.set_xlabel('Action Class')
-                ax.set_ylabel('Phase')
-                for i in range(len(real_phase_conditions)):
-                    for j in range(n_classes):
-                        text_color = 'w' if mean_probs[i, j] < 0.5 else 'k'
-                        ax.text(j, i, f'{mean_probs[i, j]:.2f}',
-                                ha='center', va='center', color=text_color, fontsize=8)
+            HEAD_NAMES = {
+                0: "Head 0 (Vertical/Pitch 垂直俯仰)",
+                1: "Head 1 (Horizontal/Yaw 水平偏航)"
+            }
 
-            ax_bern = plt.subplot(3, 1, 3)
-            mean_p_real = [all_bern_probs[mask].mean() if mask.any() else 0.0 for _, mask in real_phase_conditions]
-            std_p_real = [all_bern_probs[mask].std() if mask.any() else 0.0 for _, mask in real_phase_conditions]
-            plt.bar([c[0] for c in real_phase_conditions], mean_p_real,
-                    yerr=std_p_real, capsize=4, color=['red', 'green', 'gold'])
-            plt.ylabel('Mean p_fire')
-            plt.title('Own Trajectory: Mean Fire Probability per phase')
-            plt.grid(True, alpha=0.3)
+            for ep_idx, ep in enumerate(episodes_data):
+                times = ep['times']
+                if len(times) == 0:
+                    continue
 
-            plt.tight_layout()
+                cat_probs_raw = ep['cat_probs']
+                num_heads = len(cat_probs_raw[0])
+                bern_probs = ep['bern_probs'].flatten()
+                action_labels = ep['action_labels']
+                fires = ep['fires']
+
+                total_subplots = num_heads + 1
+                fig, axes = plt.subplots(total_subplots, 1, figsize=(12, 3.5 * total_subplots), sharex=True)
+                if total_subplots == 1:
+                    axes = [axes]
+
+                fig.suptitle(f"Episode {ep_idx+1}: Red vs Rule_{ep['rule_num']} (Result: {ep['result']})", fontsize=14, fontweight='bold')
+
+                for head_i in range(num_heads):
+                    ax = axes[head_i]
+                    head_probs = np.stack([step_p[head_i] for step_p in cat_probs_raw], axis=0) # (T, n_classes)
+                    T, n_classes = head_probs.shape
+
+                    probs_matrix = head_probs.T  # (n_classes, T)
+
+                    # 在每个时间点(列)对概率分布内部进行归一化
+                    col_sums = np.sum(probs_matrix, axis=0, keepdims=True)
+                    col_sums[col_sums == 0] = 1.0
+                    probs_matrix_norm = probs_matrix / col_sums
+
+                    t_min, t_max = times[0], times[-1] if len(times) > 1 else times[0] + 1.0
+                    im = ax.imshow(
+                        probs_matrix_norm,
+                        aspect='auto',
+                        cmap='viridis',
+                        origin='lower',
+                        extent=[t_min, t_max, -0.5, n_classes - 0.5],
+                        vmin=0,
+                        vmax=1
+                    )
+                    cbar = fig.colorbar(im, ax=ax, pad=0.02)
+                    cbar.set_label('Norm Prob', fontsize=9)
+
+                    ax.set_yticks(range(n_classes))
+                    if (head_i, n_classes) in HEAD_ACTION_LABELS:
+                        y_labels = HEAD_ACTION_LABELS[(head_i, n_classes)]
+                    elif n_classes == 14:
+                        y_labels = [action_optionsLR.get(j, f'A{j}') for j in range(n_classes)]
+                    else:
+                        y_labels = [f'Head{head_i}_A{j}' for j in range(n_classes)]
+                    ax.set_yticklabels(y_labels, fontsize=8)
+
+                    # 叠加实际执行的动作轨迹
+                    exec_head = action_labels[:, head_i] if action_labels.ndim > 1 else action_labels
+                    ax.plot(times, exec_head, color='red', linestyle='--', linewidth=1.2, alpha=0.7, label='Executed Action')
+                    ax.scatter(times, exec_head, color='red', s=12, zorder=5)
+
+                    head_title_name = HEAD_NAMES.get(head_i, f'Cat Head {head_i}')
+                    ax.set_title(f'{head_title_name} Probability Distribution over Time (Normalized per Timestep)', fontsize=11)
+                    ax.set_ylabel('Action Class', fontsize=10)
+                    ax.grid(True, alpha=0.2, linestyle=':')
+                    ax.legend(loc='upper right', fontsize=8)
+
+                # 绘制开火概率与开火事件
+                ax_bern = axes[-1]
+                ax_bern.plot(times, bern_probs, color='crimson', linewidth=2, label='Fire Prob (p_fire)')
+                ax_bern.set_ylim(-0.05, 1.05)
+                ax_bern.set_ylabel('p_fire', fontsize=10)
+                ax_bern.set_xlabel('Time (s)', fontsize=10)
+                ax_bern.set_title('Bernoulli Head: Fire Probability over Time', fontsize=11)
+                ax_bern.grid(True, alpha=0.3)
+
+                fire_mask = (fires > 0)
+                if np.any(fire_mask):
+                    ax_bern.scatter(times[fire_mask], bern_probs[fire_mask], color='gold', s=70, marker='*', zorder=6, label='Shoot Event')
+                    for t_shoot in times[fire_mask]:
+                        ax_bern.axvline(x=t_shoot, color='red', linestyle=':', alpha=0.6)
+
+                ax_bern.legend(loc='upper right', fontsize=8)
+
+                plt.tight_layout()
+
             plt.show()
         except Exception as e:
-            print(f"[Phase Analysis] 绘图失败: {e}")
+            import traceback
+            print(f"[Time-Heatmap Analysis] 绘图失败: {e}")
+            traceback.print_exc()
     else:
-        print("[Phase Analysis] 没有收集到对抗数据")
+        print("[Time-Heatmap Analysis] 没有收集到对抗数据")
 
-    print("\nPhase sensitivity analysis completed.")
+    print("\nTime-dependent probability heatmap analysis completed.")
+
 
