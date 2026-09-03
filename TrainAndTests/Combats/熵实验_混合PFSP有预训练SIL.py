@@ -16,7 +16,7 @@ collape_recover={ # 是否是崩盘后恢复
 mission_name = 'SLWSPFSP0.3SIL'
 
 # 超参数
-actor_lr = 3e-5 # 4 1e-4
+actor_lr = 1e-4 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30
 max_steps = 20e6 # 1320e4
@@ -24,7 +24,7 @@ hidden_dim = [128, 128, 128]
 gamma = 0.995
 lmbda = 0.995
 epochs = 4 # 10
-eps = 0.1 # 0.2
+eps = 0.2 # 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.05  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小

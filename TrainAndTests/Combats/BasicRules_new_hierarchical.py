@@ -103,9 +103,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     if rules_num == 0:
         # 规则0: 纯进攻
         action_number = [1, 0] # base_offensive_action
-        # if (distance < 95e3) and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
-        #     if t_fired >= 10 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
-        #         fire_missile = True
+        if (distance < 95e3) and ATA < 60 * pi/180 and abs(delta_psi) < 30*pi/180:
+            if t_fired >= 10 and not on_guiding and not (distance>12e3 and abs(AA_hor) < 30*pi/180):
+                fire_missile = True
         fire_missile_affirmative = fire_missile
 
     elif rules_num == 1:
@@ -178,9 +178,9 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
         elif fire_missile and distance > 40e3: # 满足开火条件且在远距离
             if sin_theta < sin(30*pi/180) and alt < 9500:  # last_action != 2: # 如果上一动作为非爬升
                 action_v = 0 # 爬升
-                # 防止无弹药爬高
-                if ammo == 0:
-                    action_v = max(2, action_v)
+                # # 防止无弹药爬高
+                # if ammo == 0:
+                #     action_v = max(2, action_v)
 
                 action_h = 0 # 追踪
                 fire_missile = False

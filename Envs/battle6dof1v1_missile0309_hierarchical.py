@@ -531,10 +531,10 @@ class Battle(object):
                     control_action, _, _, _ = self.control_actor.get_action(control_input, explore=False)
                     aileron, elevator, rudder, throttle = control_action['cont']
 
-                    # 弱化俯仰控制
-                    elevator*=0.75
-                    if UAV.mach > 0.85:
-                        elevator=np.clip(elevator, -0.72, 0.72)
+                    # # 弱化俯仰控制
+                    # elevator*=0.75
+                    # if UAV.mach > 0.85:
+                    #     elevator=np.clip(elevator, -0.72, 0.72)
 
                     UAV.move(elevator, aileron, throttle, relevant_height=True, e2e=True, rudder=rudder, dt=substep_dt)
                 else:
@@ -586,10 +586,10 @@ class Battle(object):
                 # 毁伤判别
                 vmt1 = norm(last_vmt_)
                 # 导弹慢速自爆，节省计算量
-                # if vmt1 < missile.speed_min \
-                #     and missile.t > 0.5 + missile.stage1_time + missile.stage2_time \
-                #         and last_pmt_[1] < 15e3: # 3000
-                #     missile.dead = True
+                if vmt1 < missile.speed_min \
+                    and missile.t > 0.5 + missile.stage1_time + missile.stage2_time \
+                        and last_pmt_[1] < 15e3: # 3000
+                    missile.dead = True
                 if last_pmt_[1] < missile.minH_m:  # 高度小于限高自爆
                     missile.dead = True
                 if missile.t > missile.t_max:  # 超时自爆
@@ -1208,9 +1208,9 @@ class Battle(object):
             if R_uav <= self.R_cage:
                 out = False
         
-        # 试验举措：保持对对手的锁定，就不算出界
-        if UAV.lock_on:
-            out = False
+        # # 试验举措：保持对对手的锁定，就不算出界
+        # if UAV.lock_on:
+        #     out = False
 
         # # 试验举措：敌机死后边界消失
         # # 敌机全都死了之后可以出界
