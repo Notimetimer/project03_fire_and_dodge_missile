@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """奖励权重调参模拟：观察单回合奖励与蒙特卡洛回报曲线。"""
 
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox, font as tkfont
 
@@ -16,9 +17,9 @@ plt.rcParams["axes.unicode_minus"] = False
 
 defaults = {
         "总步数": "300",
-        "密集奖励": "0.6",
-        "偶发奖励": "10",
-        "结果奖励": "60",
+        "密集奖励": "0.2",
+        "偶发奖励": "15",
+        "结果奖励": "50",
         "gamma": "0.988",
         "稀疏奖励位置": "-60,-120,-180",
     }
@@ -57,14 +58,17 @@ def simulate_episode(total_steps, dense_mag, occasional_mag, result_mag, gamma, 
 
 def generate_and_plot(entries):
     try:
-        total_steps = int(entries["总步数"].get())
-        dense_mag = float(entries["密集奖励"].get())
-        occasional_mag = float(entries["偶发奖励"].get())
-        result_mag = float(entries["结果奖励"].get())
-        gamma = float(entries["gamma"].get())
+        total_steps = int(entries["总步数"].get().strip())
+        dense_mag = float(entries["密集奖励"].get().strip())
+        occasional_mag = float(entries["偶发奖励"].get().strip())
+        result_mag = float(entries["结果奖励"].get().strip())
+        gamma = float(entries["gamma"].get().strip())
 
+        pos_str = entries["稀疏奖励位置"].get().strip()
+        # 兼容中英文逗号、分号、空格与中文负号
+        pos_str = pos_str.replace("−", "-").replace("—", "-").replace("–", "-")
         positions = []
-        for token in entries["稀疏奖励位置"].get().split(","):
+        for token in re.split(r"[,，;；\s]+", pos_str):
             token = token.strip()
             if not token:
                 continue
@@ -75,17 +79,11 @@ def generate_and_plot(entries):
     except ValueError:
         messagebox.showerror("输入错误", "请检查所有参数和稀疏奖励位置均为有效数字")
         return
-
-    if total_steps <= 0:
-        messagebox.showerror("输入错误", "总步数必须大于 0")
-        return
     if not (0.0 < gamma <= 1.0):
         messagebox.showerror("输入错误", "gamma 必须在 (0, 1] 之间")
         return
-    if any(p < 0 or p >= total_steps for p in positions):
-        messagebox.showerror("输入错误", "稀疏奖励位置超出有效范围 [0, 总步数-1]")
-        return
-
+    if total_steps > 0:
+        positions = [max(0, min(p, total_steps - 1)) for p in positions]
     event_indices = np.array(sorted(set(positions)), dtype=np.int64)
     rewards, returns, event_indices, dense_r, sparse_r, result_r = simulate_episode(
         total_steps, dense_mag, occasional_mag, result_mag, gamma, event_indices
