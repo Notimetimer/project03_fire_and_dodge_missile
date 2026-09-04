@@ -1,8 +1,11 @@
 from random import random
 import random
-# [修改] 替换 gym 为 gymnasium
-import gymnasium as gym
-from gymnasium import spaces
+try:
+    import gymnasium as gym
+    from gymnasium import spaces
+except ImportError:
+    import gym
+    from gym import spaces
 import copy
 import numpy as np
 from math import *

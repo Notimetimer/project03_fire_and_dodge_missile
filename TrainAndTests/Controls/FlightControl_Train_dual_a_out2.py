@@ -115,12 +115,12 @@ class track_env():
         UAV.color = np.array([1, 0, 0])
         # 红方出生点
         UAV.pos_ = birth_state['position']
-        UAV.speed = 300  # (UAV.speed_max - UAV.speed_min) / 2
+        UAV.speed = float(birth_state.get('speed', 300))
         speed = UAV.speed
-        UAV.psi = birth_state['psi']
+        UAV.psi = float(birth_state['psi'])
         UAV.last_psi_v = UAV.psi
-        UAV.theta = 0 * pi / 180
-        UAV.gamma = 0 * pi / 180
+        UAV.theta = float(birth_state.get('theta', 0.0))
+        UAV.gamma = float(birth_state.get('phi', birth_state.get('gamma', 0.0)))
         UAV.vel_ = UAV.speed * np.array([cos(UAV.theta) * cos(UAV.psi),
                                             sin(UAV.theta),
                                             cos(UAV.theta) * sin(UAV.psi)])

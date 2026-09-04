@@ -61,3 +61,5 @@ firing_probability_target_center.png
 结果展示/outputs/combat_matrix.csv
 *.csv
 *.png
+/TrainAndTests/Controls/aquired_combat_cmds
+/TrainAndTests/Controls/adjust

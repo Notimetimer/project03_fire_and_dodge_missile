@@ -172,6 +172,7 @@ class Battle(object):
 
         # 动作平滑参数
         self.action_ema_beta = 0.006 ** (self.dt_maneuver / 2.0)  # 2秒后旧动作权重降至 0.006 0.2
+        self.max_cmd_chaging_rate = np.radians(15) # 每秒最多能转多少度 18
         self.r_actions_ema = None
         self.b_actions_ema = None
         
@@ -366,23 +367,42 @@ class Battle(object):
         if self.r_actions_ema is None:
             self.r_actions_ema = r_actions.copy()
         else:
-            # 高度仍做 EMA
-            self.r_actions_ema[0] = self.action_ema_beta * self.r_actions_ema[0] + (1 - self.action_ema_beta) * r_actions[0]
-            # 航向：小指令或符号切换时直出，避免相位滞后导致蛇行
-            if abs(r_actions[1]) < heading_dead or np.sign(r_actions[1]) != np.sign(self.r_actions_ema[1]):
-                self.r_actions_ema[1] = r_actions[1]
-            else:
-                self.r_actions_ema[1] = self.action_ema_beta * self.r_actions_ema[1] + (1 - self.action_ema_beta) * r_actions[1]
+            # # 高度仍做 EMA
+            # self.r_actions_ema[0] = self.action_ema_beta * self.r_actions_ema[0] + (1 - self.action_ema_beta) * r_actions[0]
+            # # 航向：小指令或符号切换时直出，避免相位滞后导致蛇行
+            # if abs(r_actions[1]) < heading_dead or np.sign(r_actions[1]) != np.sign(self.r_actions_ema[1]):
+            #     self.r_actions_ema[1] = r_actions[1]
+            # else:
+            #     # # 指数滑动平滑机动指令
+            #     # self.r_actions_ema[1] = self.action_ema_beta * self.r_actions_ema[1] + (1 - self.action_ema_beta) * r_actions[1]
+            #     pass
+            # 一阶惯性环节平滑机动指令（最快不能超过50度/s）
+            r_expected_delta_h = r_actions[0]
+            self.r_actions_ema[0] = self.r_actions_ema[0] + np.sign(r_expected_delta_h - self.r_actions_ema[0]) * \
+                min(abs(r_actions[0] - self.r_actions_ema[0]), self.max_cmd_chaging_rate * 5000/(pi/2) * self.dt_maneuver)
+
+            self.r_actions_ema[1] = self.r_actions_ema[1] + np.sign(r_actions[1] - self.r_actions_ema[1]) * \
+                min(abs(r_actions[1] - self.r_actions_ema[1]), self.max_cmd_chaging_rate * self.dt_maneuver)
+
         if self.b_actions_ema is None:
             self.b_actions_ema = b_actions.copy()
         else:
-            # 高度仍做 EMA
-            self.b_actions_ema[0] = self.action_ema_beta * self.b_actions_ema[0] + (1 - self.action_ema_beta) * b_actions[0]
+            # # 高度仍做 EMA
+            # self.b_actions_ema[0] = self.action_ema_beta * self.b_actions_ema[0] + (1 - self.action_ema_beta) * b_actions[0]
             # 航向：小指令或符号切换时直出，避免相位滞后导致蛇行
-            if abs(b_actions[1]) < heading_dead or np.sign(b_actions[1]) != np.sign(self.b_actions_ema[1]):
-                self.b_actions_ema[1] = b_actions[1]
-            else:
-                self.b_actions_ema[1] = self.action_ema_beta * self.b_actions_ema[1] + (1 - self.action_ema_beta) * b_actions[1]
+            # if abs(b_actions[1]) < heading_dead or np.sign(b_actions[1]) != np.sign(self.b_actions_ema[1]):
+            #     self.b_actions_ema[1] = b_actions[1]
+            # else:
+            #     # 指数滑动平滑机动指令
+            #     # self.b_actions_ema[1] = self.action_ema_beta * self.b_actions_ema[1] + (1 - self.action_ema_beta) * b_actions[1]
+            #     pass
+            # 一阶惯性环节平滑机动指令（最快不能超过50度/s）
+            b_expected_delta_h = b_actions[0]
+            self.b_actions_ema[0] = self.b_actions_ema[0] + np.sign(b_expected_delta_h - self.b_actions_ema[0]) * \
+                min(abs(b_actions[0] - self.b_actions_ema[0]), self.max_cmd_chaging_rate * 5000/(pi/2) * self.dt_maneuver)
+
+            self.b_actions_ema[1] = self.b_actions_ema[1] + np.sign(b_actions[1] - self.b_actions_ema[1]) * \
+                min(abs(b_actions[1] - self.b_actions_ema[1]), self.max_cmd_chaging_rate * self.dt_maneuver)
         # 使用平滑后的动作执行
         actions = [self.r_actions_ema] + [self.b_actions_ema]
 
