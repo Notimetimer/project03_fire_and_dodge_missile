@@ -45,10 +45,11 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 # --- 3. 主程序 ---
 if __name__ == "__main__":
 
+    gamma = 0.97
+
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-
-    dir_name = "无预训练-run-20260829-233532"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
+    dir_name = "SLWSPFSP0.3_flymask_0-run-20260905-115503"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
@@ -128,7 +129,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [3,5,6] # [0,1,2,3,4] # [3]
+    rule_opponents = [1,2,3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -185,7 +186,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.3, 'bern':0.97}
+                            temperature={'cat':0.99, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -334,81 +335,36 @@ if __name__ == "__main__":
             
             plt.tight_layout()
 
-            # --- Figure2: 动作分布熵、置信度与状态 ---
-            plt.figure(2, figsize=(10, 9))
-            plt.clf()
-
-            plt.subplot(3, 1, 1)
-            plt.plot(history['time'], history['r_cat_conf'], label='Cat Top-1 Confidence', color='crimson')
-            plt.ylabel('Confidence')
-            plt.title(f'Test vs Rule {rule_num}: Categorical Top-1 Confidence')
-            plt.ylim([0, 1])
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(3, 1, 2)
-            plt.plot(history['time'], history['r_bern_fire_prob'], label='Bern Fire Probability', color='crimson')
-            plt.ylabel('Fire Probability')
-            plt.title(f'Test vs Rule {rule_num}: Bernoulli Fire Probability')
-            plt.ylim([0, 1])
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(3, 1, 3)
-            plt.plot(history['time'], history['r_warning'], label='Red Warning', color='orange')
-            plt.plot(history['time'], history['r_missile_in_mid_term'], label='Red Missile Mid-Term', color='green')
-            plt.ylabel('State')
-            plt.xlabel('Time (s)')
-            plt.title(f'Test vs Rule {rule_num}: Red State Flags')
-            plt.ylim([-0.2, 1.2])
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.tight_layout()
-
-            # --- Figure 3: 即时奖励函数随时间的变化（按 warning / missile_in_mid_term 着色） ---
-            plt.figure(3, figsize=(10, 5))
+            # --- Figure 4: r_shaping 与其余部分在累积蒙特卡洛回报中的占比 ---
+            plt.figure(2, figsize=(10, 4))
             plt.clf()
             t = np.array(history['time'])
-            r = np.array(history['r_reward'])
-            w = np.array(history['r_warning'])
-            m = np.array(history['r_missile_in_mid_term'])
+            r_total = np.array(history['r_reward'])
+            r_shaping = np.array(history['r_r_shaping'])
+            r_rest = r_total - r_shaping
 
-            green  = (w == 0) & (m == 0)
-            yellow = (w == 0) & (m == 1)
-            red    = (w == 1)
+            # 累积蒙特卡洛回报（从当前步到回合结束的折扣和）
+            G_shaping = np.zeros_like(r_shaping)
+            G_rest = np.zeros_like(r_rest)
+            running_shaping = 0.0
+            running_rest = 0.0
+            for i in range(len(r_total) - 1, -1, -1):
+                running_shaping = r_shaping[i] + gamma * running_shaping
+                running_rest = r_rest[i] + gamma * running_rest
+                G_shaping[i] = running_shaping
+                G_rest[i] = running_rest
 
-            r_green  = np.ma.masked_where(~green,  r)
-            r_yellow = np.ma.masked_where(~yellow, r)
-            r_red    = np.ma.masked_where(~red,    r)
+            denom = np.abs(G_shaping) + np.abs(G_rest)
+            denom = np.where(denom == 0, 1, denom)
+            shaping_ratio = np.abs(G_shaping) / denom
+            rest_ratio = np.abs(G_rest) / denom
 
-            plt.plot(t, r_green,  color='green', linewidth=2, label='warning=0 & missile=0')
-            plt.plot(t, r_yellow, color='gold',  linewidth=2, label='warning=0 & missile=1')
-            plt.plot(t, r_red,    color='red',   linewidth=2, label='warning=1')
-            plt.axhline(0, color='black', linestyle='--', alpha=0.5)
+            plt.plot(t, shaping_ratio, label='r_shaping 占比', color='crimson')
+            plt.plot(t, rest_ratio, label='其余部分占比', color='royalblue', linestyle='--')
             plt.xlabel('Time (s)')
-            plt.ylabel('Immediate Reward b_r1')
-            plt.title(f'Test vs Rule {rule_num}: Immediate Reward with State Flags')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-
-            # --- Figure 4: env.RUAV.r_shaping 变化曲线 ---
-            plt.figure(4, figsize=(10, 4))
-            plt.clf()
-            rs = np.array(history['r_r_shaping'])
-
-            rs_green  = np.ma.masked_where(~green,  rs)
-            rs_yellow = np.ma.masked_where(~yellow, rs)
-            rs_red    = np.ma.masked_where(~red,    rs)
-
-            plt.plot(t, rs_green,  color='green', linewidth=2, label='warning=0 & missile=0')
-            plt.plot(t, rs_yellow, color='gold',  linewidth=2, label='warning=0 & missile=1')
-            plt.plot(t, rs_red,    color='red',   linewidth=2, label='warning=1')
-            plt.axhline(0, color='black', linestyle='--', alpha=0.5)
-            plt.xlabel('Time (s)')
-            plt.ylabel('r_shaping')
-            plt.title(f'Test vs Rule {rule_num}: env.RUAV.r_shaping with State Flags')
+            plt.ylabel('占比')
+            plt.ylim([0, 1])
+            plt.title(f'Test vs Rule {rule_num}: r_shaping 与其余部分在累积蒙特卡洛回报中的占比')
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.tight_layout()

@@ -2,7 +2,7 @@
 增加开火惩罚
 三元组奖励
 '''
-"gamma = 0.97~0.98"
+gamma = 0.98
 
 from Controller.Controller_function import sub_of_radian
 import numpy as np
@@ -264,24 +264,25 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 ego.stage = 0
                 # if len(alive_ally_missiles) == 0:
                 # 瞄准奖励
-                r_shaping += 3 * (1-2*abs(delta_psi/pi)) * reward_weights['angle_advantage'] * (1-ego.dead)
-                # r_shaping += 2 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_shaping += 2 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
                 # 爬高奖励
-                r_shaping += 2 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
-                # r_shaping += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_shaping += 1 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+                r_shaping += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
             # crank引导
             else:
                 ego.stage = 1
                 # if len(alive_ally_missiles) > 0:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
-                r_shaping += 2 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
-                r_shaping += 4 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
+                r_shaping += 4 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_shaping += 5 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_shaping += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
         # 防御引导
         if warning:
             ego.stage = 2
             # 受到威胁应该三九线/置尾和下高
-            r_shaping += 4 * min(abs(sub_of_radian(delta_psi_threat+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
-            r_shaping += 2 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+            r_shaping += 2 * min(abs(sub_of_radian(delta_psi_threat+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 2 * (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 1 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
         
         # 速度惩罚
         slow_mach = 0.8 # 0.7

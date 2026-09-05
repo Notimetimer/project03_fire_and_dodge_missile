@@ -7,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    # r"SLWSPFSP0.3_flymask_1-run-20260902-112917")
+#     r"SLWSPFSP0.3_flymask_1-run-20260903-173826")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -21,15 +21,15 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
 mission_name = f'SLWSPFSP0.3_flymask_{manu_mask}'
 
 # 超参数
-actor_lr = 3e-5 # 4 1e-4
+actor_lr = 1e-4 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
-gamma = 0.995
+gamma = 0.97 # 0.995
 lmbda = 0.995
 epochs = 4 # 10
-eps = 0.1 # 0.2
+eps = 0.2 # 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
@@ -136,7 +136,7 @@ if __name__=='__main__':
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
         ADMISSION_THRESHOLD = -1,  # 0.5,
         MAX_HISTORY_SIZE = 50, # 150  # 300
-        compete_old_rate = 0.0, # “复习”概率
+        compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样

@@ -1,3 +1,6 @@
 {
-    "manu_mask": 0
+    "ver_map": 0,
+    "ver_mask": 0,
+    "hor_map": 0,
+    "hor_mask": 0
 }

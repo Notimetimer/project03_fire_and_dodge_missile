@@ -1926,12 +1926,12 @@ def run_MLP_simulation(
                     # 新对手：初始Elo与主智能体相同
                     new_adv_elo = main_agent_elo
                 
-                # --- 新增: 出界惩罚 ---
-                # 若对手在3分钟内出界，对手Elo额外扣除200分；当前主智能体Elo不额外修改
-                red_out_cage = res.get('red_out_cage', False)
-                red_out_cage_time = res.get('red_out_cage_time')
-                if red_out_cage and red_out_cage_time is not None and red_out_cage_time <= 3 * 60:
-                    new_adv_elo -= 200
+                # # --- 新增: 出界惩罚 ---
+                # # 若对手在3分钟内出界，对手Elo额外扣除200分；当前主智能体Elo不额外修改
+                # red_out_cage = res.get('red_out_cage', False)
+                # red_out_cage_time = res.get('red_out_cage_time')
+                # if red_out_cage and red_out_cage_time is not None and red_out_cage_time <= 3 * 60:
+                #     new_adv_elo -= 200
                 
                 elo_ratings[opp_name] = new_adv_elo
                 # 同步更新 Elite 池中已有的对手Elo分值
@@ -2084,85 +2084,9 @@ def run_MLP_simulation(
                 
                 max_fire_logits = 4.0
 
-                # # 随机拜师法
-                # if use_ADistill and batch_idx > 50:
-                #     # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
-                #     # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
-                #     candidate_items = [(k, v) for k, v in elo_ratings.items()
-                #                        if k.startswith('actor_rein') or k.startswith('Rule')]
-                #     if len(candidate_items) >= 1:
-                #         print("有可调用teacher")
-                #         candidate_items.sort(key=lambda x: x[1], reverse=True)
-                #         top_candidates = candidate_items[:10]
-                #         teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
-
-                #         teacher_wrapper = None
-                #         if teacher_key.startswith('Rule'):
-                #             # 构建基于规则的teacher
-                #             try:
-                #                 t_rule_num = int(teacher_key.split('_')[1])
-                #             except (IndexError, ValueError):
-                #                 t_rule_num = 0
-                #             print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
-                #             teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
-                #                                                  action_dims_dict, device,
-                #                                                  label_smoothing=label_smoothing)
-                #         else:
-                #             teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
-                #             if os.path.exists(teacher_path):
-                #                 print("teacher路径已获取")
-                #                 teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-                #                 teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
-                #                 teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
-                #                 teacher_wrapper.eval()
-
-                #         if teacher_wrapper is not None:
-                #             transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_ADistill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
-                #             logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
-                #         else:
-                #             RDistill_kl = None
-                #     else:
-                #         RDistill_kl = None
-
-                # if use_RND:
-                #     transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
-                # else:
-                #     rnd_mse = None
-
-                # ADistill alpha 退火：0.1 -> 0，在总步数达到 1/3 时降到 0
-                if use_ADistill:
-                    # 总步数达到阈值后，改用 Elo 最高的 Rule 作为 teacher
-                    if total_steps >= adistill_teacher_elo_steps:
-                        rule_elo_items = [(k, v) for k, v in elo_ratings.items() if k.startswith("Rule_")]
-                        if rule_elo_items:
-                            best_rule_key = max(rule_elo_items, key=lambda x: x[1])[0]
-                            try:
-                                best_rule_num = int(best_rule_key.split('_')[1])
-                            except (IndexError, ValueError):
-                                best_rule_num = teacher_rule_num_cur
-                            if best_rule_num != teacher_rule_num_cur:
-                                teacher_rule_num_cur = best_rule_num
-                                teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, rule_num=teacher_rule_num_cur,
-                                                                     action_dims_dict=action_dims_dict,
-                                                                     device=device,
-                                                                     label_smoothing=label_smoothing)
-                                print(f"[ADistill] teacher 切换为 Elo 最高规则 {best_rule_key} (Elo={elo_ratings[best_rule_key]:.0f})")
-                    logger.add("train_plus/adistill_teacher_rule", teacher_rule_num_cur, total_steps)
-
-                    alpha_distill = beta_ADistill * max(0.0, 1.0 - total_steps / (current_max_steps * adistill_anneal_factor))
-                    # cat 熵系数随 alpha_distill 从 5 倍下降到 1 倍（蒸馏强时多探索）
-                    k_entropy_cat_scale = 1.0 + 4.0 * (alpha_distill / beta_ADistill)
-
-                    # 若 cat 熵已过高，临时取消额外熵奖励，压回基准值
-                    if getattr(student_agent, 'entropy_cat', 0.0) > 2.5:
-                        k_entropy_cat_scale = 1.0
-
-                    logger.add("train_plus/alpha_distill", alpha_distill, total_steps)
-                    logger.add("train_plus/k_entropy_cat_scale", k_entropy_cat_scale, total_steps)
-                else:
-                    alpha_distill = 0
-                    teacher_wrapper = None
-                    k_entropy_cat_scale = 1.0
+                alpha_distill = 0
+                teacher_wrapper = None
+                k_entropy_cat_scale = 1.0
 
                 student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
 
@@ -2171,16 +2095,6 @@ def run_MLP_simulation(
                                      alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
                                      AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
 
-                # BernDistill：在 PPO 更新后单独对 bern 头做规则教师共识驱动的有监督蒸馏
-                if Bdistill:
-                    student_agent.BernDistill(transition_dict,
-                                              teacher_actor=adistill_rule_wrappers,
-                                              shuffled=1,
-                                              mini_batch_size=mini_batch_size_mixed,
-                                              epochs=Bdistill_epochs,
-                                              alpha=Bdistill_alpha)
-                    logger.add("train_plus/bern_distil_loss", student_agent.bern_distil_loss, total_steps)
-                    logger.add("train_plus/bern_distil_grad", student_agent.bern_distil_grad, total_steps)
 
                 # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
                 if batch_idx % 10 == 0:
@@ -2237,14 +2151,7 @@ def run_MLP_simulation(
                 
                 # [新增] 诊断监控
                 logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
-                # logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
-                
-                # IL-PPO信号强度对比
-                # 错误做法，更新强度数量级和样本数无关
-                # if use_sil:
-                #     logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
-                #     logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
-                    
+
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
                 # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
@@ -2252,53 +2159,13 @@ def run_MLP_simulation(
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
                 
-                if should_stir:
-                    # 策略搅拌：计算目标熵并执行搅拌
-                    # cat熵从0step的2到20Mstep的1.5线性退火
-                    max_steps_for_stir = 20 * 1e6  # 20M steps
-                    cat_entropy_start = 2.0
-                    cat_entropy_end = 1.5
-                    
-                    # 线性插值计算当前目标cat熵
-                    progress = min(total_steps / max_steps_for_stir, 1.0)
-                    target_cat_entropy = cat_entropy_start + (cat_entropy_end - cat_entropy_start) * progress
-                    
-                    target_entropies = {
-                        'cont': 0.0,  # 连续动作目标熵为0
-                        'cat': target_cat_entropy,  # 离散动作线性退火
-                        'bern': 0.0  # 伯努利动作目标熵为0
-                    }
-                    
-                    print(f"  [should_stir] Target cat entropy: {target_cat_entropy:.3f} (progress: {progress:.3f})")
-                    
-                    # 执行策略搅拌
-                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.01)
-                    
-                    # 保存搅拌后的模型参数
-                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}.pt"))
-                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                    
-                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                    
-                    # 记录搅拌后的熵值
-                    logger.add("stir/cat_entropy", entropy_info['cat_entropy'], total_steps)
-                    logger.add("stir/bern_entropy", entropy_info['bern_entropy'], total_steps)
-                    logger.add("stir/cont_entropy", entropy_info['cont_entropy'], total_steps)
-                    logger.add("stir/target_cat_entropy", target_cat_entropy, total_steps)
-                    
-                    print(f"  [should_stir] Actual cat entropy: {entropy_info['cat_entropy']:.3f}, bern entropy: {entropy_info['bern_entropy']:.3f}, cont entropy: {entropy_info['cont_entropy']:.3f}")
-                    
-                    print(f"Saved Stirred Checkpoint: {actor_key}")
-                    print(f"Saved Current Actor: current_actor.pt")
-                else:
-                    # 正常保存模型
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                    print(f"Saved Checkpoint: {actor_key}")
-                    print(f"Saved Current Actor: current_actor.pt")
+                # 正常保存模型
+                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                print(f"Saved Checkpoint: {actor_key}")
+                print(f"Saved Current Actor: current_actor.pt")
                 
                 # 清空 Buffer（在搅拌之后）
                 transition_dict = copy.deepcopy(empty_transition_dict)

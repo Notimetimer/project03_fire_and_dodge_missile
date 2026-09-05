@@ -7,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"无预训练-run-20260817-225310")
+#     r"无预训练_flymask_1-run-20260902-113021")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -21,15 +21,15 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
 mission_name = f'无预训练_flymask_{manu_mask}'
 
 # 超参数
-actor_lr = 3e-5 # 4 1e-4
+actor_lr = 1e-4 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 0
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
-gamma = 0.995
+gamma = 0.97 # 0.995
 lmbda = 0.995
 epochs = 4 # 10
-eps = 0.1 # 0.2
+eps = 0.2 # 0.2
 k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
@@ -122,12 +122,12 @@ if __name__=='__main__':
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
-            'Rule_4': 1200,
-            'Rule_5': 1200,
-            'Rule_6': 1200,
+            # "Rule_1": 1200,
+            # "Rule_2": 1200,
+            # 'Rule_3': 1200,
+            # 'Rule_4': 1200,
+            # 'Rule_5': 1200,
+            # 'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1,

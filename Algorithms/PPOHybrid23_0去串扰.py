@@ -22,21 +22,28 @@ def sigmoid(x):
     return 1/(1+np.exp(-x))
 
 # =============================================================================
-#  机动mask(manu_mask) 开关配置
-#  由同目录下的 mask_config.json 控制该开关的默认取值。
-#  该配置只在 PolicyNetHybrid.__init__ 中读取一次，缓存为实例属性 self.manu_mask，
+#  机动mask 开关配置
+#  由同目录下的 mask_config.json 控制垂直/水平多对一映射与 mask 开关。
+#  该配置只在 PolicyNetHybrid.__init__ 中读取一次，缓存为实例属性，
 #  forward() 直接使用该实例属性控制机动mask，不会重复读盘。
 # =============================================================================
+
 _MASK_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mask_config.json')
 
 def load_mask_config():
-    cfg = {'manu_mask': 0}
+    cfg = {
+        'ver_map': 0,
+        'ver_mask': 0,
+        'hor_map': 0,
+        'hor_mask': 0,
+    }
     try:
         with open(_MASK_CONFIG_PATH, 'r', encoding='utf-8') as f:
             loaded = json.load(f)
-        cfg['manu_mask'] = int(loaded.get('manu_mask', 0))
+        for k in cfg:
+            cfg[k] = int(loaded.get(k, 0))
     except Exception as e:
-        print(f"[mask_config] 加载 {_MASK_CONFIG_PATH} 失败，使用默认值 manu_mask=0。错误: {e}")
+        print(f"[mask_config] 加载 {_MASK_CONFIG_PATH} 失败，使用默认值。错误: {e}")
     return cfg
 
 # =============================================================================
@@ -131,9 +138,13 @@ class PolicyNetHybrid(torch.nn.Module):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
 
-        # [新增] 机动mask(manu_mask) 开关：只在网络初始化时从
+        # [新增] 机动mask 开关：只在网络初始化时从
         # mask_config.json 读取一次，永久保存为实例属性，forward() 不再重复读取磁盘。
-        self.manu_mask = load_mask_config()['manu_mask']
+        mask_cfg = load_mask_config()
+        self.ver_map = mask_cfg['ver_map']
+        self.ver_mask = mask_cfg['ver_mask']
+        self.hor_map = mask_cfg['hor_map']
+        self.hor_mask = mask_cfg['hor_mask']
         # self.Autoregressive = Autoregressive
         # # 确定bern_dim和主干网络输入维度
         # bern_dim = self.action_dims.get('bern', 0)
@@ -191,11 +202,15 @@ class PolicyNetHybrid(torch.nn.Module):
             self.action_dims['cat'] = []
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             self.cat_dims = list(self.action_dims['cat'])  # list, e.g., [4, 10]
-            # [去串扰设计] 水平动作头在actor结构定义中保留8维动作头（动作0-7，其中动作7为去串扰专用中导置尾头）
-            # 对外部暴露维度仍为 self.cat_dims (如 [5, 7])，内部网络层构建和切分采用 self.cat_dims_internal ([5, 8])
+            # [去串扰设计] ver_map/hor_map 分别控制是否启用 13/11 多对一映射；
+            # 否则直接按外部维度 self.cat_dims (如 [5, 7]) 构建离散头。
             self.cat_dims_internal = list(self.cat_dims)
-            if len(self.cat_dims_internal) > 1 and self.cat_dims_internal[1] == 7:
-                self.cat_dims_internal[1] = 8
+            if self.ver_map:
+                if len(self.cat_dims_internal) > 0 and self.cat_dims_internal[0] == 5:
+                    self.cat_dims_internal[0] = 13
+            if self.hor_map:
+                if len(self.cat_dims_internal) > 1 and self.cat_dims_internal[1] == 7:
+                    self.cat_dims_internal[1] = 11
             total_cat_dim = sum(self.cat_dims_internal)
             # 现·2层动作头
             layers = []
@@ -243,9 +258,10 @@ class PolicyNetHybrid(torch.nn.Module):
             # self.log_temp_bern = nn.Parameter(torch.zeros(bern_dim))
     
     # [修改] 增加 action_masks 参数, [新增] 增加 temperature 参数
-    # [新增] manu_mask: 机动mask开关，仅由 self.manu_mask 控制（__init__ 时从 mask_config.json 读取一次，不重复读盘）
+    # [新增] ver_mask/hor_mask: 机动mask开关（__init__ 时从 mask_config.json 读取一次，不重复读盘）
     def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=0):
-        manu_mask = self.manu_mask
+        ver_mask = self.ver_mask
+        hor_mask = self.hor_mask
         if isinstance(temperature, dict):
             temp_cat = temperature.get('cat', 1.0)
             temp_bern = temperature.get('bern', 1.0)
@@ -284,12 +300,12 @@ class PolicyNetHybrid(torch.nn.Module):
         if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
             cat_logits_all = self.fc_cat(shared_features)
             
-            # 1. 切分 Logits (内部使用 8 维水平头切分)
+            # 1. 切分 Logits (内部使用 13 维垂直头 + 11 维水平头切分)
             split_dims = getattr(self, 'cat_dims_internal', self.cat_dims)
             cat_logits_list = list(torch.split(cat_logits_all, split_dims, dim=-1))
 
-            # [去串扰与机动 mask]：对 action_hor 处理
-            if len(cat_logits_list) > 1 and cat_logits_list[1].size(-1) == 8:
+            # [去串扰与机动 mask]：对 action_ver 处理 (5个动作)
+            if len(cat_logits_list) > 0 and cat_logits_list[0].size(-1) == 13:
                 xb_cat = x
                 if xb_cat.dim() == 1:
                     xb_cat = xb_cat.unsqueeze(0)
@@ -298,14 +314,48 @@ class PolicyNetHybrid(torch.nn.Module):
                 cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
                 cond_no_warn_no_mid = (~warning_flag_cat) & (~missile_in_mid_term_cat)
 
-                hor_logits = cat_logits_list[1]  # (Batch, 8)
+                ver_logits_all = cat_logits_list[0]  # (Batch, 13)
+                v_def = ver_logits_all[:, 8:13]      # 防御：0,1,2,3,4
 
-                if manu_mask:
-                    # 白名单 (8维动作: 0追击, 1左偏, 2左3, 3置尾[告警], 4右9, 5右偏, 6占中, 7置尾[中导])
-                    #                              0, 1, 2, 3, 4, 5, 6, 7
-                    m_warn_allow   = torch.tensor([0, 0, 1, 1, 1, 0, 0, 0], dtype=torch.bool, device=x.device) # 告警: 允许 2,3,4
-                    m_mid_allow    = torch.tensor([0, 1, 0, 0, 0, 1, 0, 1], dtype=torch.bool, device=x.device) # 无告警+有中导: 允许 1,5,7 (动作7去串扰)
-                    m_no_mid_allow = torch.tensor([1, 0, 0, 0, 0, 0, 1, 0], dtype=torch.bool, device=x.device) # 无告警+无中导: 允许 0,1,5
+                if ver_mask:
+                    v_off = ver_logits_all[:, 0:5]   # 进攻：0,1,2,3,4
+                    v_dis = ver_logits_all[:, 5:8]   # 偏置：2,3,4
+
+                    B = ver_logits_all.size(0)
+                    v_off_5 = v_off
+                    v_dis_5 = torch.full((B, 5), -1e8, dtype=ver_logits_all.dtype, device=ver_logits_all.device)
+                    v_dis_5[:, 2] = v_dis[:, 0]
+                    v_dis_5[:, 3] = v_dis[:, 1]
+                    v_dis_5[:, 4] = v_dis[:, 2]
+
+                    ver_logits_5 = v_def
+                    ver_logits_5 = torch.where(cond_no_warn_mid.unsqueeze(1), v_dis_5, ver_logits_5)
+                    ver_logits_5 = torch.where(cond_no_warn_no_mid.unsqueeze(1), v_off_5, ver_logits_5)
+                    cat_logits_list[0] = ver_logits_5
+                else:
+                    cat_logits_list[0] = v_def
+
+            # [去串扰与机动 mask]：对 action_hor 处理
+            if len(cat_logits_list) > 1 and cat_logits_list[1].size(-1) == 11:
+                xb_cat = x
+                if xb_cat.dim() == 1:
+                    xb_cat = xb_cat.unsqueeze(0)
+                warning_flag_cat = xb_cat[:, 5] > 1e-6
+                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
+                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
+                cond_no_warn_no_mid = (~warning_flag_cat) & (~missile_in_mid_term_cat)
+
+                hor_logits = cat_logits_list[1]  # (Batch, 11)
+
+                if hor_mask:
+                    # 11维内部头分别对应三个阶段的白名单，对外聚合为7维动作分布
+                    # 0:无中导-追击 1:无中导-左3 2:无中导-置尾 3:无中导-右9 4:无中导-占中
+                    # 5:有中导-左偏 6:有中导-置尾 7:有中导-右偏
+                    # 8:告警-左3   9:告警-置尾  10:告警-右9
+                    #                              0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+                    m_warn_allow   = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1], dtype=torch.bool, device=x.device) # 告警: 8,9,10
+                    m_mid_allow    = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], dtype=torch.bool, device=x.device) # 无告警+有中导: 5,6,7
+                    m_no_mid_allow = torch.tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0], dtype=torch.bool, device=x.device) # 无告警+无中导: 0,1,2,3,4
 
                     legal_mask = (
                         warning_flag_cat.unsqueeze(1) & m_warn_allow |
@@ -314,17 +364,24 @@ class PolicyNetHybrid(torch.nn.Module):
                     )
                     hor_logits = hor_logits.masked_fill(~legal_mask, -1e8)
 
-                # [核心重映射] 将内部动作头7在输出前用torch运算重新映射为动作3
-                # 处于“无告警+有中导”状态时，动作3位置取自动作头7的Logit；其余状态取自原动作头3
-                # 可导的 torch.where 确保梯度能够按状态准确反向传播回动作头7或动作头3
-                logit_3_remapped = torch.where(cond_no_warn_mid.unsqueeze(1), hor_logits[:, 7:8], hor_logits[:, 3:4])
-
-                # 拼接为7维Logits对外输出，对外彻底隐藏动作头7的存在，保持接口与语义一致
-                cat_logits_list[1] = torch.cat([
-                    hor_logits[:, 0:3],
-                    logit_3_remapped,
-                    hor_logits[:, 4:7]
-                ], dim=-1)
+                # 把 11 维内部头按阶段语义映射到 7 维外部动作分布
+                # 同一外部动作可能由多个内部头承担，但同一时刻只有一个阶段激活，
+                # 因此用 logsumexp 聚合（可导，对单激活头退化为恒等）
+                # 外部动作: 0追击, 1左偏, 2左3, 3置尾, 4右9, 5右偏, 6占中
+                action_head_groups = [
+                    [0],        # 0 追击
+                    [5],        # 1 左偏
+                    [1, 8],     # 2 左3
+                    [2, 6, 9],  # 3 置尾
+                    [3, 10],    # 4 右9
+                    [7],        # 5 右偏
+                    [4],        # 6 占中
+                ]
+                # (B, 11) -> (B, 7)
+                cat_logits_list[1] = torch.stack([
+                    torch.logsumexp(hor_logits[:, heads], dim=1)
+                    for heads in action_head_groups
+                ], dim=1)
 
             # 2. 获取温度 (temperature = exp(log_temp))
             # temp_cat 形状: (num_heads, )
@@ -379,8 +436,8 @@ class PolicyNetHybrid(torch.nn.Module):
             # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
             can_fire = ammo_cond & time_const_cond & ata_cond
 
-            # 禁止大离轴发射导弹                        
-            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(25))
+            # 禁止大离轴发射导弹
+            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(45)) # 25
             can_fire = can_fire & delta_psi_cond
             # 禁止俯冲发射导弹
             theta = torch.arcsin(sin_theta)
@@ -388,23 +445,18 @@ class PolicyNetHybrid(torch.nn.Module):
             theta_cond = theta >= azimuth - np.radians(15)
             can_fire = can_fire & theta_cond
 
-            # 禁止中制导下开火
-            can_fire = can_fire & ~missile_in_mid_term
+            # # 禁止中制导下开火
+            # can_fire = can_fire & ~missile_in_mid_term
             
-            # 禁止尾追长距离开火
-            far_chase = (AA_hor < math.pi/2) & (dist > 25e3)
-            can_fire = can_fire & ~ far_chase
+            # # 禁止尾追长距离开火
+            # far_chase = (AA_hor < math.pi/2) & (dist > 25e3)
+            # can_fire = can_fire & ~ far_chase
             
             # if not can_fire:
             #     print("禁止开火")
             # else:
             #     print("  可以开炮  ")
             
-            # # 旧代码2
-            # if mask_on:
-            #     can_fire = ata_cond & locked_cond & ammo_cond & time_cond & dist_cond & delta_theta_cond
-            # else:
-            #     can_fire = ammo_cond
 
             # build mask for bern dims and apply to first bern dimension only
             bern_dim = self.action_dims.get('bern', 0)
@@ -540,7 +592,7 @@ class HybridActorWrapper(nn.Module):
 
                 pi = math.pi
                 ata_hor      = torch.acos(cos_ata_hor)
-                ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 20.0 * pi / 180.0)
+                ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 30.0 * pi / 180.0)
                 locked_cond  = (locked > 0)
                 dist_cond    = (dist < 90e3) # 105e3)
                 delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
@@ -1643,9 +1695,9 @@ class PPOHybrid:
                 advantage = compute_advantage(self.gamma, self.lmbda, td_delta.cpu(), dones.cpu(), truncs.cpu() if truncs is not None else None).to(self.device)
 
                 
-        # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
-        if alpha_distill > 0 and teacher_actor is not None:
-            advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
+        # # 策略蒸馏 (Advantage-based): 提升与 teacher 一致的 cat 动作的优势度
+        # if alpha_distill > 0 and teacher_actor is not None:
+        #     advantage = self.ADistill(transition_dict, advantage, alpha_distill, teacher_actor, AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
         
         # 3. 计算旧策略的 log_probs (使用 Wrapper)
         with torch.no_grad():

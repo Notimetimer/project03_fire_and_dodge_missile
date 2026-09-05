@@ -2,7 +2,6 @@
 增加开火惩罚
 三元组奖励
 '''
-"gamma = 0.97~0.98"
 
 from Controller.Controller_function import sub_of_radian
 import numpy as np
@@ -70,10 +69,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         reward_weights = {
             'border_penalty_scale': 0.2,
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
-            'angle_advantage': 0.1, # 0.007, # 0.03
-            'height_advantage': 0.1,
-            'to_center_reward' : 0.05, # 0.02 占领中心点的价值
-            'speed_penalty': 0.01, # 慢速惩罚
+            'angle_advantage': 0.2, # 0.007, # 0.03
+            'height_advantage': 0.2,
+            'to_center_reward' : 0.1, # 0.02 占领中心点的价值
+            'speed_penalty': 0.08, # 慢速惩罚
         }
 
         ego_win=0
@@ -116,9 +115,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         done = 0
         
         # 死亡时间戳
-        if ego.dead and getattr(ego, 'dead_time', None) is None:
+        if ego.dead and ego.dead_time == None:
             ego.dead_time = self.t
-        if enm.dead and getattr(enm, 'dead_time', None) is None:
+        if enm.dead and enm.dead_time == None:
             enm.dead_time = self.t
 
         # --简单判定法--
@@ -264,29 +263,31 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 ego.stage = 0
                 # if len(alive_ally_missiles) == 0:
                 # 瞄准奖励
-                r_shaping += 3 * (1-2*abs(delta_psi/pi)) * reward_weights['angle_advantage'] * (1-ego.dead)
-                # r_shaping += 2 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
+                r_shaping += 1 * cos(sub_of_radian(delta_psi+ego.psi, ego.psi_v)) * reward_weights['angle_advantage'] * (1-ego.dead)
                 # 爬高奖励
-                r_shaping += 2 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
-                # r_shaping += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
+                if distance > 70e3:
+                    r_shaping += 1 * (ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
+                r_shaping += 1 * min(ego.theta/(pi/4), 1) * reward_weights['angle_advantage'] * (1-ego.dead)
             # crank引导
             else:
                 ego.stage = 1
                 # if len(alive_ally_missiles) > 0:
                 # 开火后crank下高，误差惩罚改为“保持中制导条件下的奖励”
                 r_shaping += 2 * (1 - abs(pi/3-abs(sub_of_radian(delta_psi+ego.psi, ego.psi_v)))/(pi/3)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
-                r_shaping += 4 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
+                r_shaping += 2 * (1 - abs(-pi/4 - ego.theta) / (pi/4)) * reward_weights['angle_advantage'] * (1-ego.dead) #  * missile_in_mid_term
+                r_shaping += 2 * (-ego.vu/100) * reward_weights['height_advantage'] * target_locked * (1-ego.dead)
         # 防御引导
         if warning:
             ego.stage = 2
             # 受到威胁应该三九线/置尾和下高
-            r_shaping += 4 * min(abs(sub_of_radian(delta_psi_threat+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 2 * min(abs(sub_of_radian(delta_psi_threat+ego.psi, ego.psi_v)), pi/2)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
+            r_shaping += 2 * (-ego.theta)/(pi/2) * reward_weights['angle_advantage'] * (1-ego.dead)
             r_shaping += 2 * (-ego.vu/100) * reward_weights['height_advantage'] * (1-ego.dead)
         
         # 速度惩罚
         slow_mach = 0.8 # 0.7
         # if ego.speed < slow_mach*340:
-        r_shaping += 4 * ego.acceleration/9.8 * reward_weights['speed_penalty'] * (1-ego.dead)
+        r_shaping += 1 * ego.acceleration/9.8 * reward_weights['speed_penalty'] * (1-ego.dead)
         # r_shaping -= (slow_mach-ego.speed/340) * reward_weights['speed_penalty'] * (1-ego.dead)
 
         # 被目标锁定
@@ -381,12 +382,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 100
+                r_event += 50 # 100
                 r_event1 = r_event
                 r_event2 = r_event
                 r_event3 = r_event
             elif ego_lose:
-                r_event -= 100
+                r_event -= 50 # 100
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
                 r_event1 = r_event
@@ -405,9 +406,9 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         ego_avg_dist = b_avg_dist
                         enm_avg_dist = r_avg_dist
                     
-                    # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
-                    r_event += (-30 - 20 * (ego_avg_dist-enm_avg_dist)/self.R_cage0) * end_reward_weight
-                    self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
+                    # # 赢不了，也要占据中心，并把对手逼到边上，如果赢了或者输了，都禁止加这个奖励
+                    # r_event += (-30 - 20 * (ego_avg_dist-enm_avg_dist)/self.R_cage0) * end_reward_weight
+                    # self.middle_hold_score = (ego_avg_dist-enm_avg_dist)/self.R_cage0
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
                     r_event1 = r_event + 0 * end_reward_weight
