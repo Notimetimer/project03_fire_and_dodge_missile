@@ -19,17 +19,27 @@ plt.rcParams["axes.unicode_minus"] = False
 
 defaults = {
     "总步数": "300",
-    "密集奖励": "0.2",
+    "gamma": "0.988",
     "偶发奖励": "15",
     "结果奖励": "50",
-    "gamma": "0.988",
+    "密集奖励": "0.2",
     "稀疏奖励位置": "-60,-120,-180",
 }
 
 
 def simulate_episode(total_steps, dense_mag, occasional_mag, result_mag, gamma, event_indices):
     """生成一个回合的奖励、蒙特卡洛回报，以及各奖励成分的回报贡献。"""
+    # 密集奖励的波形设置
+    t = np.arange(total_steps)
+    # 常数
     dense = np.full(total_steps, dense_mag, dtype=np.float64)
+    # # 正弦波
+    # dense = dense_mag * np.sin(2 * np.pi * t / 50)  # 50步为一个周期
+    # # 衰减正弦波
+    # dense = dense_mag * np.exp(-t / (total_steps * 0.5)) * np.sin(2 * np.pi * t / 30)
+    # # 带偏置的正弦波（始终为正但有起伏）：
+    # dense = dense_mag * (1.0 + 0.5 * np.sin(2 * np.pi * t / 50))
+
 
     # 稀疏奖励位置由用户指定，支持负索引（从总步数末尾倒数）
     sparse = np.zeros(total_steps, dtype=np.float64)
@@ -42,7 +52,7 @@ def simulate_episode(total_steps, dense_mag, occasional_mag, result_mag, gamma, 
     result[-1] += result_mag
 
     rewards = dense + sparse + result
-
+    # 计算每个奖励成分的蒙特卡洛回报, 带符号计算
     def make_returns(arr):
         returns = np.empty_like(arr)
         g = 0.0
@@ -210,6 +220,7 @@ class RewardWeightTuner:
 
         # 第二张图：各奖励成分对回报的权重占比（使用绝对值）
         self.ax_weight.clear()
+        # 先算的带符号蒙特卡洛回报再取的绝对值
         total_abs = np.abs(dense_r) + np.abs(sparse_r) + np.abs(result_r)
         total_abs = np.where(total_abs == 0, 1, total_abs)
         self.ax_weight.plot(
