@@ -296,10 +296,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 #     r_shaping -= reward_bias[1]
             # 锁定目标
             if target_locked:
-                r_shaping += 10 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 1 *
+                r_shaping += 5 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 1 *
             # 被目标锁定
             if locked_by_target:
-                r_shaping -= 10 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 1 *
+                r_shaping -= 5 * reward_weights['angle_advantage'] * (1-ego.dead) * (1-enm.dead) # 1 *
 
         # 防御引导（真实RWR告警或代理告警距离触发）
         if effective_threat:
