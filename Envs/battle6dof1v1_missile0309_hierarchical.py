@@ -1498,13 +1498,12 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
         uav = env.BUAV
         target = env.RUAV
 
-    if action_label is not None and hasattr(env, 'maneuver14LR'):
-        action_array = env.maneuver14LR(uav, action_label)
-        delta_target_height = action_array[0]
-
-        desired_theta = (min(delta_target_height, env.max_alt_safe-uav.alt) / 5000.0) * (pi / 2) # 不能再爬升了，就得降低期望俯仰角
-        if (desired_theta - uav.theta > (15 * pi / 180)) and uav.alt < 7000: # 7000m以上很难再维持大爬升角，高抛延迟开火仅对7000m以下生效
-            return None
+    # if action_label is not None and hasattr(env, 'maneuver14LR'):
+    #     action_array = env.maneuver14LR(uav, action_label)
+    #     delta_target_height = action_array[0]
+    #     desired_theta = (min(delta_target_height, env.max_alt_safe-uav.alt) / 5000.0) * (pi / 2) # 不能再爬升了，就得降低期望俯仰角
+    #     if (desired_theta - uav.theta > (15 * pi / 180)) and uav.alt < 7000: # 7000m以上很难再维持大爬升角，高抛延迟开火仅对7000m以下生效
+    #         return None
 
     ego_state = env.get_state(uav.side)
     ATA = ego_state["target_information"][4]
