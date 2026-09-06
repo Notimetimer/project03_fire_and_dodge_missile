@@ -13,12 +13,14 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-# 读取 mask_config.json 中的 manu_mask 状态 (相对路径)
+# 读取 mask_config.json 中的 ver/hor 开关状态 (相对路径)
 mask_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Algorithms', 'mask_config.json')
 with open(mask_config_path, 'r', encoding='utf-8') as f:
-    manu_mask = json.load(f).get('manu_mask', 0)
+    _mask_cfg = json.load(f)
+    ver = _mask_cfg.get('ver', 0)
+    hor = _mask_cfg.get('hor', 0)
 
-mission_name = f'SLWSPFSP0.3_flymask_{manu_mask}'
+mission_name = f'SLWSPFSP0.3_flymask_v{ver}h{hor}'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-4

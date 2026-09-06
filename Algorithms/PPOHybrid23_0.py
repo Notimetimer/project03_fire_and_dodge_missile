@@ -32,10 +32,8 @@ _MASK_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ma
 
 def load_mask_config():
     cfg = {
-        'ver_map': 0,
-        'ver_mask': 0,
-        'hor_map': 0,
-        'hor_mask': 0,
+        'ver': 0,
+        'hor': 0,
     }
     try:
         with open(_MASK_CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -141,10 +139,10 @@ class PolicyNetHybrid(torch.nn.Module):
         # [新增] 机动mask 开关：只在网络初始化时从
         # mask_config.json 读取一次，永久保存为实例属性，forward() 不再重复读取磁盘。
         mask_cfg = load_mask_config()
-        self.ver_map = mask_cfg['ver_map']
-        self.ver_mask = mask_cfg['ver_mask']
-        self.hor_map = mask_cfg['hor_map']
-        self.hor_mask = mask_cfg['hor_mask']
+        self.ver_map = mask_cfg['ver']
+        self.ver_mask = mask_cfg['ver']
+        self.hor_map = mask_cfg['hor']
+        self.hor_mask = mask_cfg['hor']
         # self.Autoregressive = Autoregressive
         # # 确定bern_dim和主干网络输入维度
         # bern_dim = self.action_dims.get('bern', 0)
