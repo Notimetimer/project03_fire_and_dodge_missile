@@ -321,6 +321,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 # 3 * np.maximum(-1 + np.exp(- 2 * ego.theta / np.pi * 2), -50) # 相当重要
             )/15 # 10
             )
+            # 弹药量的影响
+            r_event -= max(0, 5-ego.ammo)/5 * 3
 
         # 导弹脱靶
         if enm.escape_once:
