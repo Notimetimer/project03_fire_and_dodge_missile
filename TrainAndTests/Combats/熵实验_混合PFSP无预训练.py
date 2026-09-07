@@ -6,19 +6,21 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"无预训练_flymask_1-run-20260902-113021")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"SLWSPFSPNoIL_flymask_v0h0-run-20260906-171344")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-# 读取 mask_config.json 中的 manu_mask 状态 (相对路径)
+# 读取 mask_config.json 中的 ver/hor 开关状态 (相对路径)
 mask_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Algorithms', 'mask_config.json')
 with open(mask_config_path, 'r', encoding='utf-8') as f:
-    manu_mask = json.load(f).get('manu_mask', 0)
+    _mask_cfg = json.load(f)
+    ver = _mask_cfg.get('ver', 0)
+    hor = _mask_cfg.get('hor', 0)
 
-mission_name = f'无预训练_flymask_{manu_mask}'
+mission_name = f'SLWSPFSPNoIL_flymask_v{ver}h{hor}'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-4
@@ -89,7 +91,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=20, # 15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -122,21 +124,21 @@ if __name__=='__main__':
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug
-            # "Rule_1": 1200,
-            # "Rule_2": 1200,
-            # 'Rule_3': 1200,
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
             # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             # 'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
-        hist_agent_as_opponent = 1,
+        hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
         WARM_UP_STEPS = 0e3, # 500e3, # 1e3 为debug
-        ADMISSION_THRESHOLD = -1,
-        MAX_HISTORY_SIZE = 50, # 300 # 100
-        compete_old_rate = 0.0, # “复习”概率
+        ADMISSION_THRESHOLD = -1,  # 0.5,
+        MAX_HISTORY_SIZE = 50, # 150  # 300
+        compete_old_rate = 0.2, # “复习”概率
         K_FACTOR = 16,  # 32 原先振荡太大了
         randomized_birth = 1,
         save_interval = 1, # 触发更新至少要经过多少批采样
