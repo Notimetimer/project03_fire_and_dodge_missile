@@ -349,10 +349,37 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # 记忆只能在奖励记录的时间点更新
         if abs(self.t - step_idx * cycle_time) < self.dt_maneuver and (self.t - ego._last_phi_t) > (cycle_time * 0.5):
             threat_crossing_reward = 0.0
+            # # 简单目标威胁判据
+            # if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
+            #     threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
+            # if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
+            #     threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
+            # 计算距离/速度和时间之比
             if ego._last_enm_threat_dist > threat_distance_threshold1 and enm_states["threat"][3] <= threat_distance_threshold1:
-                threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
+                # 遍历所有alive_ally_missiles，在missile.distance小于距离阈值的里面，找 missile.closing_rate>10 且 t_go/(missile.t_max-missile.t+1e-8)最小的，最小的那个<1才给这个奖励
+                ratios1 = [
+                    m.t_go / (m.t_max - m.t + 1e-8)
+                    for m in alive_ally_missiles
+                    if getattr(m, 'distance', float('inf')) < threat_distance_threshold1
+                    and getattr(m, 'closing_rate', None) is not None
+                    and m.closing_rate > 10
+                    and (m.t_max - m.t) > 0
+                ]
+                if len(ratios1) > 0 and min(ratios1) < 1.0:
+                    threat_crossing_reward += 4 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
             if ego._last_enm_threat_dist > threat_distance_threshold2 and enm_states["threat"][3] <= threat_distance_threshold2:
-                threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
+                # 同上
+                ratios2 = [
+                    m.t_go / (m.t_max - m.t + 1e-8)
+                    for m in alive_ally_missiles
+                    if getattr(m, 'distance', float('inf')) < threat_distance_threshold2
+                    and getattr(m, 'closing_rate', None) is not None
+                    and m.closing_rate > 10
+                    and (m.t_max - m.t) > 0
+                ]
+                if len(ratios2) > 0 and min(ratios2) < 1.0:
+                    threat_crossing_reward += 8 * fire_reward_weight * weight_temp  # 稀疏威胁奖励
+
             ego._threat_crossing_reward_t = self.t
             ego._threat_crossing_reward = threat_crossing_reward
             ego._last_phi_t = self.t
