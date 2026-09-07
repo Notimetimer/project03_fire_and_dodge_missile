@@ -589,10 +589,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 进场瞬间给全信息
                 red_init_ammo=6
                 blue_init_ammo=6
-                # 残局训练
-                if np.random.uniform(0,1) < 0.3:
-                    red_init_ammo = int(np.round(np.random.uniform(0,3)))
-                    blue_init_ammo = int(np.round(np.random.uniform(0,3)))
+                # # 残局训练
+                # if np.random.uniform(0,1) < 0.3:
+                #     red_init_ammo = int(np.round(np.random.uniform(0,3)))
+                #     blue_init_ammo = int(np.round(np.random.uniform(0,3)))
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=0)
                 
                 # 状态变量初始化
@@ -1527,7 +1527,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in [0, 1, 2, 3, 4, 5, 6]:
+                for r_idx in [0, 1, 2, 3]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1554,7 +1554,7 @@ def run_MLP_simulation(
                 
                 # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
                 test_tasks_no_random = []
-                for r_idx in [0, 1, 2, 3, 4, 5, 6]:
+                for r_idx in [0, 1, 2, 3]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         kwds={

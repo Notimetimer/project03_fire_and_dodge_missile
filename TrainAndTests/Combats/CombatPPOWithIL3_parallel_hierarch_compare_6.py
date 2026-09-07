@@ -58,7 +58,7 @@ test_red_init_ammo = 6
 test_blue_init_ammo = 6
 
 # 周期性测试所对抗的规则对手编号
-TEST_RULE_IDS = [0, 1, 2, 3, 4, 5, 6]
+TEST_RULE_IDS = [0, 1, 2, 3]
 
 
 class RuleTeacherWrapper:
@@ -596,10 +596,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 进场瞬间给全信息
                 red_init_ammo=6
                 blue_init_ammo=6
-                # 残局训练
-                if np.random.uniform(0,1) < 0.3:
-                    red_init_ammo = int(np.round(np.random.uniform(0,3)))
-                    blue_init_ammo = int(np.round(np.random.uniform(0,3)))
+                # # 残局训练
+                # if np.random.uniform(0,1) < 0.3:
+                #     red_init_ammo = int(np.round(np.random.uniform(0,3)))
+                #     blue_init_ammo = int(np.round(np.random.uniform(0,3)))
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=0)
                 
                 # 状态变量初始化
