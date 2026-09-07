@@ -63,3 +63,5 @@ firing_probability_target_center.png
 *.png
 /TrainAndTests/Controls/aquired_combat_cmds
 /TrainAndTests/Controls/adjust
+/combat挑选
+*.zip
