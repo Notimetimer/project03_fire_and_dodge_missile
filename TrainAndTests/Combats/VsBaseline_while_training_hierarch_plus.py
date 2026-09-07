@@ -95,28 +95,32 @@ def test_worker(model_state_dict, rule_num,
                         if Temperature is None:
                             Temperature = {'cat':0.5, 'bern':1}
                         explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0
+                        # [漏网点1已解决]: 测试一律传入 check_obs=b_check，激活 _deploy_can_fire 规则校验
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
                     else:
                         if Temperature is None:
                             Temperature = {'cat':1, 'bern':1}
                         explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
-                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=None)
+                        # [漏网点1已解决]: 随机测试也一律传入 check_obs=b_check，消除开火硬规则差异
+                        b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
 
                     b_action_label = b_act_exec['cat'] # [0]
                     if b_act_exec['bern'][0]:
+                        # [漏网点2 解决]: 物理层禁忌校验与开火一致性
+                        # 两种测试方式在物理层均统一加上 tabu=1 (强制要求 target_locked, weapon>=0.1, ATA<=max_radar_angle_rad)。
+                        # 无论网络意图如何，都必须通过统一的底层物理雷达锁定条件校验才允许射出导弹。
                         test_env.BUAV.about_to_fire = 1
 
-            # 尝试发射
+            # 尝试发射 (两种测试方式均强制启用 tabu=1)
+            tabu_fire = 1
             if getattr(test_env.RUAV, 'about_to_fire', 0):
                 # 如果 restrict_fire 为 True，则限制动作次序（传入 r_action_label）
                 r_act_label_to_pass = r_action_label if (restrict_fire or auto_regressive) else None
-                tabu_fire = 1 if restrict_fire else 0
                 launch_missile_immediately(test_env, 'r', action_label=r_act_label_to_pass, tabu=tabu_fire)
             b_m_id = None
             if getattr(test_env.BUAV, 'about_to_fire', 0):
                 # 如果 restrict_fire 为 True，则限制动作次序（传入 b_action_label）
                 b_act_label_to_pass = b_action_label if (restrict_fire or auto_regressive) else None
-                tabu_fire = 1 if restrict_fire else 0
                 b_m_id = launch_missile_immediately(test_env, 'b', action_label=b_act_label_to_pass, tabu=tabu_fire)
 
             # 物理步

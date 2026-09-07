@@ -1512,6 +1512,9 @@ def launch_missile_immediately(env, side='r', tabu=0, action_label=None):
     target_locked = ego_state["target_locked"]
 
     # 发射导弹
+    # 若 tabu=1，要求 target_locked、weapon>=0.1 且 ATA<=max_radar_angle_rad 同时满足才能成功发射。
+    # 只要上层 about_to_fire=1 未被清除，智能体在接下来的多个物理微步内每次 step 都会进入此处尝试发射，
+    # 一旦在某个中间微步满足上述条件，导弹便会发射成功。
     if uav.ammo>0 and not uav.dead:
         if (not tabu) or\
                 target_locked and ego_state["weapon"]>=0.1 and ATA<=env.RUAV.max_radar_angle_rad:

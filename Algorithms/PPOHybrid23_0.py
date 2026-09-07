@@ -570,6 +570,13 @@ class HybridActorWrapper(nn.Module):
 
         # =====================================================================
         # check_obs 非空时，从 state 直接提取特征计算角度/距离规则 mask（仅部署阶段）
+        # [漏网点1 判定逻辑]: 当外部传入 check_obs(如测试中的 deterministic=True 分支)时，
+        # 会执行以下更严苛的规则拦截。若不满足，_deploy_can_fire 将置为 False:
+        #   1. wait_til_last_missile_ends: 上一枚导弹中制导期间强制禁止开火 (forward 中此限制已被注释，但此处仍有效)
+        #   2. locked_cond: 目标必须已被雷达锁定 (locked > 0)
+        #   3. dist_cond: 目标距离必须小于 90km
+        #   4. ata_hor: 水平离轴角必须 <= 30° (比 forward 中的 45° 更严格)
+        # 外部若传入 check_obs=None (如测试中的 deterministic=False 分支)，则直接跳过此段，不施加这些硬限制。
         # =====================================================================
         _deploy_can_fire = True  # 默认不限制
         if (check_obs is not None) and isinstance(check_obs, dict):
@@ -593,7 +600,7 @@ class HybridActorWrapper(nn.Module):
                 ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 30.0 * pi / 180.0)
                 locked_cond  = (locked > 0)
                 dist_cond    = (dist < 90e3) # 105e3)
-                delta_theta_cond = (delta_theta < pi * 30.0 / 180.0)
+                delta_theta_cond = 1 # (delta_theta < pi * 30.0 / 180.0) # 内置了更严格的
                 wait_til_last_missile_ends = not missile_in_mid_term
                 can_fire_full = (ata_cond & locked_cond & dist_cond
                                 & delta_theta_cond
@@ -666,7 +673,8 @@ class HybridActorWrapper(nn.Module):
         # --- Bern ---
         if actor_outputs['bern'] is not None:
             bern_logits = actor_outputs['bern']
-            # 部署阶段（check_obs非空）施加角度/距离规则 mask
+            # [漏网点1 生效处]: 部署阶段（check_obs非空）施加角度/距离/中制导规则 mask
+            # 若 _deploy_can_fire 为 False，直接将 bern_logits 压为 -1e8，使开火概率归零
             if _deploy_can_fire is False:
                 bern_logits = torch.full_like(bern_logits, -1e8)
             dist = Bernoulli(logits=bern_logits)
