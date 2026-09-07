@@ -439,8 +439,8 @@ class PolicyNetHybrid(torch.nn.Module):
             can_fire = can_fire & delta_psi_cond
             # 禁止俯冲发射导弹
             theta = torch.arcsin(sin_theta)
-            azimuth = theta + delta_theta
-            theta_cond = theta >= azimuth - np.radians(15)
+            elevation = theta + delta_theta
+            theta_cond = theta >= elevation - np.radians(15)
             can_fire = can_fire & theta_cond
 
             # # 禁止中制导下开火
