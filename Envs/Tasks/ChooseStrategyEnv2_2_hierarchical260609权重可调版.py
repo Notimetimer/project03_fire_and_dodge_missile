@@ -404,12 +404,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_event += 100 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
                 r_event1 = r_event
                 r_event2 = r_event
                 r_event3 = r_event
             elif ego_lose:
-                r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_event -= 100 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
                 # if self.out_cage(ego) or ego.alt < self.min_alt:
                 #     r_event -= 50
                 r_event1 = r_event
@@ -434,12 +434,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
                     r_event1 = r_event + 0 * end_reward_weight
-                    r_event2 = r_event + 180 * end_reward_weight # 双杀当做赢
-                    r_event3 = r_event - 180 * end_reward_weight # 双杀当做输
+                    r_event2 = r_event + 100 * end_reward_weight # 双杀当做赢
+                    r_event3 = r_event - 100 * end_reward_weight # 双杀当做输
                 else:
                     r_event1 = r_event + 0 * end_reward_weight
-                    r_event2 = r_event - 180 * end_reward_weight # 双杀策略
-                    r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
+                    r_event2 = r_event - 100 * end_reward_weight # 双杀策略
+                    r_event3 = r_event + 100 * end_reward_weight # 求生者可以把双存活作为胜利
                 
             
             # 打印详细奖励组成，方便调试

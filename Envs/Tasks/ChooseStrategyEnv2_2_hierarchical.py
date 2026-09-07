@@ -48,7 +48,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_weight=0.556, 
+        end_reward_weight=1.0, 
         fire_reward_weight=None,
         fire_inside_weight = None, ends_in_bvr=0,
         proxy_warning_dist=None, r_shaping_weight=1.0, reward_bias=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
@@ -463,12 +463,12 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 
                 if enm.dead: # 平局，对面还死了，那就是双杀了
                     r_event1 = r_event + 0 * end_reward_weight
-                    r_event2 = r_event + 180 * end_reward_weight # 双杀当做赢
-                    r_event3 = r_event - 180 * end_reward_weight # 双杀当做输
+                    r_event2 = r_event + 100 * end_reward_weight # 双杀当做赢
+                    r_event3 = r_event - 100 * end_reward_weight # 双杀当做输
                 else:
                     r_event1 = r_event - 0 * end_reward_weight # 能把时间拖完算你牛逼
-                    r_event2 = r_event - 180 * end_reward_weight # 双杀策略
-                    r_event3 = r_event + 180 * end_reward_weight # 求生者可以把双存活作为胜利
+                    r_event2 = r_event - 100 * end_reward_weight # 双杀策略
+                    r_event3 = r_event + 100 * end_reward_weight # 求生者可以把双存活作为胜利
 
         if done:
             # 打印详细奖励组成，方便调试

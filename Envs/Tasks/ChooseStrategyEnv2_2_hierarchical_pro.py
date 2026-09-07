@@ -47,7 +47,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
     """
     
     def combat_terminate_and_reward(self, side, action_label, action_shoot, action_cycle_multiplier=30, 
-        end_reward_weight=0.556, 
+        end_reward_weight=1.0, 
         fire_reward_weight=None,
         fire_inside_weight = None, ends_in_bvr=0,
         proxy_warning_dist=None):  # 代理告警距离：在导弹雷达未开机时也能提前触发防御引导奖励
@@ -437,11 +437,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             total_shaping_sum = sum(reward_weights.values())
 
             if ego_win:
-                r_event += 180 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
-                r_current_event += 180 * end_reward_weight
+                r_event += 100 * end_reward_weight # 150 + 0.2 * steps_left * total_shaping_sum # 旧 150 新 145
+                r_current_event += 100 * end_reward_weight
             elif ego_lose:
-                r_event -= 180 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
-                r_current_event -= 180 * end_reward_weight
+                r_event -= 100 * end_reward_weight # 125 + steps_left * total_shaping_sum # 旧 100 新 125
+                r_current_event -= 100 * end_reward_weight
             elif ego_draw:
                 # [修改] 不再使用常数-50奖励，而是根据平均态势分来结算
                 if len(self.r_dist_seq) > 0 and len(self.b_dist_seq) > 0:
