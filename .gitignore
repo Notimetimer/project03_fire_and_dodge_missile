@@ -66,3 +66,8 @@ firing_probability_target_center.png
 /combat挑选
 *.zip
 /TrainAndTests/Combats/epsilon_sweep_candidates
+/TrainAndTests/Combats/epsilon_sweep_candidates_v0h0
+TrainAndTests/Combats/marwil_epsilon_sweep_manifest.json
+TrainAndTests/Combats/marwil_epsilon_sweep_results.json
+TrainAndTests/Combats/marwil_epsilon_sweep_results_v0h0.json
+TrainAndTests/Combats/marwil_pareto_recomputed_v0h0.json
