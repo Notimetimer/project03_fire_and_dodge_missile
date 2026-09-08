@@ -599,7 +599,7 @@ class HybridActorWrapper(nn.Module):
                 ata_hor      = torch.acos(cos_ata_hor)
                 ata_cond     = (ata <= 60.0 * pi / 180.0) & (ata_hor <= 30.0 * pi / 180.0)
                 locked_cond  = (locked > 0)
-                dist_cond    = (dist < 85e3) # 90e3) # 105e3)
+                dist_cond    = (dist < 90e3) # 105e3)
                 delta_theta_cond = 1 # (delta_theta < pi * 30.0 / 180.0) # 内置了更严格的
                 wait_til_last_missile_ends = not missile_in_mid_term
                 can_fire_full = (ata_cond & locked_cond & dist_cond
