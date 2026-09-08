@@ -1601,7 +1601,7 @@ def run_MLP_simulation(
                     'blue_birth': bb,
                     # 'R_cage_range': R_cage_range, # 将范围传给Worker
                     'fire_mask': fire_mask,
-                    'end_reward_weight': 1.0, # np.clip(total_steps/5e3, 0, 0.5),
+                    'end_reward_weight': 0.3 + np.clip(total_steps/18e3, 0, 1)*(0.4-0.3), # 1.0
                     'fire_inside_weight': fire_inside_weight,
                     'fire_reward_weight': fire_reward_weight,
                 }
