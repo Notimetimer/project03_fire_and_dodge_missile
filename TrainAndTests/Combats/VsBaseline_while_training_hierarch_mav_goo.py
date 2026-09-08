@@ -39,7 +39,7 @@ def test_worker(model_state_dict, rule_num,
     test_env = ChooseStrategyEnv(env_args, tacview_show=0, vertices=vertices)
     test_env.shielded = 1
     test_env.no_out = no_out
-    test_env.dt_move = 0.04
+    test_env.dt_move = 0.07 # 0.04
     test_env.dt_maneuver = dt_maneuver_val
 
     # 2. 初始化双agent网络并加载权重
