@@ -44,7 +44,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 奖励函数
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
 from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
@@ -53,79 +53,6 @@ from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
-
-# 测试对战初始弹药（可调）
-test_red_init_ammo = 6
-test_blue_init_ammo = 6
-
-# 周期性测试所对抗的规则对手编号 (仅测试 0, 1, 2, 3)
-TEST_RULE_IDS = [0, 1, 2, 3]
-# 蒸馏/引导用的教师规则列表（排除 Rule 0，避免其在上一枚导弹中制导时仍开火的激进行为）
-TEACHER_RULE_IDS = [1, 2, 3, 4, 5, 6]
-
-
-class RuleTeacherWrapper:
-    """
-    基于规则(basic_rules)的教师包装器，用于 RDistill。
-
-    对齐 PolicyNetHybrid.forward 的输出格式：
-      - 'cat': list[Tensor]，每个动作头一个软 one-hot 概率分布 (B, n_classes)
-      - 'bern': Tensor，开火头 logits (B, 1)
-      - 'cont': None
-    软 one-hot 构造方式与 PPOHybrid.compute_il_loss 的 pre_training 分支一致：
-      正确动作概率 = 1 - label_smoothing，其余均分 label_smoothing/(n-1)。
-
-    通过 env.obs2obs_check + env.unscale_state 把网络局部观测(obs)还原为
-    basic_rules 所需的 state_check，再逐样本调用规则得到 (action, fire)。
-    """
-    is_rule_teacher = True
-
-    def __init__(self, env, rule_num, action_dims_dict, device, label_smoothing=0.1):
-        self.env = env
-        self.rule_num = rule_num
-        self.action_dims_dict = action_dims_dict
-        self.device = device
-        self.label_smoothing = label_smoothing
-        cat_dims = action_dims_dict.get('cat', [])
-        # 兼容 int / list 两种写法
-        self.cat_dims = list(cat_dims) if isinstance(cat_dims, (list, tuple)) else [cat_dims]
-
-    def eval(self):
-        return self
-
-    @torch.no_grad()
-    def predict_distributions(self, states):
-        obs_np = states.detach().cpu().numpy()
-        B = obs_np.shape[0]
-        ls = self.label_smoothing
-        n_heads = len(self.cat_dims)
-
-        # 初始化为平滑背景概率
-        cat_probs = [np.full((B, nc), ls / max(nc - 1, 1), dtype=np.float32) for nc in self.cat_dims]
-        bern_logits = np.full((B, 1), -3.0, dtype=np.float32)
-
-        for i in range(B):
-            check_obs = self.env.obs2obs_check(obs_np[i])
-            state_check = self.env.unscale_state(check_obs)
-            action_number, fire = basic_rules(state_check, self.rule_num, p_random=0)
-
-            if isinstance(action_number, (list, tuple, np.ndarray)):
-                act_list = list(np.asarray(action_number).reshape(-1))
-            else:
-                act_list = [action_number]
-
-            for h in range(n_heads):
-                nc = self.cat_dims[h]
-                idx = int(act_list[h]) if h < len(act_list) else 0
-                idx = int(np.clip(idx, 0, nc - 1))
-                cat_probs[h][i, :] = ls / max(nc - 1, 1)
-                cat_probs[h][i, idx] = 1.0 - ls
-
-            bern_logits[i, 0] = 3.0 if fire else -3.0
-
-        cat_tensors = [torch.tensor(cp, dtype=torch.float, device=self.device) for cp in cat_probs]
-        bern_tensor = torch.tensor(bern_logits, dtype=torch.float, device=self.device)
-        return {'cont': None, 'cat': cat_tensors, 'bern': bern_tensor}
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -404,9 +331,8 @@ def get_opponent_probabilities(elite_elo_ratings, hall_of_fame=None,
         elif SP_type == 'PFSP_balanced' or SP_type == 'PFSP_with_delta':
             actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
         else: # 默认通用的 'PFSP' 逻辑
-            actual_target = float(target_elo) if target_elo is not None else np.mean(elos)
-            # # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
-            # actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
+            # 你之前的逻辑：取 0.5 均值 + 0.5 最大值，作为一个偏向挑战的平衡点
+            actual_target = 0.5 * (float(target_elo) if target_elo is not None else np.mean(elos)) + 0.5 * np.max(elos)
         
         diffs = elos - actual_target
         scores = np.exp(-0.5 * (diffs / float(sigma))**2)
@@ -511,13 +437,28 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
-        # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
         local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
+        # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
+        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+        local_agent = PPOHybrid(
+            actor=HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
+            critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
+            actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
+            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
+            device=device_worker 
+        )
         
         # 初始化对手网络
         adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
-        adv_agent = HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker)
+        # 【修改 2】同样为对手创建一个 dummy critic
+        adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+        adv_agent = PPOHybrid(
+            actor=HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
+            critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
+            actor_lr=0, critic_lr=0, 
+            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
+            device=device_worker
+        )
 
         # --- 2. 循环等待阶段 ---
         while True:
@@ -533,16 +474,16 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 (actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
-                local_agent.load_state_dict(actor_weights)
+                local_agent.actor.load_state_dict(actor_weights)
                 
                 # B. 配置对手
-                opp_name, opp_type, opp_data, opp_temperature = opponent_info
+                opp_name, opp_type, opp_data = opponent_info
                 adv_is_rule = (opp_type == 'rule')
                 rule_num = 0
                 if adv_is_rule:
                     rule_num = opp_data
                 else:
-                    adv_agent.load_state_dict(opp_data)
+                    adv_agent.actor.load_state_dict(opp_data)
 
                 # C. 准备本回合容器
                 # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
@@ -599,10 +540,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 # 进场瞬间给全信息
                 red_init_ammo=6
                 blue_init_ammo=6
-                # # 残局训练
-                # if np.random.uniform(0,1) < 0.3:
-                #     red_init_ammo = int(np.round(np.random.uniform(0,3)))
-                #     blue_init_ammo = int(np.round(np.random.uniform(0,3)))
+                # 残局训练
+                if np.random.uniform(0,1) < 0.3:
+                    red_init_ammo = int(np.round(np.random.uniform(0,3)))
+                    blue_init_ammo = int(np.round(np.random.uniform(0,3)))
                 env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=0)
                 
                 # 状态变量初始化
@@ -617,12 +558,6 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 m_fired = 0
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
-                
-                # 新增: 出界状态及首次出界时间记录（用于Elo惩罚）
-                red_out_cage = False
-                red_out_cage_time = None
-                blue_out_cage = False
-                blue_out_cage_time = None
                 
                 # --- E. 仿真循环 (核心物理逻辑) ---
                 # 计算最大步数
@@ -690,8 +625,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         with torch.no_grad():
                             # Blue Decision
                             b_state_check = env.unscale_state(b_check_obs)
-                            b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
-                            # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                            b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, mask_on=fire_mask)
+                            # b_action_exec, _, _, _ = local_agent.take_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                             b_action_label = b_action_exec['cat'] # [0]
                             b_fire = b_action_exec['bern'][0]
                             
@@ -704,9 +639,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
-                                                        mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
-                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                                r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, mask_on=fire_mask)
+                                # r_action_exec, _, _, _ = adv_agent.take_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
                                 r_fire = r_action_exec['bern'][0]
 
@@ -778,30 +712,24 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
                     
-                    # 新增: 记录红蓝双方首次出界时刻
-                    if not red_out_cage and env.out_cage(env.RUAV):
-                        red_out_cage = True
-                        red_out_cage_time = env.t
-                    if not blue_out_cage and env.out_cage(env.BUAV):
-                        blue_out_cage = True
-                        blue_out_cage_time = env.t
-                    
                     # 4. 奖励计算
-                    # 返回值: done, r_event1+r_shaping(训练), r_event1(纯事件), r_event2+r_shaping(固定±100终局)
                     done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
                                                             action_cycle_multiplier, end_reward_weight=end_reward_weight,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
-                    _, r_reward1, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
+                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
+                                                            fire_reward_weight=fire_reward_weight,
+                                                            fire_inside_weight=fire_inside_weight)
+                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_weight=0,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
 
-                    reward_for_learn = b_reward1
-                    reward_for_enm = r_reward1
+                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
+                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += b_reward3 # 固定±100结果奖励的归一化回报，用于日志
-                        episode_return_dense += b_reward2 # 纯shaping奖励
+                        episode_return += b_reward1
+                        episode_return_dense += b_dense_reward
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -846,8 +774,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if isinstance(td[k], list):
                                 td[k] = td[k][:last_idx+1]
                     return td
-                    
-                # 执行死后奖励压缩
+                
                 local_trans = truncate_and_shift(local_trans)
                 ego_trans = truncate_and_shift(ego_trans)
                 enm_trans = truncate_and_shift(enm_trans)
@@ -941,7 +868,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': episode_return_dense,
+                        'dense_return': b_dense_reward,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -967,12 +894,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ep_blue_avg_fire_delta_psi': ep_blue_avg_fire_delta_psi,
                     'ep_blue_avg_fire_distance': ep_blue_avg_fire_distance,
                     'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor,
-                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude,
-                    # 新增: 回合结束时双方出界状态与首次出界时间
-                    'red_out_cage': red_out_cage,
-                    'red_out_cage_time': red_out_cage_time,
-                    'blue_out_cage': blue_out_cage,
-                    'blue_out_cage_time': blue_out_cage_time,
+                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude
                 }
                 
                 # 8. 发送回 Master
@@ -1063,21 +985,6 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
-    use_RND = 0, # 好奇心机制
-    beta_RND = 0.3,
-    use_ADistill = 0, # 温和蒸馏机制
-    beta_ADistill = 0.1,
-    AFiltered = 0, # 温和蒸馏是否需要优势滤波
-    conf_thres = 0.7,
-    bern_included = 1, # 开火也一起上
-    adistill_anneal_factor = 0.5, # ADistill alpha 退火速度系数
-    Bdistill = 0, # 是否启用Bdistill
-    Bdistill_alpha = 1.0, # BernDistill alpha
-    Bdistill_epochs = 3, # BernDistill epochs
-    adistill_teacher_rule = 6, # ADistill 初始固定 teacher 的规则编号
-    adistill_teacher_elo_steps = 1e6, # 总步数超过该值后，改用 Elo 最高的 Rule 作为 teacher
-    no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
-    distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
 
     actor_lr0 = actor_lr
@@ -1125,19 +1032,6 @@ def run_MLP_simulation(
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
     action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
-    # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
-    rule_teacher_env = copy.deepcopy(dummy_env)
-    # ADistill/BernDistill 用：Rule_1 ~ Rule_6 共识集合（排除 Rule 0）
-    adistill_rule_wrappers = [
-        RuleTeacherWrapper(rule_teacher_env, rule_num=r,
-                           action_dims_dict=action_dims_dict,
-                           device=device,
-                           label_smoothing=label_smoothing)
-        for r in TEACHER_RULE_IDS
-    ]
-    # 保留单个 teacher_wrapper 仅用于日志 / 兼容其它旧逻辑
-    teacher_rule_num_cur = adistill_teacher_rule
-    teacher_wrapper = adistill_rule_wrappers[TEACHER_RULE_IDS.index(teacher_rule_num_cur)]
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -1159,12 +1053,9 @@ def run_MLP_simulation(
         gamma=gamma, 
         device=device, 
         k_entropy=k_entropy, 
-        max_std=label_smoothing,
-        rnd_state_dim=state_dim,
+        max_std=label_smoothing
     )
     
-    # ADistill 用：cat 熵系数的基准值（在 agent 类属性上动态缩放）
-    base_k_cat = student_agent.k_entropy.get('cat', 0.008)
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
@@ -1235,15 +1126,6 @@ def run_MLP_simulation(
                 student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
                 student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
                 print("Loaded optimizer states.")
-                if student_agent.rnd_target is not None and 'rnd_target' in opt_states:
-                    student_agent.rnd_target.load_state_dict(opt_states['rnd_target'])
-                    print("Loaded RND target state.")
-                if student_agent.rnd_prediction is not None and 'rnd_prediction' in opt_states:
-                    student_agent.rnd_prediction.load_state_dict(opt_states['rnd_prediction'])
-                    print("Loaded RND prediction state.")
-                if student_agent.rnd_optimizer is not None and 'rnd_optimizer' in opt_states:
-                    student_agent.rnd_optimizer.load_state_dict(opt_states['rnd_optimizer'])
-                    print("Loaded RND optimizer state.")
             except Exception as e:
                 print(f"Failed to load optimizers: {e}")
         
@@ -1362,6 +1244,11 @@ def run_MLP_simulation(
                     logger.add(_name, _val, epoch)
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
+    
+    # MARWIL 结束后恢复 bern bias，防止稀疏开火动作被拉向高熵中间态（无济于事）
+    if hasattr(student_agent.actor.net, 'fc_bern'):
+        with torch.no_grad():
+            student_agent.actor.net.fc_bern[-1].bias.clamp_(max=-2.5)
     
     if IL_epoches > 0:
         print("IL Training Finished.")
@@ -1488,7 +1375,6 @@ def run_MLP_simulation(
     # 训练循环变量
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
     batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
-    last_il_update_batch_idx = batch_idx
     if collape_recover["collapsed"]:
         actor_freeze_until = batch_idx + int(collape_recover["actor_frozen_batchs"])
         student_agent.reset_optimizer() # 恢复训练清除动量
@@ -1506,8 +1392,6 @@ def run_MLP_simulation(
     ema_score = 0.5
     ema_step = 0
     target_p1 = 0.65
-    ppo_grad_ema = None  # [新增] 初始化 PPO 梯度 EMA 缓存
-    rnd_mse = None       # RND 原始 MSE（上一批次的值，首批为 None）
 
     # =========================================================
     # 主循环 (Master Process)
@@ -1529,7 +1413,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in TEST_RULE_IDS:
+                for r_idx in [0, 1, 2, 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1550,15 +1434,13 @@ def run_MLP_simulation(
                             'deterministic': False,
                             'restrict_fire': True, # False, 和采样保持一致
                             'vertices': vertices,
-                            'red_init_ammo': test_red_init_ammo,
-                            'blue_init_ammo': test_blue_init_ammo,
                         }
                     )
                     test_tasks.append(obj)
                 
                 # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
                 test_tasks_no_random = []
-                for r_idx in TEST_RULE_IDS:
+                for r_idx in [0, 1, 2, 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         kwds={
@@ -1576,8 +1458,6 @@ def run_MLP_simulation(
                             'deterministic': True,     # 机动动作确定化
                             'restrict_fire': True,      # 动作次序限制打开
                             'vertices': vertices,
-                            'red_init_ammo': test_red_init_ammo,
-                            'blue_init_ammo': test_blue_init_ammo,
                         }
                     )
                     test_tasks_no_random.append(obj)
@@ -1717,8 +1597,7 @@ def run_MLP_simulation(
                         opp_type = 'rule'
                         opp_data = 0
                 
-                opp_temperature = np.random.uniform(0.99, 1.0) # 0.8, 1.0
-                opp_info = (selected_opponent_name, opp_type, opp_data, opp_temperature)
+                opp_info = (selected_opponent_name, opp_type, opp_data)
                 
                 # 初始位置配置
                 rb, bb = create_initial_state_worker(randomized_birth)
@@ -1730,7 +1609,7 @@ def run_MLP_simulation(
                     'blue_birth': bb,
                     # 'R_cage_range': R_cage_range, # 将范围传给Worker
                     'fire_mask': fire_mask,
-                    'end_reward_weight': np.clip(total_steps/18e3, 0.3, 0.5),
+                    'end_reward_weight': 1.0, # np.clip(total_steps/5e3, 0, 0.5),
                     'fire_inside_weight': fire_inside_weight,
                     'fire_reward_weight': fire_reward_weight,
                 }
@@ -1848,7 +1727,7 @@ def run_MLP_simulation(
                 worker_metrics_buffer.append(f"{opp_name}: {result_str}")
                 
                 batch_total_steps += metrics['steps']
-                batch_total_return += metrics['return'] # 已是固定±100终局的归一化回报
+                batch_total_return += metrics['return']
                 batch_total_dense_return += metrics['dense_return']
                 batch_total_m_fired += metrics['m_fired']
                 if metrics.get('BVR_perish_together', False):
@@ -1893,17 +1772,17 @@ def run_MLP_simulation(
                 
                 # 3.2 SIL 数据收集 (需计算 return)
                 if use_sil:
-                    # ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    # il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
-                    # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
+                    ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
 
-                    if not metrics['lose']: # 赢或平，学自己
-                        # 计算回报 (Master 端计算)
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
-                    if not metrics['win']: # 输或平，学对手
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
+                    # if not metrics['lose']: # 赢或平，学自己
+                    #     # 计算回报 (Master 端计算)
+                    #     ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
+                    #     il_transition_buffer.add(ego_tr)
+                    
+                    # if not metrics['win']: # 输或平，学对手
+                    #     enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
+                    #     il_transition_buffer.add(enm_tr)
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
@@ -1919,25 +1798,17 @@ def run_MLP_simulation(
                     main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score, K_FACTOR)
                     # 更新对手Elo分
                     new_adv_elo = update_elo(adv_elo, prev_main_elo, 1.0 - actual_score, K_FACTOR)
+                    elo_ratings[opp_name] = new_adv_elo
                     elo_ratings["__CURRENT_MAIN__"] = main_agent_elo
+                    # 同步更新 Elite 池中已有的对手Elo分值
+                    if opp_name in elite_elo_ratings:
+                        elite_elo_ratings[opp_name] = new_adv_elo
+                    # 同步更新 Hall of Fame 中已有的对手Elo分值
+                    if opp_name in hall_of_fame:
+                        hall_of_fame[opp_name] = new_adv_elo
                 else:
-                    # 新对手：初始Elo与主智能体相同
-                    new_adv_elo = main_agent_elo
-                
-                # # --- 新增: 出界惩罚 ---
-                # # 若对手在3分钟内出界，对手Elo额外扣除200分；当前主智能体Elo不额外修改
-                # red_out_cage = res.get('red_out_cage', False)
-                # red_out_cage_time = res.get('red_out_cage_time')
-                # if red_out_cage and red_out_cage_time is not None and red_out_cage_time <= 3 * 60:
-                #     new_adv_elo -= 200
-                
-                elo_ratings[opp_name] = new_adv_elo
-                # 同步更新 Elite 池中已有的对手Elo分值
-                if opp_name in elite_elo_ratings:
-                    elite_elo_ratings[opp_name] = new_adv_elo
-                # 同步更新 Hall of Fame 中已有的对手Elo分值
-                if opp_name in hall_of_fame:
-                    hall_of_fame[opp_name] = new_adv_elo
+                    # 新对手：始终添加到 elo_ratings
+                    elo_ratings[opp_name] = main_agent_elo
             
             # 计算蓝方开火策略指标的批次平均值
             batch_blue_avg_fire_interval = float(np.mean(batch_blue_fire_intervals)) if batch_blue_fire_intervals else None
@@ -1955,15 +1826,15 @@ def run_MLP_simulation(
                 if batch_val is None:
                     return ema_val
                 return batch_val if ema_val is None else (1 - alpha) * ema_val + alpha * batch_val
-            ema_fire_interval = _ema_update(ema_fire_interval, batch_blue_avg_fire_interval if batch_blue_avg_fire_interval is not None else None)
-            ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi if batch_blue_avg_fire_delta_psi is not None else None)
-            ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance if batch_blue_avg_fire_distance is not None else None)
-            ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi if batch_blue_avg_fire_AA_hor is not None else None)
-            ema_fire_altitude = _ema_update(ema_fire_altitude, batch_blue_avg_fire_altitude if batch_blue_avg_fire_altitude is not None else None)
-            ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi if batch_blue_avg_fire_theta is not None else None)
-            ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi if batch_blue_avg_ATA is not None else None)
-            ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi if batch_blue_avg_delta_psi_threat is not None else None)
-            ema_delta_theta = _ema_update(ema_delta_theta, batch_blue_avg_delta_theta*180/pi if batch_blue_avg_delta_theta is not None else None)
+            ema_fire_interval = _ema_update(ema_fire_interval, batch_blue_avg_fire_interval)
+            ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi)
+            ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance)
+            ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi)
+            ema_fire_altitude = _ema_update(ema_fire_altitude, batch_blue_avg_fire_altitude)
+            ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi)
+            ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi)
+            ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi)
+            ema_delta_theta = _ema_update(ema_delta_theta, batch_blue_avg_delta_theta*180/pi)
 
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
@@ -1987,8 +1858,6 @@ def run_MLP_simulation(
 
             # 使用带有偏差修正的滤波值
             filtered_score = ema_score
-            if use_RND and rnd_mse is not None:
-                logger.add("train_plus/RND_mse", rnd_mse, total_steps)
             logger.add("train_plus/batch_score", batch_score, total_steps)
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
             logger.add("train_plus/target_p1", target_p1, total_steps)
@@ -2082,46 +1951,10 @@ def run_MLP_simulation(
                 
                 max_fire_logits = 4.0
 
-                alpha_distill = 0
-                teacher_wrapper = None
-                k_entropy_cat_scale = 1.0
-
-                student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
-
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
-                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
-                                     alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
-                                     AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
-
-
-                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
-                if batch_idx % 10 == 0:
-                    student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
-                
-                # # 机动概率保护，未被调好，无法区分告警状态的有无，加上进攻引导就不会躲，加上防御引导又不会进攻
-                # if  \
-                #     (batch_blue_avg_fire_delta_psi*180/pi > 60 or
-                #         batch_blue_avg_delta_psi_threat*180/pi < 90):
-                #     student_agent.maneuver_il_protection(transition_dict, alpha=3, epochs=12)
-
-                # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
-                current_ppo_grad = student_agent.pre_clip_actor_grad
-                if current_ppo_grad is not None and not np.isnan(current_ppo_grad):
-                    if ppo_grad_ema is None:
-                        ppo_grad_ema = current_ppo_grad
-                    else:
-                        ppo_grad_ema = 0.95 * ppo_grad_ema + 0.05 * current_ppo_grad
-
-                alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
-
-                # if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
-                #     if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                #         student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
-                #                                   chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
-                #                                   ppo_grad_val=ppo_grad_ema)
-                #         # 不可以自模仿得过于频繁
-                #         last_il_update_batch_idx = batch_idx
-                
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
+                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
+                if use_sil:
+                    student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=512, alpha=alpha_il, chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE)
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
@@ -2149,7 +1982,14 @@ def run_MLP_simulation(
                 
                 # [新增] 诊断监控
                 logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
-
+                # logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
+                
+                # IL-PPO信号强度对比
+                # 错误做法，更新强度数量级和样本数无关
+                # if use_sil:
+                #     logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
+                #     logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
+                    
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
                 # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
@@ -2157,13 +1997,53 @@ def run_MLP_simulation(
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
                 
-                # 正常保存模型
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                print(f"Saved Checkpoint: {actor_key}")
-                print(f"Saved Current Actor: current_actor.pt")
+                if should_stir:
+                    # 策略搅拌：计算目标熵并执行搅拌
+                    # cat熵从0step的2到20Mstep的1.5线性退火
+                    max_steps_for_stir = 20 * 1e6  # 20M steps
+                    cat_entropy_start = 2.0
+                    cat_entropy_end = 1.5
+                    
+                    # 线性插值计算当前目标cat熵
+                    progress = min(total_steps / max_steps_for_stir, 1.0)
+                    target_cat_entropy = cat_entropy_start + (cat_entropy_end - cat_entropy_start) * progress
+                    
+                    target_entropies = {
+                        'cont': 0.0,  # 连续动作目标熵为0
+                        'cat': target_cat_entropy,  # 离散动作线性退火
+                        'bern': 0.0  # 伯努利动作目标熵为0
+                    }
+                    
+                    print(f"  [should_stir] Target cat entropy: {target_cat_entropy:.3f} (progress: {progress:.3f})")
+                    
+                    # 执行策略搅拌
+                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.01)
+                    
+                    # 保存搅拌后的模型参数
+                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}.pt"))
+                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                    
+                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                    
+                    # 记录搅拌后的熵值
+                    logger.add("stir/cat_entropy", entropy_info['cat_entropy'], total_steps)
+                    logger.add("stir/bern_entropy", entropy_info['bern_entropy'], total_steps)
+                    logger.add("stir/cont_entropy", entropy_info['cont_entropy'], total_steps)
+                    logger.add("stir/target_cat_entropy", target_cat_entropy, total_steps)
+                    
+                    print(f"  [should_stir] Actual cat entropy: {entropy_info['cat_entropy']:.3f}, bern entropy: {entropy_info['bern_entropy']:.3f}, cont entropy: {entropy_info['cont_entropy']:.3f}")
+                    
+                    print(f"Saved Stirred Checkpoint: {actor_key}")
+                    print(f"Saved Current Actor: current_actor.pt")
+                else:
+                    # 正常保存模型
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                    print(f"Saved Checkpoint: {actor_key}")
+                    print(f"Saved Current Actor: current_actor.pt")
                 
                 # 清空 Buffer（在搅拌之后）
                 transition_dict = copy.deepcopy(empty_transition_dict)
@@ -2188,23 +2068,6 @@ def run_MLP_simulation(
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
                 
-                # -----------------------------------------------------------
-                # 逻辑分支 B: 定期重刷精英池 (每 1M step)
-                # -----------------------------------------------------------
-                if total_steps > 0 and total_steps % 1e6 == 0:
-                    print(f"\n>>> [Elite Pool Refresh] Refreshing elite_elo_ratings at {total_steps} steps...")
-                    # 从 elo_ratings 中选出 Elo 最高的 min(当前非Rule数量, MAX_HISTORY_SIZE) 个非 Rule 智能体
-                    non_rule_elo = {k: v for k, v in elo_ratings.items() if not k.startswith("Rule") and not k.startswith("__")}
-                    current_non_rule_count = len([k for k in elite_elo_ratings.keys() if not k.startswith("Rule") and not k.startswith("__")])
-                    refresh_size = min(current_non_rule_count, MAX_HISTORY_SIZE)
-                    sorted_non_rule = sorted(non_rule_elo.items(), key=lambda x: x[1], reverse=True)
-                    top_non_rule = dict(sorted_non_rule[:refresh_size])
-                    # 加上所有 Rule
-                    rule_elo = {k: v for k, v in elo_ratings.items() if k.startswith("Rule")}
-                    # 重置 elite_elo_ratings
-                    elite_elo_ratings = {**rule_elo, **top_non_rule}
-                    print(f"  [Elite Pool Refresh] Refreshed: {len(rule_elo)} Rules + {len(top_non_rule)} top agents (size={refresh_size})")
-
                 # 5. 保存全量日志
                 with open(full_json_path, "w", encoding="utf-8") as f:
                     json.dump(elo_ratings, f, ensure_ascii=False, indent=2)
@@ -2289,9 +2152,8 @@ def run_MLP_simulation(
                             print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
                         
                         # --- 正式入池 ---
-                        if hist_agent_as_opponent:
-                            elite_elo_ratings[actor_key] = main_agent_elo
-                            print(f"Accepted {actor_key} into Elite Pool.")
+                        elite_elo_ratings[actor_key] = main_agent_elo
+                        print(f"Accepted {actor_key} into Elite Pool.")
 
                     # # 动态学习率调节
                     # actor_lr = 1e-4 + np.clip(curr_rank, 0, 1) * (1e-5 - 1e-4)
@@ -2320,9 +2182,6 @@ def run_MLP_simulation(
                 torch.save({
                     'actor_optimizer': student_agent.actor_optimizer.state_dict(),
                     'critic_optimizer': student_agent.critic_optimizer.state_dict(),
-                    'rnd_target': student_agent.rnd_target.state_dict() if student_agent.rnd_target is not None else None,
-                    'rnd_prediction': student_agent.rnd_prediction.state_dict() if student_agent.rnd_prediction is not None else None,
-                    'rnd_optimizer': student_agent.rnd_optimizer.state_dict() if student_agent.rnd_optimizer is not None else None,
                 }, os.path.join(log_dir, "optimizers_state.pt"))
                 if il_transition_buffer is not None:
                     il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))

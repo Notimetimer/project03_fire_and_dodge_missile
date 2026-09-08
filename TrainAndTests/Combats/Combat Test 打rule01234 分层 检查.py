@@ -49,7 +49,9 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SLWSPFSP0.3_flymask_0-run-20260905-115503"# "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
+    dir_name = "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
+    
+    "SLWSPFSPNoIL_flymask_v0h0-run-20260906-171344"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
@@ -82,7 +84,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.025 # 2 # 0.05 # 0.04 # 25
+    env.dt_move = 0.07 # 025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -129,7 +131,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [1,2,3] # [0,1,2,3,4] # [3]
+    rule_opponents = [0,1,2,3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -160,6 +162,8 @@ if __name__ == "__main__":
                 'r_warning': [], 'r_missile_in_mid_term': [],
                 'r_reward': [],
                 'r_r_shaping': [],
+                'r_count_12km': [], 'r_count_4km': [],
+                'b_count_12km': [], 'b_count_4km': [],
             }
 
             fire_time = -120
@@ -186,7 +190,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.99, 'bern':0.97}
+                            temperature={'cat':1.0, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -238,7 +242,7 @@ if __name__ == "__main__":
                     print()
                     fire_time = env.t
                 if getattr(env.BUAV, 'about_to_fire', 0):
-                    launch_missile_immediately(env, 'b', tabu=0, action_label=None) # b_action_label)
+                    launch_missile_immediately(env, 'b', tabu=1, action_label=None) # b_action_label)
                 
 
                 if (action_cycle_multiplier-1) * env.dt_maneuver <= env.t-fire_time < 2 * action_cycle_multiplier * env.dt_maneuver:
@@ -249,6 +253,9 @@ if __name__ == "__main__":
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
                 done, b_r1, b_r2, b_r3 = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
+                # [诊断] 补一次蓝方调用（返回值丢弃）：更新蓝方导弹 get_in_12km/get_in_4km 锁存与 BUAV._count 计数，
+                # 与训练时双侧每步都调用保持一致；放在 'r' 调用之后，不影响已记录的红方奖励。
+                env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)
 
                 # if abs(env.t % 5) < 0.1:
                     # print("当前动作", r_action_exec)
@@ -272,6 +279,10 @@ if __name__ == "__main__":
                 history['r_missile_in_mid_term'].append(r_missile_in_mid_term)
                 history['r_reward'].append(b_r1)
                 history['r_r_shaping'].append(env.RUAV.r_shaping)
+                history['r_count_12km'].append(getattr(env.RUAV, '_count_12km', 0))
+                history['r_count_4km'].append(getattr(env.RUAV, '_count_4km', 0))
+                history['b_count_12km'].append(getattr(env.BUAV, '_count_12km', 0))
+                history['b_count_4km'].append(getattr(env.BUAV, '_count_4km', 0))
 
                 env.render(t_bias=t_bias)
 
@@ -368,6 +379,29 @@ if __name__ == "__main__":
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
+
+            # --- Figure 3: 红蓝双方 _count_12km / _count_4km 变化（分子图避免曲线重叠遮挡） ---
+            fig3 = plt.figure(3, figsize=(10, 6))
+            fig3.clf()
+            t3 = np.array(history['time'])
+            ax_r = fig3.add_subplot(211)
+            ax_b = fig3.add_subplot(212, sharex=ax_r)
+
+            ax_r.step(t3, history['r_count_12km'], where='post', label='Red _count_12km', color='crimson', linestyle='--')
+            ax_r.step(t3, history['r_count_4km'], where='post', label='Red _count_4km', color='crimson')
+            ax_r.set_ylabel('Red count')
+            ax_r.set_title(f'Test vs Rule {rule_num}: 双方导弹威胁穿越计数 (_count_12km / _count_4km)')
+            ax_r.legend(loc='upper left')
+            ax_r.grid(True, alpha=0.3)
+
+            ax_b.step(t3, history['b_count_12km'], where='post', label='Blue _count_12km', color='royalblue', linestyle='--')
+            ax_b.step(t3, history['b_count_4km'], where='post', label='Blue _count_4km', color='royalblue')
+            ax_b.set_xlabel('Time (s)')
+            ax_b.set_ylabel('Blue count')
+            ax_b.legend(loc='upper left')
+            ax_b.grid(True, alpha=0.3)
+
+            fig3.tight_layout()
 
             plt.show()
 
