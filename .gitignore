@@ -65,3 +65,4 @@ firing_probability_target_center.png
 /TrainAndTests/Controls/adjust
 /combat挑选
 *.zip
+/TrainAndTests/Combats/epsilon_sweep_candidates
