@@ -6,8 +6,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"SLWSPFSPNoIL_flymask_v0h0-run-20260909-131801")
+# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+#     r"SLWSPFSP0.3_flymask_1-run-20260903-173826")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -20,7 +20,12 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
     ver = _mask_cfg.get('ver', 0)
     hor = _mask_cfg.get('hor', 0)
 
-mission_name = f'SLWSPFSPNoIL_flymask_v{ver}h{hor}'
+mask_tag = f"v{ver}h{hor}"
+init_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"epsilon_sweep_candidates_{mask_tag}")
+init_actor_filename = "actor_candidate_0.64.pt"
+init_critic_filename = "critic_candidate_0.64.pt"
+
+mission_name = f'SLWSPFSP0.64_flymask_{mask_tag}'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-4
@@ -149,6 +154,9 @@ if __name__=='__main__':
         vertices = None,
         resume_dir=resume_target_dir, # 指定中断续训目录
         init_il_data = original_il_transition_dict, # 传入模仿数据集
+        init_model_dir=init_model_dir,
+        init_actor_filename=init_actor_filename,
+        init_critic_filename=init_critic_filename,
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
     )

@@ -21,7 +21,7 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
     ver = _mask_cfg.get('ver', 0)
     hor = _mask_cfg.get('hor', 0)
 
-mission_name = f'SAC0_flymask_v{ver}h{hor}'
+mission_name = f'SAC0.3_flymask_v{ver}h{hor}'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
@@ -39,7 +39,7 @@ il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.05 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -101,7 +101,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=10,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,

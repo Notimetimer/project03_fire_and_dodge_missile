@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "SLWSPFSP0.3_flymask_1-run-20260903-173826"
+    dir_name = "SLWSPFSPNoIL_flymask_v0h0-run-20260906-171344" # "SLWSPFSP0.3_flymask_1-run-20260903-173826"
         
     # 次要
     experiment_name = None    
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.025 # 2 # 0.05 # 0.04 # 25
+    env.dt_move = 0.07 # 0.025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim

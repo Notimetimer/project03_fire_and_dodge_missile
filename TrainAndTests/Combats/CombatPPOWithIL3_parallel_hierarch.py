@@ -1060,6 +1060,9 @@ def run_MLP_simulation(
     vertices = None,
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
+    init_model_dir = None,
+    init_actor_filename = None,
+    init_critic_filename = None,
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
@@ -1267,6 +1270,25 @@ def run_MLP_simulation(
                 print(f"Loaded controller state from: {special_json_path}")
             print(f"Loaded special EMA states from: {special_json_path}")
     
+    init_model_requested = init_actor_filename is not None or init_critic_filename is not None
+    if init_model_requested:
+        if resume_dir is not None:
+            raise ValueError("init model files cannot be used together with resume_dir")
+        if init_model_dir is None or init_actor_filename is None or init_critic_filename is None:
+            raise ValueError("init_model_dir, init_actor_filename and init_critic_filename must all be specified")
+        init_actor_path = os.path.join(init_model_dir, init_actor_filename)
+        init_critic_path = os.path.join(init_model_dir, init_critic_filename)
+        if not os.path.isfile(init_actor_path):
+            raise FileNotFoundError(f"Initial actor not found: {init_actor_path}")
+        if not os.path.isfile(init_critic_path):
+            raise FileNotFoundError(f"Initial critic not found: {init_critic_path}")
+        student_agent.actor.load_state_dict(torch.load(init_actor_path, map_location=device))
+        student_agent.critic.load_state_dict(torch.load(init_critic_path, map_location=device))
+        IL_epoches = 0
+        print(f"Loaded initial actor from: {init_actor_path}")
+        print(f"Loaded initial critic from: {init_critic_path}")
+        print("Skipping MARWIL pretraining and starting online training from the selected models.")
+
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
     # 构建一个与 state 维度相同的 dummy input (batch_size=1)
@@ -1371,6 +1393,9 @@ def run_MLP_simulation(
     # 存储在线训练前的网络参数
     int_agent_name = "actor_rein0"
     torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{int_agent_name}.pt"))
+    if init_model_requested:
+        torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+        torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
 
 
     # --- 新增：实例化混合缓冲区 ---

@@ -680,23 +680,21 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     steps_run += 1
                     
                     # 4. 奖励计算
+                    # 返回值: done, r_event1+r_shaping(训练), r_event1(纯事件), r_event2+r_shaping(固定±100终局)
                     done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
                                                             action_cycle_multiplier, end_reward_weight=end_reward_weight,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
-                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
-                    _, b_dense_reward, _, _ = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, action_cycle_multiplier, end_reward_weight=0,
+                    _, r_reward1, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
                                                             fire_reward_weight=fire_reward_weight,
                                                             fire_inside_weight=fire_inside_weight)
 
-                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
-                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
+                    reward_for_learn = b_reward1
+                    reward_for_enm = r_reward1
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += b_reward1
-                        episode_return_dense += b_dense_reward
+                        episode_return += b_reward3 # 固定±100结果奖励的归一化回报，用于日志
+                        episode_return_dense += b_reward2 # 纯shaping奖励
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -741,7 +739,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if isinstance(td[k], list):
                                 td[k] = td[k][:last_idx+1]
                     return td
-                
+                    
+                # 执行死后奖励压缩
                 local_trans = truncate_and_shift(local_trans)
                 ego_trans = truncate_and_shift(ego_trans)
                 enm_trans = truncate_and_shift(enm_trans)
@@ -835,7 +834,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': b_dense_reward,
+                        'dense_return': episode_return_dense,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -1235,8 +1234,6 @@ def run_MLP_simulation(
                     logger.add(_name, _val, epoch)
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
-    
-    
     
     if IL_epoches > 0:
         print("IL Training Finished.")
@@ -1996,15 +1993,13 @@ def run_MLP_simulation(
                 
                 # [新增] 诊断监控
                 logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
-                # logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
-                
+
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
                 # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
                 
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
-                
                 
                 # 正常保存模型
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
