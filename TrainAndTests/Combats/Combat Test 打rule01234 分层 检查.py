@@ -22,7 +22,7 @@ from BasicRules_new_hierarchical import basic_rules
 # from BasicRules_new_hierarchical2 import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
+from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper, infer_mask_cfg_from_actor_meta # 纯MLP
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SLWSPFSP0.8_flymask_v1h1-run-20260908-175241" # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
+    dir_name = "SLWSPFSP0_flymask_0-run-20260905-210721" # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
     
     "SLWSPFSPNoIL_flymask_v0h0-run-20260906-171344"
     
@@ -114,8 +114,14 @@ if __name__ == "__main__":
     print(f"Loading agent weights from: {agent_path}")
     print()
 
+    # [新增] 根据 checkpoint 所在目录的 actor.meta.json 自动推断 ver/hor 配置
+    mask_cfg = None
+    actor_meta_path = os.path.join(os.path.dirname(agent_path), "actor.meta.json")
+    if os.path.exists(actor_meta_path):
+        mask_cfg = infer_mask_cfg_from_actor_meta(actor_meta_path)
+
     # 实例化模型结构并加载权重
-    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device)
     # 注意：测试时只需要 Actor Wrapper，不需要完整的 PPO agent
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
     actor_wrapper.load_state_dict(torch.load(agent_path, map_location=device, weights_only=1), strict=False)

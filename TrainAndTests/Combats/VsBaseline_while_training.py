@@ -17,7 +17,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.append(project_root)
 from BasicRules_new import *
 from Envs.Tasks.ChooseStrategyEnv2_2 import *
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper, infer_mask_cfg_from_state_dict
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 
@@ -44,7 +44,9 @@ def test_worker(model_state_dict, rule_num,
     test_env.dt_maneuver = dt_maneuver_val # 使用传入的值，不依赖全局变量
     
     # 2. 局部初始化网络并加载权重
-    net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    # [新增] 根据传入的 state_dict 自动推断训练时的 ver/hor 配置
+    mask_cfg = infer_mask_cfg_from_state_dict(model_state_dict)
+    net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device)
     actor = HybridActorWrapper(net, action_dims_dict, None, device).to(device)
     actor.load_state_dict(model_state_dict)
     actor.eval() # 设置为评估模式

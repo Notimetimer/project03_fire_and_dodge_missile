@@ -45,7 +45,7 @@ sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 奖励函数
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper, infer_mask_cfg_from_actor_meta
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
@@ -486,7 +486,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1, vertices=None):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1, vertices=None, mask_cfg=None):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -512,11 +512,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
         # 初始化本地网络 (CPU)
         # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
-        local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device_worker)
         local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
         
         # 初始化对手网络
-        adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device_worker)
         adv_agent = HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker)
 
         # --- 2. 循环等待阶段 ---
@@ -1147,7 +1147,15 @@ def run_MLP_simulation(
     print(f"Master training device: {device}")
 
     # 3. 创建神经网络
-    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+    # [新增] 如果续训，根据 actor.meta.json 自动推断当时的 ver/hor 配置，
+    # 避免模型结构与 checkpoint 不匹配。
+    mask_cfg = None
+    if resume_dir is not None and os.path.exists(resume_dir):
+        actor_meta_path = os.path.join(resume_dir, "actor.meta.json")
+        if os.path.exists(actor_meta_path):
+            mask_cfg = infer_mask_cfg_from_actor_meta(actor_meta_path)
+
+    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device)
     critic_net = ValueNet(state_dim, hidden_dim).to(device)
     actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
 
@@ -1456,6 +1464,7 @@ def run_MLP_simulation(
                            'no_crash': no_crash,
                            'pomdp': POMDP,
                            'vertices': vertices,
+                           'mask_cfg': mask_cfg,
                        })
         p.start()
         workers.append(p)

@@ -30,11 +30,15 @@ def sigmoid(x):
 
 _MASK_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mask_config.json')
 
-def load_mask_config():
+def load_mask_config(override=None):
     cfg = {
         'ver': 0,
         'hor': 0,
     }
+    if override is not None:
+        for k in cfg:
+            cfg[k] = int(override.get(k, cfg[k]))
+        return cfg
     try:
         with open(_MASK_CONFIG_PATH, 'r', encoding='utf-8') as f:
             loaded = json.load(f)
@@ -43,6 +47,68 @@ def load_mask_config():
     except Exception as e:
         print(f"[mask_config] 加载 {_MASK_CONFIG_PATH} 失败，使用默认值。错误: {e}")
     return cfg
+
+# [==== 有些实验没来得及标记，打个补丁来推断mask的情况
+def _infer_mask_cfg_from_cat_out_dim(cat_out_dim, source_name):
+    """
+    根据 fc_cat 输出维度（即 net.fc_cat.2.bias 的长度）推断 ver/hor 配置。
+    """
+    shape_map = {
+        12: {'ver': 0, 'hor': 0}, # 5 + 7
+        20: {'ver': 1, 'hor': 0}, # 5+5+3 + 7
+        24: {'ver': 1, 'hor': 1}, # 5+5+3 + 5+3+3
+        16: {'ver': 0, 'hor': 1}, # 5 + 5+3+3
+    }
+    cfg = shape_map.get(int(cat_out_dim))
+    if cfg is None:
+        raise ValueError(
+            f"无法从 {source_name} 的 fc_cat.2.bias 长度 {cat_out_dim} 推断 ver/hor 配置，"
+            f"已知映射: {shape_map}"
+        )
+    return cfg
+
+
+def infer_mask_cfg_from_actor_meta(meta_path):
+    """
+    从 actor.meta.json 的 net.fc_cat.2.bias 形状推断训练时的 ver/hor 配置。
+    返回 {'ver': int, 'hor': int}。
+    """
+    try:
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta = json.load(f)
+        bias_shape = meta.get('net.fc_cat.2.bias')
+        if bias_shape is None:
+            raise KeyError("net.fc_cat.2.bias not found in meta")
+        if not isinstance(bias_shape, list) or len(bias_shape) == 0:
+            raise ValueError(f"Unexpected bias shape: {bias_shape}")
+        cfg = _infer_mask_cfg_from_cat_out_dim(bias_shape[0], meta_path)
+        print(f"[mask_cfg] 从 {meta_path} 推断 ver={cfg['ver']}, hor={cfg['hor']} "
+              f"(fc_cat.2.bias={bias_shape})")
+        return cfg
+    except Exception as e:
+        print(f"[mask_cfg] 读取 {meta_path} 失败: {e}，使用默认配置 ver=0, hor=0")
+        return {'ver': 0, 'hor': 0}
+
+
+def infer_mask_cfg_from_state_dict(state_dict):
+    """
+    从 PyTorch state_dict 中的 net.fc_cat.2.bias 形状推断 ver/hor 配置。
+    返回 {'ver': int, 'hor': int}。
+    """
+    bias_key = 'net.fc_cat.2.bias'
+    try:
+        if bias_key not in state_dict:
+            raise KeyError(f"{bias_key} not found in state_dict")
+        bias = state_dict[bias_key]
+        cat_out_dim = int(bias.shape[0]) if hasattr(bias, 'shape') else int(len(bias))
+        cfg = _infer_mask_cfg_from_cat_out_dim(cat_out_dim, "state_dict")
+        print(f"[mask_cfg] 从 state_dict 推断 ver={cfg['ver']}, hor={cfg['hor']} "
+              f"({bias_key} length={cat_out_dim})")
+        return cfg
+    except Exception as e:
+        print(f"[mask_cfg] 从 state_dict 推断失败: {e}，使用默认配置 ver=0, hor=0")
+        return {'ver': 0, 'hor': 0}
+# ====]
 
 # =============================================================================
 # 0. RND 网络定义
@@ -132,13 +198,13 @@ class PolicyNetHybrid(torch.nn.Module):
     支持混合动作空间的策略网络 (纯 MLP)。
     引入了可学习的温度参数来控制离散和伯努利动作的熵。
     """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0, mask_cfg=None):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
 
         # [新增] 机动mask 开关：只在网络初始化时从
-        # mask_config.json 读取一次，永久保存为实例属性，forward() 不再重复读取磁盘。
-        mask_cfg = load_mask_config()
+        # mask_config.json 读取一次（或被外部显式传入），永久保存为实例属性，forward() 不再重复读取磁盘。
+        mask_cfg = load_mask_config(override=mask_cfg)
         self.ver_map = mask_cfg['ver']
         self.ver_mask = mask_cfg['ver']
         self.hor_map = mask_cfg['hor']
