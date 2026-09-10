@@ -23,10 +23,13 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
 
 mission_name = f'SAC0.3_flymask_v{ver}h{hor}'
 
+# 指定外部 actor 起点路径（借调已有模型作为初始策略，跳过模仿学习）
+init_actor_path = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\SLWSPFSP0.3_flymask_0-run-20260905-210412\actor_rein0.pt"
+
 # 超参数
 actor_lr = 1e-4 # 4 1e-3
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 30 # 180
+IL_epoches= 30 # 180，使用外部 actor 起点时跳过 IL 预训练
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.97 # 0.995
@@ -65,6 +68,8 @@ sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
+SAC_update_step_interval = 1000      # [SAC] 按固定环境步数触发更新，替代按 batch/回合触发
+SAC_max_updates_per_batch = 10       # [SAC] 每次触发最多执行多少次梯度更新，防止过拟合
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -101,7 +106,8 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=10,  # 并行进程数，根据CPU核数调整，建议 10-20
+        init_actor_path=init_actor_path,  # 外部 actor 起点
+        num_workers=1,  # 关闭并行采样，防止过拟合
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -138,6 +144,8 @@ if __name__=='__main__':
         sac_updates_per_10_steps=sac_updates_per_10_steps,
         SAC_gumbel_tau=SAC_gumbel_tau,
         replay_buffer_save_interval=replay_buffer_save_interval,
+        SAC_update_step_interval=SAC_update_step_interval,
+        SAC_max_updates_per_batch=SAC_max_updates_per_batch,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug

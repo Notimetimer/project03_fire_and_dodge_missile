@@ -922,6 +922,8 @@ def run_MLP_simulation(
     sac_updates_per_10_steps=1,    # [SAC] 每经过10个采样步执行的梯度更新次数
     SAC_gumbel_tau=1.5,            # [SAC] Cat Gumbel-Softmax 温度
     replay_buffer_save_interval=20,# [SAC] 每多少个 batch 持久化一次经验池
+    SAC_update_step_interval=1000, # [SAC] 按固定环境步数触发更新，替代按 batch/回合触发
+    SAC_max_updates_per_batch=30,  # [SAC] 每次触发最多执行多少次梯度更新，防止过拟合
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
@@ -953,6 +955,7 @@ def run_MLP_simulation(
     R_cage_range = (55.00e3, 55.00e3), # 新增：环境随机化范围
     vertices = None,
     resume_dir = None,
+    init_actor_path = None, # [新增] 指定外部 actor 权重路径作为起点，会覆盖初始化权重并跳过 IL
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
@@ -1060,6 +1063,10 @@ def run_MLP_simulation(
     else:
         log_dir = os.path.join(logs_dir, f"{mission_name}-run-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
         os.makedirs(log_dir, exist_ok=True)
+
+    # [新增] 若指定了外部 actor 起点，则跳过模仿学习预训练
+    if init_actor_path is not None and os.path.exists(init_actor_path):
+        IL_epoches = 0
     
     # --- 仅保存一次网络形状（meta json），如果已存在则跳过
     actor_meta_path = os.path.join(log_dir, "actor.meta.json")
@@ -1139,6 +1146,11 @@ def run_MLP_simulation(
                 RWController.load_state_dict(special_data["controller_state"])
                 print(f"Loaded controller state from: {special_json_path}")
             print(f"Loaded special EMA states from: {special_json_path}")
+
+    # [新增] 用外部指定 actor 权重覆盖当前 actor（作为训练起点）
+    if init_actor_path is not None and os.path.exists(init_actor_path):
+        student_agent.actor.load_state_dict(torch.load(init_actor_path, map_location=device))
+        print(f"[init_actor] Loaded actor from {init_actor_path} as training start point")
     
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
@@ -1379,6 +1391,8 @@ def run_MLP_simulation(
         print(f"[SAC] Created new replay buffer (capacity={int(replay_buffer_size)})")
     # 距离上次 SAC 更新累计的采样步数，用于决定本轮执行多少次梯度更新
     steps_since_update = 0
+    # [SAC] 按固定环境步数触发下一次更新（替代按 batch/回合触发）
+    next_update_step_trigger = int(total_steps + SAC_update_step_interval)
 
     # 初始化基于胜率的在线 EMA 变量
     ema_score = 0.5
@@ -1909,8 +1923,9 @@ def run_MLP_simulation(
             logger.add("agent/ batch_step", batch_idx, total_steps)
 
             # --- 5. 更新，保存与维护 (Checkpoint & Pool) ---
-            # [SAC] 触发条件：经验池累计样本达到阈值（warm-up）即可开始 off-policy 更新
-            if batch_idx % save_interval == 0:# and \
+            # [SAC] 触发条件：按固定环境步数触发更新（替代原来的按 batch/回合触发），
+            # 避免间隔步数过多导致过拟合；每次更新最多执行 SAC_max_updates_per_batch 次梯度更新。
+            if total_steps >= next_update_step_trigger:# and \
                 # replay_buffer.size() >= transition_dict_threshold:
                 
                 '记录ELo相对位置'
@@ -1938,6 +1953,8 @@ def run_MLP_simulation(
                 # [SAC] 统计自上次更新以来经过了多少采样步，off-policy 需要执行成比例的多次梯度更新
                 # 每经过 10 个采样步执行 sac_updates_per_10_steps 次更新（默认 steps/10 次）
                 num_sac_updates = max(1, int(steps_since_update // 10) * int(sac_updates_per_10_steps))
+                # [SAC] 限制每次触发最多执行 SAC_max_updates_per_batch 次梯度更新，防止过拟合
+                num_sac_updates = min(num_sac_updates, int(SAC_max_updates_per_batch))
                 steps_since_update = 0
                 sac_batch_size = int(min(mini_batch_size_mixed, replay_buffer.size()))
                 # [做法5] 前 q_warmup_batches 个 batch 冻结 actor，只更新 Q 网络
@@ -1958,6 +1975,9 @@ def run_MLP_simulation(
                 logger.add("train_plus/num_sac_updates", num_sac_updates, total_steps)
                 logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
                 logger.add("train_plus/sac_alpha", student_agent.alpha, total_steps)
+
+                # [SAC] 推进下一次按固定环境步数触发的更新阈值
+                next_update_step_trigger = int(total_steps + SAC_update_step_interval)
 
                 # 计算/更新 actor pre-clip 梯度的 EMA 值
                 current_ppo_grad = student_agent.pre_clip_actor_grad

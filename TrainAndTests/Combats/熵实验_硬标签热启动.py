@@ -7,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"SLWSPFSP0_flymask_v1h1-run-20260907-211901")
+    r"SLWSPFSP0_flymask_v0h0-run-20260910-115254")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -28,11 +28,11 @@ critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
-gamma = 0.97 # 0.995
+gamma = 0.97 # 0.995  97
 lmbda = 0.985 # 0.995
 epochs = 4 # 10
 eps = 0.2 # 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # 'cat':0.008, 'bern': 0.003
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
@@ -91,7 +91,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        num_workers=15,  # 并行进程数，根据CPU核数调整，建议 10-20
+        num_workers=20,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -127,9 +127,9 @@ if __name__=='__main__':
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
-            # 'Rule_4': 1200,
-            # 'Rule_5': 1200,
-            # 'Rule_6': 1200,
+            'Rule_4': 1200,
+            'Rule_5': 1200,
+            'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈

@@ -1,14 +1,13 @@
 import os, sys
 # from CombatPPOWithIL3_parallel_hierarch_Classic import *
-# [SAC] 使用 SAC 版本的训练主模块
-from CombatTD3WithIL3_parallel_hierarch import *
+from CombatPPOWithIL3_parallel_hierarch import *
 from datetime import datetime
 from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"TD30.3_flymask_v0h0-run-20260910-080407")
+    r"SLWSPFSP0.15_flymask_v0h0-run-20260908-223429")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -21,28 +20,26 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
     ver = _mask_cfg.get('ver', 0)
     hor = _mask_cfg.get('hor', 0)
 
-mission_name = f'TD30.3_flymask_v{ver}h{hor}'
 
-# # 指定外部 actor 起点路径（借调已有模型作为初始策略，跳过模仿学习）
-init_actor_path = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\SLWSPFSP0.3_flymask_0-run-20260905-210412\actor_rein0.pt"
+mission_name = f'SLWSPFSP0.6_flymask_v{ver}h{hor}'
 
 # 超参数
-actor_lr = 1e-5 # 4 1e-4
+actor_lr = 1e-4 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 30 # 180，使用外部 actor 起点时跳过 IL 预训练
+IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.97 # 0.995
 lmbda = 0.985 # 0.995
 epochs = 4 # 10
-eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+eps = 0.2 # 0.2
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.003} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
 mini_batch_size_mixed = 256 # 混合更新minibatch大小  64
 beta_mixed = 1.0
-label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
+label_smoothing=0.6 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
 dt_decide = 2 # 2 # 6
 action_cycle_multiplier = int(round(dt_decide /dt_maneuver)) # 6s 决策一次
@@ -60,23 +57,6 @@ R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 8 * max_episode_duration//dt_action_cycle + 1  # 5*
 
-# [SAC] off-policy 专用超参数
-# replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
-replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（测试用）
-sac_tau = 0.001                      # 目标网络软更新系数 0.005
-sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
-sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
-TD3_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
-replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
-TD3_update_step_interval = 1000      # [TD3] 按固定环境步数触发更新，替代按 batch/回合触发
-TD3_max_updates_per_batch = 10 # 30       # [TD3] 每次触发最多执行多少次梯度更新，防止过拟合
-
-"""
-tau=1.0：原始基线，利用更强，塌缩风险更高。
-tau=1.5：当前建议的首个稳定化实验值。
-tau=2.0：若 1.5 下 cat 熵仍快速塌缩，可尝试。
-tau>3.0：通常过于平滑，不建议直接作为常规配置。
-"""
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
 
@@ -112,8 +92,7 @@ if __name__=='__main__':
     run_MLP_simulation(
         k_nonlinear=0.0,
         collape_recover=collape_recover,
-        init_actor_path=init_actor_path,  # 外部 actor 起点
-        num_workers=1,  # 关闭并行采样，按用户要求不并行跑
+        num_workers=10,  # 并行进程数，根据CPU核数调整，建议 10-20
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -143,12 +122,6 @@ if __name__=='__main__':
         R_cage=R_cage,
         dt_maneuver=dt_maneuver,
         transition_dict_threshold=transition_dict_threshold,
-        # [SAC] off-policy 专用参数
-        replay_buffer_size=replay_buffer_size,
-        TD3_gumbel_tau=TD3_gumbel_tau,
-        replay_buffer_save_interval=replay_buffer_save_interval,
-        TD3_update_step_interval=TD3_update_step_interval,
-        TD3_max_updates_per_batch=TD3_max_updates_per_batch,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug
