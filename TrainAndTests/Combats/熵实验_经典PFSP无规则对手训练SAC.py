@@ -27,7 +27,7 @@ mission_name = f'SAC0.3_flymask_v{ver}h{hor}'
 init_actor_path = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\SLWSPFSP0.3_flymask_0-run-20260905-210412\actor_rein0.pt"
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
+actor_lr = 1e-5 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30 # 180，使用外部 actor 起点时跳过 IL 预训练
 max_steps = 20e6 # 1320e4
@@ -71,6 +71,12 @@ replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验�
 SAC_update_step_interval = 1000      # [SAC] 按固定环境步数触发更新，替代按 batch/回合触发
 SAC_max_updates_per_batch = 10       # [SAC] 每次触发最多执行多少次梯度更新，防止过拟合
 
+"""
+tau=1.0：原始基线，利用更强，塌缩风险更高。
+tau=1.5：当前建议的首个稳定化实验值。
+tau=2.0：若 1.5 下 cat 熵仍快速塌缩，可尝试。
+tau>3.0：通常过于平滑，不建议直接作为常规配置。
+"""
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
 

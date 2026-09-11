@@ -406,7 +406,7 @@ class SACHybrid:
                         canfire_mean = bern_act_flat[valid_mask_1d].mean().item() if valid_mask_1d.any() else float('nan')
                     else:
                         canfire_mean = float('nan')
-                    bern_logit_canfire = _outs_diag['bern_logits'].view(-1)[valid_mask_1d]
+                    bern_logit_canfire = _outs_diag['bern'].view(-1)[valid_mask_1d]
                     logit_mean = bern_logit_canfire.mean().item() if valid_mask_1d.any() else float('nan')
                     logit_max = bern_logit_canfire.max().item() if valid_mask_1d.any() else float('nan')
                     print(f"[SAC diag #{self._diag_update_count}] next_states fire_mask: can_fire={n_can_fire}, masked={n_masked}, "
