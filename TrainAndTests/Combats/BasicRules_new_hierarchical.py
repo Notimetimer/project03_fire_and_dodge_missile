@@ -1,5 +1,5 @@
 import numpy as np
-from math import *
+from math import atan2, pi, sin
 import torch
 import argparse
 from numpy.linalg import norm
@@ -15,6 +15,31 @@ import re
 
 use_tacview = 1  # 是否可视化
 action_cycle_multiplier = 10
+
+def rule3_fire(state_check):
+    distance = state_check["target_information"][3]
+    alt = state_check["ego_main"][1]
+    delta_psi = atan2(state_check["target_information"][1], state_check["target_information"][0])
+    RWR = state_check["warning"]
+    on_guiding = state_check["missile_in_mid_term"]
+    t_fired = state_check["weapon"]
+    ATA = state_check["target_information"][4]
+    AA_hor = state_check["target_information"][6]
+    sin_theta = state_check["ego_main"][3]
+
+    case1 = distance < 95e3 and (sin_theta >= sin(30*pi/180) or alt >= 9e3)
+    case2 = distance < 80e3
+    fire_missile = ((case1 or case2)
+                    and ATA < 60*pi/180
+                    and abs(delta_psi) < 30*pi/180
+                    and t_fired >= 40
+                    and not on_guiding
+                    and not (distance > 12e3 and abs(AA_hor) < 45*pi/180))
+    if RWR or on_guiding:
+        return False
+    if fire_missile and distance > 40e3 and sin_theta < sin(30*pi/180) and alt < 9500:
+        return False
+    return bool(fire_missile)
 
 def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     '''

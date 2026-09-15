@@ -1685,7 +1685,7 @@ def run_MLP_simulation(
                     'blue_birth': bb,
                     # 'R_cage_range': R_cage_range, # 将范围传给Worker
                     'fire_mask': fire_mask,
-                    'end_reward_weight': 0.3 + np.clip(total_steps/18e3, 0, 1)*(0.4-0.3), # 1.0
+                    'end_reward_weight': 1.0,
                     'fire_inside_weight': fire_inside_weight,
                     'fire_reward_weight': fire_reward_weight,
                 }
@@ -2029,50 +2029,6 @@ def run_MLP_simulation(
                 
                 max_fire_logits = 4.0
 
-                # 随机拜师法
-                if use_ADistill and batch_idx > 50:
-                    # 候选teacher：actor_rein 网络策略 + Rule 规则策略，一起按 Elo 排序，取前10随机抽1
-                    # 这样即便 Elo 最高的是规则(Rule)，也能作为教师用 KL 散度修改奖励
-                    candidate_items = [(k, v) for k, v in elo_ratings.items()
-                                       if k.startswith('actor_rein') or k.startswith('Rule')]
-                    if len(candidate_items) >= 1:
-                        print("有可调用teacher")
-                        candidate_items.sort(key=lambda x: x[1], reverse=True)
-                        top_candidates = candidate_items[:10]
-                        teacher_key = top_candidates[np.random.randint(len(top_candidates))][0]
-
-                        teacher_wrapper = None
-                        if teacher_key.startswith('Rule'):
-                            # 构建基于规则的teacher
-                            try:
-                                t_rule_num = int(teacher_key.split('_')[1])
-                            except (IndexError, ValueError):
-                                t_rule_num = 0
-                            print(f"规则teacher已获取: {teacher_key} (rule_num={t_rule_num})")
-                            teacher_wrapper = RuleTeacherWrapper(rule_teacher_env, t_rule_num,
-                                                                 action_dims_dict, device,
-                                                                 label_smoothing=label_smoothing)
-                        else:
-                            teacher_path = os.path.join(log_dir, f"{teacher_key}.pt")
-                            if os.path.exists(teacher_path):
-                                print("teacher路径已获取")
-                                teacher_policy = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-                                teacher_wrapper = HybridActorWrapper(teacher_policy, action_dims_dict, None, device).to(device)
-                                teacher_wrapper.load_state_dict(torch.load(teacher_path, map_location=device))
-                                teacher_wrapper.eval()
-
-                        if teacher_wrapper is not None:
-                            transition_dict, RDistill_kl = student_agent.RDistill(transition_dict, beta=beta_ADistill, k=3, teacher_actor=teacher_wrapper, no_bern=no_bern_distill, learn_type=distill_learn_type)
-                            logger.add("train_plus/RDistill_kl", RDistill_kl, total_steps)
-                        else:
-                            RDistill_kl = None
-                    else:
-                        RDistill_kl = None
-
-                if use_RND:
-                    transition_dict, rnd_mse = student_agent.RND_calc(transition_dict, beta=beta_RND) # 10
-                else:
-                    rnd_mse = None
 
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1, 
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits)
@@ -2097,13 +2053,13 @@ def run_MLP_simulation(
 
                 alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
 
-                if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
-                    if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                        student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
-                                                  chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
-                                                  ppo_grad_val=ppo_grad_ema)
-                        # 不可以自模仿得过于频繁
-                        last_il_update_batch_idx = batch_idx
+                # if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
+                #     if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
+                #         student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
+                #                                   chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
+                #                                   ppo_grad_val=ppo_grad_ema)
+                #         # 不可以自模仿得过于频繁
+                #         last_il_update_batch_idx = batch_idx
                 
                 # 记录 Log
 
@@ -2147,53 +2103,13 @@ def run_MLP_simulation(
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
                 
-                if should_stir:
-                    # 策略搅拌：计算目标熵并执行搅拌
-                    # cat熵从0step的2到20Mstep的1.5线性退火
-                    max_steps_for_stir = 20 * 1e6  # 20M steps
-                    cat_entropy_start = 2.0
-                    cat_entropy_end = 1.5
-                    
-                    # 线性插值计算当前目标cat熵
-                    progress = min(total_steps / max_steps_for_stir, 1.0)
-                    target_cat_entropy = cat_entropy_start + (cat_entropy_end - cat_entropy_start) * progress
-                    
-                    target_entropies = {
-                        'cont': 0.0,  # 连续动作目标熵为0
-                        'cat': target_cat_entropy,  # 离散动作线性退火
-                        'bern': 0.0  # 伯努利动作目标熵为0
-                    }
-                    
-                    print(f"  [should_stir] Target cat entropy: {target_cat_entropy:.3f} (progress: {progress:.3f})")
-                    
-                    # 执行策略搅拌
-                    stirred_state_dict, entropy_info = student_agent.Stir(transition_dict, target_entropies, max_steps=50, lr=0.01)
-                    
-                    # 保存搅拌后的模型参数
-                    torch.save(stirred_state_dict, os.path.join(log_dir, f"{actor_key}.pt"))
-                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                    
-                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                    
-                    # 记录搅拌后的熵值
-                    logger.add("stir/cat_entropy", entropy_info['cat_entropy'], total_steps)
-                    logger.add("stir/bern_entropy", entropy_info['bern_entropy'], total_steps)
-                    logger.add("stir/cont_entropy", entropy_info['cont_entropy'], total_steps)
-                    logger.add("stir/target_cat_entropy", target_cat_entropy, total_steps)
-                    
-                    print(f"  [should_stir] Actual cat entropy: {entropy_info['cat_entropy']:.3f}, bern entropy: {entropy_info['bern_entropy']:.3f}, cont entropy: {entropy_info['cont_entropy']:.3f}")
-                    
-                    print(f"Saved Stirred Checkpoint: {actor_key}")
-                    print(f"Saved Current Actor: current_actor.pt")
-                else:
-                    # 正常保存模型
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                    torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                    # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                    torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                    print(f"Saved Checkpoint: {actor_key}")
-                    print(f"Saved Current Actor: current_actor.pt")
+                # 正常保存模型
+                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
+                torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
+                # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                print(f"Saved Checkpoint: {actor_key}")
+                print(f"Saved Current Actor: current_actor.pt")
                 
                 # 清空 Buffer（在搅拌之后）
                 transition_dict = copy.deepcopy(empty_transition_dict)

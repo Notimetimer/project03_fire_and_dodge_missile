@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "SLWSPFSPNoIL_flymask_v0h0-run-20260906-171344" # "SLWSPFSP0.3_flymask_1-run-20260903-173826"
+    dir_name = "SLWSPFSP0_flymask_v0h0-run-20260910-115254" # "SLWSPFSP0.3_flymask_1-run-20260903-173826"
         
     # 次要
     experiment_name = None    

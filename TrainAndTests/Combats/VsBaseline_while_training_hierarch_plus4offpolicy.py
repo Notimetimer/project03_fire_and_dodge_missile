@@ -96,19 +96,19 @@ def test_worker(model_state_dict, rule_num,
                     if deterministic:
                         if Temperature is None:
                             Temperature = {'cat':0.5}
-                        explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0, bern 不使用
+                        explore_dict = {'cont': 0, 'cat': 1, 'bern': 0} # 'cat': 0, bern 不使用
                         # 测试一律传入 check_obs=b_check，激活 _deploy_can_fire 规则校验
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
                     else:
                         if Temperature is None:
                             Temperature = {'cat':1}
-                        explore_dict = {'cont': 1, 'cat': 1, 'bern': 1} # bern 不使用
+                        explore_dict = {'cont': 1, 'cat': 1, 'bern': 0} # bern 不使用
                         # 随机测试也一律传入 check_obs=b_check
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
 
                     b_action_label = b_act_exec['cat'] # [0]
                     b_state_check = test_env.unscale_state(b_check)
-                    if b_act_exec['bern'][0]:
+                    if rule3_fire(b_state_check):
                         # [漏网点2 解决]: 物理层禁忌校验与开火一致性
                         # 两种测试方式在物理层均统一加上 tabu=1 (强制要求 target_locked, weapon>=0.1, ATA<=max_radar_angle_rad)。
                         # 无论网络意图如何，都必须通过统一的底层物理雷达锁定条件校验才允许射出导弹。

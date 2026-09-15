@@ -594,7 +594,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
                             # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                             b_action_label = b_action_exec['cat'] # [0]
-                            b_fire = b_action_exec['bern'][0]
+                            b_fire = rule3_fire(b_state_check)
                             
                             # Red Decision
                             r_state_check = env.unscale_state(r_check_obs)
@@ -605,11 +605,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
-                                                        mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
-                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
+                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':0},
+                                                        mask_on=fire_mask, temperature={'cat':opp_temperature})
+                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':0}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
-                                r_fire = r_action_exec['bern'][0]
+                                r_fire = rule3_fire(r_state_check)
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
                         b_is_firing = 0
@@ -622,9 +622,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             r_is_firing = env.has_ammo_to_fire('r')
                         
                         # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
-                        current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
-                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
+                        # 开火完全由 Rule 3 控制，不记录 bern 输出
+                        current_action = {'cat': b_action_exec['cat']}
+                        current_action_exec = {'cat': b_action_exec['cat']}
+                        current_enm_action_exec = {'cat': r_action_exec['cat']}
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
@@ -1009,7 +1010,8 @@ def run_MLP_simulation(
     # 创建一个 dummy env 获取维度
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
-    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
+    # 开火完全由 Rule 3 控制，TD3 只学习机动 (cat)
+    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': 0}
     del dummy_env
 
     # [TD3] 若外部未指定目标熵，则只根据机动部分 (cat) 计算；bern 使用固定 k_entropy 不再参与 alpha 调节

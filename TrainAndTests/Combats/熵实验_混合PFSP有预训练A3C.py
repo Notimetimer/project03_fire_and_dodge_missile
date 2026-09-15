@@ -13,19 +13,27 @@ collape_recover={ # 是否是崩盘后恢复
             "best_actor_name": None,
             "actor_frozen_batchs": 5,
         }
-mission_name = 'SLWSA3C0.3'
+# 读取 mask_config.json 中的 ver/hor 开关状态 (相对路径)
+mask_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Algorithms', 'mask_config.json')
+with open(mask_config_path, 'r', encoding='utf-8') as f:
+    _mask_cfg = json.load(f)
+    ver = _mask_cfg.get('ver', 0)
+    hor = _mask_cfg.get('hor', 0)
+
+
+mission_name = f'SLWSA3C0.3_flymask_v{ver}h{hor}'
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-3
-critic_lr = actor_lr * 5 # * 5
+actor_lr = 3e-5 # 4 1e-4
+critic_lr = 5e-4 # * 5
 IL_epoches= 30
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
-gamma = 0.995
-lmbda = 0.995
+gamma = 0.97
+lmbda = 0.985
 epochs = 4 # 10
 eps = 0.2
-k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.0001} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
+k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.0} # cat:0.005, bern:0.001 是常数熵系数几乎完美的设定值。
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
@@ -43,11 +51,11 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # 仿真环境参数
 no_crash = 1 # 是否开启环境级别的防撞地系统
-dt_move = 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
+dt_move = 0.07 # 0.05 # 0.1 # 0.04 # 动力学解算步长, dt_maneuver=0.2 这是常数，不许改
 max_episode_duration = 15*60 # 回合最长时间，单位s
 R_cage= 62.00e3 # 55e3 # 场地半径，单位m
 dt_action_cycle = dt_maneuver * action_cycle_multiplier
-transition_dict_threshold = 5 * max_episode_duration//dt_action_cycle + 1 
+transition_dict_threshold = 8 * max_episode_duration//dt_action_cycle + 1  # 5*
 
 
 require_new_IL_data = 0 # 是否需要现场产生示范数据
@@ -120,8 +128,9 @@ if __name__=='__main__':
             "Rule_1": 1200,
             "Rule_2": 1200,
             'Rule_3': 1200,
-            'Rule_4': 1200,
+            # 'Rule_4': 1200,
             # 'Rule_5': 1200,
+            # 'Rule_6': 1200,
             },
         self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈

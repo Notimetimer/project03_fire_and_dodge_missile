@@ -1,5 +1,4 @@
 import os, sys
-# from CombatPPOWithIL3_parallel_hierarch_Classic import *
 # [SAC] 使用 SAC 版本的训练主模块
 from CombatTD3WithIL3_parallel_hierarch import *
 from datetime import datetime
@@ -8,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"TD30.3_flymask_v0h0-run-20260910-080407")
+    r"TD30.3_flymask_v0h0-run-20260912-230601")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -69,7 +68,11 @@ sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新�
 TD3_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 TD3_update_step_interval = 1000      # [TD3] 按固定环境步数触发更新，替代按 batch/回合触发
-TD3_max_updates_per_batch = 10 # 30       # [TD3] 每次触发最多执行多少次梯度更新，防止过拟合
+TD3_max_updates_per_batch = 10 # 30       # [TD3] 每个采样块最多执行多少次梯度更新
+rollout_chunk_size = 128
+TD3_utd_ratio = 0.1
+actor_warmup_replay_size = 5000
+actor_max_update_norm = 0.01
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。
@@ -149,17 +152,21 @@ if __name__=='__main__':
         replay_buffer_save_interval=replay_buffer_save_interval,
         TD3_update_step_interval=TD3_update_step_interval,
         TD3_max_updates_per_batch=TD3_max_updates_per_batch,
+        # rollout_chunk_size=rollout_chunk_size,
+        # TD3_utd_ratio=TD3_utd_ratio,
+        # actor_warmup_replay_size=actor_warmup_replay_size,
+        # actor_max_update_norm=actor_max_update_norm,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
+            # 'Rule_0': 1200, # debug
+            # "Rule_1": 1200,
+            # "Rule_2": 1200,
+            # 'Rule_3': 1200,
             # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             # 'Rule_6': 1200,
             },
-        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'SP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,

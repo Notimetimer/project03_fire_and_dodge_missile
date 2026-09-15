@@ -69,7 +69,11 @@ sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新�
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 SAC_update_step_interval = 1000      # [SAC] 按固定环境步数触发更新，替代按 batch/回合触发
-SAC_max_updates_per_batch = 10       # [SAC] 每次触发最多执行多少次梯度更新，防止过拟合
+SAC_max_updates_per_batch = 10       # [SAC] 每个采样块最多执行多少次梯度更新
+rollout_chunk_size = 128
+SAC_utd_ratio = 0.1
+actor_warmup_replay_size = 5000
+actor_max_update_norm = 0.01
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。
@@ -152,6 +156,10 @@ if __name__=='__main__':
         replay_buffer_save_interval=replay_buffer_save_interval,
         SAC_update_step_interval=SAC_update_step_interval,
         SAC_max_updates_per_batch=SAC_max_updates_per_batch,
+        rollout_chunk_size=rollout_chunk_size,
+        SAC_utd_ratio=SAC_utd_ratio,
+        actor_warmup_replay_size=actor_warmup_replay_size,
+        actor_max_update_norm=actor_max_update_norm,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug

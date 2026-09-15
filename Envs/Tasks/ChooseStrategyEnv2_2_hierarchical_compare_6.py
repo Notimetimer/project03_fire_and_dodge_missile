@@ -67,18 +67,10 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
         # --- 1. 参数初始化与状态获取 ---
         # 权重在此仅作为内部计算比例，实际整体缩放由外部 lambda 控制
         reward_weights = {
-            'missile_guidance': 0.04,
-            'target_locked': 0.06,
-            'locked_by_target': 0.05,
-            'missile_warning': 0.06,
-            'enemy_gets_warning': 0.05,
-            'alt_limit_penalty': 1.0,
             'border_penalty_scale': 0.2,
             'border_reward': 0.2, # 旧的数值: 1.0, 新的数值：0.2
             'angle_advantage': 0.05, # 0.007, # 0.03
             'height_advantage': 0.05,
-            'aoa_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.2
-            'pitch_penalty': 0.02, # 旧的数值: 0.02, 新的数值：0.05
             'to_center_reward' : 0.005, # 0.01 占领中心点的价值
             'speed_penalty': 0.01, # 慢速惩罚
         }
@@ -109,21 +101,25 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             enm = self.BUAV
             alive_enm_missiles = self.alive_b_missiles
             alive_ally_missiles = self.alive_r_missiles
+            all_ally_missiles = self.Rmissiles
             i_can_guide = self.r_can_guide
         if side == 'b':
             ego = self.BUAV
             enm = self.RUAV
             alive_enm_missiles = self.alive_r_missiles
             alive_ally_missiles = self.alive_b_missiles
+            all_ally_missiles = self.Bmissiles
             i_can_guide = self.b_can_guide
+        
+        ego.stage = 0
 
         # --- 2. 终止判定 ---
         done = 0
         
         # 死亡时间戳
-        if ego.dead and ego.dead_time == None:
+        if ego.dead and getattr(ego, 'dead_time', None) is None:
             ego.dead_time = self.t
-        if enm.dead and enm.dead_time == None:
+        if enm.dead and getattr(enm, 'dead_time', None) is None:
             enm.dead_time = self.t
 
         # --简单判定法--
@@ -238,12 +234,6 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                         (1 - abs(delta_psi_to_center)/pi) * \
                         reward_weights['to_center_reward']
         
-        # # 迎角惩罚
-        # r_shaping -= reward_weights['aoa_penalty'] * ((ego.alpha_air*180/pi > 15)*(ego.alpha_air*180/pi-15) + \
-        #                                                  (ego.alpha_air*180/pi < -5)*(-5 - ego.alpha_air*180/pi))
-        # # 俯仰角惩罚
-        # r_shaping -= reward_weights['pitch_penalty'] * (abs(ego.theta)/pi*2)
-
         r_shaping *= (1-ego.dead) # 密集奖励只有在存活的时候有意义
 
         # 开火代价控制
