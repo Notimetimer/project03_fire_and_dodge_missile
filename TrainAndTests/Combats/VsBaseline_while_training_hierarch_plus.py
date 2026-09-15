@@ -92,22 +92,21 @@ def test_worker(model_state_dict, rule_num,
                 
                 # 蓝方 (神经网络)
                 with torch.no_grad():
-                    # 机动(cat)由神经网络输出；开火(bern)不再使用，统一由 Rule 3 判定
+                    # 如果 deterministic 为 True，则机动(cat)采用确定性决策，开火(bern)仍保持随机(1)
                     if deterministic:
                         if Temperature is None:
-                            Temperature = {'cat':0.5}
-                        explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0, bern 不使用
-                        # 测试一律传入 check_obs=b_check，激活 _deploy_can_fire 规则校验
+                            Temperature = {'cat':0.5, 'bern':1}
+                        explore_dict = {'cont': 0, 'cat': 1, 'bern': 1} # 'cat': 0
+                        # [漏网点1已解决]: 测试一律传入 check_obs=b_check，激活 _deploy_can_fire 规则校验
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
                     else:
                         if Temperature is None:
-                            Temperature = {'cat':1}
-                        explore_dict = {'cont': 1, 'cat': 1, 'bern': 1} # bern 不使用
-                        # 随机测试也一律传入 check_obs=b_check
+                            Temperature = {'cat':1, 'bern':1}
+                        explore_dict = {'cont': 1, 'cat': 1, 'bern': 1}
+                        # [漏网点1已解决]: 随机测试也一律传入 check_obs=b_check，消除开火硬规则差异
                         b_act_exec, _, _, _ = actor.get_action(b_obs, explore=explore_dict, temperature=Temperature, check_obs=b_check)
 
                     b_action_label = b_act_exec['cat'] # [0]
-                    b_state_check = test_env.unscale_state(b_check)
                     if b_act_exec['bern'][0]:
                         # [漏网点2 解决]: 物理层禁忌校验与开火一致性
                         # 两种测试方式在物理层均统一加上 tabu=1 (强制要求 target_locked, weapon>=0.1, ATA<=max_radar_angle_rad)。
