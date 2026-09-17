@@ -49,7 +49,9 @@ if __name__ == "__main__":
 
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
+    
     dir_name = "SLWSPFSP0_flymask_v0h0-run-20260910-115254" # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
+
 
     
     # 次要
@@ -75,7 +77,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.07 # 025 # 2 # 0.05 # 0.04 # 25
+    env.dt_move = 0.02 # 025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -128,7 +130,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3] # [0,1,2,3,4] # [3]
+    rule_opponents = [3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -186,8 +188,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.2, 'bern':0.97}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.4,
+                            temperature={'cat':0.3, 'bern':0.5}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -292,15 +294,15 @@ if __name__ == "__main__":
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
             
-            # # --- 保存作战记录到 CSV ---
-            # try:
-            #     df_history = pd.DataFrame(history)
-            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-            #     save_path = os.path.join(project_root, "logs", save_name)
-            #     df_history.to_csv(save_path, index=False)
-            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            # except Exception as e:
-            #     print(f"Failed to save CSV: {e}")
+            # --- 保存作战记录到 CSV ---
+            try:
+                df_history = pd.DataFrame(history)
+                save_name = f"CombatLog_vs_Rule_2609_{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
+                save_path = os.path.join(project_root, "logs", save_name)
+                df_history.to_csv(save_path, index=False)
+                print(f"Combat data for Rule {rule_num} saved to: {save_path}")
+            except Exception as e:
+                print(f"Failed to save CSV: {e}")
 
             # --- 绘制曲线 ---
             plt.figure(figsize=(10, 10))
