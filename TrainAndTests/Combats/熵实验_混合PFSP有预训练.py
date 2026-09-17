@@ -21,7 +21,7 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
     hor = _mask_cfg.get('hor', 0)
 
 
-mission_name = f'无阶段引导奖励0.3_flymask_v{ver}h{hor}'
+mission_name = f'PPO0.3_flymask_v{ver}h{hor}'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-4
