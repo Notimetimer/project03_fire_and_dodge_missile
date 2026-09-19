@@ -1,4 +1,4 @@
-'''
+﻿'''
 同步并行化改进（每个仿真进程同步开始，结束后等待其他仿真进程结束）
 放弃非阻塞的并行测试，改为严格的并行测试完成后再并行采样，都完成了再并行测试
 '''
@@ -19,113 +19,19 @@ from datetime import datetime
 import torch.multiprocessing as mp  # 使用 torch 的多进程模块
 import traceback # [新增]
 import random
-# 必须在任何 sklearn 导入之前执行！
-try:
-    import threadpoolctl
-    # 彻底让信息查询返回空列表
-    threadpoolctl.threadpool_info = lambda *args, **kwargs: []
-    # 核心修复：直接将 threadpool_limits 变为一个什么都不做的空上下文管理器
-    class DummyContextManager:
-        def __init__(self, *args, **kwargs): pass
-        def __enter__(self): return self
-        def __exit__(self, exc_type, exc_val, exc_tb): pass
-        def _set_threadpool_limits(self): return []
-    threadpoolctl.threadpool_limits = DummyContextManager
-    # 针对 3.x 版本的控制器拦截
-    if hasattr(threadpoolctl, 'ThreadpoolController'):
-        threadpoolctl.ThreadpoolController.info = lambda self, *args, **kwargs: []
-        threadpoolctl.ThreadpoolController.limit = lambda self, *args, **kwargs: DummyContextManager()
-    print("[Patch] threadpoolctl 全版本上下文拦截补丁已成功强行注入。")
-except Exception as e:
-    print(f"[Patch] 补丁注入失败: {e}，尝试继续运行...")
-from sklearn.cluster import KMeans
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
-from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 奖励函数
-from Algorithms.PPOHybrid23_0 import PPOHybrid, PolicyNetHybrid, HybridActorWrapper, infer_mask_cfg_from_actor_meta
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
+from Algorithms.PPOHybridClockWise import PPOHybrid as ClockwisePPO, PolicyNetHybrid as ClockwisePolicyNet, HybridActorWrapper as ClockwiseActorWrapper
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training_hierarch_plus import test_worker
-from RewardWeightController import FireRewardWeightController
+from VsBaseline_while_training_hierarch2 import test_worker
 
 dt_move = 0.04
-
-# 测试对战初始弹药（可调）
-test_red_init_ammo = 6
-test_blue_init_ammo = 6
-
-# 周期性测试所对抗的规则对手编号 (仅测试 0, 1, 2, 3)
-TEST_RULE_IDS = [0, 1, 2, 3]
-# 蒸馏/引导用的教师规则列表（排除 Rule 0，避免其在上一枚导弹中制导时仍开火的激进行为）
-TEACHER_RULE_IDS = [1, 2, 3, 4, 5, 6]
-
-
-class RuleTeacherWrapper:
-    """
-    基于规则(basic_rules)的教师包装器，用于 RDistill。
-
-    对齐 PolicyNetHybrid.forward 的输出格式：
-      - 'cat': list[Tensor]，每个动作头一个软 one-hot 概率分布 (B, n_classes)
-      - 'bern': Tensor，开火头 logits (B, 1)
-      - 'cont': None
-    软 one-hot 构造方式与 PPOHybrid.compute_il_loss 的 pre_training 分支一致：
-      正确动作概率 = 1 - label_smoothing，其余均分 label_smoothing/(n-1)。
-
-    通过 env.obs2obs_check + env.unscale_state 把网络局部观测(obs)还原为
-    basic_rules 所需的 state_check，再逐样本调用规则得到 (action, fire)。
-    """
-    is_rule_teacher = True
-
-    def __init__(self, env, rule_num, action_dims_dict, device, label_smoothing=0.1):
-        self.env = env
-        self.rule_num = rule_num
-        self.action_dims_dict = action_dims_dict
-        self.device = device
-        self.label_smoothing = label_smoothing
-        cat_dims = action_dims_dict.get('cat', [])
-        # 兼容 int / list 两种写法
-        self.cat_dims = list(cat_dims) if isinstance(cat_dims, (list, tuple)) else [cat_dims]
-
-    def eval(self):
-        return self
-
-    @torch.no_grad()
-    def predict_distributions(self, states):
-        obs_np = states.detach().cpu().numpy()
-        B = obs_np.shape[0]
-        ls = self.label_smoothing
-        n_heads = len(self.cat_dims)
-
-        # 初始化为平滑背景概率
-        cat_probs = [np.full((B, nc), ls / max(nc - 1, 1), dtype=np.float32) for nc in self.cat_dims]
-        bern_logits = np.full((B, 1), -3.0, dtype=np.float32)
-
-        for i in range(B):
-            check_obs = self.env.obs2obs_check(obs_np[i])
-            state_check = self.env.unscale_state(check_obs)
-            action_number, fire = basic_rules(state_check, self.rule_num, p_random=0)
-
-            if isinstance(action_number, (list, tuple, np.ndarray)):
-                act_list = list(np.asarray(action_number).reshape(-1))
-            else:
-                act_list = [action_number]
-
-            for h in range(n_heads):
-                nc = self.cat_dims[h]
-                idx = int(act_list[h]) if h < len(act_list) else 0
-                idx = int(np.clip(idx, 0, nc - 1))
-                cat_probs[h][i, :] = ls / max(nc - 1, 1)
-                cat_probs[h][i, idx] = 1.0 - ls
-
-            bern_logits[i, 0] = 3.0 if fire else -3.0
-
-        cat_tensors = [torch.tensor(cp, dtype=torch.float, device=self.device) for cp in cat_probs]
-        bern_tensor = torch.tensor(bern_logits, dtype=torch.float, device=self.device)
-        return {'cont': None, 'cat': cat_tensors, 'bern': bern_tensor}
 
 def get_current_file_dir():
     return os.path.dirname(os.path.abspath(__file__))
@@ -157,7 +63,7 @@ def load_il_and_transitions(folder, il_name, rl_name):
 def restructure_actions(actions_data):
     """
     将 list of dicts [{'fly': 1, 'fire': 0}, ...] 
-    转换为 dict of arrays {'cat': array([[1],...]), 'bern': array([[0],...])}
+    转换为 dict of arrays {'lin': array([[1],...]), 'bern': array([[0],...])}
     并确保维度是 (N, 1) 以适配 PPOHybrid2 的索引操作
     """
     # 如果已经是字典格式，直接返回
@@ -169,7 +75,7 @@ def restructure_actions(actions_data):
         # print("Restructuring actions from List[Dict] to Dict[Array]...") # 频繁调用可注释掉以减少刷屏
         
         # 初始化容器
-        new_actions = {'cat': [], 'bern': []}
+        new_actions = {'lin': [], 'circ': [], 'bern': []}
         
         for item in actions_data:
             # 兼容处理：item 可能是 dict，也可能是包含 dict 的 numpy array
@@ -177,31 +83,45 @@ def restructure_actions(actions_data):
             if isinstance(item, np.ndarray) and item.dtype == object:
                 act = item.item() # 提取 numpy 里的 dict
             
-            # 映射 'fly' -> 'cat' (离散机动)
+            # 映射 'fly' -> 'lin' (离散垂直机动)
             # 映射 'fire' -> 'bern' (开关开火)
             if isinstance(act, dict):
-                # 优先找 'fly'，找不到找 'cat'
-                val_cat = act.get('fly', act.get('cat'))
-                if val_cat is not None:
-                    new_actions['cat'].append(val_cat)
-                
-                # 优先找 'fire'，找不到找 'bern'
+                # 优先找 'fly'，找不到找 'lin'，最后兼容 'cat'
+                val_lin = act.get('fly', act.get('lin', act.get('cat')))
+                val_circ = act.get('circ')
                 val_bern = act.get('fire', act.get('bern'))
+                
+                if val_lin is not None:
+                    if isinstance(val_lin, (list, np.ndarray)) and len(val_lin) == 2 and val_circ is None:
+                        new_actions['lin'].append([val_lin[0]])
+                        new_actions['circ'].append([val_lin[1]])
+                    else:
+                        new_actions['lin'].append(val_lin)
+                
+                if val_circ is not None:
+                    new_actions['circ'].append(val_circ)
+                    
                 if val_bern is not None:
                     new_actions['bern'].append(val_bern)
 
             # 备用：如果数据意外变成了 list/tuple
             elif isinstance(act, (list, np.ndarray, tuple)) and len(act) >= 2:
-                 new_actions['cat'].append(act[0])
-                 new_actions['bern'].append(act[1])
+                if isinstance(act[0], (list, np.ndarray)) and len(act[0]) == 2:
+                    new_actions['lin'].append([act[0][0]])
+                    new_actions['circ'].append([act[0][1]])
+                else:
+                    new_actions['lin'].append(act[0])
+                new_actions['bern'].append(act[1])
 
         # 转换为 Numpy Array 并调整形状为 (Batch, 1)
-        # 这一点至关重要：PPOHybrid2 里的 expert_cat[:, i] 需要 expert_cat 是二维的
-        
-        # 1. 'cat': 离散动作，转为 int64，Reshape 为 (N, 1)
-        cat_arr = np.array(new_actions['cat'], dtype=np.int64)
-        if cat_arr.ndim == 1:
-            cat_arr = cat_arr.reshape(-1, 1)
+        # 1. 'lin': 离散垂直动作，转为 int64，Reshape 为 (N, 1)
+        lin_arr = np.array(new_actions['lin'], dtype=np.int64)
+        if lin_arr.ndim == 1:
+            lin_arr = lin_arr.reshape(-1, 1)
+            
+        circ_arr = np.array(new_actions['circ'], dtype=np.int64)
+        if circ_arr.ndim == 1 and circ_arr.size > 0:
+            circ_arr = circ_arr.reshape(-1, 1)
         
         # 2. 'bern': 伯努利动作，转为 float32 (BCE Loss需要)，Reshape 为 (N, 1)
         bern_arr = np.array(new_actions['bern'], dtype=np.float32)
@@ -209,14 +129,111 @@ def restructure_actions(actions_data):
             bern_arr = bern_arr.reshape(-1, 1)
 
         result = {
-            'cat': cat_arr,
+            'lin': lin_arr,
             'bern': bern_arr
         }
+        if circ_arr.size > 0:
+            result['circ'] = circ_arr
         
-        print(f"Structure fixed: 'cat' shape={cat_arr.shape}, 'bern' shape={bern_arr.shape}")
+        print(f"Structure fixed: 'lin' shape={lin_arr.shape}, 'bern' shape={bern_arr.shape}")
         return result
 
     return actions_data
+
+
+# --- IL action conversion helpers (moved here from VsBaseline) -----------------
+def old_lin_idx2radian(idx):
+    mapping = {0: np.pi/4.0, 1: np.pi/8.0, 2: 0.0, 3: -np.pi/8.0, 4: -np.pi/2.0}
+    return mapping.get(int(idx), 0.0)
+
+
+def old_circ_idx2radian(idx):
+    mapping = {0: 0.0, 1: np.pi/3.0, 2: np.pi/2.0, 3: np.pi, 4: -np.pi/2.0, 5: -np.pi/3.0}
+    return mapping.get(int(idx), 0.0)
+
+
+def new_lin_radians_grid(n_linear):
+    idxs = np.arange(n_linear)
+    return np.pi/2.0 - np.pi * idxs / float(n_linear - 1)
+
+def new_circ_radians_grid(n_circle):
+    idxs = np.arange(n_circle)
+    return 2.0 * np.pi * idxs / float(n_circle - 1)
+
+# def new_lin_idx2radian(idx, n_linear=12):
+#     lin_grid = new_lin_radians_grid(n_linear)
+#     try:
+#         # coerce possible array-like / tensor to scalar int
+#         if isinstance(idx, (list, tuple)):
+#             idx0 = int(np.array(idx).reshape(-1)[0])
+#         else:
+#             arr = np.asarray(idx)
+#             if arr.shape == ():
+#                 idx0 = int(arr)
+#             else:
+#                 idx0 = int(arr.reshape(-1)[0])
+#     except Exception:
+#         idx0 = int(idx)
+#     # clamp
+#     idx0 = max(0, min(int(n_linear) - 1, idx0))
+#     return lin_grid[idx0]
+    
+# def new_circ_idx2radian(idx, n_circle=24):
+#     circ_grid = new_circ_radians_grid(n_circle)
+#     try:
+#         if isinstance(idx, (list, tuple)):
+#             idx0 = int(np.array(idx).reshape(-1)[0])
+#         else:
+#             arr = np.asarray(idx)
+#             if arr.shape == ():
+#                 idx0 = int(arr)
+#             else:
+#                 idx0 = int(arr.reshape(-1)[0])
+#     except Exception:
+#         idx0 = int(idx)
+#     idx0 = max(0, min(int(n_circle) - 1, idx0))
+#     return circ_grid[idx0]
+
+def convert_il_actions(actions, n_linear=12, n_circle=24):
+    """
+    Convert imitation-learning actions from old discrete scheme to new discrete indices.
+    Accepts dict-of-arrays or list-of-dicts and returns the remapped structure.
+    """
+    lin_grid = new_lin_radians_grid(n_linear)
+    circ_grid = new_circ_radians_grid(n_circle)
+
+    def map_lin(old_idx):
+        rad = old_lin_idx2radian(old_idx)
+        return int(np.argmin(np.abs(lin_grid - rad)))
+
+    def map_circ(old_idx):
+        rad = old_circ_idx2radian(old_idx)
+        rad_norm = np.mod(rad, 2.0 * np.pi)
+        return int(np.argmin(np.abs(circ_grid - rad_norm)))
+
+    if isinstance(actions, dict):
+        new_actions = actions.copy()
+        if 'lin' in actions and actions['lin'] is not None:
+            a = np.array(actions['lin']).reshape(-1)
+            new_actions['lin'] = np.array([map_lin(x) for x in a], dtype=np.int64).reshape(-1, 1)
+        if 'circ' in actions and actions['circ'] is not None:
+            a = np.array(actions['circ']).reshape(-1)
+            new_actions['circ'] = np.array([map_circ(x) for x in a], dtype=np.int64).reshape(-1, 1)
+        return new_actions
+
+    if isinstance(actions, list):
+        new_list = []
+        for item in actions:
+            it = item.copy()
+            if 'lin' in item:
+                it['lin'] = map_lin(item['lin'])
+            if 'circ' in item:
+                it['circ'] = map_circ(item['circ'])
+            new_list.append(it)
+        return new_list
+
+    return actions
+
 
 def save_meta_once(path, state_dict):
     if os.path.exists(path):
@@ -337,20 +354,6 @@ class IL_transition_buffer:
         for k in self.addon_dict:
             self.addon_dict[k] = []
         print("[IL_transition_buffer] Buffer cleared.")
-
-    def save(self, path):
-        """直接序列化整个 buffer 实例"""
-        torch.save(self, path)
-        print(f"[IL_transition_buffer] Saved to {path}. Size: {len(self.addon_dict['states'])}")
-
-    @staticmethod # 静态方法调用,不需要实例化
-    def load(path):
-        """从磁盘加载 buffer 实例"""
-        if not os.path.exists(path):
-            return None
-        buffer = torch.load(path, map_location='cpu')
-        print(f"[IL_transition_buffer] Loaded from {path}. Size: {len(buffer.addon_dict['states'])}")
-        return buffer
         
 
 
@@ -486,7 +489,7 @@ def create_initial_state_worker(randomized=0):
 
 def worker_process(rank, pipe, args, state_dim, hidden_dim, 
                    action_dims_dict, device_worker, dt_maneuver, 
-                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1, vertices=None, mask_cfg=None):
+                   seed, opp_greedy_rate, dt_move=0.05, no_crash=1, pomdp=1):
     """
     常驻子进程：接收参数 -> 跑完一整场 -> 返回数据 -> 等待
     完整的 Worker 逻辑：包含环境初始化、模型加载、仿真循环、数据回传
@@ -503,7 +506,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         # args.R_cage = np.random.uniform(30e3, 45e3) # 已移除：放在这里会导致同一个Worker的所有episode的环境大小不变
 
         # 初始化环境 (关闭可视化以加速)
-        env = ChooseStrategyEnv(args, tacview_show=False, vertices=vertices)
+        env = ChooseStrategyEnv(args, tacview_show=False)
         env.shielded = no_crash # 假设默认开启防撞
         env.dt_move = dt_move
         env.dt_maneuver = dt_maneuver
@@ -511,13 +514,28 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
         env.no_out = 0 # 训练时该出界必须出界
 
         # 初始化本地网络 (CPU)
-        # Worker 仅做推理：直接用 HybridActorWrapper（SAC 与 PPO 共用同一套 actor 接口），无需构建完整 SAC/Q 网络
-        local_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device_worker)
-        local_agent = HybridActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker)
+        local_actor = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        # 【修改 1】创建一个 dummy critic，仅为了满足 PPOHybrid 初始化要求
+        local_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+        local_agent = ClockwisePPO(
+            actor=ClockwiseActorWrapper(local_actor, action_dims_dict, None, device_worker).to(device_worker),
+            critic=local_dummy_critic,  # <--- 【修改】传入实体对象，而非 None
+            actor_lr=0, critic_lr=0,    # 学习率为0，确保不会更新
+            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
+            device=device_worker 
+        )
         
         # 初始化对手网络
-        adv_actor = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device_worker)
-        adv_agent = HybridActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker)
+        adv_actor = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict).to(device_worker)
+        # 【修改 2】同样为对手创建一个 dummy critic
+        adv_dummy_critic = ValueNet(state_dim, hidden_dim).to(device_worker)
+        adv_agent = ClockwisePPO(
+            actor=ClockwiseActorWrapper(adv_actor, action_dims_dict, None, device_worker).to(device_worker),
+            critic=adv_dummy_critic,    # <--- 【修改】传入实体对象，而非 None
+            actor_lr=0, critic_lr=0, 
+            lmbda=0, eps=0, gamma=0, epochs=0, # 补全位置参数
+            device=device_worker
+        )
 
         # --- 2. 循环等待阶段 ---
         while True:
@@ -533,23 +551,20 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 (actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
-                local_agent.load_state_dict(actor_weights)
+                local_agent.actor.load_state_dict(actor_weights)
                 
                 # B. 配置对手
-                opp_name, opp_type, opp_data, opp_temperature = opponent_info
+                opp_name, opp_type, opp_data = opponent_info
                 adv_is_rule = (opp_type == 'rule')
                 rule_num = 0
                 if adv_is_rule:
                     rule_num = opp_data
                 else:
-                    adv_agent.load_state_dict(opp_data)
+                    adv_agent.actor.load_state_dict(opp_data)
 
                 # C. 准备本回合容器
-                # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
                 # local_trans 用于 PPO 更新 (只包含 Blue 视角)
                 local_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-                ego_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
-                enm_trans = {'obs': [], 'states': [], 'actions': [], 'next_states': [], 'rewards': [], 'dones': [], 'active_masks': []}
 
                 # 新增: 开火角度参数及导弹存活期 ATA 的回合统计容器
                 # 红方（对手）统计
@@ -590,39 +605,24 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 # 每次重新运行对局前，根据Master指定的范围随机化当前环境大小
                 # r_min, r_max = settings.get('R_cage_range', (55.00e3, 55.00e3))
-                fire_mask = settings.get('fire_mask', 1)
                 # env.R_cage = np.random.uniform(r_min, r_max)
-
-                fire_inside_weight = settings.get('fire_inside_weight', None)
-                fire_reward_weight = settings.get('fire_reward_weight', None)
                 
                 # 进场瞬间给全信息
                 red_init_ammo=6
                 blue_init_ammo=6
-                # # 残局训练
-                # if np.random.uniform(0,1) < 0.3:
-                #     red_init_ammo = int(np.round(np.random.uniform(0,3)))
-                #     blue_init_ammo = int(np.round(np.random.uniform(0,3)))
-                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=red_init_ammo, blue_init_ammo=blue_init_ammo, pomdp=0)
+                env.reset(red_birth_state=red_birth, blue_birth_state=blue_birth, red_init_ammo=6, blue_init_ammo=6, pomdp=0)
                 
                 # 状态变量初始化
                 done = False
                 last_decision_obs, last_decision_state = None, None
                 last_enm_decision_obs, last_enm_decision_state = None, None
-                current_action, current_action_exec, current_enm_action_exec = None, None, None
+                current_action = None
                 
                 steps_run = 0
                 episode_return = 0 # 仅用于统计显示
-                episode_return_dense = 0
                 m_fired = 0
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
-                
-                # 新增: 出界状态及首次出界时间记录（用于Elo惩罚）
-                red_out_cage = False
-                red_out_cage_time = None
-                blue_out_cage = False
-                blue_out_cage_time = None
                 
                 # --- E. 仿真循环 (核心物理逻辑) ---
                 # 计算最大步数
@@ -675,10 +675,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.1 存储【上一个】周期的经验
                         if steps_run > 0:
                             # 注意：这里调用你原文件里的 append_experience 辅助函数
-                            # 确保 append_experience 在 这个函数 作用域外是可见的，或者复制进来
+                            # 仅保存 local_trans（SIL 已关闭）
                             append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, b_state_global, False, not dead_dict['b'])
-                            append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, r_state_global, False, not dead_dict['r'])
 
                         # 2.2 更新上一帧记录
                         last_decision_obs = b_obs
@@ -689,25 +687,38 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         # 2.3 产生新动作 (No Grad)
                         with torch.no_grad():
                             # Blue Decision
+                            # “警报响起，少整活、多保命”
                             b_state_check = env.unscale_state(b_check_obs)
-                            b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
-                            # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
-                            b_action_label = b_action_exec['cat'] # [0]
+                            if b_state_check["warning"]:
+                                temperature = 1 # 0.3
+                            else:
+                                temperature = 1
+                            b_action_exec, b_action_raw, _, _ = local_agent.take_action(b_obs, explore=1, temperature=temperature)
+                            b_action_v = b_action_exec['lin'][0] if isinstance(b_action_exec['lin'], (list, np.ndarray)) else b_action_exec['lin']
+                            b_action_h = b_action_exec['circ'][0] if isinstance(b_action_exec['circ'], (list, np.ndarray)) else b_action_exec['circ']
+                            # actions_exec already contains execution radians — pass through directly
+                            b_action_radians = [float(b_action_v), float(b_action_h)]
                             b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
                             r_state_check = env.unscale_state(r_check_obs)
+                            if r_state_check["warning"]:
+                                temperature = 1 # 0.3
+                            else:
+                                temperature = 1
                             if adv_is_rule:
                                 # 调用规则，假设 basic_rules 已导入
                                 r_action_label, r_fire = basic_rules(r_state_check, rule_num, p_random=0.1)
-                                r_action_exec = {'cat': r_action_label, 'bern': np.array([r_fire], dtype=np.float32)}
+                                # r_action_exec = {'lin': [r_action_label[0]], 'circ': [r_action_label[1]], 'bern': np.array([r_fire], dtype=np.float32)}
+                                # r_action_raw = {'lin': [r_action_label[0]], 'circ': [r_action_label[1]], 'bern': np.array([r_fire], dtype=np.float32)}
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, 
-                                                        mask_on=fire_mask, temperature={'cat':opp_temperature, 'bern':1.0})
-                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':1}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
-                                r_action_label = r_action_exec['cat'] #[0]
+                                explore_dict_r = {'cont':0, 'lin':adv_explore, 'circ':adv_explore, 'bern':1}
+                                r_action_exec, r_action_raw, _, _ = adv_agent.take_action(r_obs, explore=explore_dict_r, temperature=temperature, max_std=0.8)
+                                r_action_v = r_action_exec['lin'][0] if isinstance(r_action_exec['lin'], (list, np.ndarray)) else r_action_exec['lin']
+                                r_action_h = r_action_exec['circ'][0] if isinstance(r_action_exec['circ'], (list, np.ndarray)) else r_action_exec['circ']
+                                r_action_label = [float(r_action_v), float(r_action_h)]
                                 r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
@@ -720,88 +731,41 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             env.RUAV.about_to_fire = 1
                             r_is_firing = env.has_ammo_to_fire('r')
                         
-                        # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
-                        current_action = {'cat': b_action_exec['cat'], 'bern': b_action_exec['bern']}
-                        current_action_exec = {'cat': b_action_exec['cat'], 'bern': np.array([b_is_firing])}
-                        current_enm_action_exec = {'cat': r_action_exec['cat'], 'bern': np.array([r_is_firing])}
+                        # 2.5 记录当前动作供下一帧存储（记录 raw 索引，用于 RL 存储/分析）
+                        current_action = {'lin': b_action_raw['lin'][0], 'circ': b_action_raw['circ'][0], 'bern': b_action_raw['bern']}
 
                     # 3. 物理步进与尝试发射
-                     # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
-
-                    r_action_label_fire=None
-                    b_action_label_fire=None
-                    
-                    r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label_fire) if getattr(env.RUAV, 'about_to_fire', 0) else None
-                    b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label_fire) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                     # 采样的时候不适合限制动作次序，会妨碍“试错”  r_action_label  b_action_label
+                    b_m_id = launch_missile_immediately(env, 'b', action_label=None) if getattr(env.BUAV, 'about_to_fire', 0) else None
+                    r_m_id = launch_missile_immediately(env, 'r', action_label=None) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     
                     if b_m_id: 
                         m_fired += 1
-                        # 记录蓝方（本方）开火俯仰角
-                        blue_fire_theta = float(env.BUAV.theta)
-                        episode_blue_fire_thetas.append(blue_fire_theta)
-                        
-                        # 记录开火瞬间高度
-                        blue_fire_alt = float(env.BUAV.alt)
-                        episode_blue_fire_alts.append(blue_fire_alt)
-                        
-                        # 记录蓝方开火策略指标
-                        current_time = steps_run * dt_maneuver
-                        if last_blue_fire_time >= 0:
-                            fire_interval = current_time - last_blue_fire_time
-                            episode_blue_fire_intervals.append(fire_interval)
-                        last_blue_fire_time = current_time
-                        
-                        # 记录开火瞬间的abs(delta_psi)、距离、AA_hor
-                        if "target_information" in b_state_check and len(b_state_check["target_information"]) > 0:
-                            # delta_psi: target_information[0]
-                            fire_delta_psi = np.arccos(b_state_check["target_information"][0])
-                            episode_blue_fire_delta_psis.append(float(fire_delta_psi))
-                            
-                            # 距离: target_information[1]
-                            fire_distance = b_state_check["target_information"][3]
-                            episode_blue_fire_distances.append(float(fire_distance))
-                            
-                            # AA_hor: target_information[6]
-                            fire_AA_hor = b_state_check["target_information"][6]
-                            episode_blue_fire_AA_hors.append(abs(float(fire_AA_hor)))
-                        
-                    if r_m_id is not None:
-                        fire_theta = float(env.RUAV.theta)
-                        episode_red_fire_thetas.append(fire_theta)
+                    if r_m_id:
+                        pass
                     
-                    # debug
-                    if r_action_label[0] > 4:
-                        print("数值超出范围", r_action_label[0], r_action_label[1])
+                    # # debug
+                    # if r_action_label[0] > 4:
+                    #     print("数值超出范围", r_action_label[0], r_action_label[1])
 
-                    r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
-                    b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
+                    # Use continuous maneuver API for non-rule agents (actions in radians)
+                    if adv_is_rule:
+                        r_maneuver = env.maneuver14LR(env.RUAV, r_action_label)
+                    else:
+                        r_maneuver = env.maneuverContinuous(env.RUAV, r_action_label)
+                    b_maneuver = env.maneuverContinuous(env.BUAV, b_action_radians)
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
                     
-                    # 新增: 记录红蓝双方首次出界时刻
-                    if not red_out_cage and env.out_cage(env.RUAV):
-                        red_out_cage = True
-                        red_out_cage_time = env.t
-                    if not blue_out_cage and env.out_cage(env.BUAV):
-                        blue_out_cage = True
-                        blue_out_cage_time = env.t
-                    
                     # 4. 奖励计算
-                    # 返回值: done, r_event1+r_shaping(训练), r_event1(纯事件), r_event2+r_shaping(固定±100终局)
-                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
-                                                            action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
-                    _, r_reward1, _, _ = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
-
-                    reward_for_learn = b_reward1
-                    reward_for_enm = r_reward1
+                    done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_radians, b_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight)
+                    _, r_reward1, r_reward2, r_reward3 = env.combat_terminate_and_reward('r', r_action_label, r_m_id is not None, action_cycle_multiplier, end_reward_weight=end_reward_weight)
+                    
+                    reward_for_learn = sum(np.array([b_reward1, b_reward2, b_reward3]) * reward_weight)
+                    reward_for_enm = sum(np.array([r_reward1, r_reward2, r_reward3]) * reward_weight)
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
-                        episode_return += b_reward3 # 固定±100结果奖励的归一化回报，用于日志
-                        episode_return_dense += b_reward2 # 纯shaping奖励
+                        episode_return += b_reward1
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -812,14 +776,10 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 # 6. 存储最后一步经验 (Terminal State)
                 # 强制做一次终局判定
-                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_label, False, action_cycle_multiplier, end_reward_weight=end_reward_weight,
-                                                            fire_reward_weight=fire_reward_weight,
-                                                            fire_inside_weight=fire_inside_weight)
+                done, _, _, _ = env.combat_terminate_and_reward('b', b_action_radians, False, action_cycle_multiplier, end_reward_weight=end_reward_weight)
                 
                 if last_decision_state is not None:
                     append_experience(local_trans, last_decision_obs, last_decision_state, current_action, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(ego_trans, last_decision_obs, last_decision_state, current_action_exec, reward_for_learn, next_b_state_global, True, not dead_dict['b'])
-                    append_experience(enm_trans, last_enm_decision_obs, last_enm_decision_state, current_enm_action_exec, reward_for_enm, next_r_state_global, True, not dead_dict['r'])
 
                 # --- 序列时空修正 (Credit Assignment Fix) ---死后时间压缩
                 # 由于代理死亡后 active_mask 变为 False，回合结束时的同归于尽补偿等延迟奖励
@@ -846,133 +806,23 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             if isinstance(td[k], list):
                                 td[k] = td[k][:last_idx+1]
                     return td
-                    
-                # 执行死后奖励压缩
-                local_trans = truncate_and_shift(local_trans)
-                ego_trans = truncate_and_shift(ego_trans)
-                enm_trans = truncate_and_shift(enm_trans)
-                # ----------------------------------------------
-
-                # 计算本回合红方开火与角度参数指标
-                if len(episode_red_fire_thetas) > 0:
-                    ep_avg_fire_theta = float(np.mean(episode_red_fire_thetas))
-                else:
-                    ep_avg_fire_theta = None
-                    
-                if len(episode_red_ATAs) > 0:
-                    ep_avg_ATA = float(np.mean(episode_red_ATAs))
-                else:
-                    ep_avg_ATA = None
-                    
-                if len(episode_red_delta_psi_threats) > 0:
-                    ep_avg_delta_psi_threat = float(np.mean(episode_red_delta_psi_threats))
-                else:
-                    ep_avg_delta_psi_threat = None
-                    
-                if len(episode_red_delta_thetas) > 0:
-                    ep_avg_delta_theta = float(np.mean(episode_red_delta_thetas))
-                else:
-                    ep_avg_delta_theta = None
-                    
-                if len(episode_red_delta_psis) > 0:
-                    ep_avg_delta_psi = float(np.mean(episode_red_delta_psis))
-                else:
-                    ep_avg_delta_psi = None
-
-                # 计算本回合蓝方（本方）开火与角度参数指标
-                if len(episode_blue_fire_thetas) > 0:
-                    ep_blue_avg_fire_theta = float(np.mean(episode_blue_fire_thetas))
-                else:
-                    ep_blue_avg_fire_theta = None
-                    
-                if len(episode_blue_ATAs) > 0:
-                    ep_blue_avg_ATA = float(np.mean(episode_blue_ATAs))
-                else:
-                    ep_blue_avg_ATA = None
-                    
-                if len(episode_blue_delta_psi_threats) > 0:
-                    ep_blue_avg_delta_psi_threat = float(np.mean(episode_blue_delta_psi_threats))
-                else:
-                    ep_blue_avg_delta_psi_threat = None
-                    
-                if len(episode_blue_delta_thetas) > 0:
-                    ep_blue_avg_delta_theta = float(np.mean(episode_blue_delta_thetas))
-                else:
-                    ep_blue_avg_delta_theta = None
-                    
-                if len(episode_blue_delta_psis) > 0:
-                    ep_blue_avg_delta_psi = float(np.mean(episode_blue_delta_psis))
-                else:
-                    ep_blue_avg_delta_psi = None
-
-                # 计算本回合蓝方（本方）开火策略指标
-                if len(episode_blue_fire_intervals) > 0:
-                    ep_blue_avg_fire_interval = float(np.mean(episode_blue_fire_intervals))
-                else:
-                    ep_blue_avg_fire_interval = None
-                    
-                if len(episode_blue_fire_delta_psis) > 0:
-                    ep_blue_avg_fire_delta_psi = float(np.mean(episode_blue_fire_delta_psis))
-                else:
-                    ep_blue_avg_fire_delta_psi = None
-                    
-                if len(episode_blue_fire_distances) > 0:
-                    ep_blue_avg_fire_distance = float(np.mean(episode_blue_fire_distances))
-                else:
-                    ep_blue_avg_fire_distance = None
-                    
-                if len(episode_blue_fire_AA_hors) > 0:
-                    ep_blue_avg_fire_AA_hor = float(np.mean(episode_blue_fire_AA_hors))
-                else:
-                    ep_blue_avg_fire_AA_hor = None
                 
-                if len(episode_blue_fire_alts) > 0:
-                    ep_blue_avg_fire_altitude = float(max(episode_blue_fire_alts)) # 不再记录平均开火高度，改为记录最大开火高度
-                else:
-                    ep_blue_avg_fire_altitude = None
-
-                WVR = env.close_range_kill()
-                BVR_perish_together = (not WVR) and env.draw
+                local_trans = truncate_and_shift(local_trans)
+                # ----------------------------------------------
 
                 # 7. 打包结果
                 result_packet = {
                     'trans': local_trans, # 用于 RL Update
-                    'ego_trans': ego_trans, # 用于 SIL (win)
-                    'enm_trans': enm_trans, # 用于 SIL (lose)
+                    # SIL disabled: ego_trans/enm_trans removed
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': episode_return_dense,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
                         'draw': env.draw,
-                        'm_fired': m_fired,
-                        'BVR_perish_together': BVR_perish_together
+                        'm_fired': m_fired
                     },
-                    'opp_name': opp_name,
-                    # 新增: 本回合红方（对手）开火角度参数统计 [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
-                    'ep_avg_fire_theta': ep_avg_fire_theta,
-                    'ep_avg_ATA': ep_avg_ATA,
-                    'ep_avg_delta_psi_threat': ep_avg_delta_psi_threat,
-                    'ep_avg_delta_theta': ep_avg_delta_theta,
-                    'ep_avg_delta_psi': ep_avg_delta_psi,
-                    # 新增: 本回合蓝方（本方）开火角度参数统计
-                    'ep_blue_avg_fire_theta': ep_blue_avg_fire_theta,
-                    'ep_blue_avg_ATA': ep_blue_avg_ATA,
-                    'ep_blue_avg_delta_psi_threat': ep_blue_avg_delta_psi_threat,
-                    'ep_blue_avg_delta_theta': ep_blue_avg_delta_theta,
-                    'ep_blue_avg_delta_psi': ep_blue_avg_delta_psi,
-                    # 新增: 本回合蓝方（本方）开火策略指标统计
-                    'ep_blue_avg_fire_interval': ep_blue_avg_fire_interval,
-                    'ep_blue_avg_fire_delta_psi': ep_blue_avg_fire_delta_psi,
-                    'ep_blue_avg_fire_distance': ep_blue_avg_fire_distance,
-                    'ep_blue_avg_fire_AA_hor': ep_blue_avg_fire_AA_hor,
-                    'ep_blue_avg_fire_altitude': ep_blue_avg_fire_altitude,
-                    # 新增: 回合结束时双方出界状态与首次出界时间
-                    'red_out_cage': red_out_cage,
-                    'red_out_cage_time': red_out_cage_time,
-                    'blue_out_cage': blue_out_cage,
-                    'blue_out_cage_time': blue_out_cage_time,
+                    'opp_name': opp_name
                 }
                 
                 # 8. 发送回 Master
@@ -989,13 +839,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
 
 def run_MLP_simulation(
     k_nonlinear,
-    collape_recover={
-        "collapsed": False,
-        "best_actor_name": None,
-        "actor_frozen_batchs": 5,
-    },
     num_workers=10, # 并行进程数，根据CPU核数调整，建议 10-20
-    n_clusters=5,
     mission_name='无名',
     actor_lr=1e-4,
     critic_lr=5e-4,
@@ -1009,9 +853,9 @@ def run_MLP_simulation(
     epochs=4,
     eps=0.2,
     k_entropy=None,
-    alpha_il=0.05,
+    alpha_il=1.0,
     il_batch_size=128,
-    il_batch_size2=None,
+    il_batch_size2=1e4,
     il_buffer_max_size=2e4,
     mini_batch_size_mixed=64,
     beta_mixed=1.0,
@@ -1039,8 +883,6 @@ def run_MLP_simulation(
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
     use_sil = True,
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
-    chosen_quantile = 0.2, 
-    DARK_SIDE = 1,  # sil默认找最差
     p_factor = None, # 无效接口
     sigma_elo = 400,
     WARM_UP_STEPS = 500e3,
@@ -1057,30 +899,9 @@ def run_MLP_simulation(
     max_il_exponent = -2.0,
     k_shape_il = 0.004,
     R_cage_range = (55.00e3, 55.00e3), # 新增：环境随机化范围
-    vertices = None,
     resume_dir = None,
     init_il_data = None, # [新增] 从外部传入预拉取的数据集
-    init_model_dir = None,
-    init_actor_filename = None,
-    init_critic_filename = None,
     POMDP = 0, # 0全信息，1部分信息
-    should_stir = 0, # 是否搅拌策略参数后存储
-    adj_r_w = 0, # 是否允许奖励函数权重浮动
-    use_RND = 0, # 好奇心机制
-    beta_RND = 0.3,
-    use_ADistill = 0, # 温和蒸馏机制
-    beta_ADistill = 0.1,
-    AFiltered = 0, # 温和蒸馏是否需要优势滤波
-    conf_thres = 0.7,
-    bern_included = 1, # 开火也一起上
-    adistill_anneal_factor = 0.5, # ADistill alpha 退火速度系数
-    Bdistill = 0, # 是否启用Bdistill
-    Bdistill_alpha = 1.0, # BernDistill alpha
-    Bdistill_epochs = 3, # BernDistill epochs
-    adistill_teacher_rule = 6, # ADistill 初始固定 teacher 的规则编号
-    adistill_teacher_elo_steps = 1e6, # 总步数超过该值后，改用 Elo 最高的 Rule 作为 teacher
-    no_bern_distill = 1, # 1: RDistill时不计算bern的KL散度
-    distill_learn_type = "dual_prob", # RDistill奖励构造方式: dual_prob(师生KL) 或 single_prob(teacher对真实动作NLL)
 ):
 
     actor_lr0 = actor_lr
@@ -1110,6 +931,9 @@ def run_MLP_simulation(
     
     # 对加载/传入的数据进行必要的重构
     if original_il_transition_dict is not None:
+        # convert legacy IL action indices to the new discretization, then restructure
+        if 'actions' in original_il_transition_dict and original_il_transition_dict['actions'] is not None:
+            original_il_transition_dict['actions'] = convert_il_actions(original_il_transition_dict['actions'], n_linear=12, n_circle=24)
         original_il_transition_dict['actions'] = restructure_actions(original_il_transition_dict['actions'])
         # 顺便确保 states 和 returns 也是标准的 float32 numpy array
         if 'states' in original_il_transition_dict:
@@ -1127,39 +951,18 @@ def run_MLP_simulation(
     # 创建一个 dummy env 获取维度
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
-    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
-    # 保留一个常驻 env 供规则教师(RuleTeacherWrapper)做 obs->check_obs 的还原（仅用其无状态的缩放方法）
-    rule_teacher_env = copy.deepcopy(dummy_env)
-    # ADistill/BernDistill 用：Rule_1 ~ Rule_6 共识集合（排除 Rule 0）
-    adistill_rule_wrappers = [
-        RuleTeacherWrapper(rule_teacher_env, rule_num=r,
-                           action_dims_dict=action_dims_dict,
-                           device=device,
-                           label_smoothing=label_smoothing)
-        for r in TEACHER_RULE_IDS
-    ]
-    # 保留单个 teacher_wrapper 仅用于日志 / 兼容其它旧逻辑
-    teacher_rule_num_cur = adistill_teacher_rule
-    teacher_wrapper = adistill_rule_wrappers[TEACHER_RULE_IDS.index(teacher_rule_num_cur)]
+    action_dims_dict = {'cont': 0, 'lin': 1, 'circ': 1, 'bern': dummy_env.fire_dim}
     del dummy_env
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print(f"Master training device: {device}")
 
     # 3. 创建神经网络
-    # [新增] 如果续训，根据 actor.meta.json 自动推断当时的 ver/hor 配置，
-    # 避免模型结构与 checkpoint 不匹配。
-    mask_cfg = None
-    if resume_dir is not None and os.path.exists(resume_dir):
-        actor_meta_path = os.path.join(resume_dir, "actor.meta.json")
-        if os.path.exists(actor_meta_path):
-            mask_cfg = infer_mask_cfg_from_actor_meta(actor_meta_path)
-
-    actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_cfg=mask_cfg).to(device)
+    actor_net = ClockwisePolicyNet(state_dim, hidden_dim, action_dims_dict, init_std=1.5).to(device)
     critic_net = ValueNet(state_dim, hidden_dim).to(device)
-    actor_wrapper = HybridActorWrapper(actor_net, action_dims_dict, None, device).to(device)
+    actor_wrapper = ClockwiseActorWrapper(actor_net, action_dims_dict, None, device).to(device)
 
-    student_agent = PPOHybrid(
+    student_agent = ClockwisePPO(
         actor=actor_wrapper, 
         critic=critic_net, 
         actor_lr=actor_lr, 
@@ -1170,12 +973,9 @@ def run_MLP_simulation(
         gamma=gamma, 
         device=device, 
         k_entropy=k_entropy, 
-        max_std=label_smoothing,
-        rnd_state_dim=state_dim,
+        max_std=2.0   # <--- 设置为 >= init_std 的值（例如 2.0 或更大），允许网络在这个空间内探索
     )
     
-    # ADistill 用：cat 熵系数的基准值（在 agent 类属性上动态缩放）
-    base_k_cat = student_agent.k_entropy.get('cat', 0.008)
     
     # 日志记录 (使用您自定义的 TensorBoardLogger)
     logs_dir = os.path.join(project_root, "logs/combat")
@@ -1194,109 +994,32 @@ def run_MLP_simulation(
     save_meta_once(actor_meta_path, student_agent.actor.state_dict())
     save_meta_once(critic_meta_path, student_agent.critic.state_dict())
 
-    # [新增] （训练方）蓝方开火策略指标的 EMA 变量（指数=0.2，即 1-0.8）
-    ema_fire_interval = None # 50
-    ema_fire_delta_psi = None # 30
-    ema_fire_distance = None # 50e3
-    ema_fire_AA_hor = None # 145
-    ema_fire_altitude = None # 3e3
-    ema_fire_theta = None # -5
-    ema_ATA = None # 37
-    ema_delta_psi_threat = None # 135
-    ema_delta_theta = None # 4
-    EMA_ALPHA = 0.2
-    
-    fire_inside_weight = None
-    fire_reward_weight = None
-
-    RWController = FireRewardWeightController(initial_fire_reward_weight=1.0)
-
     # 中断续训
     if resume_dir is not None and os.path.exists(resume_dir):
-        if collape_recover["collapsed"]:
-            best_actor_name = collape_recover["best_actor_name"]
-            current_actor_path = os.path.join(log_dir, f"{best_actor_name}.pt")
-        else:
-            # 优先加载current_actor（确保不加载搅拌后的参数）
-            current_actor_path = os.path.join(log_dir, "current_actor.pt")
+        actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+        if len(actor_files) > 0:
+            def extract_num(f):
+                m = re.search(r'actor_rein(\d+)\.pt$', f)
+                return int(m.group(1)) if m else -1
+            latest_actor = max(actor_files, key=extract_num)
+            student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
+            print(f"Loaded actor from: {latest_actor}")
             
-        if os.path.exists(current_actor_path):
-            student_agent.actor.load_state_dict(torch.load(current_actor_path, map_location=device))
-            print(f"Loaded current actor from: {current_actor_path}")
-        else:
-            # 如果current_actor不存在，回退到原来的逻辑
-            actor_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
-            if len(actor_files) > 0:
-                def extract_num(f):
-                    m = re.search(r'actor_rein(\d+)\.pt$', f)
-                    return int(m.group(1)) if m else -1
-                latest_actor = max(actor_files, key=extract_num)
-                student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
-                print(f"Loaded actor from: {latest_actor}")
-        
-        critic_path = os.path.join(log_dir, "critic.pt")
-        if os.path.exists(critic_path):
-            student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
-            print(f"Loaded critic from: {critic_path}")
-        
-        opt_path = os.path.join(log_dir, "optimizers_state.pt")
-        if os.path.exists(opt_path):
-            try:
-                opt_states = torch.load(opt_path, map_location=device)
-                student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
-                student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
-                print("Loaded optimizer states.")
-                if student_agent.rnd_target is not None and 'rnd_target' in opt_states:
-                    student_agent.rnd_target.load_state_dict(opt_states['rnd_target'])
-                    print("Loaded RND target state.")
-                if student_agent.rnd_prediction is not None and 'rnd_prediction' in opt_states:
-                    student_agent.rnd_prediction.load_state_dict(opt_states['rnd_prediction'])
-                    print("Loaded RND prediction state.")
-                if student_agent.rnd_optimizer is not None and 'rnd_optimizer' in opt_states:
-                    student_agent.rnd_optimizer.load_state_dict(opt_states['rnd_optimizer'])
-                    print("Loaded RND optimizer state.")
-            except Exception as e:
-                print(f"Failed to load optimizers: {e}")
-        
-        # [新增] 恢复 special EMA 状态和控制器状态
-        special_json_path = os.path.join(log_dir, "special.json")
-        if os.path.exists(special_json_path):
-            with open(special_json_path, "r", encoding="utf-8") as f:
-                special_data = json.load(f)
-            ema_fire_interval = special_data.get("ema_fire_interval", None)
-            ema_fire_delta_psi = special_data.get("ema_fire_delta_psi", None)
-            ema_fire_distance = special_data.get("ema_fire_distance", None)
-            ema_fire_AA_hor = special_data.get("ema_fire_AA_hor", None)
-            ema_fire_altitude = special_data.get("ema_fire_altitude", None)
-            ema_fire_theta = special_data.get("ema_fire_theta", None)
-            ema_ATA = special_data.get("ema_ATA", None)
-            ema_delta_psi_threat = special_data.get("ema_delta_psi_threat", None)
-            ema_delta_theta = special_data.get("ema_delta_theta", None)
-            # [新增] 恢复控制器状态
-            if "controller_state" in special_data:
-                RWController.load_state_dict(special_data["controller_state"])
-                print(f"Loaded controller state from: {special_json_path}")
-            print(f"Loaded special EMA states from: {special_json_path}")
+            critic_path = os.path.join(log_dir, "critic.pt")
+            if os.path.exists(critic_path):
+                student_agent.critic.load_state_dict(torch.load(critic_path, map_location=device))
+                print(f"Loaded critic from: {critic_path}")
+            
+            opt_path = os.path.join(log_dir, "optimizers_state.pt")
+            if os.path.exists(opt_path):
+                try:
+                    opt_states = torch.load(opt_path, map_location=device)
+                    student_agent.actor_optimizer.load_state_dict(opt_states['actor_optimizer'])
+                    student_agent.critic_optimizer.load_state_dict(opt_states['critic_optimizer'])
+                    print("Loaded optimizer states.")
+                except Exception as e:
+                    print(f"Failed to load optimizers: {e}")
     
-    init_model_requested = init_actor_filename is not None or init_critic_filename is not None
-    if init_model_requested:
-        if resume_dir is not None:
-            raise ValueError("init model files cannot be used together with resume_dir")
-        if init_model_dir is None or init_actor_filename is None or init_critic_filename is None:
-            raise ValueError("init_model_dir, init_actor_filename and init_critic_filename must all be specified")
-        init_actor_path = os.path.join(init_model_dir, init_actor_filename)
-        init_critic_path = os.path.join(init_model_dir, init_critic_filename)
-        if not os.path.isfile(init_actor_path):
-            raise FileNotFoundError(f"Initial actor not found: {init_actor_path}")
-        if not os.path.isfile(init_critic_path):
-            raise FileNotFoundError(f"Initial critic not found: {init_critic_path}")
-        student_agent.actor.load_state_dict(torch.load(init_actor_path, map_location=device))
-        student_agent.critic.load_state_dict(torch.load(init_critic_path, map_location=device))
-        IL_epoches = 0
-        print(f"Loaded initial actor from: {init_actor_path}")
-        print(f"Loaded initial critic from: {init_critic_path}")
-        print("Skipping MARWIL pretraining and starting online training from the selected models.")
-
     # 保存onnx模型
     # 前提：假设此时 student_agent 已经创建好，且 state_dim 已经定义
     # 构建一个与 state 维度相同的 dummy input (batch_size=1)
@@ -1358,7 +1081,7 @@ def run_MLP_simulation(
             beta=beta_mixed, 
             batch_size=il_batch_size, # 显存如果够大可以适当调大
             label_smoothing=label_smoothing,
-            no_bern = 0, # 0
+            no_bern = 1, # 0
         )
         
         # 记录
@@ -1366,30 +1089,6 @@ def run_MLP_simulation(
             logger.add("il_train/avg_actor_loss", avg_actor_loss, epoch)
             logger.add("il_train/avg_critic_loss", avg_critic_loss, epoch)
             # logger.add("il_train/beta_c", c, epoch) # 如果 tensorboardlogger 支持的话
-
-            # [新增] MARWIL 监控：每个动作头独立的 NLL 与策略熵 (全采样固定 batch, no_grad)
-            for _name, _val in [
-                ("il_train/nll_cont", getattr(student_agent, "marwil_nll_cont", None)),
-                ("il_train/nll_cat", getattr(student_agent, "marwil_nll_cat", None)),
-                # ("il_train/nll_bern", getattr(student_agent, "marwil_nll_bern", None)),
-                ("il_train/entropy_cont", getattr(student_agent, "marwil_entropy_cont", None)),
-                ("il_train/entropy_cat", getattr(student_agent, "marwil_entropy_cat", None)),
-                # ("il_train/entropy_bern", getattr(student_agent, "marwil_entropy_bern", None)),
-                ("il_train/accuracy_cont", getattr(student_agent, "marwil_accuracy_cont", None)),
-                ("il_train/accuracy_cat", getattr(student_agent, "marwil_accuracy_cat", None)),
-                ("il_train/accuracy_bern", getattr(student_agent, "marwil_accuracy_bern", None)),
-                ("il_train/weight_mean", getattr(student_agent, "marwil_weight_mean", None)),
-                # ("il_train/weight_max", getattr(student_agent, "marwil_weight_max", None)),
-                # ("il_train/weight_min", getattr(student_agent, "marwil_weight_min", None)),
-                ("il_train/weight_clip_frac", getattr(student_agent, "marwil_weight_clip_frac", None)),
-                ("il_train/adv_std", getattr(student_agent, "marwil_adv_std", None)),
-                # ("il_train/adv_p95", getattr(student_agent, "marwil_adv_p95", None)),
-                ("il_train/adv_max", getattr(student_agent, "marwil_adv_max", None)),
-                ("il_train/adv_mean", getattr(student_agent, "marwil_adv_mean", None)),
-                ("il_train/adv_positive_frac", getattr(student_agent, "marwil_adv_positive_frac", None)),
-            ]:
-                if _val is not None:
-                    logger.add(_name, _val, epoch)
 
             print(f"Epoch {epoch}: Actor Loss: {avg_actor_loss:.4f}, Critic Loss: {avg_critic_loss:.4f}")
     
@@ -1401,22 +1100,26 @@ def run_MLP_simulation(
     # 存储在线训练前的网络参数
     int_agent_name = "actor_rein0"
     torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{int_agent_name}.pt"))
-    if init_model_requested:
-        torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-        torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
 
-
+    # --- 新增：重置分布的标准差 ---
+    # 模仿学习往往会把 std 压得很低，导致进入强化学习时丧失探索能力。
+    # 这里强行把动作分布的 std 推回初始值 (1.5)
+    init_std_val = 1.2 # 1.5
+    with torch.no_grad():
+        if hasattr(student_agent.actor.net, 'log_std_shared'):
+            student_agent.actor.net.log_std_shared.fill_(np.log(init_std_val))
+            student_agent.actor.net.log_std_shared.requires_grad = True # 解除冻结（如果之前被冻结）
+        if hasattr(student_agent.actor.net, 'log_std_cont'):
+            student_agent.actor.net.log_std_cont.fill_(np.log(init_std_val))
+            student_agent.actor.net.log_std_cont.requires_grad = True
+    print(f"Action standard deviations have been reset to {init_std_val} for RL exploration.")
+    
     # --- 新增：实例化混合缓冲区 ---
     il_transition_buffer = None
     if IL_epoches + use_sil > 0:  # 只要出现模仿学习就得准备好初始的模仿池
         print("Initializing IL Transition Buffer...")
-        il_buffer_path = os.path.join(log_dir, "il_buffer.pt")
-        if os.path.exists(il_buffer_path):
-            # 中断续训时优先加载已保存的 buffer
-            il_transition_buffer = IL_transition_buffer.load(il_buffer_path)
-        else:
-            original_data_input = original_il_transition_dict0 if use_init_data else None
-            il_transition_buffer = IL_transition_buffer(original_data_input, max_size=il_buffer_max_size)
+        original_data_input = original_il_transition_dict0 if use_init_data else None
+        il_transition_buffer = IL_transition_buffer(original_data_input, max_size=il_buffer_max_size)
 
     # ==============================================================================
     # 强化学习 (Self-Play / PFSP) 阶段
@@ -1427,6 +1130,23 @@ def run_MLP_simulation(
     # ----------------------------------------------------
     
     # 7. 强化学习准备
+    # # debug test_worker有问题
+    # current_weights = {k: v.cpu().clone() for k, v in student_agent.actor.state_dict().items()}
+    # test_worker(
+    #             model_state_dict=current_weights,
+    #             rule_num=2,
+    #             env_args=args,
+    #             state_dim=state_dim,
+    #             hidden_dim=hidden_dim,
+    #             action_dims_dict=action_dims_dict,
+    #             dt_maneuver_val=dt_maneuver,
+    #             device_name='cpu',
+    #             num_runs=num_runs,
+    #             action_cycle_multiplier=action_cycle_multiplier,
+    #             no_out=0,  # 这里可以根据需要设为 1
+    #             deterministic=False,
+    #             restrict_fire=False,
+    #             )
     
     
     # 进程通信设置
@@ -1462,9 +1182,7 @@ def run_MLP_simulation(
                            'opp_greedy_rate': opp_greedy_rate,
                            'dt_move': dt_move,
                            'no_crash': no_crash,
-                           'pomdp': POMDP,
-                           'vertices': vertices,
-                           'mask_cfg': mask_cfg,
+                           'pomdp': POMDP
                        })
         p.start()
         workers.append(p)
@@ -1478,12 +1196,8 @@ def run_MLP_simulation(
     full_json_path = os.path.join(log_dir, "elo_ratings.json")
     elite_json_path = os.path.join(log_dir, "elite_elo_ratings.json")
     hof_json_path = os.path.join(log_dir, "hall_of_fame.json")
-    # 新增：对手及精英开火与导弹期参数统计文件路径
-    Elite_Fire_Stats_path = os.path.join(log_dir, "Elite_Fire_Stats.json")
 
     GameTimes = {}
-    # 初始化开火与导弹期参数统计字典（不区分普通和精英）
-    Elite_Fire_Stats = {}
 
     # 尝试加载历史 # 中断续训
     if os.path.exists(full_json_path):
@@ -1492,8 +1206,6 @@ def run_MLP_simulation(
         with open(elite_json_path, 'r', encoding='utf-8') as f: elite_elo_ratings = json.load(f)
     if os.path.exists(hof_json_path):
         with open(hof_json_path, 'r', encoding='utf-8') as f: hall_of_fame = json.load(f)
-    if os.path.exists(Elite_Fire_Stats_path):
-        with open(Elite_Fire_Stats_path, 'r', encoding='utf-8') as f: Elite_Fire_Stats = json.load(f)
 
     main_agent_elo = elo_ratings.get("__CURRENT_MAIN__", 1200)
 
@@ -1507,27 +1219,22 @@ def run_MLP_simulation(
         # 自博弈开启时的初始分值填充
         if hist_agent_as_opponent:
             elo_ratings[int_agent_name] = main_agent_elo
-        
+
         # 从零开始不论对手有多烂都要加入Elite池
         elite_elo_ratings = copy.deepcopy(elo_ratings)
-        
-        # 初始化GameTimes表与Elite_Fire_Stats表
+
+        # 初始化GameTimes表
         for k in elo_ratings.keys():
             GameTimes[k] = 0
-            Elite_Fire_Stats[k] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
-        # 初始化主代理（蓝方）的fire_stats
-        Elite_Fire_Stats["__CURRENT_MAIN__"] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
 
+
+    # # 初始对手(存储IL后的网络参数)
+    # if (not elo_ratings) and hist_agent_as_opponent: # or IL_epoches > 0: # 没有模仿学习也要存
+    #     elo_ratings[int_agent_name] = 1200
 
     # 训练循环变量
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
     batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
-    last_il_update_batch_idx = batch_idx
-    if collape_recover["collapsed"]:
-        actor_freeze_until = batch_idx + int(collape_recover["actor_frozen_batchs"])
-        student_agent.reset_optimizer() # 恢复训练清除动量
-    else:
-        actor_freeze_until = -1
     trigger = trigger0 + (total_steps // trigger_delta) * trigger_delta
     
     current_max_steps = int(max_steps)
@@ -1540,18 +1247,17 @@ def run_MLP_simulation(
     ema_score = 0.5
     ema_step = 0
     target_p1 = 0.65
-    ppo_grad_ema = None  # [新增] 初始化 PPO 梯度 EMA 缓存
-    rnd_mse = None       # RND 原始 MSE（上一批次的值，首批为 None）
 
     # =========================================================
     # 主循环 (Master Process)
     # =========================================================
     while True:
         while total_steps < current_max_steps:
+            # 先尝尝乱开或的后果，再mask掉错误开火
             if total_steps < 5e3:
-                fire_mask = 0 # 0 # 全程开启开火mask
+                fire_mask = 1 # 0 # 全程开启开火mask
             else:
-                fire_mask = 0
+                fire_mask = 1
             # --- 【修改】同步并行测试阶段 ---
             # 只有测试跑完并处理完名人堂，才进入下一步的采样和仿真
             # --- 1. 并行测试触发逻辑 (Async) ---
@@ -1563,7 +1269,7 @@ def run_MLP_simulation(
                 # 2. 分发测试任务并【立即阻塞等待】
                 # 注意：这里直接用 list comprehension 配合 .get() 实现阻塞
                 test_tasks = []
-                for r_idx in TEST_RULE_IDS:
+                for r_idx in [0, 1, 2]: # , 3, 4]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         # args=(current_weights, r_idx, args, 
@@ -1582,17 +1288,14 @@ def run_MLP_simulation(
                             'action_cycle_multiplier': action_cycle_multiplier,
                             'no_out': 0,  # 这里可以根据需要设为 1
                             'deterministic': False,
-                            'restrict_fire': True, # False, 和采样保持一致
-                            'vertices': vertices,
-                            'red_init_ammo': test_red_init_ammo,
-                            'blue_init_ammo': test_blue_init_ammo,
+                            'restrict_fire': False,
                         }
                     )
                     test_tasks.append(obj)
                 
                 # 第二种形式：追加额外测试 (机动动作确定化 + 动作次序限制打开)
                 test_tasks_no_random = []
-                for r_idx in TEST_RULE_IDS:
+                for r_idx in [0, 1, 2]:
                     obj = test_pool.apply_async(
                         test_worker, 
                         kwds={
@@ -1608,10 +1311,7 @@ def run_MLP_simulation(
                             'action_cycle_multiplier': action_cycle_multiplier,
                             'no_out': 0,
                             'deterministic': True,     # 机动动作确定化
-                            'restrict_fire': True,      # 动作次序限制打开
-                            'vertices': vertices,
-                            'red_init_ammo': test_red_init_ammo,
-                            'blue_init_ammo': test_blue_init_ammo,
+                            'restrict_fire': True      # 动作次序限制打开
                         }
                     )
                     test_tasks_no_random.append(obj)
@@ -1621,39 +1321,25 @@ def run_MLP_simulation(
                 test_results_no_random = [t.get() for t in test_tasks_no_random]
 
                 # 记录第一种测试结果
-                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
-                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
-                outcomes_perish = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results}
+                outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results}
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
-                    # logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
+                    logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
 
-                # 记录第一种测试的平均指标（所有对手的平均Score和超视距双杀率）
-                avg_score = np.mean(list(outcomes.values()))
-                avg_perish_together = np.mean(list(outcomes_perish.values()))
-                logger.add("test/avg_score", avg_score, total_steps)
-                logger.add("test/BVR perish together", avg_perish_together, total_steps)
-
                 # 记录第二种测试结果 (test_No_random)
-                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
-                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
-                outcomes_perish_nr = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws in test_results_no_random}
+                outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws in test_results_no_random}
 
                 for r_num, score in outcomes_nr.items():
                     logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
-                    # logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
-                # 记录第二种测试的平均指标（所有对手的平均Score和超视距双杀率）
-                avg_score_nr = np.mean(list(outcomes_nr.values()))
-                avg_perish_together_nr = np.mean(list(outcomes_perish_nr.values()))
-                logger.add("test_No_random/avg_score", avg_score_nr, total_steps)
-                logger.add("test_No_random/BVR perish together", avg_perish_together_nr, total_steps)
-
                 # 名人堂判定：如果全胜则保存并加入池子
-                if all(score > 0.5 for score in outcomes_nr.values()): # 原先为outcomes.values()
+                if all(score > 0.5 for score in outcomes.values()):
                     # 【核心修改】从全量注册表 elo_ratings 中寻找最新的已保存编号
                     rein_keys = [k for k in elo_ratings.keys() if re.match(r'^actor_rein\d+$', k)]
                     
@@ -1661,7 +1347,7 @@ def run_MLP_simulation(
                         # 找到数值最大的编号（即最新的已保存智能体）
                         hof_key = max(rein_keys, key=lambda k: int(k.replace('actor_rein', '')))
                         
-                        if hof_key not in hall_of_fame: # 只能判断key，不能判断value
+                        if hof_key not in hall_of_fame:
                             # 存入字典，分数优先取全量表中的记录
                             hall_of_fame[hof_key] = elo_ratings.get(hof_key, main_agent_elo)
                             print(f"!!! [Hall of Fame] New Hero Captured: {hof_key}")
@@ -1669,29 +1355,7 @@ def run_MLP_simulation(
                 trigger += trigger_delta
 
             # --- 2. 准备训练 Batch (Synchronous) ---
-            # 改变环境奖励权重，超过100轮采样再更新权重，每次权重维持5轮采样
-            if adj_r_w and batch_idx > 10:
-                fire_inside_weight, fire_reward_weight = RWController.update({
-                    'ema_fire_interval': ema_fire_interval,
-                    'ema_fire_distance': ema_fire_distance,
-                    'ema_fire_altitude': ema_fire_altitude,
-                    'ema_fire_delta_psi': ema_fire_delta_psi,
-                    'ema_fire_theta': ema_fire_theta,
-                    'ema_ATA': ema_ATA,
-                    'ema_delta_psi_threat': ema_delta_psi_threat,
-                    'ema_delta_theta': ema_delta_theta
-                })
-                logger.add(f"SPECIAL/开火权重", fire_reward_weight, total_steps)
-                logger.add(f"SPECIAL/0 W_d_fire", fire_inside_weight[0], total_steps)
-                logger.add(f"SPECIAL/1 W_t_since_fire", fire_inside_weight[1], total_steps)
-                logger.add(f"SPECIAL/2 W_AA_fire", fire_inside_weight[2], total_steps)
-                logger.add(f"SPECIAL/3 W_psi_fire", fire_inside_weight[3], total_steps)
-                logger.add(f"SPECIAL/4 W_v_fire", fire_inside_weight[4], total_steps)
-                logger.add(f"SPECIAL/5 W_theta_fire", fire_inside_weight[5], total_steps)
             
-            if not adj_r_w:
-                fire_inside_weight = None
-                fire_reward_weight = None
 
             # A. 获取当前策略权重 (CPU)
             current_actor_weights = {k: v.cpu() for k, v in student_agent.actor.state_dict().items()}
@@ -1703,13 +1367,13 @@ def run_MLP_simulation(
             # [修正] 处理纯自博弈逻辑：当没有初始规则对手时，筛选分数最高的 MAX_HISTORY_SIZE 个对手作为匹配池
             if not init_elo_ratings:
                 # 按照 Elo 分数降序排列，排除内部特殊键
-                sorted_all_keys = [k for k in sorted(elo_ratings.keys(), 
-                                                key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9, 
+                sorted_all_keys = [k for k in sorted(elo_ratings.keys(),
+                                                key=lambda x: elo_ratings[x] if not x.startswith("__") else -1e9,
                                                 reverse=True) if not k.startswith("__")]
                 effective_pool = {k: elo_ratings[k] for k in sorted_all_keys[:MAX_HISTORY_SIZE]}
             else:
                 effective_pool = elite_elo_ratings
-                
+
             for rank in range(num_workers):
                 # 采样对手
                 probs, opponent_keys = get_opponent_probabilities(
@@ -1722,16 +1386,16 @@ def run_MLP_simulation(
                     deltaFSP_epsilon=deltaFSP_epsilon,
                 )
                 selected_opponents = np.random.choice(opponent_keys, size=num_workers, p=probs).tolist()
-            
+
             for rank in range(num_workers):
                 selected_opponent_name = selected_opponents[rank]
-                
+
                 # 更新GameTimes表
                 if selected_opponent_name in GameTimes:
                     GameTimes[selected_opponent_name] += 1
                 else:
                     GameTimes[selected_opponent_name] = 1
-                
+
                 # 准备对手数据
                 opp_type = 'rule'
                 opp_data = 0
@@ -1750,10 +1414,9 @@ def run_MLP_simulation(
                         # Fallback
                         opp_type = 'rule'
                         opp_data = 0
-                
-                opp_temperature = np.random.uniform(0.99, 1.0) # 0.8, 1.0
-                opp_info = (selected_opponent_name, opp_type, opp_data, opp_temperature)
-                
+
+                opp_info = (selected_opponent_name, opp_type, opp_data)
+
                 # 初始位置配置
                 rb, bb = create_initial_state_worker(randomized_birth)
                 settings = {
@@ -1763,12 +1426,9 @@ def run_MLP_simulation(
                     'red_birth': rb,
                     'blue_birth': bb,
                     # 'R_cage_range': R_cage_range, # 将范围传给Worker
-                    'fire_mask': fire_mask,
                     'end_reward_weight': 0.3 + np.clip(total_steps/18e3, 0, 1)*(0.4-0.3), # 1.0
-                    'fire_inside_weight': fire_inside_weight,
-                    'fire_reward_weight': fire_reward_weight,
                 }
-                
+
                 # 发送指令 pipe.send
                 pipes[rank].send(('RUN_EPISODE', (current_actor_weights, opp_info, settings)))
 
@@ -1797,158 +1457,43 @@ def run_MLP_simulation(
             batch_wins = 0
             batch_loss_cnt = 0
             batch_draw_cnt = 0        # 新增统计
-            batch_bvr_perish_together_cnt = 0 # 新增统计
             batch_total_return = 0    # 新增统计
-            batch_total_dense_return = 0
             batch_total_m_fired = 0   # 新增统计
             
-            # 新增: 批次开火策略指标统计
-            batch_blue_fire_intervals = []
-            batch_blue_fire_delta_psis = []
-            batch_blue_fire_distances = []
-            batch_blue_fire_AA_hors = []
-            batch_blue_fire_alts = []
-            batch_blue_fire_thetas = []
-            batch_blue_ATAs = []
-            batch_blue_delta_psi_threats = []
-            batch_blue_delta_thetas = []
-            
             for res in batch_results:
-                # res 结构: {'trans':..., 'ego_tr':..., 'enm_tr':..., 'metrics':..., 'opp_name':...}
+                # res 结构: {'trans':..., 'metrics':..., 'opp_name':...}
                 l_tr = res['trans'] # PPO 训练数据 (含探索)
-                ego_tr = res['ego_trans'] # SIL 蓝方数据
-                enm_tr = res['enm_trans'] # SIL 红方数据
                 metrics = res['metrics']
                 opp_name = res['opp_name']
-                
-                # --- 新增: 更新红方（对手）开火角度参数的 EMA ---
-                ep_avg_fire_theta = res.get('ep_avg_fire_theta')
-                ep_avg_ATA = res.get('ep_avg_ATA')
-                ep_avg_delta_psi_threat = res.get('ep_avg_delta_psi_threat')
-                ep_avg_delta_theta = res.get('ep_avg_delta_theta')
-                ep_avg_delta_psi = res.get('ep_avg_delta_psi')
-                
-                # 更新 EMA [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
-                alpha_ema = 0.1
-                if opp_name not in Elite_Fire_Stats:
-                    Elite_Fire_Stats[opp_name] = [0.0, 0.0, 0.0, 0.0, 0.0]
-                    
-                old_stats = Elite_Fire_Stats[opp_name]
-                new_stats = list(old_stats)
-                
-                if ep_avg_fire_theta is not None:
-                    new_stats[0] = alpha_ema * ep_avg_fire_theta + (1 - alpha_ema) * old_stats[0]
-                if ep_avg_ATA is not None:
-                    new_stats[1] = alpha_ema * ep_avg_ATA + (1 - alpha_ema) * old_stats[1]
-                if ep_avg_delta_psi_threat is not None:
-                    new_stats[2] = alpha_ema * ep_avg_delta_psi_threat + (1 - alpha_ema) * old_stats[2]
-                if ep_avg_delta_theta is not None:
-                    new_stats[3] = alpha_ema * ep_avg_delta_theta + (1 - alpha_ema) * old_stats[3]
-                if ep_avg_delta_psi is not None:
-                    new_stats[4] = alpha_ema * ep_avg_delta_psi + (1 - alpha_ema) * old_stats[4]
-                    
-                Elite_Fire_Stats[opp_name] = new_stats
-                
-                # --- 新增: 更新蓝方（本方/主代理）开火角度参数的 EMA ---
-                ep_blue_avg_fire_theta = res.get('ep_blue_avg_fire_theta')
-                ep_blue_avg_ATA = res.get('ep_blue_avg_ATA')
-                ep_blue_avg_delta_psi_threat = res.get('ep_blue_avg_delta_psi_threat')
-                ep_blue_avg_delta_theta = res.get('ep_blue_avg_delta_theta')
-                ep_blue_avg_delta_psi = res.get('ep_blue_avg_delta_psi')
-                
-                # 使用当前主代理的key来记录本方行为
-                main_agent_key = "__CURRENT_MAIN__"
-                if main_agent_key not in Elite_Fire_Stats:
-                    Elite_Fire_Stats[main_agent_key] = [0.0, 0.0, 0.0, 0.0, 0.0]
-                
-                old_main_stats = Elite_Fire_Stats[main_agent_key]
-                new_main_stats = list(old_main_stats)
-                
-                if ep_blue_avg_fire_theta is not None:
-                    new_main_stats[0] = alpha_ema * ep_blue_avg_fire_theta + (1 - alpha_ema) * old_main_stats[0]
-                if ep_blue_avg_ATA is not None:
-                    new_main_stats[1] = alpha_ema * ep_blue_avg_ATA + (1 - alpha_ema) * old_main_stats[1]
-                if ep_blue_avg_delta_psi_threat is not None:
-                    new_main_stats[2] = alpha_ema * ep_blue_avg_delta_psi_threat + (1 - alpha_ema) * old_main_stats[2]
-                if ep_blue_avg_delta_theta is not None:
-                    new_main_stats[3] = alpha_ema * ep_blue_avg_delta_theta + (1 - alpha_ema) * old_main_stats[3]
-                if ep_blue_avg_delta_psi is not None:
-                    new_main_stats[4] = alpha_ema * ep_blue_avg_delta_psi + (1 - alpha_ema) * old_main_stats[4]
-                    
-                Elite_Fire_Stats[main_agent_key] = new_main_stats
                 
                 # [新增] 填充 buffer 用户打印详情
                 result_str = "Win" if metrics['win'] else ("Lose" if metrics['lose'] else "Draw")
                 worker_metrics_buffer.append(f"{opp_name}: {result_str}")
                 
                 batch_total_steps += metrics['steps']
-                batch_total_return += metrics['return'] # 已是固定±100终局的归一化回报
-                batch_total_dense_return += metrics['dense_return']
+                batch_total_return += metrics['return']
                 batch_total_m_fired += metrics['m_fired']
-                if metrics.get('BVR_perish_together', False):
-                    batch_bvr_perish_together_cnt += 1
-
-                # 收集蓝方开火策略指标
-                ep_blue_avg_fire_interval = res.get('ep_blue_avg_fire_interval')
-                ep_blue_avg_fire_delta_psi = res.get('ep_blue_avg_fire_delta_psi')
-                ep_blue_avg_fire_distance = res.get('ep_blue_avg_fire_distance')
-                ep_blue_avg_fire_AA_hor = res.get('ep_blue_avg_fire_AA_hor')
-                ep_blue_avg_fire_altitude = res.get('ep_blue_avg_fire_altitude')
-                ep_blue_avg_fire_theta = res.get('ep_blue_avg_fire_theta')
-                
-                if ep_blue_avg_fire_interval is not None:
-                    batch_blue_fire_intervals.append(ep_blue_avg_fire_interval)
-                if ep_blue_avg_fire_delta_psi is not None:
-                    batch_blue_fire_delta_psis.append(ep_blue_avg_fire_delta_psi)
-                if ep_blue_avg_fire_distance is not None:
-                    batch_blue_fire_distances.append(ep_blue_avg_fire_distance)
-                if ep_blue_avg_fire_AA_hor is not None:
-                    batch_blue_fire_AA_hors.append(ep_blue_avg_fire_AA_hor)
-                if ep_blue_avg_fire_altitude is not None:
-                    batch_blue_fire_alts.append(ep_blue_avg_fire_altitude)
-                if ep_blue_avg_fire_theta is not None:
-                    batch_blue_fire_thetas.append(ep_blue_avg_fire_theta)
-                
-                if ep_blue_avg_ATA is not None:
-                    batch_blue_ATAs.append(ep_blue_avg_ATA)
-                if ep_blue_avg_delta_psi_threat is not None:
-                    batch_blue_delta_psi_threats.append(ep_blue_avg_delta_psi_threat)
-                if ep_blue_avg_delta_theta is not None:
-                    batch_blue_delta_thetas.append(ep_blue_avg_delta_theta)
 
                 if metrics['win']: batch_wins += 1
                 elif metrics['lose']: batch_loss_cnt += 1
-                else: 
-                    batch_draw_cnt += 1
+                else: batch_draw_cnt += 1
                 
                 # 3.1 聚合 PPO 数据到全局 Buffer
                 for k in transition_dict:
                     transition_dict[k].extend(l_tr[k])
                 
-                # 3.2 SIL 数据收集 (需计算 return)
-                if use_sil:
-                    # ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                    # il_transition_buffer.add(ego_tr)  # 优化无望，改回原论文做法用来对比
-                    # pass # 只是对比缓慢结束初始模仿的话不需要增添新样本
-
-                    if not metrics['lose']: # 赢或平，学自己
-                        # 计算回报 (Master 端计算)
-                        ego_tr['returns'] = compute_monte_carlo_returns(gamma, ego_tr['rewards'], ego_tr['dones'])
-                        il_transition_buffer.add(ego_tr)
-                    if not metrics['win']: # 输或平，学对手
-                        enm_tr['returns'] = compute_monte_carlo_returns(gamma, enm_tr['rewards'], enm_tr['dones'])
-                        il_transition_buffer.add(enm_tr)
+                # SIL disabled: no il_transition_buffer updates
                 
                 # 3.3 ELO 更新 (实时更新)
                 actual_score = 0.5
                 if metrics['win']: actual_score = 1.0
                 elif metrics['lose']: actual_score = 0.0
-                
-                
+
+
                 if opp_name in elo_ratings:
                     prev_main_elo = main_agent_elo
                     adv_elo = elo_ratings[opp_name]
-                    
+
                     # 更新主智能体Elo分
                     main_agent_elo = update_elo(prev_main_elo, adv_elo, actual_score, K_FACTOR)
                     # 更新对手Elo分
@@ -1957,14 +1502,8 @@ def run_MLP_simulation(
                 else:
                     # 新对手：初始Elo与主智能体相同
                     new_adv_elo = main_agent_elo
-                
-                # # --- 新增: 出界惩罚 ---
-                # # 若对手在3分钟内出界，对手Elo额外扣除200分；当前主智能体Elo不额外修改
-                # red_out_cage = res.get('red_out_cage', False)
-                # red_out_cage_time = res.get('red_out_cage_time')
-                # if red_out_cage and red_out_cage_time is not None and red_out_cage_time <= 3 * 60:
-                #     new_adv_elo -= 200
-                
+                    print('警告，elo_ratings没有全部收录!!!')
+
                 elo_ratings[opp_name] = new_adv_elo
                 # 同步更新 Elite 池中已有的对手Elo分值
                 if opp_name in elite_elo_ratings:
@@ -1973,32 +1512,6 @@ def run_MLP_simulation(
                 if opp_name in hall_of_fame:
                     hall_of_fame[opp_name] = new_adv_elo
             
-            # 计算蓝方开火策略指标的批次平均值
-            batch_blue_avg_fire_interval = float(np.mean(batch_blue_fire_intervals)) if batch_blue_fire_intervals else None
-            batch_blue_avg_fire_delta_psi = float(np.mean(batch_blue_fire_delta_psis)) if batch_blue_fire_delta_psis else None
-            batch_blue_avg_fire_distance = float(max(batch_blue_fire_distances)) if batch_blue_fire_distances else None
-            batch_blue_avg_fire_AA_hor = float(np.mean(batch_blue_fire_AA_hors)) if batch_blue_fire_AA_hors else None
-            batch_blue_avg_fire_altitude = float(np.mean(batch_blue_fire_alts)) if batch_blue_fire_alts else None
-            batch_blue_avg_fire_theta = float(np.mean(batch_blue_fire_thetas)) if batch_blue_fire_thetas else None
-            batch_blue_avg_ATA = float(np.mean(batch_blue_ATAs)) if batch_blue_ATAs else None
-            batch_blue_avg_delta_psi_threat = float(np.mean(batch_blue_delta_psi_threats)) if batch_blue_delta_psi_threats else None
-            batch_blue_avg_delta_theta = float(np.mean(batch_blue_delta_thetas)) if batch_blue_delta_thetas else None
-
-            # [新增] 用 EMA(指数=0.2) 平滑批次均值
-            def _ema_update(ema_val, batch_val, alpha=EMA_ALPHA):
-                if batch_val is None:
-                    return ema_val
-                return batch_val if ema_val is None else (1 - alpha) * ema_val + alpha * batch_val
-            ema_fire_interval = _ema_update(ema_fire_interval, batch_blue_avg_fire_interval if batch_blue_avg_fire_interval is not None else None)
-            ema_fire_delta_psi = _ema_update(ema_fire_delta_psi, batch_blue_avg_fire_delta_psi*180/pi if batch_blue_avg_fire_delta_psi is not None else None)
-            ema_fire_distance = _ema_update(ema_fire_distance, batch_blue_avg_fire_distance if batch_blue_avg_fire_distance is not None else None)
-            ema_fire_AA_hor = _ema_update(ema_fire_AA_hor, batch_blue_avg_fire_AA_hor*180/pi if batch_blue_avg_fire_AA_hor is not None else None)
-            ema_fire_altitude = _ema_update(ema_fire_altitude, batch_blue_avg_fire_altitude if batch_blue_avg_fire_altitude is not None else None)
-            ema_fire_theta = _ema_update(ema_fire_theta, batch_blue_avg_fire_theta*180/pi if batch_blue_avg_fire_theta is not None else None)
-            ema_ATA = _ema_update(ema_ATA, batch_blue_avg_ATA*180/pi if batch_blue_avg_ATA is not None else None)
-            ema_delta_psi_threat = _ema_update(ema_delta_psi_threat, batch_blue_avg_delta_psi_threat*180/pi if batch_blue_avg_delta_psi_threat is not None else None)
-            ema_delta_theta = _ema_update(ema_delta_theta, batch_blue_avg_delta_theta*180/pi if batch_blue_avg_delta_theta is not None else None)
-
             # [新增] 在 PPO 更新前打印本轮详细战况
             if batch_idx % 1 == 0:
                 print(f"  [Batch {batch_idx}] Results: {', '.join(worker_metrics_buffer)}")
@@ -2021,56 +1534,17 @@ def run_MLP_simulation(
 
             # 使用带有偏差修正的滤波值
             filtered_score = ema_score
-            if use_RND and rnd_mse is not None:
-                logger.add("train_plus/RND_mse", rnd_mse, total_steps)
             logger.add("train_plus/batch_score", batch_score, total_steps)
             logger.add("train_plus/filtered_score", filtered_score, total_steps)
             logger.add("train_plus/target_p1", target_p1, total_steps)
 
-            # 记录开火策略指标 - 蓝方（本方），使用原始批次均值
-            if batch_blue_avg_fire_interval is not None:
-                logger.add("special/1 开火间隔时长", batch_blue_avg_fire_interval, total_steps)
-            if batch_blue_avg_fire_delta_psi is not None:
-                logger.add("special/2 开火abs(delta_psi)", batch_blue_avg_fire_delta_psi*180/pi, total_steps)
-            if batch_blue_avg_fire_distance is not None:
-                logger.add("special/3 开火距离", batch_blue_avg_fire_distance, total_steps)
-            if batch_blue_avg_fire_AA_hor is not None:
-                logger.add("special/4 开火abs(AA_hor)", batch_blue_avg_fire_AA_hor*180/pi, total_steps)
-            if batch_blue_avg_fire_altitude is not None:
-                logger.add("special/0 开火高度", batch_blue_avg_fire_altitude, total_steps)
-            if batch_blue_avg_fire_theta is not None:
-                logger.add("special/5 fire_theta", batch_blue_avg_fire_theta*180/pi, total_steps)
-            if batch_blue_avg_ATA is not None:
-                logger.add("special/6 ATA30", batch_blue_avg_ATA*180/pi, total_steps)
-            if batch_blue_avg_delta_psi_threat is not None:
-                logger.add("special/7 delta_psi_threat", batch_blue_avg_delta_psi_threat*180/pi, total_steps)
-            if batch_blue_avg_delta_theta is not None:
-                logger.add("special/8 delta_theta30", batch_blue_avg_delta_theta*180/pi, total_steps)
-            
-            # [新增] 保存 EMA 状态和控制器状态到 special.json
-            special_data = {
-                "ema_fire_interval": ema_fire_interval,
-                "ema_fire_delta_psi": ema_fire_delta_psi,
-                "ema_fire_distance": ema_fire_distance,
-                "ema_fire_AA_hor": ema_fire_AA_hor,
-                "ema_fire_altitude": ema_fire_altitude,
-                "ema_fire_theta": ema_fire_theta,
-                "ema_ATA": ema_ATA,
-                "ema_delta_psi_threat": ema_delta_psi_threat,
-                "ema_delta_theta": ema_delta_theta,
-                "controller_state": RWController.state_dict(),  # [新增] 保存控制器状态
-            }
-            with open(os.path.join(log_dir, "special.json"), "w", encoding="utf-8") as f:
-                json.dump(special_data, f, ensure_ascii=False, indent=2)
-            
+            # 记录导弹发射平均数量或总数
+            logger.add("special/0 发射的导弹总数", batch_total_m_fired, total_steps)
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
-            logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)
-            logger.add("train/2 BVR perish together", batch_bvr_perish_together_cnt / num_workers, total_steps)
-            logger.add("train/2 BVR not end", (batch_draw_cnt-batch_bvr_perish_together_cnt) / num_workers, total_steps)
             # 找最好的智能体
             logger.add("agent/ episode_step", batch_idx * num_workers, total_steps)
             logger.add("agent/ batch_step", batch_idx, total_steps)
@@ -2101,61 +1575,53 @@ def run_MLP_simulation(
                 x_elo_diff = main_agent_elo - avg_pool_elo
                 logger.add("train_plus/elo_diff_x", x_elo_diff, total_steps)
                 
+
+                #====================
+                # 动态调节 std 约束范围 (线性退火)
+                #====================
+                # max_std: 限制探索的上限，从 1.1 降到 0.8，防止训练后期动作过于离谱
+                current_max_std = 1.1 - (1.1 - 0.8) * np.clip(total_steps / 10e6, 0.0, 1.0)
+
+                # # min_std: 限制探索的下限，核心是强迫机动策略保持探索。
+                # # 初始设定为一个较大的值 (如 0.7)，直到 10M steps 时才允许其降到 0.2 左右
+                # # 这样在训练前期，机动策略永远不会变成确定性策略，必须给开火头留出尝试空间
+                # current_min_std = 0.7 - (0.7 - 0.2) * np.clip(total_steps / 10e6, 0.0, 1.0)
+
+                student_agent.max_std = current_max_std
+                # student_agent.min_std = current_min_std # 假设你在 agent 类中定义了这个变量
+
+                #====================
+                # 强制将底层网络参数限制在 [min, max] 区间
+                #====================
+                with torch.no_grad():
+                    # 对数空间的限制：std = exp(log_std) -> log_std = ln(std)
+                    log_max = np.log(current_max_std)
+                    log_min = 0 # np.log(current_min_std)
+                    
+                    # 针对共享 std 和连续动作 std 进行双向截断
+                    if hasattr(student_agent.actor.net, 'log_std_shared'):
+                        student_agent.actor.net.log_std_shared.clamp_(min=log_min, max=log_max)
+                        
+                    if hasattr(student_agent.actor.net, 'log_std_cont'):
+                        student_agent.actor.net.log_std_cont.clamp_(min=log_min, max=log_max)
+                
+                logger.add("train_plus/max_std", current_max_std, total_steps)
+
+                #====================
+                # 原有强化学习部分
                 # 学习率warm_up
                 actor_lr = min(actor_lr0, actor_lr0 * total_steps/1e6)
                 critic_lr = min(critic_lr0, critic_lr0 * total_steps/1e6)
                 student_agent.set_learning_rate(actor_lr=actor_lr, critic_lr=critic_lr)
-
-                if batch_idx <= actor_freeze_until:
-                    freeze_actor = 1
-                else:
-                    freeze_actor = 0
-                # # critic先收敛
-                # if total_steps < 5e3:
-                #     freeze_actor = 1
                 
-                max_fire_logits = 4.0
+                # # 初始设定 alpha_tutor 为 0.4 (与 alpha_max_std 对齐)
+                # # 在 5M 步线性退火到 0
+                # alpha_tutor_now = 0.4 * max(0, 1 - total_steps / 5e6)
 
-                alpha_distill = 0
-                teacher_wrapper = None
-                k_entropy_cat_scale = 1.0
-
-                student_agent.k_entropy['cat'] = base_k_cat * k_entropy_cat_scale
-
-                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
-                                     k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
-                                     alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
-                                     AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
-
-
-                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
-                if batch_idx % 10 == 0:
-                    student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
-                
-                # # 机动概率保护，未被调好，无法区分告警状态的有无，加上进攻引导就不会躲，加上防御引导又不会进攻
-                # if  \
-                #     (batch_blue_avg_fire_delta_psi*180/pi > 60 or
-                #         batch_blue_avg_delta_psi_threat*180/pi < 90):
-                #     student_agent.maneuver_il_protection(transition_dict, alpha=3, epochs=12)
-
-                # 计算/更新 PPO actor pre-clip 梯度的 EMA 值
-                current_ppo_grad = student_agent.pre_clip_actor_grad
-                if current_ppo_grad is not None and not np.isnan(current_ppo_grad):
-                    if ppo_grad_ema is None:
-                        ppo_grad_ema = current_ppo_grad
-                    else:
-                        ppo_grad_ema = 0.95 * ppo_grad_ema + 0.05 * current_ppo_grad
-
-                alpha_il_real = alpha_il #  * np.clip(1 - total_steps/5e6, 0.1, 1)
-
-                # if use_sil and len(il_transition_buffer.addon_dict['states']) >= 2048:
-                #     if int(round(batch_idx - last_il_update_batch_idx)) % 30 == 0 and alpha_il_real > 0:
-                #         student_agent.ADPC_update(il_transition_buffer.read(il_buffer_max_size), batch_size=2048, alpha=alpha_il_real, 
-                #                                   chosen_quantile=chosen_quantile, no_bern=sil_only_maneuver, dark_side=DARK_SIDE,
-                #                                   ppo_grad_val=ppo_grad_ema)
-                #         # 不可以自模仿得过于频繁
-                #         last_il_update_batch_idx = batch_idx
-                
+                # 调用 update
+                student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, 
+                    target_p1=target_p1, k_nonlinear=k_nonlinear)
+                #====================
                 # 记录 Log
 
                 # [Modification] 保留原有梯度监控代码
@@ -2163,8 +1629,8 @@ def run_MLP_simulation(
                 critic_pre_clip_grad = student_agent.pre_clip_critic_grad
 
                 # 梯度监控
-                # logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
-                # logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
+                logger.add("train/5 actor_pre_clip_grad", actor_pre_clip_grad, total_steps)
+                logger.add("train/6 critic_pre_clip_grad", critic_pre_clip_grad, total_steps)
                 # 损失函数监控
                 logger.add("train/7 actor_loss", student_agent.actor_loss, total_steps)
                 logger.add("train/8 critic_loss", student_agent.critic_loss, total_steps)
@@ -2172,47 +1638,40 @@ def run_MLP_simulation(
                 logger.add("train/9 entropy", student_agent.entropy_mean, total_steps)
                 logger.add("train/9 entropy_cat", student_agent.entropy_cat, total_steps)
                 logger.add("train/9 entropy_bern", student_agent.entropy_bern, total_steps)
-                logger.add("train_plus/max_fire_prob", student_agent.max_fire_prob, total_steps)
-                logger.add("train_plus/min_fire_prob", student_agent.min_fire_prob, total_steps)
-
-                # logger.add("train/10 advantage", student_agent.advantage, total_steps) 
+                
+                logger.add("train/10 advantage", student_agent.advantage, total_steps) 
                 # 强化学习
-                # logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
-                # logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
-                # logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
+                logger.add("train/10 explained_var", student_agent.explained_var, total_steps)
+                logger.add("train/10 approx_kl", student_agent.approx_kl, total_steps)
+                logger.add("train/10 clip_frac", student_agent.clip_frac, total_steps)
                 
                 # [新增] 诊断监控
                 logger.add("train_plus/td_error_var", student_agent.td_error_var, total_steps)
-
+                logger.add("train_plus/grad_norm_ratio", student_agent.grad_norm_ratio, total_steps)
+                
+                # IL-PPO信号强度对比
+                # 错误做法，更新强度数量级和样本数无关
+                # if use_sil:
+                #     logger.add("train_plus/原始信号强度对比IL-PPO", student_agent.IL_samples/student_agent.PPO_samples*alpha_il, total_steps)
+                #     logger.add("train_plus/滤波后信号强度对比IL-PPO", student_agent.IL_valid_samples/student_agent.PPO_valid_samples*alpha_il, total_steps)
+                    
                 print(f"Step {total_steps}: Batch WinRate {batch_wins}/{num_workers}, ELO {main_agent_elo:.0f}")
 
-                # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
+                # 清空 Buffer
+                transition_dict = copy.deepcopy(empty_transition_dict)
                 
                 # A. 保存模型
                 actor_key = f"actor_rein{batch_idx}"
-                
-                # 正常保存模型
                 torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
                 torch.save(student_agent.critic.state_dict(), os.path.join(log_dir, "critic.pt"))
-                # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
                 print(f"Saved Checkpoint: {actor_key}")
-                print(f"Saved Current Actor: current_actor.pt")
-                
-                # 清空 Buffer（在搅拌之后）
-                transition_dict = copy.deepcopy(empty_transition_dict)
 
-                # B. 经典胜率精英池维护
-                # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
+                # B. 精英池维护
+                # 只有自博弈能够更新精英Elo表
                 if total_steps >= WARM_UP_STEPS:
-                    # 复制当前主代理的蓝方行为统计到该历史版本，记录它"作为蓝方时"的行为特征
-                    if "__CURRENT_MAIN__" in Elite_Fire_Stats:
-                        Elite_Fire_Stats[actor_key] = copy.deepcopy(Elite_Fire_Stats["__CURRENT_MAIN__"])
-                    else:
-                        Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
                     elo_ratings[opp_name] = main_agent_elo
 
-                    
+
                 # -----------------------------------------------------------
                 # 逻辑分支 B: 维护“全量历史记录” (Full JSON)
                 # -----------------------------------------------------------
@@ -2221,7 +1680,7 @@ def run_MLP_simulation(
                 elo_ratings[actor_key] = main_agent_elo
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
-                
+
                 # -----------------------------------------------------------
                 # 逻辑分支 B: 定期重刷精英池 (每 1M step)
                 # -----------------------------------------------------------
@@ -2257,12 +1716,6 @@ def run_MLP_simulation(
                 # -----------------------------------------------------------
                 with open(hof_json_path, "w", encoding="utf-8") as f:
                     json.dump(hall_of_fame, f, ensure_ascii=False, indent=2)
-
-                # -----------------------------------------------------------
-                # 逻辑分支 E: 保存胜率表 (用于核心更新与选择)
-                # -----------------------------------------------------------
-                with open(Elite_Fire_Stats_path, "w", encoding="utf-8") as f:
-                    json.dump(Elite_Fire_Stats, f, ensure_ascii=False, indent=2)
 
                 # --- 日志记录 (Logging) - 保持不变，展示的是精英池状态 ---
                 valid_elos = {k: v for k, v in elite_elo_ratings.items() if not k.startswith("__")}
@@ -2304,11 +1757,7 @@ def run_MLP_simulation(
                     # Elo分数没有稳定不许记录
                     if total_steps >= WARM_UP_STEPS:
                         logger.add("Elo_Centered/Current_rank_normed %", curr_rank * 100, total_steps)
-                    
-                    
-                    # # 仅对高门槛使用
-                    # rule_elo_thres = ADMISSION_THRESHOLD * elo_ratings['Rule_2'] +\
-                    #     (1-ADMISSION_THRESHOLD) * min_rule_elo
+
 
                     if main_agent_elo >= rule_elo_thres:
                         # 满员清理
@@ -2321,7 +1770,7 @@ def run_MLP_simulation(
                             del elite_elo_ratings[weakest_history_key]
                             history_keys.remove(weakest_history_key)
                             print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
-                        
+
                         # --- 正式入池 ---
                         if hist_agent_as_opponent:
                             elite_elo_ratings[actor_key] = main_agent_elo
@@ -2354,12 +1803,7 @@ def run_MLP_simulation(
                 torch.save({
                     'actor_optimizer': student_agent.actor_optimizer.state_dict(),
                     'critic_optimizer': student_agent.critic_optimizer.state_dict(),
-                    'rnd_target': student_agent.rnd_target.state_dict() if student_agent.rnd_target is not None else None,
-                    'rnd_prediction': student_agent.rnd_prediction.state_dict() if student_agent.rnd_prediction is not None else None,
-                    'rnd_optimizer': student_agent.rnd_optimizer.state_dict() if student_agent.rnd_optimizer is not None else None,
                 }, os.path.join(log_dir, "optimizers_state.pt"))
-                if il_transition_buffer is not None:
-                    il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
