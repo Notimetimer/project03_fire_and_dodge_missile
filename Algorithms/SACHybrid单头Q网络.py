@@ -1,9 +1,5 @@
 '''
-混合动作空间的 TD3 算法
-- 连续动作：确定性策略 + 目标策略平滑噪声
-- 离散/伯努利动作：Gumbel-Softmax 可导采样
-- 不使用 SAC 自动温度 alpha，改用固定熵系数
-- 不使用重要性采样
+混合动作空间空间的PPO改为SAC
 '''
 import random
 import numpy as np
@@ -90,95 +86,38 @@ class ReplayBufferHybrid:
 # =============================================================================
 
 
-# ============================================================
-# 多 cat 维度展平/还原辅助函数
-# ============================================================
-def _make_strides(cat_dims):
-    if not cat_dims:
-        return []
-    m = len(cat_dims)
-    strides = [1] * m
-    for d in range(m - 2, -1, -1):
-        strides[d] = strides[d + 1] * cat_dims[d + 1]
-    return strides
-
-
-def ravel_cat_indices(cat_indices, cat_dims):
-    """多 dim cat 索引 (B, m) -> 展平联合索引 (B, 1)"""
-    if not cat_dims:
-        return torch.zeros(cat_indices.size(0), 1, dtype=torch.long, device=cat_indices.device)
-    strides = _make_strides(cat_dims)
-    joint = torch.zeros(cat_indices.size(0), 1, dtype=torch.long, device=cat_indices.device)
-    for d, s in enumerate(strides):
-        joint += cat_indices[:, d:d+1] * s
-    return joint
-
-
-def unravel_cat_index(joint, cat_dims):
-    """展平联合索引 (B, 1) -> 多 dim cat 索引 (B, m)"""
-    if not cat_dims:
-        return torch.empty(joint.size(0), 0, dtype=torch.long, device=joint.device)
-    strides = _make_strides(cat_dims)
-    m = len(cat_dims)
-    indices = torch.empty(joint.size(0), m, dtype=torch.long, device=joint.device)
-    for d, (K, s) in enumerate(zip(cat_dims, strides)):
-        indices[:, d] = ((joint // s) % K).squeeze(-1)
-    return indices
-
-
-def per_dim_onehot_to_indices(cat_onehot, cat_dims):
-    """把拼接的 per-dim one-hot (B, sum K_i) 还原成索引 (B, m)"""
-    if not cat_dims:
-        return torch.empty(cat_onehot.size(0), 0, dtype=torch.long, device=cat_onehot.device)
-    splits = torch.split(cat_onehot, cat_dims, dim=-1)
-    indices = [split.argmax(dim=-1, keepdim=True) for split in splits]
-    return torch.cat(indices, dim=-1)
-
-
-def joint_cat_prob_from_list(probs_list):
-    """由每个 cat 维度的概率 (B, K_i) 计算联合概率 (B, K1*K2*...)"""
-    if not probs_list:
-        return None
-    prob = probs_list[0]
-    for p in probs_list[1:]:
-        prob = (prob.unsqueeze(-1) * p.unsqueeze(1)).view(prob.size(0), -1)
-    return prob
-
-
 class QNetHybrid(torch.nn.Module):
     def __init__(self, state_dim, hidden_dims, action_dims_dict):
         super(QNetHybrid, self).__init__()
         
-        # cat 展平为联合输出；cont/bern 作为输入条件
-        self.cont_dim = int(action_dims_dict.get('cont', 0))
-        self.bern_dim = int(action_dims_dict.get('bern', 0))
-        self.cat_dims = list(action_dims_dict.get('cat', []))
-        self.joint_cat_dim = int(np.prod(self.cat_dims, dtype=np.int64)) if self.cat_dims else 1
+        # 计算所有动作展平后的总维度
+        act_dim = 0
+        if 'cont' in action_dims_dict: act_dim += action_dims_dict['cont']
+        if 'cat' in action_dims_dict: act_dim += sum(action_dims_dict['cat']) # Cat 需要转为 One-hot 输入
+        if 'bern' in action_dims_dict: act_dim += action_dims_dict['bern']
         
-        prev_size = state_dim + self.cont_dim + self.bern_dim
         layers = []
+        prev_size = state_dim + act_dim
         for layer_size in hidden_dims:
             layers.append(nn.Linear(prev_size, layer_size))
             layers.append(nn.ReLU())
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
-        self.fc_out = nn.Linear(prev_size, self.joint_cat_dim)
+        self.fc_out = nn.Linear(prev_size, 1)
 
     def forward(self, state, action_dict):
-        # 只把 cont / bern 作为输入；cat 不同取值的 Q 由输出头给出
-        parts = [state]
+        # 拼接动作
+        actions_list = []
         if 'cont' in action_dict and action_dict['cont'] is not None:
-            parts.append(action_dict['cont'])
-        else:
-            if self.cont_dim > 0:
-                parts.append(torch.zeros(state.size(0), self.cont_dim, device=state.device, dtype=state.dtype))
+            actions_list.append(action_dict['cont'])
+        if 'cat' in action_dict and action_dict['cat'] is not None:
+            actions_list.append(action_dict['cat']) # 这里必须已经是 one-hot 或 gumbel-softmax 的输出
         if 'bern' in action_dict and action_dict['bern'] is not None:
-            parts.append(action_dict['bern'])
-        else:
-            if self.bern_dim > 0:
-                parts.append(torch.zeros(state.size(0), self.bern_dim, device=state.device, dtype=state.dtype))
-        x = torch.cat(parts, dim=-1)
-        return self.fc_out(self.net(x))  # (B, K1*K2*...)
+            actions_list.append(action_dict['bern'])
+            
+        action_cat = torch.cat(actions_list, dim=-1)
+        x = torch.cat([state, action_cat], dim=-1)
+        return self.fc_out(self.net(x))
 
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper as PPOHybridActorWrapper
 
@@ -189,57 +128,37 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper as PPOH
 class HybridActorWrapper(PPOHybridActorWrapper):
     """
     继承自 PPOHybrid23_0 的统一接口适配器。
-    为 TD3 额外提供确定性策略平滑采样的 sample_for_td3 方法。
+    为 SAC 额外提供可导采样的 sample_for_sac 方法。
     """
 
-    def sample_for_td3(self, states, target_noise=0.0, noise_clip=0.5, action_masks=None, gumbel_tau=1.5):
+    def sample_for_sac(self, states, action_masks=None, gumbel_tau=1.5):
         """
-        TD3风格的确定性采样接口。
-        - 连续动作：使用策略网络的 mu 作为确定性输出，可选加入目标平滑噪声。
-        - 离散动作：使用 Gumbel-Softmax 实现可导采样。
-        - 伯努利动作：使用 Gumbel-Softmax 实现可导采样。
-        重要性采样：不使用。
-        Args:
-            states: (batch, state_dim)
-            target_noise: 目标策略平滑噪声标准差（用于 Critic 目标计算），推理/actor更新时设为0
-            noise_clip: 目标噪声裁剪范围
-        Returns:
-            actions_differentiable: dict, 可直接输入 Q 网络
-            log_probs: dict, 各动作头 log_prob（可选监控）
-            entropies: dict, 各动作头熵（可选监控）
+        专门为 SAC 提供的采样方法。
+        返回可导的 actions，以及按动作头拆分的 log_prob 字典。
         """
         actor_outputs = self.net(states, action_masks=action_masks)
 
         actions_differentiable = {}
-        log_probs = {
-            'cont': torch.zeros(states.size(0), 1).to(self.device),
-            'cat': torch.zeros(states.size(0), 1).to(self.device),
-            'bern': torch.zeros(states.size(0), 1).to(self.device),
-            'total': torch.zeros(states.size(0), 1).to(self.device),
-        }
-        entropies = {
-            'cont': torch.zeros(states.size(0), 1).to(self.device),
-            'cat': torch.zeros(states.size(0), 1).to(self.device),
-            'bern': torch.zeros(states.size(0), 1).to(self.device),
-        }
+        log_probs_total = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_cont = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_cat = torch.zeros(states.size(0), 1).to(self.device)
+        log_probs_bern = torch.zeros(states.size(0), 1).to(self.device)
+        bern_entropy = torch.zeros(states.size(0), 1).to(self.device)
 
         # --- Cont (连续动作，使用 rsample) ---
         if actor_outputs['cont'] is not None:
             mu, std = actor_outputs['cont']
-            if target_noise > 0:
-                noise = torch.randn_like(mu) * target_noise
-                noise = torch.clamp(noise, -noise_clip, noise_clip)
-                a_norm = torch.tanh(mu + noise)
-            else:
-                a_norm = torch.tanh(mu)
-            actions_differentiable['cont'] = a_norm
+            # 注意：此处需确保 SquashedNormal 支持 rsample 并且正确计算了 tanh 的 log_prob
+            dist = Normal(mu, std)
+            u = dist.rsample() # 重参数化采样
+            a_norm = torch.tanh(u)
+            # 计算 Squash 的 log_prob
+            log_prob_cont = dist.log_prob(u) - torch.log(1 - a_norm.pow(2) + 1e-7)
+            log_prob_cont_sum = log_prob_cont.sum(-1, keepdim=True)
+            log_probs_cont += log_prob_cont_sum
+            log_probs_total += log_prob_cont_sum
 
-            # 计算确定性动作对应的 log_prob 与熵
-            dist = SquashedNormal(mu, std)
-            log_prob_cont = dist.log_prob(a_norm, mu).sum(-1, keepdim=True)
-            log_probs['cont'] = log_prob_cont
-            log_probs['total'] += log_prob_cont
-            entropies['cont'] = dist.entropy().sum(-1, keepdim=True)
+            actions_differentiable['cont'] = a_norm # 直接输出 -1~1 的范围给 Q 网络
 
         # --- Cat (离散动作，使用 Gumbel-Softmax) ---
         if actor_outputs['cat'] is not None:
@@ -248,7 +167,6 @@ class HybridActorWrapper(PPOHybridActorWrapper):
             cat_logits_list = [torch.log(probs + 1e-8) for probs in actor_outputs['cat']]
             cat_actions = []
             log_p_cat_sum = torch.zeros(states.size(0), 1).to(self.device)
-            ent_cat_sum = torch.zeros(states.size(0), 1).to(self.device)
             for logits in cat_logits_list:
                 # hard=True 表示前向传播输出 One-hot(例如[0,1,0])，反向传播用 softmax 的梯度
                 gumbel_out = F.gumbel_softmax(logits, tau=gumbel_tau, hard=True)
@@ -256,13 +174,14 @@ class HybridActorWrapper(PPOHybridActorWrapper):
 
                 # 计算 log_prob (近似)
                 probs = F.softmax(logits, dim=-1)
+                dist = Categorical(probs=probs)
+                # 由于 hard=True 返回的是 one-hot，可以通过与 log_probs 相乘来提取选中项的 log_prob
                 log_p = torch.sum(torch.log(probs + 1e-8) * gumbel_out, dim=-1, keepdim=True)
                 log_p_cat_sum += log_p
-                ent_cat_sum += Categorical(probs=probs).entropy().unsqueeze(-1)
+
+            log_probs_cat += log_p_cat_sum
+            log_probs_total += log_p_cat_sum
             actions_differentiable['cat'] = torch.cat(cat_actions, dim=-1)
-            log_probs['cat'] = log_p_cat_sum
-            log_probs['total'] += log_p_cat_sum
-            entropies['cat'] = ent_cat_sum
 
         # --- Bern (伯努利动作，使用 Binary Gumbel-Softmax / 缓和的 Sigmoid) ---
         if actor_outputs['bern'] is not None:
@@ -283,31 +202,34 @@ class HybridActorWrapper(PPOHybridActorWrapper):
             fire_mask = actor_outputs.get('fire_mask', None)
             if fire_mask is not None:
                 log_p_bern = log_p_bern * fire_mask  # shape: (batch, bern_dim)，masked 位置乘 0
+                valid_count = fire_mask.sum(-1, keepdim=True).clamp_min(1.0)
+                bern_entropy = (Bernoulli(logits=bern_logits).entropy() * fire_mask).sum(-1, keepdim=True) / valid_count
+            else:
+                bern_entropy = Bernoulli(logits=bern_logits).entropy().mean(-1, keepdim=True)
 
             log_p_bern_sum = log_p_bern.view(states.size(0), -1).sum(-1, keepdim=True)
-            log_probs['bern'] = log_p_bern_sum
-            log_probs['total'] += log_p_bern_sum
+            log_probs_bern += log_p_bern_sum
+            log_probs_total += log_p_bern_sum
 
-            ent_bern = Bernoulli(logits=bern_logits).entropy()
-            if fire_mask is not None:
-                ent_bern = (ent_bern * fire_mask).sum(-1, keepdim=True)
-            else:
-                ent_bern = ent_bern.sum(-1, keepdim=True)
-            entropies['bern'] = ent_bern
-
-        return actions_differentiable, log_probs, entropies
+        log_probs = {
+            'cont': log_probs_cont,
+            'cat': log_probs_cat,
+            'bern': log_probs_bern,
+            'bern_entropy': bern_entropy,
+            'total': log_probs_total,
+        }
+        return actions_differentiable, log_probs
 # =============================================================================
-# 3. TD3 算法类 (混合动作空间)
+# 3. SAC 算法类 (精简版)
 # =============================================================================
-class TD3Hybrid:
-    def __init__(self, actor, critic_temp, critic_1, critic_2, target_critic_1, target_critic_2,
-                 actor_lr, critic_lr, action_dims_dict, gamma, tau, device,
-                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05},
-                 critic_max_grad=2, actor_max_grad=2, max_std=0.7,
-                 policy_delay=2, target_noise=0.2, noise_clip=0.5, gumbel_tau=1.5):
+class SACHybrid:
+    def __init__(self, actor, critic_temp, critic_1, critic_2, target_critic_1, target_critic_2, 
+                 actor_lr, critic_lr, alpha_lr, action_dims_dict, gamma, tau, device,
+                 k_entropy={'cont':0.01, 'cat':0.005, 'bern':0.05}, critic_max_grad=2, actor_max_grad=2, max_std=0.7,
+                 gumbel_tau=1.5):
         self.actor = actor
         # MARWIL_update 内部引用 self.critic，这里让其指向预训练用的 ValueNet
-        self.critic = critic_temp # 仅给预训练(MARWIL)使用，在线TD3阶段弃置不用
+        self.critic = critic_temp # 仅给预训练(MARWIL)使用，在线SAC阶段弃置不用
         self.critic_1 = critic_1
         self.critic_2 = critic_2
         self.target_critic_1 = target_critic_1
@@ -316,39 +238,30 @@ class TD3Hybrid:
         # 保存超参，供学习率调整 / 梯度裁剪 / 重建优化器使用
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
+        self.alpha_lr = alpha_lr
         self.k_entropy = k_entropy
         self.max_std = max_std
         self.actor_max_grad = actor_max_grad
         self.critic_max_grad = critic_max_grad
-
-        # TD3 特有超参
-        self.policy_delay = policy_delay
-        self.target_noise = target_noise
-        self.noise_clip = noise_clip
         self.gumbel_tau = gumbel_tau
-        self.update_count = 0
-
+        
         # 初始化目标网络
         self.target_critic_1.load_state_dict(self.critic_1.state_dict())
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
-
-        # [TD3] 目标 Actor：内部深拷贝当前 actor，参数不参与梯度优化，仅靠软更新跟随
-        self.target_actor = copy.deepcopy(self.actor).to(device)
-        self.target_actor.load_state_dict(self.actor.state_dict())
-        for p in self.target_actor.parameters():
-            p.requires_grad_(False)
-
+        
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=critic_lr)
         self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=critic_lr)
         # 预训练 (MARWIL) 阶段优化 ValueNet 的优化器
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
-
-        # 固定熵系数（替代 SAC 的自动温度 alpha）
-        self.k_cont = k_entropy.get('cont', 0.01)
-        self.k_cat = k_entropy.get('cat', 0.005)
-        self.k_bern = k_entropy.get('bern', 0.05)
-
+        
+        # 自动调节温度参数 Alpha
+        # 针对 Hybrid，可以设一个全局 Alpha，也可以为 cont, cat, bern 各设一个。这里用一个全局的演示。
+        self.log_alpha = torch.tensor(np.log(0.01), dtype=torch.float, requires_grad=True, device=device)
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=alpha_lr)
+        
+        # target_entropy 由外部在 update() 中传入，此处不做预设
+        
         self.gamma = gamma
         self.tau = tau
         self.device = device
@@ -376,19 +289,16 @@ class TD3Hybrid:
         self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=self.critic_lr)
         self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=self.critic_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.critic_lr)
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=self.alpha_lr)
 
     def save_critics(self, path):
-        """保存在线TD3的Q网络与固定熵系数（弃置ValueNet）。"""
+        """保存在线SAC的Q网络与温度参数（弃置ValueNet）。"""
         torch.save({
             'critic_1': self.critic_1.state_dict(),
             'critic_2': self.critic_2.state_dict(),
             'target_critic_1': self.target_critic_1.state_dict(),
             'target_critic_2': self.target_critic_2.state_dict(),
-            'target_actor': self.target_actor.state_dict(),
-            'k_entropy': self.k_entropy,
-            'policy_delay': self.policy_delay,
-            'target_noise': self.target_noise,
-            'noise_clip': self.noise_clip,
+            'log_alpha': self.log_alpha.detach().cpu(),
             'gumbel_tau': self.gumbel_tau,
         }, path)
 
@@ -396,25 +306,22 @@ class TD3Hybrid:
         ckpt = torch.load(path, map_location=map_location)
         # 兼容旧的 ValueNet critic.pt（只有 state_dict，没有Q网络键）
         if not isinstance(ckpt, dict) or 'critic_1' not in ckpt:
-            print(f"[TD3Hybrid] {path} 不是TD3 critic格式，跳过加载Q网络。")
+            print(f"[SACHybrid] {path} 不是SAC critic格式，跳过加载Q网络。")
             return
         self.critic_1.load_state_dict(ckpt['critic_1'])
         self.critic_2.load_state_dict(ckpt['critic_2'])
         self.target_critic_1.load_state_dict(ckpt['target_critic_1'])
         self.target_critic_2.load_state_dict(ckpt['target_critic_2'])
-        if 'target_actor' in ckpt:
-            self.target_actor.load_state_dict(ckpt['target_actor'])
-        if 'k_entropy' in ckpt:
-            self.k_entropy = ckpt['k_entropy']
-            self.k_cont = self.k_entropy.get('cont', 0.01)
-            self.k_cat = self.k_entropy.get('cat', 0.005)
-            self.k_bern = self.k_entropy.get('bern', 0.05)
+        if 'log_alpha' in ckpt:
+            with torch.no_grad():
+                self.log_alpha.copy_(ckpt['log_alpha'].to(self.log_alpha.device))
 
     def save_optimizers(self, path):
         torch.save({
             'actor_optimizer': self.actor_optimizer.state_dict(),
             'critic_1_optimizer': self.critic_1_optimizer.state_dict(),
             'critic_2_optimizer': self.critic_2_optimizer.state_dict(),
+            'alpha_optimizer': self.alpha_optimizer.state_dict(),
         }, path)
 
     def load_optimizers(self, path, map_location='cpu'):
@@ -424,24 +331,21 @@ class TD3Hybrid:
             if 'critic_1_optimizer' in s:
                 self.critic_1_optimizer.load_state_dict(s['critic_1_optimizer'])
                 self.critic_2_optimizer.load_state_dict(s['critic_2_optimizer'])
+            if 'alpha_optimizer' in s:
+                self.alpha_optimizer.load_state_dict(s['alpha_optimizer'])
         except Exception as e:
-            print(f"[TD3Hybrid] Failed to load optimizers: {e}")
+            print(f"[SACHybrid] Failed to load optimizers: {e}")
 
     def soft_update(self, net, target_net):
         for param_target, param in zip(target_net.parameters(), net.parameters()):
             param_target.data.copy_(param_target.data * (1.0 - self.tau) + param.data * self.tau)
 
-    def update(self, batch, freeze_actor=False, actor_max_update_norm=0.05):
+    def update(self, batch, target_entropy=2.0, alpha_clip=(0.001, 0.1), freeze_actor=False, actor_max_update_norm=0.05):
         """
-        接收 ReplayBuffer 返回的字典 batch，按标准 TD3 的三条独立计算流更新：
-        - 流A（每次都执行）：target_actor 产生 next_action(确定性+截断噪声)，
-          两个 target_critic 取 min 算 TD 目标 y，更新当前两个 critic。
-        - 流B（每 policy_delay 次 critic 更新才执行 1 次）：当前 actor 产生确定性动作
-          a_pi(无噪声)，仅用当前 critic_1 计算 Q1(s, a_pi)，最大化 Q1 更新 actor。
-          此阶段 target 网络绝不参与计算。
-        - 软更新（仅在 actor 完成一次更新后执行）：actor->target_actor,
-          critic_1->target_critic_1, critic_2->target_critic_2。
-        freeze_actor : True 时只更新 Q 网络，跳过 actor 更新（Q 预热阶段使用）。
+        接收 ReplayBuffer 返回的字典 batch
+        target_entropy : 目标熵（正数，由外部传入）。None 则不更新 alpha。
+        alpha_clip      : (min, max) 对 alpha=exp(log_alpha) 的截断范围。
+        freeze_actor   : True 时只更新 Q 网络，跳过 actor 和 alpha 更新（Q 预热阶段使用）。
         """
         # --- A. 数据搬运与类型转换 (NumPy -> Tensor) ---
         device = self.device
@@ -462,18 +366,20 @@ class TD3Hybrid:
         if 'cont' in raw_actions:
             actions_for_q['cont'] = torch.from_numpy(raw_actions['cont']).to(device)
             
-        # cat 只保留索引，Q 网络不再把 one-hot 作为输入，而是输出所有 cat 组合的 Q
         if 'cat' in raw_actions:
             cat_idx = torch.from_numpy(raw_actions['cat']).to(device).long()
-            cat_dims = self.actor.action_dims['cat']
-            joint_idx = ravel_cat_indices(cat_idx, cat_dims)
-        else:
-            joint_idx = None
+            # 转换为 One-hot 供 Q 网络输入
+            cat_onehots = []
+            for i, dim in enumerate(self.actor.action_dims['cat']):
+                cat_onehots.append(F.one_hot(cat_idx[:, i], num_classes=dim).float())
+            actions_for_q['cat'] = torch.cat(cat_onehots, dim=-1)
             
         if self.actor.action_dims.get('bern', 0) > 0 and 'bern' in raw_actions:
             actions_for_q['bern'] = torch.from_numpy(raw_actions['bern']).to(device)
 
-        # --- B. TD3 Critic 目标计算 ---
+        # --- B. SAC 计算逻辑 (逻辑保持不变，但变量名已对齐) ---
+        
+        # [诊断] 统计当前 batch 中 replay buffer 存储的 bern 动作分布
         if not hasattr(self, '_diag_update_count'):
             self._diag_update_count = 0
         self._diag_update_count += 1
@@ -483,35 +389,51 @@ class TD3Hybrid:
                 bern_buf = raw_actions['bern']  # shape: (batch, bern_dim)
                 n_fire = (bern_buf > 0.5).sum()
                 n_no_fire = (bern_buf <= 0.5).sum()
-                print(f"[TD3 diag #{self._diag_update_count}] replay buffer bern: fire={n_fire}, no_fire={n_no_fire}, ratio={n_fire/(n_fire+n_no_fire+1e-8):.3f}")
+                print(f"[SAC diag #{self._diag_update_count}] replay buffer bern: fire={n_fire}, no_fire={n_no_fire}, ratio={n_fire/(n_fire+n_no_fire+1e-8):.3f}")
 
-        # ============ 流A：Critic 更新（每次 update 都执行）============
+        # 1. 更新 Q 网络 (Critic)
         with torch.no_grad():
-            # 目标策略平滑：由 target_actor 产生确定性动作 + 裁剪噪声
-            next_actions_diff, _, _ = self.target_actor.sample_for_td3(
-                next_states, target_noise=self.target_noise, noise_clip=self.noise_clip,
-                gumbel_tau=self.gumbel_tau)
-
-            # 把目标 actor 的 cat one-hot 还原成联合索引，Q 输出所有 cat 后 gather
-            if 'cat' in next_actions_diff and next_actions_diff['cat'] is not None:
-                joint_idx_next = ravel_cat_indices(
-                    per_dim_onehot_to_indices(next_actions_diff['cat'], self.actor.action_dims['cat']),
-                    self.actor.action_dims['cat'])
-            else:
-                joint_idx_next = None
-
-            q1_target_all = self.target_critic_1(next_states, next_actions_diff)
-            q2_target_all = self.target_critic_2(next_states, next_actions_diff)
-            q1_target = q1_target_all.gather(1, joint_idx_next) if joint_idx_next is not None else q1_target_all
-            q2_target = q2_target_all.gather(1, joint_idx_next) if joint_idx_next is not None else q2_target_all
-            min_q_target = torch.min(q1_target, q2_target)
+            # 获取下一状态的动作 (可导采样) 和 log_prob
+            next_actions_diff, next_log_probs = self.actor.sample_for_sac(next_states, gumbel_tau=self.gumbel_tau)
+            
+            # [诊断] 统计 next_states 里被 mask 和未被 mask 的样本数
+            if self._diag_update_count % 200 == 1:
+                _outs_diag = self.actor.net(next_states)
+                _fm = _outs_diag.get('fire_mask', None)
+                if _fm is not None:
+                    n_can_fire = (_fm > 0.5).sum().item()
+                    n_masked = (_fm <= 0.5).sum().item()
+                    bern_lp = next_log_probs['bern']
+                    # 统计 sample_for_sac 采出的 bern_action 在 can_fire 位置的均值（接近1=偏开火，接近0=偏不开火）
+                    valid_mask_1d = (_fm > 0.5).view(-1)
+                    bern_act = next_actions_diff.get('bern', None)
+                    if bern_act is not None:
+                        bern_act_flat = bern_act.view(-1)
+                        canfire_mean = bern_act_flat[valid_mask_1d].mean().item() if valid_mask_1d.any() else float('nan')
+                    else:
+                        canfire_mean = float('nan')
+                    bern_logit_canfire = _outs_diag['bern'].view(-1)[valid_mask_1d]
+                    logit_mean = bern_logit_canfire.mean().item() if valid_mask_1d.any() else float('nan')
+                    logit_max = bern_logit_canfire.max().item() if valid_mask_1d.any() else float('nan')
+                    print(f"[SAC diag #{self._diag_update_count}] next_states fire_mask: can_fire={n_can_fire}, masked={n_masked}, "
+                          f"bern_logprob mean={bern_lp.mean().item():.4f}, "
+                          f"bern_action[can_fire] mean={canfire_mean:.3f}, "
+                          f"bern_logit[can_fire] mean={logit_mean:.3f} max={logit_max:.3f}")
+            
+            # 目标 Q 值
+            q1_target = self.target_critic_1(next_states, next_actions_diff)
+            q2_target = self.target_critic_2(next_states, next_actions_diff)
+            alpha = self.log_alpha.exp()
+            k_bern = self.k_entropy.get('bern', 0.003)
+            entropy_reg = alpha * (next_log_probs['cont'] + next_log_probs['cat']) - k_bern * next_log_probs['bern_entropy']
+            min_q_target = torch.min(q1_target, q2_target) - entropy_reg
+            
+            # TD 目标
             y_target = rewards + self.gamma * (1 - dones) * min_q_target
             
         # 当前 Q 值预测
-        q1_pred_all = self.critic_1(states, actions_for_q)
-        q2_pred_all = self.critic_2(states, actions_for_q)
-        q1_pred = q1_pred_all.gather(1, joint_idx) if joint_idx is not None else q1_pred_all
-        q2_pred = q2_pred_all.gather(1, joint_idx) if joint_idx is not None else q2_pred_all
+        q1_pred = self.critic_1(states, actions_for_q)
+        q2_pred = self.critic_2(states, actions_for_q)
         
         mask_eps = 1e-5
         active_sum = active_masks.sum()
@@ -525,65 +447,22 @@ class TD3Hybrid:
         self.critic_1_optimizer.step()
         self.critic_2_optimizer.step()
 
-        # --- C. TD3 Actor 延迟更新 ---
-        actor_loss = torch.tensor(0.0)
-        actor_grad = torch.tensor(0.0)
-        entropies = {
-            'cont': torch.zeros(1, device=device),
-            'cat': torch.zeros(1, device=device),
-            'bern': torch.zeros(1, device=device),
-        }
-
-        if not freeze_actor and (self.update_count % self.policy_delay == 0):
-            # 在 update 中直接采样动作并计算各动作头熵
-            actor_outputs = self.actor.net(states)
-            actor_actions_for_q = {}
-            cat_joint_probs = None
-
-            # 连续动作：随机采样 + 熵
-            if actor_outputs['cont'] is not None:
-                mu, std = actor_outputs['cont']
-                dist = Normal(mu, std)
-                u = dist.rsample()
-                actor_actions_for_q['cont'] = torch.tanh(u)
-                entropies['cont'] = dist.entropy().sum(-1, keepdim=True)
-
-            # 离散动作：用 per-dim probs 计算联合概率（可微）并用于期望 Q
-            if actor_outputs['cat'] is not None:
-                cat_probs_list = actor_outputs['cat']
-                cat_joint_probs = joint_cat_prob_from_list(cat_probs_list)
-                ent_cat = torch.zeros(states.size(0), 1).to(device)
-                for probs in cat_probs_list:
-                    ent_cat += Categorical(probs=probs).entropy().unsqueeze(-1)
-                entropies['cat'] = ent_cat
-
-            # 伯努利动作：Gumbel-Softmax + 熵（fire_mask 位置才算有效熵）
-            if actor_outputs['bern'] is not None:
-                bern_logits = actor_outputs['bern']
-                logits_2d = torch.stack([torch.zeros_like(bern_logits), bern_logits], dim=-1)
-                gumbel_out = F.gumbel_softmax(logits_2d, tau=1.0, hard=True)
-                actor_actions_for_q['bern'] = gumbel_out[..., 1]
-                ent_bern = Bernoulli(logits=bern_logits).entropy()
-                fire_mask = actor_outputs.get('fire_mask', None)
-                if fire_mask is not None:
-                    ent_bern = (ent_bern * fire_mask).sum(-1, keepdim=True)
-                else:
-                    ent_bern = ent_bern.sum(-1, keepdim=True)
-                entropies['bern'] = ent_bern
-
-            # Q(s, cont, bern) 输出所有 cat 的 Q，与 cat 的联合概率做期望（可微）
-            q1_pi_all = self.critic_1(states, actor_actions_for_q)
-            q2_pi_all = self.critic_2(states, actor_actions_for_q)
-            q1_pi = (q1_pi_all * cat_joint_probs).sum(dim=1, keepdim=True) if cat_joint_probs is not None else q1_pi_all
-            q2_pi = (q2_pi_all * cat_joint_probs).sum(dim=1, keepdim=True) if cat_joint_probs is not None else q2_pi_all
+        # 2. 更新 策略网络 (Actor) —— freeze_actor=True 时跳过
+        if not freeze_actor:
+            # 重新对当前状态采样
+            curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states, gumbel_tau=self.gumbel_tau)
+            
+            q1_pi = self.critic_1(states, curr_actions_diff)
+            q2_pi = self.critic_2(states, curr_actions_diff)
             min_q_pi = torch.min(q1_pi, q2_pi)
-
-            # 固定熵系数正则化：最大化 min_q + k * H
-            actor_loss = -(( min_q_pi
-                           + self.k_cont * entropies['cont']
-                           + self.k_cat * entropies['cat']
-                           + self.k_bern * entropies['bern']) * active_masks).sum() / (active_sum + mask_eps)
-
+            
+            alpha = self.log_alpha.exp().detach()
+            # 机动部分 (cont+cat) 使用自适应 alpha；开火部分 (bern) 使用固定初始熵系数
+            k_bern = self.k_entropy.get('bern', 0.05)
+            actor_loss = ((alpha * (curr_log_probs['cont'] + curr_log_probs['cat'])
+                          - k_bern * curr_log_probs['bern_entropy']
+                          - min_q_pi) * active_masks).sum() / (active_sum + mask_eps)
+            
             actor_params = [p for p in self.actor.parameters() if p.requires_grad]
             actor_before = [p.detach().clone() for p in actor_params]
             self.actor_optimizer.zero_grad()
@@ -598,32 +477,50 @@ class TD3Hybrid:
                         for p, old in zip(actor_params, actor_before):
                             p.copy_(old + scale * (p - old))
 
-            # 软更新：仅在 actor 完成一次参数更新后执行，频率为 critic 的 1/policy_delay
-            # 三个目标网络一起跟随：target_actor / target_critic_1 / target_critic_2
-            self.soft_update(self.actor, self.target_actor)
-            self.soft_update(self.critic_1, self.target_critic_1)
-            self.soft_update(self.critic_2, self.target_critic_2)
+            # 3. 更新 Alpha (熵系数)
+            if target_entropy is not None:
+                self.target_entropy = target_entropy
+                # alpha 只根据机动部分 (cont+cat) 的熵来调节
+                # mobility_log_probs 是 log_prob（负数），熵 entropy = -log_prob（正数）
+                mobility_log_probs = curr_log_probs['cont'].detach() + curr_log_probs['cat'].detach()
+                mobility_entropy = -mobility_log_probs
+                alpha_loss = -(self.log_alpha * (mobility_entropy - target_entropy) * active_masks).sum() / (active_sum + mask_eps)
+                self.alpha_optimizer.zero_grad()
+                alpha_loss.backward()
+                self.alpha_optimizer.step()
+                # 将 alpha 截断到合法范围
+                if alpha_clip is not None:
+                    log_alpha_min = np.log(alpha_clip[0])
+                    log_alpha_max = np.log(alpha_clip[1])
+                    with torch.no_grad():
+                        self.log_alpha.clamp_(log_alpha_min, log_alpha_max)
+            else:
+                alpha_loss = torch.tensor(0.0)
+        else:
+            # freeze_actor=True：用零值占位，不触碰 actor/alpha 参数
+            curr_log_probs = {'cont': torch.zeros(1), 'cat': torch.zeros(1), 'bern': torch.zeros(1), 'bern_entropy': torch.zeros(1), 'total': torch.zeros(1)}
+            actor_loss = torch.tensor(0.0)
+            actor_grad = torch.tensor(0.0)
+            alpha_loss = torch.tensor(0.0)
 
-        self.update_count += 1
-
-        # --- E. 监控指标（兼容主训练脚本的 logger 字段） ---
+        # 4. 目标网络软更新
+        self.soft_update(self.critic_1, self.target_critic_1)
+        self.soft_update(self.critic_2, self.target_critic_2)
+        
+        # --- 监控指标（兼容主训练脚本的 logger 字段） ---
         self.last_actor_loss = actor_loss.item()
         self.last_critic_loss = critic_loss.item()
-        self.last_entropy = (entropies['cont'] + entropies['cat'] + entropies['bern']).mean().item()
-        self.last_entropy_mobility = (entropies['cont'] + entropies['cat']).mean().item()
-        self.last_entropy_bern = entropies['bern'].mean().item()
+        self.last_entropy_mobility = -(curr_log_probs['cont'] + curr_log_probs['cat']).mean().item()
+        self.last_entropy_bern = curr_log_probs['bern_entropy'].mean().item()
+        self.last_entropy = self.last_entropy_mobility + self.last_entropy_bern
         self.actor_loss = self.last_actor_loss
         self.critic_loss = self.last_critic_loss
         self.entropy_mean = self.last_entropy
-        self.k_cont = self.k_cont
-        self.k_cat = self.k_cat
-        self.k_bern = self.k_bern
+        self.alpha = self.log_alpha.exp().item()
+        self.k_bern = self.k_entropy.get('bern', 0.003)
         self.pre_clip_actor_grad = float(actor_grad)
         self.pre_clip_critic_grad = float(critic_grad)
         self.td_error_var = (y_target - q1_pred).detach().var().item()
-        self.policy_delay = self.policy_delay
-        self.target_noise = self.target_noise
-        self.noise_clip = self.noise_clip
 
         # 各动作头熵 / 开火概率（基于当前策略分布，便于监控）
         with torch.no_grad():

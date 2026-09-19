@@ -86,38 +86,95 @@ class ReplayBufferHybrid:
 # =============================================================================
 
 
+# ============================================================
+# 多 cat 维度展平/还原辅助函数
+# ============================================================
+def _make_strides(cat_dims):
+    if not cat_dims:
+        return []
+    m = len(cat_dims)
+    strides = [1] * m
+    for d in range(m - 2, -1, -1):
+        strides[d] = strides[d + 1] * cat_dims[d + 1]
+    return strides
+
+
+def ravel_cat_indices(cat_indices, cat_dims):
+    """多 dim cat 索引 (B, m) -> 展平联合索引 (B, 1)"""
+    if not cat_dims:
+        return torch.zeros(cat_indices.size(0), 1, dtype=torch.long, device=cat_indices.device)
+    strides = _make_strides(cat_dims)
+    joint = torch.zeros(cat_indices.size(0), 1, dtype=torch.long, device=cat_indices.device)
+    for d, s in enumerate(strides):
+        joint += cat_indices[:, d:d+1] * s
+    return joint
+
+
+def unravel_cat_index(joint, cat_dims):
+    """展平联合索引 (B, 1) -> 多 dim cat 索引 (B, m)"""
+    if not cat_dims:
+        return torch.empty(joint.size(0), 0, dtype=torch.long, device=joint.device)
+    strides = _make_strides(cat_dims)
+    m = len(cat_dims)
+    indices = torch.empty(joint.size(0), m, dtype=torch.long, device=joint.device)
+    for d, (K, s) in enumerate(zip(cat_dims, strides)):
+        indices[:, d] = ((joint // s) % K).squeeze(-1)
+    return indices
+
+
+def per_dim_onehot_to_indices(cat_onehot, cat_dims):
+    """把拼接的 per-dim one-hot (B, sum K_i) 还原成索引 (B, m)"""
+    if not cat_dims:
+        return torch.empty(cat_onehot.size(0), 0, dtype=torch.long, device=cat_onehot.device)
+    splits = torch.split(cat_onehot, cat_dims, dim=-1)
+    indices = [split.argmax(dim=-1, keepdim=True) for split in splits]
+    return torch.cat(indices, dim=-1)
+
+
+def joint_cat_prob_from_list(probs_list):
+    """由每个 cat 维度的概率 (B, K_i) 计算联合概率 (B, K1*K2*...)"""
+    if not probs_list:
+        return None
+    prob = probs_list[0]
+    for p in probs_list[1:]:
+        prob = (prob.unsqueeze(-1) * p.unsqueeze(1)).view(prob.size(0), -1)
+    return prob
+
+
 class QNetHybrid(torch.nn.Module):
     def __init__(self, state_dim, hidden_dims, action_dims_dict):
         super(QNetHybrid, self).__init__()
         
-        # 计算所有动作展平后的总维度
-        act_dim = 0
-        if 'cont' in action_dims_dict: act_dim += action_dims_dict['cont']
-        if 'cat' in action_dims_dict: act_dim += sum(action_dims_dict['cat']) # Cat 需要转为 One-hot 输入
-        if 'bern' in action_dims_dict: act_dim += action_dims_dict['bern']
+        # cat 展平为联合输出；cont/bern 作为输入条件
+        self.cont_dim = int(action_dims_dict.get('cont', 0))
+        self.bern_dim = int(action_dims_dict.get('bern', 0))
+        self.cat_dims = list(action_dims_dict.get('cat', []))
+        self.joint_cat_dim = int(np.prod(self.cat_dims, dtype=np.int64)) if self.cat_dims else 1
         
+        prev_size = state_dim + self.cont_dim + self.bern_dim
         layers = []
-        prev_size = state_dim + act_dim
         for layer_size in hidden_dims:
             layers.append(nn.Linear(prev_size, layer_size))
             layers.append(nn.ReLU())
             prev_size = layer_size
         self.net = nn.Sequential(*layers)
-        self.fc_out = nn.Linear(prev_size, 1)
+        self.fc_out = nn.Linear(prev_size, self.joint_cat_dim)
 
     def forward(self, state, action_dict):
-        # 拼接动作
-        actions_list = []
+        # 只把 cont / bern 作为输入；cat 不同取值的 Q 由输出头给出
+        parts = [state]
         if 'cont' in action_dict and action_dict['cont'] is not None:
-            actions_list.append(action_dict['cont'])
-        if 'cat' in action_dict and action_dict['cat'] is not None:
-            actions_list.append(action_dict['cat']) # 这里必须已经是 one-hot 或 gumbel-softmax 的输出
+            parts.append(action_dict['cont'])
+        else:
+            if self.cont_dim > 0:
+                parts.append(torch.zeros(state.size(0), self.cont_dim, device=state.device, dtype=state.dtype))
         if 'bern' in action_dict and action_dict['bern'] is not None:
-            actions_list.append(action_dict['bern'])
-            
-        action_cat = torch.cat(actions_list, dim=-1)
-        x = torch.cat([state, action_cat], dim=-1)
-        return self.fc_out(self.net(x))
+            parts.append(action_dict['bern'])
+        else:
+            if self.bern_dim > 0:
+                parts.append(torch.zeros(state.size(0), self.bern_dim, device=state.device, dtype=state.dtype))
+        x = torch.cat(parts, dim=-1)
+        return self.fc_out(self.net(x))  # (B, K1*K2*...)
 
 from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper as PPOHybridActorWrapper
 
@@ -366,13 +423,13 @@ class SACHybrid:
         if 'cont' in raw_actions:
             actions_for_q['cont'] = torch.from_numpy(raw_actions['cont']).to(device)
             
+        # cat 只保留索引，Q 网络输出所有 cat 组合后 gather
         if 'cat' in raw_actions:
             cat_idx = torch.from_numpy(raw_actions['cat']).to(device).long()
-            # 转换为 One-hot 供 Q 网络输入
-            cat_onehots = []
-            for i, dim in enumerate(self.actor.action_dims['cat']):
-                cat_onehots.append(F.one_hot(cat_idx[:, i], num_classes=dim).float())
-            actions_for_q['cat'] = torch.cat(cat_onehots, dim=-1)
+            cat_dims = self.actor.action_dims['cat']
+            joint_idx = ravel_cat_indices(cat_idx, cat_dims)
+        else:
+            joint_idx = None
             
         if self.actor.action_dims.get('bern', 0) > 0 and 'bern' in raw_actions:
             actions_for_q['bern'] = torch.from_numpy(raw_actions['bern']).to(device)
@@ -396,6 +453,14 @@ class SACHybrid:
             # 获取下一状态的动作 (可导采样) 和 log_prob
             next_actions_diff, next_log_probs = self.actor.sample_for_sac(next_states, gumbel_tau=self.gumbel_tau)
             
+            # 把目标 actor 的 cat one-hot 还原成联合索引
+            if 'cat' in next_actions_diff and next_actions_diff['cat'] is not None:
+                joint_idx_next = ravel_cat_indices(
+                    per_dim_onehot_to_indices(next_actions_diff['cat'], self.actor.action_dims['cat']),
+                    self.actor.action_dims['cat'])
+            else:
+                joint_idx_next = None
+
             # [诊断] 统计 next_states 里被 mask 和未被 mask 的样本数
             if self._diag_update_count % 200 == 1:
                 _outs_diag = self.actor.net(next_states)
@@ -421,8 +486,10 @@ class SACHybrid:
                           f"bern_logit[can_fire] mean={logit_mean:.3f} max={logit_max:.3f}")
             
             # 目标 Q 值
-            q1_target = self.target_critic_1(next_states, next_actions_diff)
-            q2_target = self.target_critic_2(next_states, next_actions_diff)
+            q1_target_all = self.target_critic_1(next_states, next_actions_diff)
+            q2_target_all = self.target_critic_2(next_states, next_actions_diff)
+            q1_target = q1_target_all.gather(1, joint_idx_next) if joint_idx_next is not None else q1_target_all
+            q2_target = q2_target_all.gather(1, joint_idx_next) if joint_idx_next is not None else q2_target_all
             alpha = self.log_alpha.exp()
             k_bern = self.k_entropy.get('bern', 0.003)
             entropy_reg = alpha * (next_log_probs['cont'] + next_log_probs['cat']) - k_bern * next_log_probs['bern_entropy']
@@ -432,8 +499,10 @@ class SACHybrid:
             y_target = rewards + self.gamma * (1 - dones) * min_q_target
             
         # 当前 Q 值预测
-        q1_pred = self.critic_1(states, actions_for_q)
-        q2_pred = self.critic_2(states, actions_for_q)
+        q1_pred_all = self.critic_1(states, actions_for_q)
+        q2_pred_all = self.critic_2(states, actions_for_q)
+        q1_pred = q1_pred_all.gather(1, joint_idx) if joint_idx is not None else q1_pred_all
+        q2_pred = q2_pred_all.gather(1, joint_idx) if joint_idx is not None else q2_pred_all
         
         mask_eps = 1e-5
         active_sum = active_masks.sum()
@@ -452,8 +521,18 @@ class SACHybrid:
             # 重新对当前状态采样
             curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states, gumbel_tau=self.gumbel_tau)
             
-            q1_pi = self.critic_1(states, curr_actions_diff)
-            q2_pi = self.critic_2(states, curr_actions_diff)
+            # 由 actor 的 per-dim cat probs 计算可微联合概率
+            actor_outputs = self.actor.net(states)
+            if actor_outputs['cat'] is not None:
+                cat_joint_probs = joint_cat_prob_from_list(actor_outputs['cat'])
+            else:
+                cat_joint_probs = None
+            
+            # Q 网络输入 cont/bern（自动忽略 cat），输出所有 cat 的 Q 后求期望
+            q1_pi_all = self.critic_1(states, curr_actions_diff)
+            q2_pi_all = self.critic_2(states, curr_actions_diff)
+            q1_pi = (q1_pi_all * cat_joint_probs).sum(dim=1, keepdim=True) if cat_joint_probs is not None else q1_pi_all
+            q2_pi = (q2_pi_all * cat_joint_probs).sum(dim=1, keepdim=True) if cat_joint_probs is not None else q2_pi_all
             min_q_pi = torch.min(q1_pi, q2_pi)
             
             alpha = self.log_alpha.exp().detach()

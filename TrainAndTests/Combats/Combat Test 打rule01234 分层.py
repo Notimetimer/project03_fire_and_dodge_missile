@@ -22,7 +22,7 @@ from BasicRules_new_hierarchical import basic_rules
 # from BasicRules_new_hierarchical2 import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
+from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper, infer_mask_cfg_from_actor_meta # 纯MLP
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "无预训练-run-20260817-222029" # "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
+    dir_name = "SLWSPFSP0.3_flymask_0-run-20260905-210412" # "Adistill_NoIL-run-20260815-223725" # "TD3_PFSP_0.3-run-20260809-155629" # "SLWSPFSP0.3-run-20260804-221605"
     
     "SLWSPFSP0.3无引导奖励-run-20260726-091904"
 
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [3,5,6] # [0,1,2,3,4] # [3]
+    rule_opponents = [3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -183,7 +183,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.3, 'bern':0.97}
+                            temperature={'cat':0.2, 'bern':0.97}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]

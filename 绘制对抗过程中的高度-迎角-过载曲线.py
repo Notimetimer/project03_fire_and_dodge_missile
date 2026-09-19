@@ -8,7 +8,7 @@ import os
 # --- 路径设置 ---
 # 获取当前脚本所在目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(current_dir, "logs", "CombatLog_vs_Rule3.csv")
+csv_path = os.path.join(current_dir, "logs", "CombatLog_vs_Rule_2609_3.csv")
 
 if not os.path.exists(csv_path):
     print(f"错误：在以下路径未找到文件: {csv_path}")
@@ -35,17 +35,23 @@ else:
         # 计算全局最大和最小
         y_min = min(data_red.min(), data_blue.min())
         y_max = max(data_red.max(), data_blue.max())
-        # 仅保留最大、最小和零点（如果零在范围内）
-        ticks = [y_min, y_max]
-        if y_min < 0 < y_max:
-            ticks.append(0)
-        sorted_ticks = sorted(list(set(ticks)))
-        ax.set_yticks(sorted_ticks)
-        # 根据 precision 设置刻度标签格式
+        x_min = ax.get_xlim()[0]
+
         if precision == 0:
-            ax.set_yticklabels([f"{int(round(t))}" for t in sorted_ticks])
+            y_min_str = f"{int(round(y_min))}"
+            y_max_str = f"{int(round(y_max))}"
         else:
-            ax.set_yticklabels([f"{t:.{precision}f}" for t in sorted_ticks])
+            y_min_str = f"{y_min:.{precision}f}"
+            y_max_str = f"{y_max:.{precision}f}"
+
+        # 绘制最大、最小参考线
+        ax.axhline(y=y_max, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
+        ax.axhline(y=y_min, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
+
+        # 在坐标区域左侧标注最大、最小值，避免与原有 y 轴刻度重叠
+        bbox_props = dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='none', alpha=0.7)
+        ax.text(x_min, y_max, y_max_str, ha='left', va='top', fontsize=9, color='dimgray', clip_on=False, bbox=bbox_props)
+        ax.text(x_min, y_min, y_min_str, ha='left', va='bottom', fontsize=9, color='dimgray', clip_on=False, bbox=bbox_props)
 
     # 1. 过载 (Ny) - 第一张图
     axes[0].plot(df['time'], df['r_ny'], label='红方', color='crimson', linewidth=1.0)

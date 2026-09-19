@@ -97,47 +97,47 @@ fig1 = plt.figure(figsize=(12, 6))
 # 1. 航向角对比 (展开值)
 ax1_l = plt.subplot(3, 3, 1)
 plot_comparison(ax1_l, [df_ppo_steady, df_pid_steady], 'psi', ['PPO', 'PID'], is_error=False, req_col='psi_req', unwrap=True)
-ax1_l.set_ylabel("航向角(°)"); ax1_l.legend(loc='lower right'); ax1_l.grid(True)
+ax1_l.set_ylabel("航向角/(°)"); ax1_l.legend(loc='lower right'); ax1_l.grid(True)
 ax1_l.yaxis.set_major_locator(ticker.MultipleLocator(45))
 
 ax1_m = plt.subplot(3, 3, 2)
 plot_comparison(ax1_m, [df_ppo_norm, df_pid_norm], 'psi', ['PPO', 'PID'], is_error=False, req_col='psi_req', unwrap=True)
-ax1_m.set_ylabel("航向角(°)"); ax1_m.legend(loc='lower right'); ax1_m.grid(True)
+ax1_m.set_ylabel("航向角/(°)"); ax1_m.legend(loc='lower right'); ax1_m.grid(True)
 ax1_m.yaxis.set_major_locator(ticker.MultipleLocator(45))
 
 ax1_r = plt.subplot(3, 3, 3)
 plot_comparison(ax1_r, [df_ppo_splits, df_pid_splits], 'psi', ['PPO', 'PID'], is_error=False, req_col='psi_req', unwrap=True)
-ax1_r.set_ylabel("航向角(°)"); ax1_r.legend(loc='lower right'); ax1_r.grid(True)
+ax1_r.set_ylabel("航向角/(°)"); ax1_r.legend(loc='lower right'); ax1_r.grid(True)
 ax1_r.yaxis.set_major_locator(ticker.MultipleLocator(45))
 
 # 2. 俯仰角对比
 ax2_l = plt.subplot(3, 3, 4)
 plot_comparison(ax2_l, [df_ppo_steady, df_pid_steady], 'theta', ['PPO', 'PID'], req_col='theta_req')
-ax2_l.set_ylabel("俯仰角 (°)"); ax2_l.legend(loc='lower right'); ax2_l.grid(True)
+ax2_l.set_ylabel("俯仰角/(°)"); ax2_l.legend(loc='lower right'); ax2_l.grid(True)
 # ax2_l.yaxis.set_major_locator(ticker.MultipleLocator(45))
 
 ax2_m = plt.subplot(3, 3, 5)
 plot_comparison(ax2_m, [df_ppo_norm, df_pid_norm], 'theta', ['PPO', 'PID'], req_col='theta_req')
-ax2_m.set_ylabel("俯仰角 (°)"); ax2_m.legend(loc='lower right'); ax2_m.grid(True)
+ax2_m.set_ylabel("俯仰角/(°)"); ax2_m.legend(loc='lower right'); ax2_m.grid(True)
 # ax2_l.yaxis.set_major_locator(ticker.MultipleLocator(45))
 
 ax2_r = plt.subplot(3, 3, 6)
 plot_comparison(ax2_r, [df_ppo_splits, df_pid_splits], 'theta', ['PPO', 'PID'], req_col='theta_req')
-ax2_r.set_ylabel("俯仰角 (°)"); ax2_r.legend(loc='lower right'); ax2_r.grid(True)
+ax2_r.set_ylabel("俯仰角/(°)"); ax2_r.legend(loc='lower right'); ax2_r.grid(True)
 # ax2_l.yaxis.set_major_locator(ticker.MultipleLocator(45))
 
 # 3. 速度对比
 ax3_l = plt.subplot(3, 3, 7)
 plot_comparison(ax3_l, [df_ppo_steady, df_pid_steady], 'v', ['PPO', 'PID'], req_col='v_req')
-ax3_l.set_ylabel("空速 (m/s)"); ax3_l.set_xlabel("时间 (s)"); ax3_l.legend(loc='lower right'); ax3_l.grid(True)
+ax3_l.set_ylabel("空速/(m/s)"); ax3_l.set_xlabel("时间/(s)"); ax3_l.legend(loc='lower right'); ax3_l.grid(True)
 
 ax3_m = plt.subplot(3, 3, 8)
 plot_comparison(ax3_m, [df_ppo_norm, df_pid_norm], 'v', ['PPO', 'PID'], req_col='v_req')
-ax3_m.set_ylabel("空速 (m/s)"); ax3_m.set_xlabel("时间 (s)"); ax3_m.legend(loc='lower right'); ax3_m.grid(True)
+ax3_m.set_ylabel("空速/(m/s)"); ax3_m.set_xlabel("时间/(s)"); ax3_m.legend(loc='lower right'); ax3_m.grid(True)
 
 ax3_r = plt.subplot(3, 3, 9)
 plot_comparison(ax3_r, [df_ppo_splits, df_pid_splits], 'v', ['PPO', 'PID'], req_col='v_req')
-ax3_r.set_ylabel("空速 (m/s)"); ax3_r.set_xlabel("时间 (s)"); ax3_r.legend(loc='lower right'); ax3_r.grid(True)
+ax3_r.set_ylabel("空速/(m/s)"); ax3_r.set_xlabel("时间/(s)"); ax3_r.legend(loc='lower right'); ax3_r.grid(True)
 
 # plt.suptitle(f"控制器核心性能对比 (Mild vs Violent vs Split-S)")
 plt.tight_layout(rect=[0, 0.03, 1, 0.95])

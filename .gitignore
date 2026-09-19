@@ -71,3 +71,5 @@ TrainAndTests/Combats/marwil_epsilon_sweep_manifest.json
 TrainAndTests/Combats/marwil_epsilon_sweep_results.json
 TrainAndTests/Combats/marwil_epsilon_sweep_results_v0h0.json
 TrainAndTests/Combats/marwil_pareto_recomputed_v0h0.json
+*.svg
+*.pdf

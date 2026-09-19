@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import os
+import matplotlib.ticker as ticker
 # 自定义库
 from _context import *
 from Visualize.plot_training_curve_from_csv import plot_training_results
@@ -14,20 +15,20 @@ from Algorithms.rl_utils import moving_average # 使用我们新版本的MA
 # =============================================================================
 # 全局样式配置 (Seaborn 主旋律) darkgrid 或者 whitegrid
 # =============================================================================
-# 配置 Seaborn 主题，使用自定义浅色背景，并设置中文字体
-sns.set_theme(style="whitegrid", font="SimHei", rc={
-    "axes.unicode_minus": False,
-    # "axes.facecolor": "#f0f0f0",      # 自定义浅灰背景
-    # "figure.facecolor": "#f0f0f0",
-    # "axes.edgecolor": "#cccccc",
-    # "grid.color": "#d0d0d0"
-})
+# 配置绘图样式
+sns.set_style("whitegrid")
+
+# 配置字体：Times New Roman（英文）+ 宋体（中文）
+plt.rcParams['font.family'] = ['Times New Roman', 'SimSun']
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['axes.formatter.use_mathtext'] = True
+plt.rcParams['mathtext.fontset'] = 'stix'
 
 # =============================================================================
 # 全局视觉参数 (在此调节线粗细和深浅)
 # =============================================================================
-LW_SMOOTH = 1.2   # 平滑主趋势线粗
-LW_RAW = 0.7      # 原始噪声背景线细
+LW_SMOOTH = 0.6   # 平滑主趋势线粗
+LW_RAW = 0.3      # 原始噪声背景线细
 ALPHA_RAW = 0.1   # 原始噪声背景透明度 (0.1 风格)
 
 # 数据路径
@@ -63,7 +64,7 @@ def prepare_metric_df(path, label, scale=1.0, smooth_p=35):
 # =============================================================================
 # Figure 1：奖励函数 & 成功率
 # =============================================================================
-fig1 = plt.figure(figsize=(8, 6), dpi=100)
+fig1 = plt.figure(figsize=(8/2.54, (8*8/16)/2.54), dpi=200)
 ax1_l = fig1.add_subplot(1, 1, 1)
 
 # 准备数据
@@ -85,7 +86,7 @@ sns.lineplot(data=df_reward, x='Step', y='Smooth', ax=ax1_l, color=color_reward,
 
 
 # 绘制 PID 基准奖励虚线 (暖色调，与左轴匹配)
-ax1_l.axhline(PID_AVG_REWARD, color='indianred', linestyle='--', linewidth=1.5, alpha=0.8, label='PID 累积回报')
+ax1_l.axhline(PID_AVG_REWARD, color='indianred', linestyle='--', linewidth=0.8, alpha=0.8, label='PID 累积回报')
 
 # 绘制右轴 (Survive Rate)
 ax1_r = ax1_l.twinx()
@@ -96,39 +97,36 @@ sns.lineplot(data=df_survive, x='Step', y='Smooth', ax=ax1_r, color=color_surviv
 
 # 绘制 PID 基准失败率虚线 (冷色调，与右轴匹配)
 pid_exceed = 1 - PID_AVG_SURVIVE
-ax1_r.axhline(pid_exceed, color='steelblue', linestyle='--', linewidth=1.5, alpha=0.8, label='PID 失败率')
+ax1_r.axhline(pid_exceed, color='steelblue', linestyle='--', linewidth=0.8, alpha=0.8, label='PID 失败率')
 
 # 在虚线末端标注 PID 数值
 xmax1 = ax1_l.get_xlim()[1]
 ax1_l.text(xmax1*0.98, PID_AVG_REWARD*-0.8, f'PID: {PID_AVG_REWARD}',
-           color='indianred', fontsize=9, fontweight='bold', va='bottom', ha='right')
+           color='indianred', fontsize=5.5, fontweight='bold', va='bottom', ha='right')
 ax1_r.text(xmax1*0.98, pid_exceed + 0.02, f'PID: {pid_exceed:.2f}',
-           color='steelblue', fontsize=9, fontweight='bold', va='bottom', ha='right')
+           color='steelblue', fontsize=5.5, fontweight='bold', va='bottom', ha='right')
 
 # 合并图例
 ax1_r.legend_.remove() if ax1_r.get_legend() else None
 h1, l1 = ax1_l.get_legend_handles_labels()
 h2, l2 = ax1_r.get_legend_handles_labels()
-leg1 = ax1_l.legend(handles=h1+h2, labels=l1+l2, loc='center right', frameon=True, fontsize=9)
+leg1 = ax1_l.legend(handles=h1+h2, labels=l1+l2, loc='center right', frameon=True, fontsize=5.5)
 
 # 装饰 (参考 Figure 1 风格)
 # 调深 Y 轴颜色 (加深版彩色)
 color_reward_dark = "tab:red"
 color_survive_dark = "tab:blue"
 
-ax1_l.set_ylabel("平均累积回报", color='black', fontweight='bold', fontsize=12) # Return
-ax1_r.set_ylabel("失败率", color='black', fontweight='bold', fontsize=12)
-ax1_l.set_xlabel("Steps", fontweight='bold')
-ax1_l.tick_params(axis='y', labelcolor='black', labelsize=10, width=1.5)
-ax1_r.tick_params(axis='y', labelcolor='black', labelsize=10, width=1.5)
+ax1_l.set_ylabel("奖励", color='black', fontweight='bold', fontsize=7.5) # Return
+ax1_r.set_ylabel("失败率", color='black', fontweight='bold', fontsize=7.5)
+ax1_l.set_xlabel("步数", fontweight='bold', fontsize=7.5)
+ax1_l.tick_params(axis='both', labelcolor='black', labelsize=5.5, width=1.5)
+ax1_r.tick_params(axis='y', labelcolor='black', labelsize=5.5, width=1.5)
+ax1_l.ticklabel_format(axis='x', style='sci', scilimits=(0,0), useMathText=True)
+ax1_l.xaxis.get_offset_text().set_fontsize(5.5)
 
 # 强制所有坐标轴刻度数字加粗
-for label in ax1_l.get_yticklabels(): 
-    label.set_fontweight('bold')
-for label in ax1_r.get_yticklabels(): 
-    label.set_fontweight('bold')
-for label in ax1_l.get_xticklabels(): 
-    label.set_fontweight('bold')
+
 
 # 保持网格在最底层
 ax1_l.set_axisbelow(True)
@@ -141,12 +139,12 @@ ax1_r.grid(True, alpha=0.3, color='lightgray')
 sns.despine(ax=ax1_l, right=False)
 
 # 布局收尾 (Figure 1)
-fig1.tight_layout(pad=3.0, rect=[0, 0, 1, 0.95])
+fig1.tight_layout(pad=0.0, h_pad=0, w_pad=0, rect=[0.05, 0.05, 0.95, 0.95])
 
 # =============================================================================
 # Figure 2：误差追踪 (Psi & Theta & V)
 # =============================================================================
-fig2 = plt.figure(figsize=(8, 6), dpi=100)
+fig2 = plt.figure(figsize=(8/2.54, 5/2.54), dpi=200)
 ax2 = fig2.add_subplot(1, 1, 1)
 
 # 读取并预处理误差数据到一个 DataFrame
@@ -180,24 +178,24 @@ sns.lineplot(data=df_v, x='Step', y='Smooth', ax=ax2_r, color=color_v, linewidth
 
 
 # PID 基准误差虚线 (与 Figure1 PID 颜色一致)
-ax2.axhline(PID_AVG_PSI_ERR, color='indianred', linestyle='--', linewidth=1.5, alpha=0.8, label='PID 航向角误差')
-ax2.axhline(PID_AVG_THETA_ERR, color='steelblue', linestyle='--', linewidth=1.5, alpha=0.8, label='PID 俯仰角误差')
-ax2_r.axhline(PID_AVG_V_ERR, color='darkgreen', linestyle='--', linewidth=1.5, alpha=0.8, label='PID 速度误差')
+ax2.axhline(PID_AVG_PSI_ERR, color='indianred', linestyle='--', linewidth=0.8, alpha=0.8, label='PID 航向角误差')
+ax2.axhline(PID_AVG_THETA_ERR, color='steelblue', linestyle='--', linewidth=0.8, alpha=0.8, label='PID 俯仰角误差')
+ax2_r.axhline(PID_AVG_V_ERR, color='darkgreen', linestyle='--', linewidth=0.8, alpha=0.8, label='PID 速度误差')
 
 # 在虚线末端标注 PID 数值
 xmax2 = ax2.get_xlim()[1]
 ax2.text(xmax2*0.98, PID_AVG_PSI_ERR*1.15, f'PID: {PID_AVG_PSI_ERR}°',
-         color=colors_main[0], fontsize=9, fontweight='bold', va='bottom', ha='right')
+         color=colors_main[0], fontsize=5.5, fontweight='bold', va='bottom', ha='right')
 ax2.text(xmax2*0.98, PID_AVG_THETA_ERR*0.7, f'PID: {PID_AVG_THETA_ERR}°',
-         color=colors_main[1], fontsize=9, fontweight='bold', va='bottom', ha='right')
+         color=colors_main[1], fontsize=5.5, fontweight='bold', va='bottom', ha='right')
 ax2_r.text(xmax2*0.98, PID_AVG_V_ERR*0.7, f'PID: {PID_AVG_V_ERR} m/s',
-         color=color_v, fontsize=9, fontweight='bold', va='bottom', ha='right')
+         color=color_v, fontsize=5.5, fontweight='bold', va='bottom', ha='right')
 
 # 合并图例
 ax2_r.legend_.remove() if ax2_r.get_legend() else None
 h1, l1 = ax2.get_legend_handles_labels()
 h2, l2 = ax2_r.get_legend_handles_labels()
-leg2 = ax2.legend(handles=h1+h2, labels=l1+l2, loc='upper right', frameon=True, fontsize=9)
+leg2 = ax2.legend(handles=h1+h2, labels=l1+l2, loc='upper right', frameon=True, fontsize=5.5)
 
 # 装饰底轴风格
 import matplotlib.ticker as ticker
@@ -210,19 +208,16 @@ ax2.yaxis.set_minor_locator(ticker.LogLocator(base=10.0, subs=np.arange(1, 10), 
 ax2.yaxis.set_minor_formatter(ticker.NullFormatter())
 
 # 装饰底轴风格
-ax2.set_ylabel("角度误差(°)", fontweight='bold', fontsize=12, color='black')
-ax2_r.set_ylabel("速度误差(m/s)", fontweight='bold', fontsize=12, color='black')
-ax2.tick_params(axis='y', labelcolor='black', labelsize=10, width=1.5)
-ax2_r.tick_params(axis='y', labelcolor='black', labelsize=10, width=1.5)
-ax2.set_xlabel("Steps", fontweight='bold')
+ax2.set_ylabel("角度误差/(°)", fontweight='bold', fontsize=7.5, color='black')
+ax2_r.set_ylabel("速度误差/(m/s)", fontweight='bold', fontsize=7.5, color='black')
+ax2.tick_params(axis='both', labelcolor='black', labelsize=5.5, width=1.5)
+ax2_r.tick_params(axis='y', labelcolor='black', labelsize=5.5, width=1.5)
+ax2.set_xlabel("步数", fontweight='bold', fontsize=7.5)
+ax2.ticklabel_format(axis='x', style='sci', scilimits=(0,0), useMathText=True)
+ax2.xaxis.get_offset_text().set_fontsize(5.5)
 
 # 确保所有坐标轴数字也加粗
-for label in ax2.get_yticklabels():
-    label.set_fontweight('bold')
-for label in ax2_r.get_yticklabels(): 
-    label.set_fontweight('bold')
-for label in ax2.get_xticklabels():
-    label.set_fontweight('bold')
+
 
 # 保持网格在最底层
 ax2.set_axisbelow(True)
@@ -235,6 +230,13 @@ ax2_r.grid(True, axis='y', alpha=0.3, color='lightgray')
 sns.despine(ax=ax2, right=False)
 
 # 使用 tight_layout 并像决策曲线图一样留出顶部空白，防止标题被遮挡
-fig2.tight_layout(pad=3.0, rect=[0, 0, 1, 0.95])
+fig2.tight_layout(pad=0.0, h_pad=0, w_pad=0, rect=[0.05, 0.05, 0.95, 0.95])
+
+# 保存图片
+save_dir = os.path.dirname(os.path.abspath(__file__))
+fig1.savefig(os.path.join(save_dir, "奖励失败率.svg"), format="svg")
+fig1.savefig(os.path.join(save_dir, "奖励失败率.png"), format="png", dpi=200)
+fig2.savefig(os.path.join(save_dir, "指令跟踪误差.svg"), format="svg")
+fig2.savefig(os.path.join(save_dir, "指令跟踪误差.png"), format="png", dpi=200)
 
 plt.show()
