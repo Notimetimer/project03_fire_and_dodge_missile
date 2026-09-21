@@ -1062,7 +1062,13 @@ class PPOHybrid:
         # self.actor_optimizer = torch.optim.AdamW(self.actor.parameters(), lr=actor_lr, weight_decay=1e-4, eps=1e-5)
         "RAdam优化器(为冷启动优化，但非平稳环境不建议用)"
         # self.actor_optimizer = torch.optim.RAdam(self.actor.parameters(), lr=actor_lr, eps=1e-5)
-        
+
+        # [新增] 开火头(fc_bern)专属优化器，供 supervised_fire_update 使用，与其余动作头解耦
+        self.fire_head_optimizer = None
+        if hasattr(self.actor.net, 'fc_bern'):
+            self.fire_head_optimizer = torch.optim.Adam(self.actor.net.fc_bern.parameters(), lr=actor_lr)
+        self.last_supervised_fire_loss = 0.0
+
         self.gamma = gamma
         self.lmbda = lmbda
         self.epochs = epochs
@@ -1606,6 +1612,9 @@ class PPOHybrid:
         if actor_lr is not None:
             for param_group in self.actor_optimizer.param_groups:
                 param_group['lr'] = actor_lr
+            if self.fire_head_optimizer is not None:
+                for param_group in self.fire_head_optimizer.param_groups:
+                    param_group['lr'] = actor_lr
         if critic_lr is not None:
             for param_group in self.critic_optimizer.param_groups:
                 param_group['lr'] = critic_lr  
@@ -1629,11 +1638,17 @@ class PPOHybrid:
             # 重新创建 optim（以清除内部 state），但使用当前的 lr/betas/eps/weight_decay
             self.actor_optimizer = _recreate_from(self.actor_optimizer, self.actor.parameters())
             self.critic_optimizer = _recreate_from(self.critic_optimizer, self.critic.parameters())
+            if self.fire_head_optimizer is not None:
+                self.fire_head_optimizer = _recreate_from(self.fire_head_optimizer, self.actor.net.fc_bern.parameters())
+                self.fire_head_optimizer.zero_grad()
             # 清除可能残留的梯度
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
         elif reset_type=='actor':
             self.actor_optimizer = _recreate_from(self.actor_optimizer, self.actor.parameters())
+            if self.fire_head_optimizer is not None:
+                self.fire_head_optimizer = _recreate_from(self.fire_head_optimizer, self.actor.net.fc_bern.parameters())
+                self.fire_head_optimizer.zero_grad()
             self.actor_optimizer.zero_grad()
         elif reset_type=='critic':
             self.critic_optimizer = _recreate_from(self.critic_optimizer, self.critic.parameters())
@@ -2185,6 +2200,63 @@ class PPOHybrid:
 
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
+    
+    def supervised_fire_update(self, fire_batch, epochs=1, batch_size=128, max_grad_norm=2.0):
+        """仅用回合结束后的 fire_obs/hit_record 更新开火头 fc_bern。
+
+        共享 backbone 和 BFM/其它动作头不参与梯度更新；因此该更新不会改变
+        SAC 学到的机动策略。fire_batch 可是 SupervisedFireBuffer.sample() 的
+        字典，也可是包含 fire_obs/hit_record 的原始 record 列表。
+        """
+        if self.fire_head_optimizer is None:
+            self.last_supervised_fire_loss = 0.0
+            return 0.0
+
+        if isinstance(fire_batch, dict):
+            states = fire_batch.get('states', fire_batch.get('fire_obs'))
+            labels = fire_batch.get('labels', fire_batch.get('hit_record'))
+        else:
+            records = list(fire_batch or [])
+            states = [r.get('state', r.get('fire_obs')) for r in records]
+            labels = [r.get('label', r.get('hit_record')) for r in records]
+        if states is None or labels is None or len(states) == 0:
+            self.last_supervised_fire_loss = 0.0
+            return 0.0
+
+        states = torch.as_tensor(np.asarray(states, dtype=np.float32), device=self.device)
+        labels = torch.as_tensor(np.asarray(labels, dtype=np.float32), device=self.device).view(-1, 1)
+        if states.size(0) != labels.size(0):
+            raise ValueError('fire_obs and hit_record must have the same length')
+
+        net = self.actor.net
+        params = list(self.actor.parameters())
+        old_requires_grad = [p.requires_grad for p in params]
+        for p in params:
+            p.requires_grad_(False)
+        for p in net.fc_bern.parameters():
+            p.requires_grad_(True)
+
+        losses = []
+        n = states.size(0)
+        mb_size = max(1, min(int(batch_size), n))
+        for _ in range(max(1, int(epochs))):
+            order = torch.randperm(n, device=self.device)
+            for start in range(0, n, mb_size):
+                idx = order[start:start + mb_size]
+                with torch.no_grad():
+                    features = net.net(states[idx])
+                logits = net.fc_bern(features)[:, :1]
+                loss = F.binary_cross_entropy_with_logits(logits, labels[idx])
+                self.fire_head_optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(net.fc_bern.parameters(), max_grad_norm)
+                self.fire_head_optimizer.step()
+                losses.append(float(loss.detach().cpu()))
+
+        for p, requires_grad in zip(params, old_requires_grad):
+            p.requires_grad_(requires_grad)
+        self.last_supervised_fire_loss = float(np.mean(losses)) if losses else 0.0
+        return self.last_supervised_fire_loss
 
     # =========================================================================
     #  [New Method] Bernoulli 开火头保护性有监督训练 (防止机动策略被bern崩溃拖累)
