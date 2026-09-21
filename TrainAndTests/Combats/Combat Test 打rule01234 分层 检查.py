@@ -22,7 +22,7 @@ from BasicRules_new_hierarchical import basic_rules
 # from BasicRules_new_hierarchical2 import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper, infer_mask_cfg_from_actor_meta # 纯MLP
+from Algorithms.PPOHybrid23_0 import HybridActorWrapper, infer_mask_cfg_from_actor_meta # 纯MLP
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
@@ -47,10 +47,13 @@ if __name__ == "__main__":
 
     gamma = 0.97
 
+    # from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
+    from Algorithms.SACHybrid import PolicyNetHybrid
+
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
     
-    dir_name = "SAC0.3_flymask_v0h0-run-20260921-165708"
+    dir_name = "SAC0.3_flymask_v0h0-run-20260921-173420"
     
     # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
 

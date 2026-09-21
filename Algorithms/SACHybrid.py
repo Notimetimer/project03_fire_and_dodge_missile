@@ -232,7 +232,287 @@ class QNetHybrid(torch.nn.Module):
         x = torch.cat(parts, dim=-1)
         return self.fc_out(self.net(x))  # (B, K1*K2*...)
 
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper as PPOHybridActorWrapper
+from Algorithms.PPOHybrid23_0 import load_mask_config, HybridActorWrapper as PPOHybridActorWrapper
+
+# =============================================================================
+# 1. Policy 网络 (用于 SAC / TD3，支持 warning 状态下的动作 mask)
+# =============================================================================
+
+class PolicyNetHybrid(torch.nn.Module):
+    """
+    支持混合动作空间的策略网络 (纯 MLP)。
+    引入了可学习的温度参数来控制离散和伯努利动作的熵。
+    """
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0, mask_cfg=None):
+        super(PolicyNetHybrid, self).__init__()
+        self.action_dims = action_dims_dict
+
+        # [新增] 机动mask 开关：只在网络初始化时从
+        # mask_config.json 读取一次（或被外部显式传入），永久保存为实例属性，forward() 不再重复读取磁盘。
+        mask_cfg = load_mask_config(override=mask_cfg)
+        self.ver_map = mask_cfg['ver']
+        self.ver_mask = mask_cfg['ver']
+        self.hor_map = mask_cfg['hor']
+        self.hor_mask = mask_cfg['hor']
+
+        backbone_input_dim = state_dim
+
+        # 共享主干网络
+        layers = []
+        prev_size = backbone_input_dim
+        for layer_size in hidden_dims:
+            layers.append(nn.Linear(prev_size, layer_size))
+            layers.append(nn.ReLU())
+            prev_size = layer_size
+        self.net = nn.Sequential(*layers)
+
+        # 1. 连续动作头 (Continuous)
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
+            cont_dim = self.action_dims['cont']
+            self.log_std_cont = nn.Parameter(torch.log(torch.ones(cont_dim) * init_std))
+
+            layers = []
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), cont_dim))
+            self.fc_mu = nn.Sequential(*layers)
+
+        # 2. 离散动作头 (Categorical)
+        if 'cat' not in self.action_dims:
+            self.action_dims['cat'] = []
+        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
+            self.cat_dims = list(self.action_dims['cat'])  # list, e.g., [5, 7]
+            # [去串扰设计] ver_map/hor_map 分别控制是否启用 13/11 多对一映射；
+            # 否则直接按外部维度 self.cat_dims (如 [5, 7] 或 [5, 6]) 构建离散头。
+            self.cat_dims_internal = list(self.cat_dims)
+            if self.ver_map:
+                if len(self.cat_dims_internal) > 0 and self.cat_dims_internal[0] == 5:
+                    self.cat_dims_internal[0] = 13
+            if self.hor_map:
+                if len(self.cat_dims_internal) > 1 and self.cat_dims_internal[1] in (6, 7):
+                    self.cat_dims_internal[1] = 11
+            total_cat_dim = sum(self.cat_dims_internal)
+
+            layers = []
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), total_cat_dim))
+            self.fc_cat = nn.Sequential(*layers)
+
+        # 3. 伯努利动作头 (Bernoulli)
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+            bern_dim = self.action_dims['bern']
+            layers = []
+            layers.append(nn.Linear(prev_size, int(prev_size/2)))
+            layers.append(nn.ReLU())
+            layers.append(nn.Linear(int(prev_size/2), bern_dim))
+            self.fc_bern = nn.Sequential(*layers)
+            nn.init.constant_(self.fc_bern[-1].bias, 0.0)
+
+    def forward(self, x, min_std=1e-6, max_std=1.0, action_masks=None, temperature=1.0, mask_on=0):
+        ver_mask = self.ver_mask
+        hor_mask = self.hor_mask
+        if isinstance(temperature, dict):
+            temp_cat = temperature.get('cat', 1.0)
+            temp_bern = temperature.get('bern', 1.0)
+        else:
+            temp_cat = temperature
+            temp_bern = temperature
+
+        shared_features = self.net(x)
+
+        outputs = {'cont': None, 'cat': None, 'bern': None}
+
+        # --- Continuous ---
+        if 'cont' in self.action_dims and self.action_dims['cont'] > 0:
+            mu = self.fc_mu(shared_features)
+            std = torch.exp(self.log_std_cont)
+            std = torch.clamp(std, min=min_std, max=max_std)
+            if mu.dim() > 1:
+                std = std.unsqueeze(0).expand_as(mu)
+            outputs['cont'] = (mu, std)
+
+        # --- Categorical ---
+        if 'cat' in self.action_dims and sum(self.action_dims['cat']) > 0:
+            cat_logits_all = self.fc_cat(shared_features)
+
+            # 1. 切分 Logits (内部使用 13 维垂直头 + 11 维水平头切分)
+            split_dims = getattr(self, 'cat_dims_internal', self.cat_dims)
+            cat_logits_list = list(torch.split(cat_logits_all, split_dims, dim=-1))
+
+            # [去串扰与机动 mask]：对 action_ver 处理 (5个动作)
+            if len(cat_logits_list) > 0 and cat_logits_list[0].size(-1) == 13:
+                xb_cat = x
+                if xb_cat.dim() == 1:
+                    xb_cat = xb_cat.unsqueeze(0)
+                warning_flag_cat = xb_cat[:, 5] > 1e-6
+                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
+                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
+                cond_no_warn_no_mid = (~warning_flag_cat) & (~missile_in_mid_term_cat)
+
+                ver_logits_all = cat_logits_list[0]  # (Batch, 13)
+                v_def = ver_logits_all[:, 8:13]      # 防御：0,1,2,3,4
+
+                if ver_mask:
+                    v_off = ver_logits_all[:, 0:5]   # 进攻：0,1,2,3,4
+                    v_dis = ver_logits_all[:, 5:8]   # 偏置：2,3,4
+                    v_off_5 = v_off
+
+                    B = ver_logits_all.size(0)
+                    v_dis_5 = torch.full((B, 5), -1e8, dtype=ver_logits_all.dtype, device=ver_logits_all.device)
+                    v_dis_5[:, 2] = v_dis[:, 0]
+                    v_dis_5[:, 3] = v_dis[:, 1]
+                    v_dis_5[:, 4] = v_dis[:, 2]
+
+                    ver_logits_5 = v_def
+                    ver_logits_5 = torch.where(cond_no_warn_mid.unsqueeze(1), v_dis_5, ver_logits_5)
+                    ver_logits_5 = torch.where(cond_no_warn_no_mid.unsqueeze(1), v_off_5, ver_logits_5)
+                    cat_logits_list[0] = ver_logits_5
+                else:
+                    cat_logits_list[0] = v_def
+
+            # [去串扰与机动 mask]：对 action_hor 处理
+            if len(cat_logits_list) > 1 and cat_logits_list[1].size(-1) == 11:
+                xb_cat = x
+                if xb_cat.dim() == 1:
+                    xb_cat = xb_cat.unsqueeze(0)
+                warning_flag_cat = xb_cat[:, 5] > 1e-6
+                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
+                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
+                cond_no_warn_no_mid = (~warning_flag_cat) & (~missile_in_mid_term_cat)
+
+                hor_logits = cat_logits_list[1]  # (Batch, 11)
+
+                if hor_mask:
+                    # 11维内部头分别对应三个阶段的白名单
+                    # 0:无中导-追击 1:无中导-左3 2:无中导-置尾 3:无中导-右9 4:无中导-占中
+                    # 5:有中导-左偏 6:有中导-置尾 7:有中导-右偏
+                    # 8:告警-左3   9:告警-置尾  10:告警-右9
+                    #                              0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+                    m_warn_allow   = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1], dtype=torch.bool, device=x.device) # 告警: 8,9,10
+                    m_mid_allow    = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], dtype=torch.bool, device=x.device) # 无告警+有中导: 5,6,7
+                    m_no_mid_allow = torch.tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0], dtype=torch.bool, device=x.device) # 无告警+无中导: 0,1,2,3,4
+
+                    legal_mask = (
+                        warning_flag_cat.unsqueeze(1) & m_warn_allow |
+                        cond_no_warn_mid.unsqueeze(1) & m_mid_allow |
+                        cond_no_warn_no_mid.unsqueeze(1) & m_no_mid_allow
+                    )
+                    hor_logits = hor_logits.masked_fill(~legal_mask, -1e8)
+
+                # 把 11 维内部头按阶段语义映射到外部动作分布
+                # 外部动作: 0追击, 1左偏, 2左3, 3置尾, 4右9, 5右偏, 6占中 (7维)
+                # 或      : 0追击, 1左偏, 2左3, 3置尾, 4右9, 5右偏 (6维)
+                if self.cat_dims[1] == 7:
+                    action_head_groups = [
+                        [0],        # 0 追击
+                        [5],        # 1 左偏
+                        [1, 8],     # 2 左3
+                        [2, 6, 9],  # 3 置尾
+                        [3, 10],    # 4 右9
+                        [7],        # 5 右偏
+                        [4],        # 6 占中
+                    ]
+                elif self.cat_dims[1] == 6:
+                    action_head_groups = [
+                        [0],        # 0 追击
+                        [5],        # 1 左偏
+                        [1, 8],     # 2 左3
+                        [2, 6, 9],  # 3 置尾
+                        [3, 10],    # 4 右9
+                        [7],        # 5 右偏
+                    ]
+                else:
+                    # 未知维度：直接保留每个内部头
+                    action_head_groups = [[i] for i in range(11)]
+
+                cat_logits_list[1] = torch.stack([
+                    torch.logsumexp(hor_logits[:, heads], dim=1)
+                    for heads in action_head_groups
+                ], dim=1)
+
+            # [强制] warning=1 时，无论 hor_mask 配置如何，都屏蔽指定水平机动动作
+            if len(cat_logits_list) > 1:
+                xb_cat = x
+                if xb_cat.dim() == 1:
+                    xb_cat = xb_cat.unsqueeze(0)
+                warning_flag_cat = xb_cat[:, 5] > 1e-6
+                hor_dim = cat_logits_list[1].size(-1)
+                mask_indices = [0, 1, 5, 6] if hor_dim == 7 else ([0, 1, 5] if hor_dim == 6 else [])
+                if mask_indices:
+                    in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
+                    in_mask[mask_indices] = True
+                    in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
+                    warning_mask = warning_flag_cat.unsqueeze(-1).expand_as(in_mask) & in_mask
+                    cat_logits_list[1] = cat_logits_list[1].masked_fill(warning_mask, -1e8)
+
+            # 2. 应用温度缩放 (Logits / temperature) 并 Softmax
+            final_probs_list = []
+            for i, logits in enumerate(cat_logits_list):
+                scaled_logits = logits / (temp_cat + 1e-8)
+                final_probs_list.append(F.softmax(scaled_logits, dim=-1))
+
+            outputs['cat'] = final_probs_list
+
+        # --- Bernoulli ---
+        if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+            bern_logits = self.fc_bern(shared_features)
+
+            xb = x
+            if xb.dim() == 1:
+                xb = xb.unsqueeze(0)
+
+            cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
+            delta_theta = xb[:, 8]
+            ata = xb[:, 10]
+            sin_theta = xb[:, 17]
+            ammo = xb[:, 20]
+            dist = xb[:, 9] * 10e3
+            t_since_launch = xb[:, 21] * 120
+
+            ammo_cond = (ammo > 0.0)
+            time_const_cond = t_since_launch >= torch.clamp_min(dist/(3*340)/2, 10.0)
+            ata_cond = ata < math.pi / 2
+            can_fire = ammo_cond & time_const_cond & ata_cond
+
+            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(45))
+            can_fire = can_fire & delta_psi_cond
+
+            theta = torch.arcsin(sin_theta)
+            elevation = theta + delta_theta
+            theta_cond = theta >= elevation - np.radians(15)
+            can_fire = can_fire & theta_cond
+
+            bern_dim = self.action_dims.get('bern', 0)
+            batch_size = shared_features.size(0)
+            mask = torch.ones((batch_size, bern_dim), dtype=torch.bool, device=shared_features.device)
+            mask[:, 0] = can_fire.to(dtype=torch.bool)
+
+            if action_masks is not None and 'bern' in action_masks:
+                ext_mask = action_masks['bern']
+                if isinstance(ext_mask, torch.Tensor):
+                    if ext_mask.dim() == 1:
+                        ext_mask = ext_mask.unsqueeze(1)
+                    ext_bool = (ext_mask != 0).to(dtype=torch.bool, device=shared_features.device)
+                else:
+                    ext_mask = torch.tensor(np.array(ext_mask), device=shared_features.device)
+                    if ext_mask.dim() == 1:
+                        ext_mask = ext_mask.unsqueeze(1)
+                    ext_bool = (ext_mask != 0).to(dtype=torch.bool, device=shared_features.device)
+
+                if ext_bool.size(1) == 1 and bern_dim > 1:
+                    ext_bool = ext_bool.expand(-1, bern_dim)
+
+                mask = mask & ext_bool
+
+            bern_logits = bern_logits.masked_fill(mask == 0, -1e8)
+
+            scaled_bern_logits = bern_logits / (temp_bern + 1e-8)
+            outputs['bern'] = scaled_bern_logits
+
+            outputs['fire_mask'] = mask.float()
+
+        return outputs
 
 # =============================================================================
 # 2. Actor 适配器 (Wrapper) - 核心重构点

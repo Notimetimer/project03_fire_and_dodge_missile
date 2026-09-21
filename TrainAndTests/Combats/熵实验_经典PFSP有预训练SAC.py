@@ -68,7 +68,7 @@ sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
-SAC_update_step_interval = 512      # [SAC] 每收集512个环境步触发一次更新
+SAC_update_step_interval = 1024      # [SAC] 每收集512个环境步触发一次更新
 SAC_max_updates_per_batch = 8       # [SAC] 每个采样块固定最多执行32次梯度更新
 
 """
@@ -154,15 +154,15 @@ if __name__=='__main__':
         SAC_max_updates_per_batch=SAC_max_updates_per_batch,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            'Rule_0': 1200, # debug
-            "Rule_1": 1200,
-            "Rule_2": 1200,
-            'Rule_3': 1200,
+            # 'Rule_0': 1200, # debug
+            # "Rule_1": 1200,
+            # "Rule_2": 1200,
+            # 'Rule_3': 1200,
             # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             # 'Rule_6': 1200,
             },
-        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'SP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,
