@@ -1087,6 +1087,7 @@ def run_MLP_simulation(
     use_supervised_fire = 0, # [新增] 开火命中监督更新开关：仅用 fire_obs->hit_record 监督 fc_bern 头
     supervised_fire_buffer_size = 1000, # [新增] 开火记录滚动缓冲容量（FIFO，像off-policy一样滚动更新）
     supervised_fire_batch_size = 128, # [新增] 每次监督更新从缓冲中采样的批大小
+    ppo_with_bern = 1, # [新增] 0 时 PPO 更新跳过开火头 fc_bern（log_prob 不计入 bern 项）
 ):
 
     actor_lr0 = actor_lr
@@ -1544,6 +1545,27 @@ def run_MLP_simulation(
 
     # [新增] 开火记录滚动缓冲：跨 batch 累积（FIFO 逐条覆盖），不随 transition_dict 清空重记录
     fire_records_buffer = collections.deque(maxlen=int(supervised_fire_buffer_size))
+
+    # [新增] 若中断续训，恢复已保存的开火监督 buffer
+    fire_buffer_path = os.path.join(log_dir, "fire_records_buffer.pkl")
+    if os.path.exists(fire_buffer_path):
+        try:
+            with open(fire_buffer_path, "rb") as f:
+                fb_data = pickle.load(f)
+            if isinstance(fb_data, dict):
+                loaded_records = fb_data.get("records", [])
+                loaded_maxlen = fb_data.get("maxlen", int(supervised_fire_buffer_size))
+            elif isinstance(fb_data, collections.deque):
+                loaded_records = list(fb_data)
+                loaded_maxlen = fb_data.maxlen
+            else:
+                loaded_records = list(fb_data)
+                loaded_maxlen = int(supervised_fire_buffer_size)
+            fire_records_buffer.clear()
+            fire_records_buffer.extend(loaded_records[-loaded_maxlen:])
+            print(f"Loaded fire records buffer from {fire_buffer_path}. Size: {len(fire_records_buffer)}")
+        except Exception as e:
+            print(f"Failed to load fire records buffer: {e}")
 
     # 初始化基于胜率的在线 EMA 变量
     ema_score = 0.5
@@ -2140,7 +2162,8 @@ def run_MLP_simulation(
                 student_agent.update(transition_dict, adv_normed=1, mini_batch_size=mini_batch_size_mixed, target_p1=target_p1,
                                      k_nonlinear=k_nonlinear, mask_on=fire_mask, actor_frozen=freeze_actor, bern_max_logits=max_fire_logits,
                                      alpha_distill=alpha_distill, teacher_actor=adistill_rule_wrappers,
-                                     AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included)
+                                     AFiltered=AFiltered, conf_thres=conf_thres, bern_included=bern_included,
+                                     ppo_with_bern=ppo_with_bern)
 
                 # [新增] 开火命中监督更新：从滚动缓冲采样，仅更新 actor.net.fc_bern，不影响机动策略
                 if use_supervised_fire and len(fire_records_buffer) > 100: # 至少收集100次开火，不要过拟合
@@ -2383,6 +2406,14 @@ def run_MLP_simulation(
                 }, os.path.join(log_dir, "optimizers_state.pt"))
                 if il_transition_buffer is not None:
                     il_transition_buffer.save(os.path.join(log_dir, "il_buffer.pt"))
+                
+                # 保存开火监督数据 buffer
+                if use_supervised_fire:
+                    fire_buffer_path = os.path.join(log_dir, "fire_records_buffer.pkl")
+                    with open(fire_buffer_path, "wb") as f:
+                        pickle.dump({"records": list(fire_records_buffer), "maxlen": fire_records_buffer.maxlen}, f)
+                    print(f"Saved fire records buffer to {fire_buffer_path}. Size: {len(fire_records_buffer)}")
+                    
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
