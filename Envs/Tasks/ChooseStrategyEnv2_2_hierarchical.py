@@ -469,8 +469,8 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             print(f"Side: {side} | Result: {'Win' if ego_win else 'Lose' if ego_lose else 'Draw'}")
             print(f"R_Event: {r_event:.2f} | r_shaping: {r_shaping:.2f}")
 
-        # 返回 done、训练奖励(缩放终局+shaping)、纯事件奖励、固定±100终局的归一化奖励
+        # 返回 done、训练奖励(缩放终局+shaping)、事件+结果奖励(r_event1)、固定±100终局的归一化奖励
         return done, \
                     r_event1+r_shaping,\
-                        r_shaping,\
+                        r_event1,\
                             r_event2+r_shaping

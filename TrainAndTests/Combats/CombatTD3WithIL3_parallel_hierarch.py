@@ -520,7 +520,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 
                 steps_run = 0
                 episode_return = 0 # 仅用于统计显示
-                episode_return_dense = 0
+                episode_return_event = 0
                 m_fired = 0
                 
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
@@ -695,7 +695,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     
                     if steps_run % action_cycle_multiplier == 0 or done:
                         episode_return += b_reward3 # 固定±100结果奖励的归一化回报，用于日志
-                        episode_return_dense += b_reward2 # 纯shaping奖励
+                        episode_return_event += b_reward2 # 事件+结果奖励(r_event1)
                     
                     # 5. 存活更新 (用于 Done 标记)
                     next_b_state_global, _ = env.obs_1v1('b', reward_fn=1)
@@ -835,7 +835,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     'metrics': {
                         'return': episode_return,
-                        'dense_return': episode_return_dense,
+                        'event_return': episode_return_event,
                         'steps': steps_run,
                         'win': env.win,
                         'lose': env.lose,
@@ -1653,7 +1653,7 @@ def run_MLP_simulation(
             batch_draw_cnt = 0        # 新增统计
             batch_bvr_perish_together_cnt = 0 # 新增统计
             batch_total_return = 0    # 新增统计
-            batch_total_dense_return = 0
+            batch_total_event_return = 0
             batch_total_m_fired = 0   # 新增统计
             
             # 新增: 批次开火策略指标统计
@@ -1737,7 +1737,7 @@ def run_MLP_simulation(
                 
                 batch_total_steps += metrics['steps']
                 batch_total_return += metrics['return']
-                batch_total_dense_return += metrics['dense_return']
+                batch_total_event_return += metrics['event_return']
                 batch_total_m_fired += metrics['m_fired']
                 if metrics.get('BVR_perish_together', False):
                     batch_bvr_perish_together_cnt += 1
@@ -1913,7 +1913,7 @@ def run_MLP_simulation(
             
             # 记录平均回报与胜率
             logger.add("train/1 avg_episode_return", batch_total_return / num_workers, total_steps)
-            logger.add("train_plus/Avg dense return", batch_total_dense_return / num_workers, total_steps)
+            logger.add("train_plus/Avg event return", batch_total_event_return / num_workers, total_steps)
             logger.add("train/2 win", batch_wins / num_workers, total_steps)
             logger.add("train/2 lose", batch_loss_cnt / num_workers, total_steps)
             logger.add("train/2 draw", batch_draw_cnt / num_workers, total_steps)

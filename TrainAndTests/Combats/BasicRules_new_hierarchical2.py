@@ -83,7 +83,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
     #     action_v = 1 # 爬升
     #     action_h = 0 # 追踪
     # else:
-    action_v = 2 # 追踪
+    action_v = 0 # 跃升  2 # 平飞
     action_h = 0 # 追踪
     action_number = [action_v, action_h] # 默认执行基础进攻
     base_offensive_action = action_number
@@ -106,7 +106,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             if alt > 5000:
                 action_v = 4 # 快速下高
             else:
-                action_v = 2 # 平飞
+                action_v = 0 # 跃升  2 # 平飞
             # 置尾机动
             action_h = 3 # 水平方向背离
             # # 39
@@ -115,7 +115,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             # else:
             #     action_h = 2 # 39
         elif on_guiding: # 如果本回合决定发射导弹
-            action_v = 2 # 平飞
+            action_v = 0 # 跃升  2 # 平飞
             if abs(delta_psi) < 5*pi/180:
                 action_h = random.choice([1,5])
             elif delta_psi < 0:
@@ -139,7 +139,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             action_number = [action_v, action_h]
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
-            action_v = 2 # 平飞
+            action_v = 0 # 跃升  2 # 平飞
             if abs(delta_psi) < 5*pi/180:
                 action_h = random.choice([1,5])
             elif delta_psi < 0:
@@ -202,11 +202,11 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             if alt > 5000:
                 action_v = 4 # 快速下高
             else:
-                action_v = 2 # 平飞
+                action_v = 0 # 跃升  2 # 平飞
             # 置尾机动
             action_h = 3 # 水平方向背离
         elif on_guiding: # 如果本回合决定发射导弹
-            action_v = 2 # 平飞
+            action_v = 0 # 跃升  2 # 平飞
             if abs(delta_psi) < 5*pi/180:
                 action_h = random.choice([1,5])
             elif delta_psi < 0:
@@ -226,7 +226,7 @@ def basic_rules(state_check, rules_num, last_action=0, p_random=0):
             action_number = [action_v, action_h]
             fire_missile = False # 防御时不发射
         elif on_guiding: # 满足开火条件但在中近距离，或上一回合是爬升
-            action_v = 2 # 平飞
+            action_v = 0 # 跃升  2 # 平飞
             if abs(delta_psi) < 5*pi/180:
                 action_h = random.choice([1,5])
             elif delta_psi < 0:
