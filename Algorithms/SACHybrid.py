@@ -81,6 +81,65 @@ class ReplayBufferHybrid:
     def size(self):
         return len(self.buffer)
 
+
+class SupervisedFireBuffer:
+    """监督记忆 M_SL：每条记录只保存 fire_obs 和 hit_record。
+
+    deque(maxlen=capacity) 保证达到容量后逐条 FIFO 覆盖，永不整体清空。
+    """
+    def __init__(self, capacity=10000):
+        self.capacity = int(capacity)
+        self.buffer = collections.deque(maxlen=self.capacity)
+
+    def add(self, fire_obs, hit_record):
+        fire_obs = np.asarray(fire_obs, dtype=np.float32).copy()
+        hit_record = float(hit_record)
+        if hit_record not in (0.0, 1.0):
+            raise ValueError(f"fire-hit label must be 0/1, got {hit_record}")
+        self.buffer.append({
+            'fire_obs': fire_obs,
+            'hit_record': hit_record,
+        })
+
+    def extend(self, records):
+        for record in records or []:
+            fire_obs = record.get('fire_obs')
+            hit_record = record.get('hit_record')
+            if fire_obs is None or hit_record is None:
+                continue
+            self.add(fire_obs, hit_record)
+
+    def sample(self, batch_size):
+        if not self.buffer:
+            raise ValueError('SupervisedFireBuffer is empty.')
+        samples = random.sample(list(self.buffer), min(int(batch_size), len(self.buffer)))
+        return {
+            'states': np.asarray([x['fire_obs'] for x in samples], dtype=np.float32),
+            'labels': np.asarray([x['hit_record'] for x in samples], dtype=np.float32).reshape(-1, 1),
+        }
+
+    def size(self):
+        return len(self.buffer)
+
+    def save(self, path):
+        torch.save({'capacity': self.capacity, 'data': list(self.buffer)}, path)
+        print(f"[SupervisedFireBuffer] Saved to {path}. Size: {self.size()}")
+
+    @staticmethod
+    def load(path, map_location='cpu', capacity=None):
+        if not os.path.exists(path):
+            return None
+        ckpt = torch.load(path, map_location=map_location)
+        buf = SupervisedFireBuffer(int(capacity) if capacity is not None else ckpt['capacity'])
+        # 兼容旧版缓存，但加载后统一收敛为两个字段。
+        for item in ckpt.get('data', []):
+            fire_obs = item.get('fire_obs', item.get('state'))
+            hit_record = item.get('hit_record', item.get('label'))
+            if fire_obs is not None and hit_record is not None:
+                buf.add(fire_obs, hit_record)
+        print(f"[SupervisedFireBuffer] Loaded from {path}. Size: {buf.size()}")
+        return buf
+
 # =============================================================================
 # 1. 神经网络定义 (保持不变，只负责 forward 计算)
 # =============================================================================
@@ -145,9 +204,11 @@ class QNetHybrid(torch.nn.Module):
     def __init__(self, state_dim, hidden_dims, action_dims_dict):
         super(QNetHybrid, self).__init__()
         
-        # cat 展平为联合输出；cont/bern 作为输入条件
+        # cat 展平为联合输出；cont 作为输入条件，bern/fire head 不进入 critic
         self.cont_dim = int(action_dims_dict.get('cont', 0))
-        self.bern_dim = int(action_dims_dict.get('bern', 0))
+        # 论文的 RL memory / discrete SAC 只优化 BFM；fire head 只由 M_SL+BCE 更新。
+        # 因此 fire action 不作为 critic 输入，避免稀疏命中信号被错误地当作 SAC 动作价值学习。
+        self.bern_dim = 0
         self.cat_dims = list(action_dims_dict.get('cat', []))
         self.joint_cat_dim = int(np.prod(self.cat_dims, dtype=np.int64)) if self.cat_dims else 1
         
@@ -161,18 +222,13 @@ class QNetHybrid(torch.nn.Module):
         self.fc_out = nn.Linear(prev_size, self.joint_cat_dim)
 
     def forward(self, state, action_dict):
-        # 只把 cont / bern 作为输入；cat 不同取值的 Q 由输出头给出
+        # 只把 cont 作为输入；cat 不同取值的 Q 由输出头给出
         parts = [state]
         if 'cont' in action_dict and action_dict['cont'] is not None:
             parts.append(action_dict['cont'])
         else:
             if self.cont_dim > 0:
                 parts.append(torch.zeros(state.size(0), self.cont_dim, device=state.device, dtype=state.dtype))
-        if 'bern' in action_dict and action_dict['bern'] is not None:
-            parts.append(action_dict['bern'])
-        else:
-            if self.bern_dim > 0:
-                parts.append(torch.zeros(state.size(0), self.bern_dim, device=state.device, dtype=state.dtype))
         x = torch.cat(parts, dim=-1)
         return self.fc_out(self.net(x))  # (B, K1*K2*...)
 
@@ -307,6 +363,9 @@ class SACHybrid:
         self.target_critic_2.load_state_dict(self.critic_2.state_dict())
         
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.fire_head_optimizer = None
+        if hasattr(self.actor.net, 'fc_bern'):
+            self.fire_head_optimizer = torch.optim.Adam(self.actor.net.fc_bern.parameters(), lr=actor_lr)
         self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=critic_lr)
         self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=critic_lr)
         # 预训练 (MARWIL) 阶段优化 ValueNet 的优化器
@@ -332,8 +391,11 @@ class SACHybrid:
         """动态调整学习率，兼容主训练脚本的调用接口。"""
         if actor_lr is not None:
             self.actor_lr = actor_lr
-            for g in self.actor_optimizer.param_groups:
-                g['lr'] = actor_lr
+            for opt in (self.actor_optimizer, self.fire_head_optimizer):
+                if opt is None:
+                    continue
+                for g in opt.param_groups:
+                    g['lr'] = actor_lr
         if critic_lr is not None:
             self.critic_lr = critic_lr
             for opt in (self.critic_1_optimizer, self.critic_2_optimizer, self.critic_optimizer):
@@ -343,6 +405,8 @@ class SACHybrid:
     def reset_optimizer(self):
         """重建优化器以清除动量（中断续训/恢复崩溃时使用）。"""
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=self.actor_lr)
+        if hasattr(self.actor.net, 'fc_bern'):
+            self.fire_head_optimizer = torch.optim.Adam(self.actor.net.fc_bern.parameters(), lr=self.actor_lr)
         self.critic_1_optimizer = torch.optim.Adam(self.critic_1.parameters(), lr=self.critic_lr)
         self.critic_2_optimizer = torch.optim.Adam(self.critic_2.parameters(), lr=self.critic_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=self.critic_lr)
@@ -374,17 +438,22 @@ class SACHybrid:
                 self.log_alpha.copy_(ckpt['log_alpha'].to(self.log_alpha.device))
 
     def save_optimizers(self, path):
-        torch.save({
+        payload = {
             'actor_optimizer': self.actor_optimizer.state_dict(),
             'critic_1_optimizer': self.critic_1_optimizer.state_dict(),
             'critic_2_optimizer': self.critic_2_optimizer.state_dict(),
             'alpha_optimizer': self.alpha_optimizer.state_dict(),
-        }, path)
+        }
+        if self.fire_head_optimizer is not None:
+            payload['fire_head_optimizer'] = self.fire_head_optimizer.state_dict()
+        torch.save(payload, path)
 
     def load_optimizers(self, path, map_location='cpu'):
         s = torch.load(path, map_location=map_location)
         try:
             self.actor_optimizer.load_state_dict(s['actor_optimizer'])
+            if self.fire_head_optimizer is not None and 'fire_head_optimizer' in s:
+                self.fire_head_optimizer.load_state_dict(s['fire_head_optimizer'])
             if 'critic_1_optimizer' in s:
                 self.critic_1_optimizer.load_state_dict(s['critic_1_optimizer'])
                 self.critic_2_optimizer.load_state_dict(s['critic_2_optimizer'])
@@ -397,7 +466,8 @@ class SACHybrid:
         for param_target, param in zip(target_net.parameters(), net.parameters()):
             param_target.data.copy_(param_target.data * (1.0 - self.tau) + param.data * self.tau)
 
-    def update(self, batch, target_entropy=2.0, alpha_clip=(0.001, 0.1), freeze_actor=False, actor_max_update_norm=0.05):
+    def update(self, batch, target_entropy=1.5, alpha_clip=(0.001, 0.1), freeze_actor=False,
+               actor_max_update_norm=0.05):
         """
         接收 ReplayBuffer 返回的字典 batch
         target_entropy : 目标熵（正数，由外部传入）。None 则不更新 alpha。
@@ -492,7 +562,8 @@ class SACHybrid:
             q2_target = q2_target_all.gather(1, joint_idx_next) if joint_idx_next is not None else q2_target_all
             alpha = self.log_alpha.exp()
             k_bern = self.k_entropy.get('bern', 0.003)
-            entropy_reg = alpha * (next_log_probs['cont'] + next_log_probs['cat']) - k_bern * next_log_probs['bern_entropy']
+            # fire head is supervised only; it is deliberately excluded from SAC entropy/Q targets.
+            entropy_reg = alpha * (next_log_probs['cont'] + next_log_probs['cat'])
             min_q_target = torch.min(q1_target, q2_target) - entropy_reg
             
             # TD 目标
@@ -537,11 +608,9 @@ class SACHybrid:
             
             alpha = self.log_alpha.exp().detach()
             # 机动部分 (cont+cat) 使用自适应 alpha；开火部分 (bern) 使用固定初始熵系数
-            k_bern = self.k_entropy.get('bern', 0.05)
             actor_loss = ((alpha * (curr_log_probs['cont'] + curr_log_probs['cat'])
-                          - k_bern * curr_log_probs['bern_entropy']
                           - min_q_pi) * active_masks).sum() / (active_sum + mask_eps)
-            
+
             actor_params = [p for p in self.actor.parameters() if p.requires_grad]
             actor_before = [p.detach().clone() for p in actor_params]
             self.actor_optimizer.zero_grad()
@@ -589,6 +658,7 @@ class SACHybrid:
         # --- 监控指标（兼容主训练脚本的 logger 字段） ---
         self.last_actor_loss = actor_loss.item()
         self.last_critic_loss = critic_loss.item()
+        self.last_supervised_fire_loss = 0.0
         self.last_entropy_mobility = -(curr_log_probs['cont'] + curr_log_probs['cat']).mean().item()
         self.last_entropy_bern = curr_log_probs['bern_entropy'].mean().item()
         self.last_entropy = self.last_entropy_mobility + self.last_entropy_bern
@@ -640,8 +710,69 @@ class SACHybrid:
                     self.max_fire_prob = fire_probs.max().item()
                     self.min_fire_prob = fire_probs.min().item()
 
+    def supervised_fire_update(self, fire_batch, epochs=1, batch_size=128, max_grad_norm=2.0):
+        """仅用回合结束后的 fire_obs/hit_record 更新开火头 fc_bern。
+
+        共享 backbone 和 BFM/其它动作头不参与梯度更新；因此该更新不会改变
+        SAC 学到的机动策略。fire_batch 可是 SupervisedFireBuffer.sample() 的
+        字典，也可是包含 fire_obs/hit_record 的原始 record 列表。
+        """
+        if self.fire_head_optimizer is None:
+            self.last_supervised_fire_loss = 0.0
+            return 0.0
+
+        if isinstance(fire_batch, dict):
+            states = fire_batch.get('states', fire_batch.get('fire_obs'))
+            labels = fire_batch.get('labels', fire_batch.get('hit_record'))
+        else:
+            records = list(fire_batch or [])
+            states = [r.get('fire_obs') for r in records]
+            labels = [r.get('hit_record') for r in records]
+        if states is None or labels is None or len(states) == 0:
+            self.last_supervised_fire_loss = 0.0
+            return 0.0
+
+        states = torch.as_tensor(np.asarray(states, dtype=np.float32), device=self.device)
+        labels = torch.as_tensor(np.asarray(labels, dtype=np.float32), device=self.device).view(-1, 1)
+        if states.size(0) != labels.size(0):
+            raise ValueError('fire_obs and hit_record must have the same length')
+
+        net = self.actor.net
+        params = list(self.actor.parameters())
+        old_requires_grad = [p.requires_grad for p in params]
+        for p in params:
+            p.requires_grad_(False)
+        for p in net.fc_bern.parameters():
+            p.requires_grad_(True)
+
+        losses = []
+        n = states.size(0)
+        mb_size = max(1, min(int(batch_size), n))
+        for _ in range(max(1, int(epochs))):
+            order = torch.randperm(n, device=self.device)
+            for start in range(0, n, mb_size):
+                idx = order[start:start + mb_size]
+                with torch.no_grad():
+                    features = net.net(states[idx])
+                logits = net.fc_bern(features)[:, :1]
+                loss = F.binary_cross_entropy_with_logits(
+                    input=logits,
+                    target=labels[idx],
+                    reduction='mean'
+                )
+                self.fire_head_optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(net.fc_bern.parameters(), max_grad_norm)
+                self.fire_head_optimizer.step()
+                losses.append(float(loss.detach().cpu()))
+
+        for p, requires_grad in zip(params, old_requires_grad):
+            p.requires_grad_(requires_grad)
+        self.last_supervised_fire_loss = float(np.mean(losses)) if losses else 0.0
+        return self.last_supervised_fire_loss
+
     # =========================================================================
-    #  [New Method] Bernoulli 开火头保护性有监督训练 (防止机动策略被bern崩溃拖累)
+    #  兼容旧流程：Bernoulli 开火头保护性有监督训练
     # =========================================================================
     def fire_prob_protection(self, batch, protect_epochs=4, protect_mini_batch=256):
         """

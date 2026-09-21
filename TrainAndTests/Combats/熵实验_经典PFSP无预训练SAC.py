@@ -27,9 +27,9 @@ mission_name = f'SAC0.3_flymask_v{ver}h{hor}'
 init_actor_path = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\SLWSPFSP0.3_flymask_0-run-20260905-210412\actor_rein0.pt"
 
 # 超参数
-actor_lr = 1e-5 # 4 1e-4
+actor_lr = 1e-4 # 4 1e-4
 critic_lr = actor_lr * 5 # * 5
-IL_epoches= 30 # 180，使用外部 actor 起点时跳过 IL 预训练
+IL_epoches= 0 # 180，使用外部 actor 起点时跳过 IL 预训练
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
 gamma = 0.97 # 0.995
@@ -63,7 +63,7 @@ transition_dict_threshold = 8 * max_episode_duration//dt_action_cycle + 1  # 5*
 # [SAC] off-policy 专用超参数
 # replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
 replay_buffer_size = transition_dict_threshold * 10  # 经验回放池容量（测试用）
-sac_tau = 0.001                      # 目标网络软更新系数 0.005
+sac_tau = 0.05                      # 目标网络软更新系数 0.005
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot

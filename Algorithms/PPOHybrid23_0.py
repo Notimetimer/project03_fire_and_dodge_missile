@@ -2253,7 +2253,11 @@ class PPOHybrid:
                 with torch.no_grad():
                     features = net.net(states[idx])
                 logits = net.fc_bern(features)[:, :1]
-                loss = F.binary_cross_entropy_with_logits(logits, labels[idx])
+                loss = F.binary_cross_entropy_with_logits(
+                                    input=logits,
+                                    target=labels[idx],
+                                    reduction='mean'
+                                )
                 self.fire_head_optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(net.fc_bern.parameters(), max_grad_norm)

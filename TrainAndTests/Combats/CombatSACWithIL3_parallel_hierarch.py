@@ -25,11 +25,14 @@ sys.path.append(project_root)
 from BasicRules_new_hierarchical import *
 # 必须先import环境再import算法，否则算法可能无法指向设置的算法模块
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import *
-from Algorithms.SACHybrid import SACHybrid, PolicyNetHybrid, HybridActorWrapper, QNetHybrid, ReplayBufferHybrid
+from Algorithms.SACHybrid import (
+    SACHybrid, PolicyNetHybrid, HybridActorWrapper, QNetHybrid,
+    ReplayBufferHybrid, SupervisedFireBuffer,
+)
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training_hierarch_plus4offpolicy import test_worker
+from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
@@ -156,6 +159,7 @@ def append_experience(td, obs, state, action, reward, next_state, done, active_m
     td['dones'].append(done)
     td['active_masks'].append(active_mask) # 【新增】active_mask，转入多智能体
     return td
+
 
 # ==========================================
 # 新增：混合缓冲区类
@@ -440,7 +444,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 (actor_weights, opponent_info, settings) = packet
                 
                 # A. 同步权重 (极快)
-                local_agent.load_state_dict(actor_weights)
+                local_agent.load_state_dict(actor_weights, strict=False)
                 
                 # B. 配置对手
                 opp_name, opp_type, opp_data, opp_temperature = opponent_info
@@ -449,7 +453,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 if adv_is_rule:
                     rule_num = opp_data
                 else:
-                    adv_agent.load_state_dict(opp_data)
+                    adv_agent.load_state_dict(opp_data, strict=False)
 
                 # C. 准备本回合容器
                 # Worker 收集完整的 ego_trans (用于 SIL) 和 enm_trans (用于 SIL)
@@ -522,7 +526,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                 episode_return = 0 # 仅用于统计显示
                 episode_return_event = 0
                 m_fired = 0
-                
+
                 dead_dict = {'r': int(bool(env.RUAV.dead)), 'b': int(bool(env.BUAV.dead))}
                 
                 # --- E. 仿真循环 (核心物理逻辑) ---
@@ -591,10 +595,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                         with torch.no_grad():
                             # Blue Decision
                             b_state_check = env.unscale_state(b_check_obs)
+                            # 训练阶段由get_action内部按Bernoulli(p_hit)采样；
+                            # bern返回值已经是0/1，不再在这里用0.5阈值二次判断。
                             b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, mask_on=fire_mask)
-                            # b_action_exec, _, _, _ = local_agent.get_action(b_obs, explore=1, check_obs=b_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                             b_action_label = b_action_exec['cat'] # [0]
-                            b_fire = rule3_fire(b_state_check)
+                            b_fire = b_action_exec['bern'][0]
                             
                             # Red Decision
                             r_state_check = env.unscale_state(r_check_obs)
@@ -605,11 +610,11 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             else:
                                 # 随机决定本局对手是否开启探索
                                 adv_explore = 1 if np.random.rand() > opp_greedy_rate else 0
-                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':0},
+                                r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':adv_explore},
                                                         mask_on=fire_mask, temperature={'cat':opp_temperature})
-                                # r_action_exec, _, _, _ = adv_agent.get_action(r_obs, explore={'cont':0, 'cat':adv_explore, 'bern':0}, check_obs=r_check_obs, mask_on=fire_mask) # 不建议采样也启用mask
                                 r_action_label = r_action_exec['cat'] #[0]
-                                r_fire = rule3_fire(r_state_check)
+                                # bern已经是按p_hit采样得到的0/1动作；不再使用0.5阈值。
+                                r_fire = r_action_exec['bern'][0]
 
                         # 2.4 处理开火 (改为置位标志，由后续物理循环尝试发射)
                         b_is_firing = 0
@@ -621,11 +626,15 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                             env.RUAV.about_to_fire = 1
                             r_is_firing = env.has_ammo_to_fire('r')
                         
-                        # 2.5 记录当前动作供下一帧存储 (初值设为未发射，若后续周期内发射成功则更新)
-                        # 开火完全由 Rule 3 控制，不记录 bern 输出
-                        current_action = {'cat': b_action_exec['cat']}
-                        current_action_exec = {'cat': b_action_exec['cat']}
+                        # 2.5 记录完整混合动作；若本周期发射成功，复制这份 (s, a) 到 M_SL。
+                        current_action = {
+                            'cat': b_action_exec['cat'],
+                            'bern': np.asarray([b_fire], dtype=np.float32),
+                        }
+                        current_action_exec = copy.deepcopy(current_action)
                         current_enm_action_exec = {'cat': r_action_exec['cat']}
+                        if 'bern' in r_action_exec:
+                            current_enm_action_exec['bern'] = np.asarray(r_action_exec['bern'], dtype=np.float32).reshape(-1)
 
                     # 3. 物理步进与尝试发射
                      # 采样的时候如果限制动作次序，会妨碍“试错”，到测试时也必须开启  r_action_label  b_action_label None
@@ -636,7 +645,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     r_m_id = launch_missile_immediately(env, 'r', action_label=r_action_label_fire) if getattr(env.RUAV, 'about_to_fire', 0) else None
                     b_m_id = launch_missile_immediately(env, 'b', action_label=b_action_label_fire) if getattr(env.BUAV, 'about_to_fire', 0) else None
                     
-                    if b_m_id: 
+                    if b_m_id is not None:
                         m_fired += 1
                         # 记录蓝方（本方）开火俯仰角
                         blue_fire_theta = float(env.BUAV.theta)
@@ -670,7 +679,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     if r_m_id is not None:
                         fire_theta = float(env.RUAV.theta)
                         episode_red_fire_thetas.append(fire_theta)
-                    
+
                     # debug
                     if r_action_label[0] > 4:
                         print("数值超出范围", r_action_label[0], r_action_label[1])
@@ -679,7 +688,7 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     b_maneuver = env.maneuver14LR(env.BUAV, b_action_label)
                     env.step(r_maneuver, b_maneuver)
                     steps_run += 1
-                    
+
                     # 4. 奖励计算
                     # 返回值: done, r_event1+r_shaping(训练), r_event1(纯事件), r_event2+r_shaping(固定±100终局)
                     done, b_reward1, b_reward2, b_reward3 = env.combat_terminate_and_reward('b', b_action_label, b_m_id is not None, 
@@ -833,6 +842,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'trans': local_trans, # 用于 RL Update
                     'ego_trans': ego_trans, # 用于 SIL (win)
                     'enm_trans': enm_trans, # 用于 SIL (lose)
+                    # 命中结果由环境在回合结束时一次性写入，直接传回主进程。
+                    'fire_hit_records': copy.deepcopy(getattr(env.BUAV, 'fire_hit_records', [])),
                     'metrics': {
                         'return': episode_return,
                         'event_return': episode_return_event,
@@ -890,7 +901,7 @@ def run_MLP_simulation(
     critic_lr=5e-4,
     actor_lr_init_il = 1e-4,
     critic_lr_init_il = 5e-4,
-    IL_epoches=180,
+    IL_epoches=0,  # 论文训练从 self-play 开始，不默认混入专家 IL
     max_steps=4 * 165e4,
     hidden_dim=None,
     gamma=0.995,
@@ -925,6 +936,8 @@ def run_MLP_simulation(
     replay_buffer_save_interval=20,# [SAC] 每多少个 batch 持久化一次经验池
     SAC_update_step_interval=1000, # [SAC] 按固定环境步数触发更新，替代按 batch/回合触发
     SAC_max_updates_per_batch=30,  # [SAC] 每次触发最多执行多少次梯度更新，防止过拟合
+    supervised_fire_buffer_size=10000,
+    supervised_fire_batch_size=1280,
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
@@ -934,7 +947,7 @@ def run_MLP_simulation(
     },
     self_play_type = 'PFSP', # FSP, SP, None 表示非自博弈
     hist_agent_as_opponent = 1, # 是否开始记录历史智能体
-    use_sil = True,
+    use_sil = False,  # 论文未使用 SIL；需要旧流程时显式打开
     sil_only_maneuver = 1, # 自模仿只包含机动还是也包含开火
     chosen_quantile = 0.2, 
     DARK_SIDE = 1,  # sil默认找最差
@@ -961,7 +974,7 @@ def run_MLP_simulation(
     POMDP = 0, # 0全信息，1部分信息
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
-    sac_target_entropy = None, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
+    sac_target_entropy = 1.5, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
     sac_alpha_clip = (0.001, 0.1), # [SAC] alpha 截断范围
     q_warmup_batches = 20, # [SAC] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
 ):
@@ -1010,15 +1023,15 @@ def run_MLP_simulation(
     # 创建一个 dummy env 获取维度
     dummy_env = ChooseStrategyEnv(args)
     state_dim = dummy_env.obs_dim
-    # 开火完全由 Rule 3 控制，SAC 只学习机动 (cat)
-    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': 0}
+    # 论文式双头策略：cat 用离散 SAC 学 BFM，bern 用 M_SL 的 BCE 学开火概率。
+    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': 1}
     del dummy_env
 
     # [SAC] 若外部未指定目标熵，则只根据机动部分 (cat) 计算；bern 使用固定 k_entropy 不再参与 alpha 调节
     if sac_target_entropy is None:
         import math
         _cat_max_ent = sum(math.log(d) for d in action_dims_dict['cat']) if action_dims_dict['cat'] else 0.0
-        sac_target_entropy = 2.3 # _cat_max_ent * 0.5  # 取最大熵的一半作为目标
+        sac_target_entropy = 1.5 # _cat_max_ent * 0.5  # 取最大熵的一半作为目标
         # print(f"[SAC] Auto target_entropy (mobility only) = {sac_target_entropy:.4f}  (cat_max={_cat_max_ent:.4f})")
 
     # device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -1104,7 +1117,7 @@ def run_MLP_simulation(
             current_actor_path = os.path.join(log_dir, "current_actor.pt")
             
         if os.path.exists(current_actor_path):
-            student_agent.actor.load_state_dict(torch.load(current_actor_path, map_location=device))
+            student_agent.actor.load_state_dict(torch.load(current_actor_path, map_location=device), strict=False)
             print(f"Loaded current actor from: {current_actor_path}")
         else:
             # 如果current_actor不存在，回退到原来的逻辑
@@ -1114,7 +1127,7 @@ def run_MLP_simulation(
                     m = re.search(r'actor_rein(\d+)\.pt$', f)
                     return int(m.group(1)) if m else -1
                 latest_actor = max(actor_files, key=extract_num)
-                student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device))
+                student_agent.actor.load_state_dict(torch.load(latest_actor, map_location=device), strict=False)
                 print(f"Loaded actor from: {latest_actor}")
         
         # [SAC] 加载在线 Q 网络（critic.pt 现为双Q网络+目标网络+log_alpha）
@@ -1151,7 +1164,7 @@ def run_MLP_simulation(
 
     # [新增] 用外部指定 actor 权重覆盖当前 actor（作为训练起点）
     if init_actor_path is not None and os.path.exists(init_actor_path):
-        student_agent.actor.load_state_dict(torch.load(init_actor_path, map_location=device))
+        student_agent.actor.load_state_dict(torch.load(init_actor_path, map_location=device), strict=False)
         print(f"[init_actor] Loaded actor from {init_actor_path} as training start point")
     
     # 保存onnx模型
@@ -1391,6 +1404,17 @@ def run_MLP_simulation(
     if replay_buffer is None:
         replay_buffer = ReplayBufferHybrid(int(replay_buffer_size))
         print(f"[SAC] Created new replay buffer (capacity={int(replay_buffer_size)})")
+
+    # 论文 M_SL：只保存已经完成 hit/miss 判定的发射样本。
+    supervised_fire_buffer_path = os.path.join(log_dir, "supervised_fire_buffer.pt")
+    supervised_fire_buffer = SupervisedFireBuffer.load(
+        supervised_fire_buffer_path,
+        map_location='cpu',
+        capacity=int(supervised_fire_buffer_size),
+    )
+    if supervised_fire_buffer is None:
+        supervised_fire_buffer = SupervisedFireBuffer(int(supervised_fire_buffer_size))
+        print(f"[SAC+SL] Created fire supervision buffer (capacity={int(supervised_fire_buffer_size)})")
     # 距离上次 SAC 更新累计的采样步数，用于决定本轮执行多少次梯度更新
     steps_since_update = 0
     # [SAC] 按固定环境步数触发下一次更新（替代按 batch/回合触发）
@@ -1656,6 +1680,7 @@ def run_MLP_simulation(
             batch_total_return = 0    # 新增统计
             batch_total_event_return = 0
             batch_total_m_fired = 0   # 新增统计
+            batch_fire_supervised = 0
             
             # 新增: 批次开火策略指标统计
             batch_blue_fire_intervals = []
@@ -1740,6 +1765,9 @@ def run_MLP_simulation(
                 batch_total_return += metrics['return']
                 batch_total_event_return += metrics['event_return']
                 batch_total_m_fired += metrics['m_fired']
+                fire_records = res.get('fire_hit_records', [])
+                supervised_fire_buffer.extend(fire_records)
+                batch_fire_supervised += len(fire_records)
                 if metrics.get('BVR_perish_together', False):
                     batch_bvr_perish_together_cnt += 1
 
@@ -1971,11 +1999,20 @@ def run_MLP_simulation(
                     student_agent.update(sac_batch, target_entropy=sac_target_entropy,
                                         alpha_clip=sac_alpha_clip, freeze_actor=_freeze_actor_now)
 
-                    # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
-                    student_agent.fire_prob_protection(sac_batch, protect_epochs=1)
+                # 回合监督数据与 SAC 更新解耦：只更新 actor.net.fc_bern。
+                if supervised_fire_buffer.size() > 0 and not _freeze_actor_now:
+                    fire_sl_batch = supervised_fire_buffer.sample(supervised_fire_batch_size)
+                    student_agent.supervised_fire_update(
+                        fire_sl_batch, epochs=1, batch_size=supervised_fire_batch_size)
+                    
+                # # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                # student_agent.fire_prob_protection(sac_batch, protect_epochs=1)
 
                 logger.add("train_plus/num_sac_updates", num_sac_updates, total_steps)
                 logger.add("train_plus/replay_buffer_size", replay_buffer.size(), total_steps)
+                logger.add("train_plus/supervised_fire_buffer_size", supervised_fire_buffer.size(), total_steps)
+                logger.add("train_plus/supervised_fire_samples", batch_fire_supervised, total_steps)
+                logger.add("train/7b supervised_fire_loss", getattr(student_agent, 'last_supervised_fire_loss', 0.0), total_steps)
                 logger.add("train_plus/sac_alpha", student_agent.alpha, total_steps)
 
                 # [SAC] 推进下一次按固定环境步数触发的更新阈值
@@ -2192,6 +2229,7 @@ def run_MLP_simulation(
                 # [SAC] 定期持久化经验池以支持中断续训（经验池较大，降低保存频率）
                 if batch_idx % max(1, int(replay_buffer_save_interval)) == 0:
                     replay_buffer.save(replay_buffer_path)
+                    supervised_fire_buffer.save(supervised_fire_buffer_path)
                 # print(f"Optimizers routinely saved to optimizers_state.pt")
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
@@ -2223,6 +2261,7 @@ def run_MLP_simulation(
     # [SAC] 退出前最后保存一次经验池/网络/优化器，确保续训完整
     try:
         replay_buffer.save(replay_buffer_path)
+        supervised_fire_buffer.save(supervised_fire_buffer_path)
         student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
         student_agent.save_optimizers(os.path.join(log_dir, "optimizers_state.pt"))
         torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))

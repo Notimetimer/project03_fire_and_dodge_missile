@@ -29,7 +29,7 @@ from Algorithms.TD3Hybrid import TD3Hybrid, PolicyNetHybrid, HybridActorWrapper,
 from Algorithms.MLP_heads import ValueNet
 from Visualize.tensorboard_visualize import TensorBoardLogger
 from Algorithms.Utils import compute_monte_carlo_returns
-from VsBaseline_while_training_hierarch_plus4offpolicy import test_worker
+from VsBaseline_while_training_hierarch_plus import test_worker
 from RewardWeightController import FireRewardWeightController
 
 dt_move = 0.04
