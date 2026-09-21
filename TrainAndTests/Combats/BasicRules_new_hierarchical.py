@@ -469,22 +469,8 @@ if __name__=='__main__':
 
                     decide_steps_after_update += 1
                     
-                    # r_action_list.append(np.array([env.t + t_bias, r_action_label]))
-                    # b_action_list.append(np.array([env.t + t_bias, b_action_label]))
-
-
-                    # # debug
-                    # if env.t >= 60+54 and i_episode==0:
-                    #     print("r_action", r_action_label)
-                    #     print("r_state_check", r_state_check["warning"])
-                    #     print()
-                        
-                    # if env.t > 40:
-                    #     print("r_state_check", r_state_check["warning"])
-                    #     print("r_action_label", r_action_label)
-                    #     print()
-                    #     print("b_state_check", b_state_check["warning"])
-                    #     print("b_action_label", b_action_label)
+                    # if len(env.Bmissiles) > 0:
+                    #     print(env.BUAV.fire_hit_records)
                     #     print()
                 
                 # action_label 设置为 r_action_label 或者 b_action_label 适合测试，完全禁止在动作没到位时开火

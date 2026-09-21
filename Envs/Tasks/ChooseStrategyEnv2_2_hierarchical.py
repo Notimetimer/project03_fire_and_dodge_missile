@@ -160,6 +160,26 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             self.win = ego_lose
             self.lose = ego_win
             self.draw = ego_draw
+
+        # --- [新增] 回填开火记录的命中/脱靶结果 ---
+        # 每次调用都扫描本侧全部已发射导弹（不论死活）；hit 优先于 dead（命中导弹同时 dead=1）
+        fire_hit_records = getattr(ego, 'fire_hit_records', None)
+        if fire_hit_records:
+            msl_table = {m.id: m for m in all_ally_missiles}
+            for rec in fire_hit_records:
+                if rec['hit_record'] is not None:
+                    continue
+                m = msl_table.get(rec['msl_id'])
+                if m is None:
+                    continue
+                if m.hit:
+                    rec['hit_record'] = 1
+                elif m.dead:
+                    rec['hit_record'] = 0
+
+        # [新增] 终局强制结算：done=1 时仍未分辨命中/脱靶的记录整行删除
+        if done and fire_hit_records:
+            ego.fire_hit_records = [rec for rec in fire_hit_records if rec['hit_record'] is not None]
         
         # ego_states = self.get_state(side)
         # enm_states = self.get_state(enm.side)
@@ -325,6 +345,20 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
             )
             # 弹药量的影响
             r_event -= max(0, 5-ego.ammo)/5 * 3
+
+            # [新增] 开火记录：快照当前观测，登记最新发射的导弹，等待命中/脱靶回填
+            if not hasattr(ego, 'fire_hit_records'):
+                ego.fire_hit_records = []
+            if len(all_ally_missiles) > 0:
+                newest_msl = all_ally_missiles[-1]
+                # 死亡清仓惩罚等 shoot>=1 但本步并无新弹发射的情形，避免重复登记同一枚导弹
+                if all(rec['msl_id'] != newest_msl.id for rec in ego.fire_hit_records):
+                    ego_obs, ego_check_obs = self.obs_1v1(ego.side, pomdp=1)
+                    ego.fire_hit_records.append({
+                        "msl_id": newest_msl.id,
+                        "fire_obs": copy.deepcopy(ego_obs),
+                        "hit_record": None,
+                    })
 
         # 导弹脱靶
         if enm.escape_once:

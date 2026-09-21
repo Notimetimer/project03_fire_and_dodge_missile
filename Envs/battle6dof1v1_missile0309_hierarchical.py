@@ -264,6 +264,7 @@ class Battle(object):
             UAV.blue = not is_red
             UAV.side = 'r' if is_red else 'b'
             UAV.color = np.array([1, 0, 0]) if is_red else np.array([0, 0, 1])
+            UAV.fire_hit_records = []  # 记录所有导弹的命中情况
             
             birth_state = red_birth_state if is_red else blue_birth_state
             
