@@ -40,7 +40,7 @@ k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.001} # cat:0.005, bern:0.001 是�
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
-mini_batch_size_mixed = 128 # 混合更新minibatch大小
+mini_batch_size_mixed = 512 # 混合更新minibatch大小，SAC要比PPO大一些
 beta_mixed = 1.0
 label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
@@ -69,7 +69,7 @@ sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新�
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 SAC_update_step_interval = 512      # [SAC] 每收集512个环境步触发一次更新
-SAC_max_updates_per_batch = 32       # [SAC] 每个采样块固定最多执行32次梯度更新
+SAC_max_updates_per_batch = 8       # [SAC] 每个采样块固定最多执行32次梯度更新
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。

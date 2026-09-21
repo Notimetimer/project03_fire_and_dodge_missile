@@ -913,7 +913,7 @@ def run_MLP_simulation(
     il_batch_size=128,
     il_batch_size2=None,
     il_buffer_max_size=2e4,
-    mini_batch_size_mixed=64,
+    mini_batch_size_mixed=256,
     beta_mixed=1.0,
     label_smoothing=0.3,
     label_smoothing_mixed=0.01,
@@ -936,8 +936,8 @@ def run_MLP_simulation(
     replay_buffer_save_interval=20,# [SAC] 每多少个 batch 持久化一次经验池
     SAC_update_step_interval=1000, # [SAC] 按固定环境步数触发更新，替代按 batch/回合触发
     SAC_max_updates_per_batch=30,  # [SAC] 每次触发最多执行多少次梯度更新，防止过拟合
-    supervised_fire_buffer_size=10000,
-    supervised_fire_batch_size=1280,
+    supervised_fire_buffer_size=1000,
+    supervised_fire_batch_size=128,
     should_kick = True,
     use_init_data = False,
     init_elo_ratings = {
