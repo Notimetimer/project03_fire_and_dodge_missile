@@ -49,11 +49,12 @@ if __name__ == "__main__":
 
     # from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
     from Algorithms.SACHybrid import PolicyNetHybrid
-
+    
+    tacview_show=1
+    
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    
-    dir_name = "SAC0.3_flymask_v0h0-run-20260921-212357"
+    dir_name = "SAC0.3_flymask_v0h0-run-20260922-095941"
     
     # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
 
@@ -81,8 +82,8 @@ if __name__ == "__main__":
     vertices = None # 默认圆形边界
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
-    env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.02 # 025 # 2 # 0.05 # 0.04 # 25
+    env = ChooseStrategyEnv(env_args, tacview_show=tacview_show, vertices=vertices)
+    env.dt_move = 0.05 # 025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim

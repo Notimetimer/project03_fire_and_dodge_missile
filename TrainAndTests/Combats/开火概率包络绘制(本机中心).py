@@ -1,5 +1,7 @@
 import os
 import sys
+import glob
+import re
 import numpy as np
 import torch
 import argparse
@@ -9,9 +11,52 @@ from itertools import product
 from _context import *
 
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import ChooseStrategyEnv
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 from Math_calculates.sub_of_angles import sub_of_radian
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
+
+# ======================= 可配置参数区 =======================
+# 模型来源：True 加载 Algorithms.SACHybrid；False 加载 Algorithms.PPOHybrid23_0
+USE_SAC_HYBRID = True
+
+# 优先使用 dir_name 指定日志目录；为 None 时用 experiment_name 自动找最新
+DIR_NAME = "SAC0.3_flymask_v0h0-run-20260922-095941"
+# DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-112447"
+EXPERIMENT_NAME = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+# 备选: 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
+#       'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项_旧版奖励函数'
+
+# 观测覆盖：中制导标志 / 自发射以来的等待时间
+MID_TERM = 1.0      # r_obs[3]  missile_in_mid_term
+T_SHOOT = 35.0      # r_obs[21] = T_SHOOT / 120
+
+# 场景参数
+RED_HEIGHT = 8e3
+BLUE_HEIGHT = 8e3
+AA_HOR_DEG = 180
+DEVICE = 'cpu'
+
+# 扫描网格
+DIST_MIN_KM, DIST_MAX_KM, DIST_STEP_KM = 8, 100, 15
+ANGLE_MIN_DEG, ANGLE_MAX_DEG, ANGLE_STEP_DEG = -45, 45, 5
+ANGLE_TICK_DEG = 15   # 扇面角度刻度间隔
+
+# 绘图：开火概率不归一化，固定 0=最深蓝、1=白色
+COLOR_LEVELS = 21     # 颜色采样等级（越大过渡越细）
+
+# 抽取进度为几%的actor参数
+select_progress_percentage = 25 # %
+
+
+# 出图规格
+FIG_DPI = 300 # 300            # 保存分辨率 (dpi)
+FIG_WIDTH_CM = 10 # 4.0       # 图宽 (cm)
+FIG_HEIGHT_CM = None     # 图高 (cm)；None 时极坐标按正方形、直角坐标按 0.7 倍宽自动
+# ===========================================================
+
+if USE_SAC_HYBRID:
+    from Algorithms.SACHybrid import PolicyNetHybrid, HybridActorWrapper
+else:
+    from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 
 def create_initial_states(red_height, blue_height, distance, delta_psi, AA_hor=0):
     """
@@ -53,6 +98,25 @@ def create_initial_states(red_height, blue_height, distance, delta_psi, AA_hor=0
     }
     
     return DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE
+
+def select_agent_by_progress(log_dir, percentage):
+    """
+    扫描目录中 actor_rein*.pt，按编号排序，返回最接近指定进度百分比的文件。
+    进度按最大编号计算：target = max_step * percentage / 100，取编号差最小的文件。
+    """
+    files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+    step_files = []
+    for f in files:
+        m = re.search(r'actor_rein(\d+)\.pt$', os.path.basename(f))
+        if m:
+            step_files.append((int(m.group(1)), f))
+    if not step_files:
+        return None
+    step_files.sort(key=lambda x: x[0])
+    target = step_files[-1][0] * percentage / 100.0
+    step, best = min(step_files, key=lambda x: abs(x[0] - target))
+    print(f"选择进度 {percentage}%: 目标步数 {target:.0f}, 选中 actor_rein{step}.pt")
+    return best
 
 def load_trained_actor(model_path, device='cpu'):
     """加载训练好的actor模型"""
@@ -118,8 +182,8 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     missile_in_mid_term = r_obs[3]
     
     # 修改数值
-    r_obs[21] = 35 /120 # 35.0  # 设置等待时间
-    r_obs[3] = 1.0    # 设置中制导标志位
+    r_obs[21] = T_SHOOT / 120  # 设置等待时间
+    r_obs[3] = MID_TERM        # 设置中制导标志位
     
     # 转换为tensor
     if isinstance(r_obs, np.ndarray):
@@ -155,28 +219,33 @@ def plot_firing_probability_heatmap_polar(delta_psis, distances, probabilities):
     # 网格形状: (distance_count, delta_psi_count)
     probabilities_plot = probabilities.T
     
-    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'), figsize=(12, 10))
+    # 图尺寸：cm -> inch；高度默认与宽度相同（正方形）
+    fig_w = FIG_WIDTH_CM / 2.54
+    fig_h = (FIG_HEIGHT_CM if FIG_HEIGHT_CM is not None else FIG_WIDTH_CM) / 2.54
+    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'), figsize=(fig_w, fig_h))
     
-    # 绘制热图
-    # c = ax.contourf(Theta, R, probabilities_plot, levels=20, cmap='Blues_r', norm=plt.Normalize(vmin=0, vmax=0.5)) # RdYlBu_r, levels是颜色层数
-    c = ax.contourf(Theta, R, probabilities_plot, levels=18, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
-    # 添加颜色条
+    # 绘制热图：固定 0~1 映射，0=最深蓝，1=白色，不做数据归一化
+    c = ax.contourf(Theta, R, probabilities_plot,
+                    levels=np.linspace(0, 1, COLOR_LEVELS + 1),
+                    cmap='Blues_r', norm=plt.Normalize(vmin=0, vmax=1))
+    # 添加颜色条：不显示标签，刻度固定为百分比
     cbar = plt.colorbar(c, ax=ax, pad=0.1)
-    cbar.set_label('Firing Probability', rotation=270, labelpad=20)
+    cbar.set_ticks(np.linspace(0, 1, 6))
+    cbar.set_ticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
     
     # 设置标签
     ax.set_theta_zero_location('N')  # 0度在北边（正前方）
     ax.set_theta_direction(-1)  # 顺时针方向
-    ax.set_title('Firing Probability Heatmap (Sector View)', pad=20)
+    # ax.set_title('Firing Probability Heatmap (Sector View)', pad=20)
     ax.set_rlabel_position(45)  # 径向标签位置
     
     # 设置角度范围只显示数据范围
-    ax.set_thetamin(-60)  # 最小角度 -60°
-    ax.set_thetamax(60)   # 最大角度 +60°
+    ax.set_thetamin(ANGLE_MIN_DEG)
+    ax.set_thetamax(ANGLE_MAX_DEG)
     
-    # 设置角度标签
-    theta_ticks = np.linspace(-pi/3, pi/3, 30)  # -60°到+60°，每20度一个标签
-    ax.set_thetagrids(np.degrees(theta_ticks), [f'{int(np.degrees(t))}°' for t in theta_ticks])
+    # 设置角度标签：间隔 ANGLE_TICK_DEG
+    theta_ticks_deg = np.arange(ANGLE_MIN_DEG, ANGLE_MAX_DEG + ANGLE_TICK_DEG, ANGLE_TICK_DEG)
+    ax.set_thetagrids(theta_ticks_deg, [f'{int(t)}°' for t in theta_ticks_deg])
     
     # 添加中心线标记
     ax.axvline(0, color='black', linestyle='-', alpha=0.3, linewidth=1)
@@ -193,7 +262,10 @@ def plot_firing_probability_heatmap_cartesian(delta_psis, distances, probabiliti
         distances: 距离数组 (m)
         probabilities: 概率矩阵，形状为 (delta_psi_count, distance_count)
     """
-    fig, ax = plt.subplots(figsize=(12, 8))
+    # 图尺寸：cm -> inch；高度默认 0.7 倍宽
+    fig_w = FIG_WIDTH_CM / 2.54
+    fig_h = (FIG_HEIGHT_CM if FIG_HEIGHT_CM is not None else FIG_WIDTH_CM * 0.7) / 2.54
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     
     # 创建网格 - 注意顺序要与probabilities数组匹配
     Delta_Psi, Distances = np.meshgrid(delta_psis, distances/1000)
@@ -203,22 +275,25 @@ def plot_firing_probability_heatmap_cartesian(delta_psis, distances, probabiliti
     # 网格形状: (distance_count, delta_psi_count)
     probabilities_plot = probabilities.T
     
-    # 绘制热图
-    c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=30, cmap='Blues_r', norm=plt.Normalize(vmin=0, vmax=0.5)) # RdYlBu_r, levels是颜色层数
-    # c = ax.contourf(Delta_Psi, Distances, probabilities_plot, levels=30, cmap='Blues_r') # RdYlBu_r, levels是颜色层数
+    # 绘制热图：固定 0~1 映射，0=最深蓝，1=白色，不做数据归一化
+    c = ax.contourf(Delta_Psi, Distances, probabilities_plot,
+                    levels=np.linspace(0, 1, COLOR_LEVELS + 1),
+                    cmap='Blues_r', norm=plt.Normalize(vmin=0, vmax=1))
     
-    # 添加颜色条
+    # 添加颜色条：不显示标签，刻度固定为百分比
     cbar = plt.colorbar(c, ax=ax)
-    cbar.set_label('Firing Probability')
+    cbar.set_ticks(np.linspace(0, 1, 6))
+    cbar.set_ticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
     
     # 设置标签
     ax.set_xlabel('Delta Psi (rad)')
     ax.set_ylabel('Distance (km)')
     ax.set_title('Firing Probability Heatmap (Cartesian Coordinates)')
     
-    # 设置角度标签（转换为度数）
-    ax.set_xticks(np.linspace(-pi/3, pi/3, 7))
-    ax.set_xticklabels([f'{int(np.degrees(t))}°' for t in np.linspace(-pi/3, pi/3, 7)])
+    # 设置角度标签（转换为度数），间隔 ANGLE_TICK_DEG
+    x_ticks_deg = np.arange(ANGLE_MIN_DEG, ANGLE_MAX_DEG + ANGLE_TICK_DEG, ANGLE_TICK_DEG)
+    ax.set_xticks(np.radians(x_ticks_deg))
+    ax.set_xticklabels([f'{int(t)}°' for t in x_ticks_deg])
     
     # 添加网格
     ax.grid(True, alpha=0.3)
@@ -227,39 +302,26 @@ def plot_firing_probability_heatmap_cartesian(delta_psis, distances, probabiliti
     return fig, ax
 
 def main():
-    # 固定参数
-    red_height = 8000  # 红方高度 8km
-    blue_height = 8000  # 蓝方高度 8km
-    AA_hor = np.radians(180)  # 水平进入角
-    device = 'cpu'
+    # 固定参数（全部来自文件顶部的可配置区）
+    red_height = RED_HEIGHT
+    blue_height = BLUE_HEIGHT
+    AA_hor = np.radians(AA_HOR_DEG)
+    device = DEVICE
     
     # 网格搜索参数
-    distances = np.arange(8e3, 101e3, 15e3)  # 8km到100km，间隔5km
-    delta_psis = np.arange(-pi/3, pi/3 + np.radians(5), np.radians(5))  # ±π/3，间隔2度
+    distances = np.arange(DIST_MIN_KM * 1e3, DIST_MAX_KM * 1e3 + DIST_STEP_KM * 1e3, DIST_STEP_KM * 1e3)
+    delta_psis = np.arange(np.radians(ANGLE_MIN_DEG),
+                           np.radians(ANGLE_MAX_DEG) + np.radians(ANGLE_STEP_DEG),
+                           np.radians(ANGLE_STEP_DEG))
     
     print(f"开始计算开火概率...")
-    print(f"距离范围: {distances[0]/1000:.0f}km - {distances[-1]/1000:.0f}km, 间隔: 5km")
-    print(f"角度范围: {np.degrees(delta_psis[0]):.0f}° - {np.degrees(delta_psis[-1]):.0f}°, 间隔: 2°")
+    print(f"距离范围: {DIST_MIN_KM:.0f}km - {DIST_MAX_KM:.0f}km, 间隔: {DIST_STEP_KM:.0f}km")
+    print(f"角度范围: {ANGLE_MIN_DEG:.0f}° - {ANGLE_MAX_DEG:.0f}°, 间隔: {ANGLE_STEP_DEG:.0f}°")
     print(f"总计算点数: {len(distances) * len(delta_psis)}")
     
     # 查找并加载训练好的模型
-    # 优先使用dir_name，如果没有则使用experiment_name
-    dir_name = None
-    dir_name = "PurePFSP_分阶段_SAC-run-20260621-193555"
-    
-    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
-    
-    "PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415"
-    "PurePFSP_分阶段_混规则对手_挑战_并行_低熵模仿-run-20260616-130304"
-    "预训练评估-run-20260614-205839"
-
-
-    experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
-    # experiment_name = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
-
-    'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
-    
-    'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项_旧版奖励函数'
+    dir_name = DIR_NAME
+    experiment_name = EXPERIMENT_NAME
     
     logs_root_dir = os.path.join(project_root, "logs/combat")
     latest_log_dir = os.path.join(logs_root_dir, dir_name) if dir_name else \
@@ -268,7 +330,8 @@ def main():
     if not latest_log_dir:
         raise FileNotFoundError(f"No log directory found for mission '{experiment_name}'")
     
-    agent_path = find_latest_agent_path(latest_log_dir, None)
+    # 按进度百分比选取 actor_rein*.pt（select_progress_percentage 为 0~100）
+    agent_path = select_agent_by_progress(latest_log_dir, select_progress_percentage)
     if not agent_path:
         raise FileNotFoundError(f"No agent file found in '{latest_log_dir}'")
     
@@ -338,7 +401,7 @@ def main():
         distances=distances, 
         probabilities=1-np.power(1-probabilities, 5)
     )
-    plt.savefig('firing_probability_polar.png', dpi=300, bbox_inches='tight')
+    plt.savefig('firing_probability_polar.png', dpi=FIG_DPI, bbox_inches='tight')
     plt.show()
     
     # print("绘制直角坐标热图...")
@@ -347,7 +410,7 @@ def main():
     #     distances=distances, 
     #     probabilities=probabilities
     # )
-    # plt.savefig('firing_probability_cartesian.png', dpi=300, bbox_inches='tight')
+    # plt.savefig('firing_probability_cartesian.png', dpi=FIG_DPI, bbox_inches='tight')
     # plt.show()
     
     print("图形已保存！")

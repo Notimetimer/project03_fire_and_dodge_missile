@@ -975,7 +975,9 @@ def run_MLP_simulation(
     should_stir = 0, # 是否搅拌策略参数后存储
     adj_r_w = 0, # 是否允许奖励函数权重浮动
     sac_target_entropy = 1.5, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
-    sac_alpha_clip = (0.001, 0.1), # [SAC] alpha 截断范围
+    sac_alpha_clip = (0.001, 0.3), # [SAC] alpha 截断范围
+    sac_policy_delay = 2, # [SAC] TD3式延迟更新：每N次梯度更新才更新一次actor/alpha
+    sac_actor_max_update_norm = 0.03, # [SAC] 单次actor更新的参数位移L2上限（post-step投影）
     q_warmup_batches = 20, # [SAC] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
 ):
 
@@ -1389,6 +1391,15 @@ def run_MLP_simulation(
     total_steps = elo_ratings.get("__LAST_UPDATE_STEP__", 0)
     batch_idx = elo_ratings.get("__LAST_UPDATE_BATCH__", 0)
     last_il_update_batch_idx = batch_idx
+    # 追踪最近一次保存 Actor 的步数；若磁盘上已有 actor_rein*.pt，
+    # 以其最大步数所在 100k 区间下界为起点，避免同一区间重复保存
+    actor_rein_files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+    max_actor_step = 0
+    for f in actor_rein_files:
+        m = re.search(r'actor_rein(\d+)\.pt$', os.path.basename(f))
+        if m:
+            max_actor_step = max(max_actor_step, int(m.group(1)))
+    last_actor_save_step = (max_actor_step // 100e3) * 100e3
     if collape_recover["collapsed"]:
         actor_freeze_until = batch_idx + int(collape_recover["actor_frozen_batchs"])
         student_agent.reset_optimizer() # 恢复训练清除动量
@@ -1997,7 +2008,9 @@ def run_MLP_simulation(
                 for _ in range(num_sac_updates):
                     sac_batch = replay_buffer.sample(sac_batch_size)
                     student_agent.update(sac_batch, target_entropy=sac_target_entropy,
-                                        alpha_clip=sac_alpha_clip, freeze_actor=_freeze_actor_now)
+                                        alpha_clip=sac_alpha_clip, freeze_actor=_freeze_actor_now,
+                                        policy_delay=sac_policy_delay,
+                                        actor_max_update_norm=sac_actor_max_update_norm)
 
                 # 回合监督数据与 SAC 更新解耦：只更新 actor.net.fc_bern。
                 if supervised_fire_buffer.size() > 0 and not _freeze_actor_now:
@@ -2060,36 +2073,53 @@ def run_MLP_simulation(
                 # 原本是在这里清空Buffer的，但是现在要在搅拌之后清空，所以移到了后面
                 
                 # A. 保存模型
-                actor_key = f"actor_rein{batch_idx}"
-                
-                # 正常保存模型
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, f"{actor_key}.pt"))
-                # [SAC] critic.pt 现保存双Q网络+目标网络+log_alpha
-                student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
-                # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
-                torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
-                print(f"Saved Checkpoint: {actor_key}")
-                print(f"Saved Current Actor: current_actor.pt")
-                
+                # 每个 100k 步区间只保存一次 (0~100k, 100k~200k, ...)。
+                # 下一个待保存的步点是 last_actor_save_step + 100e3；
+                # 当 total_steps 首次跨过该点时，保存 actor_rein{next_step}.pt 并推进 last_actor_save_step。
+                step_int = int(total_steps)
+                next_actor_save_step = last_actor_save_step + 100e3
+                save_actor = (step_int >= next_actor_save_step)
+                actor_key = None
+
+                if save_actor:
+                    actor_key = f"actor_rein{next_actor_save_step}"
+                    save_file = os.path.join(log_dir, f"{actor_key}.pt")
+                    if os.path.exists(save_file):
+                        print(f"Actor checkpoint already exists for step {next_actor_save_step}, skip.")
+                        save_actor = False
+                    else:
+                        # 正常保存模型
+                        torch.save(student_agent.actor.state_dict(), save_file)
+                        # 额外保存当前训练用的actor参数（覆盖式保存，用于续训）
+                        torch.save(student_agent.actor.state_dict(), os.path.join(log_dir, "current_actor.pt"))
+                        # [SAC] critic.pt 现保存双Q网络+目标网络+log_alpha，与 Actor 同频率保存
+                        student_agent.save_critics(os.path.join(log_dir, "critic.pt"))
+                        print(f"Saved Checkpoint: {actor_key}")
+                        print(f"Saved Current Actor: current_actor.pt")
+                        print("Saved Critic: critic.pt")
+                    last_actor_save_step = next_actor_save_step
+
                 # [SAC] off-policy 经验池不再清空（用完不抛弃）
 
                 # B. 经典胜率精英池维护
                 # 只有自博弈能够更新精英Elo和胜率表，否则只能更新普通胜率和Elo表
                 if total_steps >= WARM_UP_STEPS:
                     # 复制当前主代理的蓝方行为统计到该历史版本，记录它"作为蓝方时"的行为特征
-                    if "__CURRENT_MAIN__" in Elite_Fire_Stats:
-                        Elite_Fire_Stats[actor_key] = copy.deepcopy(Elite_Fire_Stats["__CURRENT_MAIN__"])
-                    else:
-                        Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
+                    if save_actor:
+                        if "__CURRENT_MAIN__" in Elite_Fire_Stats:
+                            Elite_Fire_Stats[actor_key] = copy.deepcopy(Elite_Fire_Stats["__CURRENT_MAIN__"])
+                        else:
+                            Elite_Fire_Stats[actor_key] = [0.0, 0.0, 0.0, 0.0, 0.0]  # [fire_theta, ATA, delta_psi_threat, delta_theta, delta_psi]
                     elo_ratings[opp_name] = main_agent_elo
 
-                    
+
                 # -----------------------------------------------------------
                 # 逻辑分支 B: 维护“全量历史记录” (Full JSON)
                 # -----------------------------------------------------------
                 # 目标：记录所有产生过的 Agent 的最后一次已知 Elo，无论它是否在精英池里
-                # 无论是否进入精英池，全量表都要记录
-                elo_ratings[actor_key] = main_agent_elo
+                # 只有实际保存了 actor 参数的历史点才记录到全量表
+                if save_actor:
+                    elo_ratings[actor_key] = main_agent_elo
                 elo_ratings["__LAST_UPDATE_STEP__"] = total_steps
                 elo_ratings["__LAST_UPDATE_BATCH__"] = batch_idx
                 
@@ -2194,7 +2224,8 @@ def run_MLP_simulation(
                             print(f"[Pool Cleanup] Kicked weakest: {weakest_history_key} (Elo: {old_elo:.0f}), Current Pool: {len(history_keys)}")
                         
                         # --- 正式入池 ---
-                        if hist_agent_as_opponent:
+                        # 只有本次保存了 Actor 参数，才把它作为对手加入精英池
+                        if save_actor and hist_agent_as_opponent:
                             elite_elo_ratings[actor_key] = main_agent_elo
                             print(f"Accepted {actor_key} into Elite Pool.")
 

@@ -40,7 +40,7 @@ k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.001} # cat:0.005, bern:0.001 是�
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
-mini_batch_size_mixed = 512 # 混合更新minibatch大小，SAC要比PPO大一些
+mini_batch_size_mixed = 2048 # 混合更新minibatch大小，SAC要比PPO大一些
 beta_mixed = 1.0
 label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
@@ -63,13 +63,15 @@ transition_dict_threshold = 8 * max_episode_duration//dt_action_cycle + 1  # 5*
 # [SAC] off-policy 专用超参数
 # replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
 replay_buffer_size = int(1e5)       # 经验回放池容量；按决策转移计数
-sac_tau = 0.05                      # 目标网络软更新系数 0.005
+sac_tau = 0.005                      # 目标网络软更新系数 0.005
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 SAC_update_step_interval = 1024      # [SAC] 每收集512个环境步触发一次更新
 SAC_max_updates_per_batch = 4       # [SAC] 每个采样块固定最多执行32次梯度更新 8
+SAC_policy_delay = 2                # [SAC] TD3式延迟更新：每N次梯度更新才更新一次actor/alpha
+SAC_actor_max_update_norm = 0.03    # [SAC] 单次actor更新参数位移L2上限，收紧防策略横跳
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。
@@ -113,7 +115,7 @@ if __name__=='__main__':
         k_nonlinear=0.0,
         collape_recover=collape_recover,
         init_actor_path=init_actor_path,  # 外部 actor 起点
-        num_workers=1,  # 关闭并行采样，防止过拟合
+        num_workers=10,  # 并行采样进程数
         mission_name=mission_name,
         actor_lr=actor_lr,
         critic_lr=critic_lr,
@@ -152,17 +154,19 @@ if __name__=='__main__':
         replay_buffer_save_interval=replay_buffer_save_interval,
         SAC_update_step_interval=SAC_update_step_interval,
         SAC_max_updates_per_batch=SAC_max_updates_per_batch,
+        sac_policy_delay=SAC_policy_delay,
+        sac_actor_max_update_norm=SAC_actor_max_update_norm,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
-            # 'Rule_0': 1200, # debug
-            # "Rule_1": 1200,
-            # "Rule_2": 1200,
-            # 'Rule_3': 1200,
+            'Rule_0': 1200, # debug
+            "Rule_1": 1200,
+            "Rule_2": 1200,
+            'Rule_3': 1200,
             # 'Rule_4': 1200,
             # 'Rule_5': 1200,
             # 'Rule_6': 1200,
             },
-        self_play_type = 'SP', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
+        self_play_type = 'PFSP_balanced', # PFSP_balanced, PFSP_challenge, FSP, SP, None 表示非自博弈
         hist_agent_as_opponent = 1, # 奖励函数调试禁止自博弈
         use_sil = 0,
         p_factor = 0.23,

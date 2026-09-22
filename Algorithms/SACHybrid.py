@@ -439,7 +439,7 @@ class PolicyNetHybrid(torch.nn.Module):
                 # warning时不准前进
                 warning_flag_cat = xb_cat[:, 5] > 1e-6
                 hor_dim = cat_logits_list[1].size(-1)
-                mask_indices = [0, 1,  2,4,  5, 6] if hor_dim == 7 else ([0, 1,  2,4,  5] if hor_dim == 6 else [])
+                mask_indices = [0, 1,   5, 6] if hor_dim == 7 else ([0, 1,   5] if hor_dim == 6 else [])
                 if mask_indices:
                     in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
                     in_mask[mask_indices] = True
@@ -757,13 +757,14 @@ class SACHybrid:
         for param_target, param in zip(target_net.parameters(), net.parameters()):
             param_target.data.copy_(param_target.data * (1.0 - self.tau) + param.data * self.tau)
 
-    def update(self, batch, target_entropy=1.5, alpha_clip=(0.001, 0.1), freeze_actor=False,
-               actor_max_update_norm=0.05):
+    def update(self, batch, target_entropy=1.5, alpha_clip=(0.001, 0.3), freeze_actor=False,
+               actor_max_update_norm=0.05, policy_delay=1):
         """
         接收 ReplayBuffer 返回的字典 batch
         target_entropy : 目标熵（正数，由外部传入）。None 则不更新 alpha。
         alpha_clip      : (min, max) 对 alpha=exp(log_alpha) 的截断范围。
         freeze_actor   : True 时只更新 Q 网络，跳过 actor 和 alpha 更新（Q 预热阶段使用）。
+        policy_delay   : TD3式延迟更新，每 policy_delay 次 update() 才更新一次 actor/alpha（1=不延迟）。
         """
         # --- A. 数据搬运与类型转换 (NumPy -> Tensor) ---
         device = self.device
@@ -801,6 +802,11 @@ class SACHybrid:
         if not hasattr(self, '_diag_update_count'):
             self._diag_update_count = 0
         self._diag_update_count += 1
+
+        if not hasattr(self, '_policy_update_counter'):
+            self._policy_update_counter = 0
+        self._policy_update_counter += 1
+        delay_actor = (self._policy_update_counter % max(1, int(policy_delay))) != 0
         
         if self._diag_update_count % 200 == 1:
             if 'bern' in raw_actions:
@@ -884,8 +890,8 @@ class SACHybrid:
         self.critic_2_optimizer.step()
         critic_grad = (critic_1_grad + critic_2_grad) / 2.0
 
-        # 2. 更新 策略网络 (Actor) —— freeze_actor=True 时跳过
-        if not freeze_actor:
+        # 2. 更新 策略网络 (Actor) —— freeze_actor=True 或延迟更新计数未到时跳过
+        if not (freeze_actor or delay_actor):
             # 重新对当前状态采样
             curr_actions_diff, curr_log_probs = self.actor.sample_for_sac(states, gumbel_tau=self.gumbel_tau)
             
