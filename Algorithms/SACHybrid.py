@@ -436,15 +436,26 @@ class PolicyNetHybrid(torch.nn.Module):
                 xb_cat = x
                 if xb_cat.dim() == 1:
                     xb_cat = xb_cat.unsqueeze(0)
+                # warning时不准前进
                 warning_flag_cat = xb_cat[:, 5] > 1e-6
                 hor_dim = cat_logits_list[1].size(-1)
-                mask_indices = [0, 1, 5, 6] if hor_dim == 7 else ([0, 1, 5] if hor_dim == 6 else [])
+                mask_indices = [0, 1,  2,4,  5, 6] if hor_dim == 7 else ([0, 1,  2,4,  5] if hor_dim == 6 else [])
                 if mask_indices:
                     in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
                     in_mask[mask_indices] = True
                     in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
                     warning_mask = warning_flag_cat.unsqueeze(-1).expand_as(in_mask) & in_mask
                     cat_logits_list[1] = cat_logits_list[1].masked_fill(warning_mask, -1e8)
+                # mid_term时不准瞄准
+                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
+                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
+                mask_indices = [0, 6] if hor_dim == 7 else ([0] if hor_dim == 6 else [])
+                if mask_indices:
+                    in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
+                    in_mask[mask_indices] = True
+                    in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
+                    mid_term_mask = cond_no_warn_mid.unsqueeze(-1).expand_as(in_mask) & in_mask
+                    cat_logits_list[1] = cat_logits_list[1].masked_fill(mid_term_mask, -1e8)
 
             # 2. 应用温度缩放 (Logits / temperature) 并 Softmax
             final_probs_list = []
@@ -857,15 +868,21 @@ class SACHybrid:
         
         mask_eps = 1e-5
         active_sum = active_masks.sum()
-        critic_loss = (F.mse_loss(q1_pred, y_target, reduction='none') + F.mse_loss(q2_pred, y_target, reduction='none')).mean()
-        
+        # 两个 Q 网络分别计算损失并独立反向传播，避免共用单一损失图
+        critic_1_loss = F.mse_loss(q1_pred, y_target, reduction='mean')
+        critic_2_loss = F.mse_loss(q2_pred, y_target, reduction='mean')
+        critic_loss = (critic_1_loss + critic_2_loss).detach()  # 仅用于日志
+
         self.critic_1_optimizer.zero_grad()
-        self.critic_2_optimizer.zero_grad()
-        critic_loss.backward()
-        critic_grad = nn.utils.clip_grad_norm_(
-            list(self.critic_1.parameters()) + list(self.critic_2.parameters()), self.critic_max_grad)
+        critic_1_loss.backward()
+        critic_1_grad = nn.utils.clip_grad_norm_(self.critic_1.parameters(), self.critic_max_grad)
         self.critic_1_optimizer.step()
+
+        self.critic_2_optimizer.zero_grad()
+        critic_2_loss.backward()
+        critic_2_grad = nn.utils.clip_grad_norm_(self.critic_2.parameters(), self.critic_max_grad)
         self.critic_2_optimizer.step()
+        critic_grad = (critic_1_grad + critic_2_grad) / 2.0
 
         # 2. 更新 策略网络 (Actor) —— freeze_actor=True 时跳过
         if not freeze_actor:
@@ -888,8 +905,10 @@ class SACHybrid:
             
             alpha = self.log_alpha.exp().detach()
             # 机动部分 (cont+cat) 使用自适应 alpha；开火部分 (bern) 使用固定初始熵系数
-            actor_loss = ((alpha * (curr_log_probs['cont'] + curr_log_probs['cat'])
-                          - min_q_pi) * active_masks).sum() / (active_sum + mask_eps)
+            # 与原版 SAC 一致：actor_loss = -alpha * entropy - min_Q，其中 entropy = -log_prob
+            mobility_log_prob = curr_log_probs['cont'] + curr_log_probs['cat']
+            mobility_entropy = -mobility_log_prob
+            actor_loss = ((-alpha * mobility_entropy - min_q_pi) * active_masks).sum() / (active_sum + mask_eps)
 
             actor_params = [p for p in self.actor.parameters() if p.requires_grad]
             actor_before = [p.detach().clone() for p in actor_params]
@@ -912,7 +931,8 @@ class SACHybrid:
                 # mobility_log_probs 是 log_prob（负数），熵 entropy = -log_prob（正数）
                 mobility_log_probs = curr_log_probs['cont'].detach() + curr_log_probs['cat'].detach()
                 mobility_entropy = -mobility_log_probs
-                alpha_loss = -(self.log_alpha * (mobility_entropy - target_entropy) * active_masks).sum() / (active_sum + mask_eps)
+                alpha = self.log_alpha.exp()
+                alpha_loss = (alpha * (mobility_entropy - target_entropy) * active_masks).sum() / (active_sum + mask_eps)
                 self.alpha_optimizer.zero_grad()
                 alpha_loss.backward()
                 self.alpha_optimizer.step()

@@ -8,7 +8,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"PurePFSP_分阶段_混规则对手_挑战_并行_训练满熵项-run-20260616-171415")
+#     r"SAC0.3_flymask_v0h0-run-20260921-212357")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -32,7 +32,7 @@ critic_lr = actor_lr * 5 # * 5
 IL_epoches= 30 # 180，使用外部 actor 起点时跳过 IL 预训练
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
-gamma = 0.97 # 0.995
+gamma = 0.92 # 0.97
 lmbda = 0.985 # 0.995
 epochs = 4 # 10
 eps = 0.2
@@ -69,7 +69,7 @@ sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新�
 SAC_gumbel_tau = 1.5                 # Cat Gumbel-Softmax 温度：仅平滑反向Q梯度，前向仍为one-hot
 replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验池
 SAC_update_step_interval = 1024      # [SAC] 每收集512个环境步触发一次更新
-SAC_max_updates_per_batch = 8       # [SAC] 每个采样块固定最多执行32次梯度更新
+SAC_max_updates_per_batch = 4       # [SAC] 每个采样块固定最多执行32次梯度更新 8
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。
@@ -182,7 +182,7 @@ if __name__=='__main__':
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
-        sac_target_entropy = 1.5, # 目标熵
+        sac_target_entropy = 2.5, # 目标熵
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
