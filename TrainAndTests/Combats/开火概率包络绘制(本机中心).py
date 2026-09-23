@@ -16,18 +16,22 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 
 # ======================= 可配置参数区 =======================
 # 模型来源：True 加载 Algorithms.SACHybrid；False 加载 Algorithms.PPOHybrid23_0
-USE_SAC_HYBRID = True
+USE_SAC_HYBRID = 0
 
 # 优先使用 dir_name 指定日志目录；为 None 时用 experiment_name 自动找最新
-DIR_NAME = "SAC0.3_flymask_v0h0-run-20260922-095941"
-# DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-112447"
-EXPERIMENT_NAME = 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
-# 备选: 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项_对照奖励函数'
-#       'NoILPFSP_分阶段_混规则对手_挑战_并行_训练满熵项_旧版奖励函数'
+# DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
+DIR_NAME = "PPO0.3_flymask_v0h0-run-20260921-194617"
+# DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428"
+
+EXPERIMENT_NAME = None
+
+# 抽取进度为几%的actor参数
+select_progress_percentage = 100 # %
+ammo = 6
 
 # 观测覆盖：中制导标志 / 自发射以来的等待时间
-MID_TERM = 1.0      # r_obs[3]  missile_in_mid_term
-T_SHOOT = 35.0      # r_obs[21] = T_SHOOT / 120
+MID_TERM = 0      # r_obs[3]  missile_in_mid_term
+T_SHOOT = 31.0 if MID_TERM else 120     # r_obs[21] = T_SHOOT / 120
 
 # 场景参数
 RED_HEIGHT = 8e3
@@ -37,14 +41,13 @@ DEVICE = 'cpu'
 
 # 扫描网格
 DIST_MIN_KM, DIST_MAX_KM, DIST_STEP_KM = 8, 100, 15
-ANGLE_MIN_DEG, ANGLE_MAX_DEG, ANGLE_STEP_DEG = -45, 45, 5
+ANGLE_MIN_DEG, ANGLE_MAX_DEG, ANGLE_STEP_DEG = -30, 30, 5
 ANGLE_TICK_DEG = 15   # 扇面角度刻度间隔
 
 # 绘图：开火概率不归一化，固定 0=最深蓝、1=白色
 COLOR_LEVELS = 21     # 颜色采样等级（越大过渡越细）
 
-# 抽取进度为几%的actor参数
-select_progress_percentage = 25 # %
+
 
 
 # 出图规格
@@ -172,7 +175,7 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     
     # 重置环境
     env.reset(red_birth_state=red_state, blue_birth_state=blue_state,
-              red_init_ammo=6, blue_init_ammo=6)
+              red_init_ammo=ammo, blue_init_ammo=ammo)
     
     # 获取观测
     r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
@@ -194,11 +197,12 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     # 获取动作和开火概率
     with torch.no_grad():
         actions_exec, actions_raw, _, actions_dist_check = actor.get_action(
-            r_obs_tensor, explore=False, check_obs=None, temperature=1.0
+            r_obs_tensor, explore=False, check_obs=r_check_obs, temperature=1.0
         ) # check_obs=r_check_obs, None
     
     # 提取开火概率
     firing_probability = actions_dist_check['bern'][0] if 'bern' in actions_dist_check else 0.0
+    
     
     return firing_probability
 
