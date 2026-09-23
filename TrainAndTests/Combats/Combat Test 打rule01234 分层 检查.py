@@ -54,7 +54,7 @@ if __name__ == "__main__":
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SAC0.3_flymask_v0h0-run-20260922-095941"
+    dir_name = "SAC0.3_flymask_v0h0-run-20260923-000702"
     
     # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
 
@@ -195,7 +195,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.4,
-                            temperature={'cat':0.3, 'bern':1}
+                            temperature={'cat':1, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]

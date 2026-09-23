@@ -7,7 +7,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-    r"SLWSPFSPNoIL_flymask_v0h0-run-20260909-131801")
+    r"NoIL_flymask_v0h0-run-20260922-152959")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -20,7 +20,7 @@ with open(mask_config_path, 'r', encoding='utf-8') as f:
     ver = _mask_cfg.get('ver', 0)
     hor = _mask_cfg.get('hor', 0)
 
-mission_name = f'SLWSPFSPNoIL_flymask_v{ver}h{hor}'
+mission_name = f'NoIL_flymask_v{ver}h{hor}'
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-4
