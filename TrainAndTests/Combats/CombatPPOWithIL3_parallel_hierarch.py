@@ -941,7 +941,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ego_trans': ego_trans, # 用于 SIL (win)
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     # 命中结果由环境在回合结束时一次性写入，直接传回主进程。
-                    'fire_hit_records': copy.deepcopy(getattr(env.BUAV, 'fire_hit_records', [])),
+                    'fire_hit_records': copy.deepcopy(getattr(env.BUAV, 'fire_hit_records', [])+
+                        getattr(env.RUAV, 'fire_hit_records', [])),
                     'metrics': {
                         'return': episode_return,
                         'event_return': episode_return_event,

@@ -843,7 +843,8 @@ def worker_process(rank, pipe, args, state_dim, hidden_dim,
                     'ego_trans': ego_trans, # 用于 SIL (win)
                     'enm_trans': enm_trans, # 用于 SIL (lose)
                     # 命中结果由环境在回合结束时一次性写入，直接传回主进程。
-                    'fire_hit_records': copy.deepcopy(getattr(env.BUAV, 'fire_hit_records', [])),
+                    'fire_hit_records': copy.deepcopy(getattr(env.BUAV, 'fire_hit_records', [])+
+                        getattr(env.RUAV, 'fire_hit_records', [])),
                     'metrics': {
                         'return': episode_return,
                         'event_return': episode_return_event,
@@ -977,7 +978,7 @@ def run_MLP_simulation(
     sac_target_entropy = 1.5, # [SAC] 目标熵（正数），None 表示不自动调节 alpha
     sac_alpha_clip = (0.001, 0.3), # [SAC] alpha 截断范围
     sac_policy_delay = 2, # [SAC] TD3式延迟更新：每N次梯度更新才更新一次actor/alpha
-    sac_actor_max_update_norm = 0.03, # [SAC] 单次actor更新的参数位移L2上限（post-step投影）
+    sac_actor_max_update_norm = 0.003, # [SAC] 单次actor更新的参数位移L2上限（post-step投影）
     sac_mobility_freeze_steps = 1e6, # [SAC] 前N个环境步冻结机动头（actor/alpha不更新），仅Q网络与开火头SL学习
     sac_actor_norm_ramp_steps = 5e6, # [SAC] actor位移上限在此步数内从10%线性爬坡到满值
     q_warmup_batches = 20, # [SAC] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
