@@ -978,7 +978,10 @@ def run_MLP_simulation(
     sac_alpha_clip = (0.001, 0.3), # [SAC] alpha 截断范围
     sac_policy_delay = 2, # [SAC] TD3式延迟更新：每N次梯度更新才更新一次actor/alpha
     sac_actor_max_update_norm = 0.03, # [SAC] 单次actor更新的参数位移L2上限（post-step投影）
+    sac_mobility_freeze_steps = 1e6, # [SAC] 前N个环境步冻结机动头（actor/alpha不更新），仅Q网络与开火头SL学习
+    sac_actor_norm_ramp_steps = 5e6, # [SAC] actor位移上限在此步数内从10%线性爬坡到满值
     q_warmup_batches = 20, # [SAC] 前N个batch只训Q网络，actor冻结，防止随机初始化Q把预训练actor炸飞
+    il_no_bern = 0,  # 是否让模仿学习排除开火
 ):
 
     actor_lr0 = actor_lr
@@ -1230,7 +1233,7 @@ def run_MLP_simulation(
             beta=beta_mixed, 
             batch_size=il_batch_size, # 显存如果够大可以适当调大
             label_smoothing=label_smoothing,
-            no_bern = 0, # 0
+            no_bern = il_no_bern, # 0
         )
         
         # 记录
@@ -2001,16 +2004,24 @@ def run_MLP_simulation(
                 # [做法5] 前 q_warmup_batches 个 batch 冻结 actor，只更新 Q 网络
                 # 让 Q 先在真实 replay buffer 数据上建立合理估值，再允许 actor 被梯度更新
                 _freeze_actor_now = (batch_idx <= q_warmup_batches)
+                # [新增] 前 sac_mobility_freeze_steps 个环境步冻结机动头（actor/alpha不更新，
+                # 但开火头SL照常）；之后位移上限在 sac_actor_norm_ramp_steps 内从10%线性爬坡到满值
+                _freeze_mobility_now = (total_steps < sac_mobility_freeze_steps)
+                _actor_norm_cap = sac_actor_max_update_norm * (0.1 + 0.9 * np.clip(
+                    total_steps / sac_actor_norm_ramp_steps, 0.0, 1.0))
                 if _freeze_actor_now and batch_idx == 1:
                     print(f"[做法5] Actor冻结中，将在 batch_idx>{q_warmup_batches} 后解冻")
                 elif not _freeze_actor_now and batch_idx == q_warmup_batches + 1:
                     print(f"[做法5] Actor已解冻，开始正常SAC更新")
+                if _freeze_mobility_now and batch_idx == 1:
+                    print(f"[SAC] 机动头冻结中（前{sac_mobility_freeze_steps:.0e}步），仅Q网络与开火头SL学习")
                 for _ in range(num_sac_updates):
                     sac_batch = replay_buffer.sample(sac_batch_size)
                     student_agent.update(sac_batch, target_entropy=sac_target_entropy,
-                                        alpha_clip=sac_alpha_clip, freeze_actor=_freeze_actor_now,
+                                        alpha_clip=sac_alpha_clip,
+                                        freeze_actor=(_freeze_actor_now or _freeze_mobility_now),
                                         policy_delay=sac_policy_delay,
-                                        actor_max_update_norm=sac_actor_max_update_norm)
+                                        actor_max_update_norm=_actor_norm_cap)
 
                 # 回合监督数据与 SAC 更新解耦：只更新 actor.net.fc_bern。
                 if supervised_fire_buffer.size() > 0 and not _freeze_actor_now:

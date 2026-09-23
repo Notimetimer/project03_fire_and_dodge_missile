@@ -40,7 +40,9 @@ k_entropy={'cont':0.01, 'cat':0.008, 'bern': 0.001} # cat:0.005, bern:0.001 是�
 alpha_il = 0.0  # 设置为0就是纯强化学习
 il_batch_size=128 # 模仿学习minibatch大小
 il_buffer_max_size= 5e3 # il_batch_size 2e4
-mini_batch_size_mixed = 2048 # 混合更新minibatch大小，SAC要比PPO大一些
+mini_batch_size_mixed = 3000 # 混合更新minibatch大小，SAC要比PPO大一些
+# replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
+replay_buffer_size = int(1e5)       # 经验回放池容量；按决策转移计数
 beta_mixed = 1.0
 label_smoothing=0.3 # 0.2 # 0.3 改为 1-0.4，而p1=0.4对应3.4附近的策略熵
 label_smoothing_mixed=0.01
@@ -61,8 +63,6 @@ dt_action_cycle = dt_maneuver * action_cycle_multiplier
 transition_dict_threshold = 8 * max_episode_duration//dt_action_cycle + 1  # 5*
 
 # [SAC] off-policy 专用超参数
-# replay_buffer_size = int(1e6)      # 经验回放池容量（正常训练）
-replay_buffer_size = int(1e5)       # 经验回放池容量；按决策转移计数
 sac_tau = 0.005                      # 目标网络软更新系数 0.005
 sac_alpha_lr = 3e-4                  # 温度参数 alpha 学习率
 sac_updates_per_10_steps = 1         # 每 10 个采样步执行的梯度更新次数（off-policy 更新比）
@@ -71,7 +71,9 @@ replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验�
 SAC_update_step_interval = 1024      # [SAC] 每收集512个环境步触发一次更新
 SAC_max_updates_per_batch = 4       # [SAC] 每个采样块固定最多执行32次梯度更新 8
 SAC_policy_delay = 2                # [SAC] TD3式延迟更新：每N次梯度更新才更新一次actor/alpha
-SAC_actor_max_update_norm = 0.03    # [SAC] 单次actor更新参数位移L2上限，收紧防策略横跳
+SAC_actor_max_update_norm = 0.01    # [SAC] 单次actor更新参数位移L2上限，收紧防策略横跳
+SAC_mobility_freeze_steps = 8e5     # [SAC] 前N个环境步冻结机动头（cont/cat），仅Q网络与开火头SL学习
+SAC_actor_norm_ramp_steps = 5e6     # [SAC] actor位移上限在解冻后线性爬坡，至此步数达到满值
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。
@@ -156,6 +158,8 @@ if __name__=='__main__':
         SAC_max_updates_per_batch=SAC_max_updates_per_batch,
         sac_policy_delay=SAC_policy_delay,
         sac_actor_max_update_norm=SAC_actor_max_update_norm,
+        sac_mobility_freeze_steps=SAC_mobility_freeze_steps,
+        sac_actor_norm_ramp_steps=SAC_actor_norm_ramp_steps,
         should_kick=0, # False,  # 是否踢走不合规的对手
         init_elo_ratings = {
             'Rule_0': 1200, # debug
@@ -187,6 +191,7 @@ if __name__=='__main__':
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
         sac_target_entropy = 2.5, # 目标熵
+        il_no_bern = 0, # 排除开火
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")
