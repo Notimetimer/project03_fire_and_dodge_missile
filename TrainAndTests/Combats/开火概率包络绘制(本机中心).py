@@ -19,10 +19,10 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 USE_SAC_HYBRID = 0
 
 # 优先使用 dir_name 指定日志目录；为 None 时用 experiment_name 自动找最新
-DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
+# DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
 # DIR_NAME = "PPO0.3_flymask_v0h0-run-20260921-194617"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428"
-# DIR_NAME = "SAC0.3_flymask_v1h1-run-20260923-213238"
+DIR_NAME = "SAC0.3_flymask_v1h1-run-20260923-213238"
 
 EXPERIMENT_NAME = None
 
@@ -115,15 +115,15 @@ def select_agent_by_progress(log_dir, percentage):
     files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
     step_files = []
     for f in files:
-        m = re.search(r'actor_rein(\d+)\.pt$', os.path.basename(f))
+        m = re.fullmatch(r'actor_rein(\d+(?:\.\d+)?)\.pt', os.path.basename(f))
         if m:
-            step_files.append((int(m.group(1)), f))
+            step_files.append((float(m.group(1)), f))
     if not step_files:
         return None
     step_files.sort(key=lambda x: x[0])
     target = step_files[-1][0] * percentage / 100.0
     step, best = min(step_files, key=lambda x: abs(x[0] - target))
-    print(f"选择进度 {percentage}%: 目标步数 {target:.0f}, 选中 actor_rein{step}.pt")
+    print(f"选择进度 {percentage}%: 目标步数 {target:.0f}, 选中 {os.path.basename(best)}")
     return best
 
 def load_trained_actor(model_path, device='cpu'):
