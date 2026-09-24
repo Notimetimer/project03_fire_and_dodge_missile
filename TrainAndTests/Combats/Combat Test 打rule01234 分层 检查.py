@@ -54,15 +54,15 @@ if __name__ == "__main__":
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SAC0.3_flymask_v0h0-run-20260923-000702"
+    dir_name = "SAC0.3_flymask_v1h1-run-20260923-213238"
     
-    # "SLWSPFSP0_flymask_v1h1-run-20260907-211901"
+    
 
 
     
     # 次要
     experiment_name = None    
-    'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
+    # 'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
 
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [3] # [0,1,2,3,4] # [3]
+    rule_opponents = [1] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 

@@ -431,31 +431,31 @@ class PolicyNetHybrid(torch.nn.Module):
                     for heads in action_head_groups
                 ], dim=1)
 
-            # [强制] warning=1 时，无论 hor_mask 配置如何，都屏蔽指定水平机动动作
-            if len(cat_logits_list) > 1:
-                xb_cat = x
-                if xb_cat.dim() == 1:
-                    xb_cat = xb_cat.unsqueeze(0)
-                # warning时不准前进
-                warning_flag_cat = xb_cat[:, 5] > 1e-6
-                hor_dim = cat_logits_list[1].size(-1)
-                mask_indices = [0, 1,   5, 6] if hor_dim == 7 else ([0, 1,   5] if hor_dim == 6 else [])
-                if mask_indices:
-                    in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
-                    in_mask[mask_indices] = True
-                    in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
-                    warning_mask = warning_flag_cat.unsqueeze(-1).expand_as(in_mask) & in_mask
-                    cat_logits_list[1] = cat_logits_list[1].masked_fill(warning_mask, -1e8)
-                # mid_term时不准瞄准
-                missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
-                cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
-                mask_indices = [0, 6] if hor_dim == 7 else ([0] if hor_dim == 6 else [])
-                if mask_indices:
-                    in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
-                    in_mask[mask_indices] = True
-                    in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
-                    mid_term_mask = cond_no_warn_mid.unsqueeze(-1).expand_as(in_mask) & in_mask
-                    cat_logits_list[1] = cat_logits_list[1].masked_fill(mid_term_mask, -1e8)
+            # # [强制] warning=1 时，无论 hor_mask 配置如何，都屏蔽指定水平机动动作
+            # if len(cat_logits_list) > 1:
+            #     xb_cat = x
+            #     if xb_cat.dim() == 1:
+            #         xb_cat = xb_cat.unsqueeze(0)
+            #     # warning时不准前进
+            #     warning_flag_cat = xb_cat[:, 5] > 1e-6
+            #     hor_dim = cat_logits_list[1].size(-1)
+            #     mask_indices = [0, 1,   5, 6] if hor_dim == 7 else ([0, 1,   5] if hor_dim == 6 else [])
+            #     if mask_indices:
+            #         in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
+            #         in_mask[mask_indices] = True
+            #         in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
+            #         warning_mask = warning_flag_cat.unsqueeze(-1).expand_as(in_mask) & in_mask
+            #         cat_logits_list[1] = cat_logits_list[1].masked_fill(warning_mask, -1e8)
+            #     # mid_term时不准瞄准
+            #     missile_in_mid_term_cat = xb_cat[:, 3] > 1e-6
+            #     cond_no_warn_mid = (~warning_flag_cat) & missile_in_mid_term_cat
+            #     mask_indices = [0, 6] if hor_dim == 7 else ([0] if hor_dim == 6 else [])
+            #     if mask_indices:
+            #         in_mask = torch.zeros(hor_dim, dtype=torch.bool, device=cat_logits_list[1].device)
+            #         in_mask[mask_indices] = True
+            #         in_mask = in_mask.unsqueeze(0).expand(cat_logits_list[1].size(0), -1)
+            #         mid_term_mask = cond_no_warn_mid.unsqueeze(-1).expand_as(in_mask) & in_mask
+            #         cat_logits_list[1] = cat_logits_list[1].masked_fill(mid_term_mask, -1e8)
 
             # 2. 应用温度缩放 (Logits / temperature) 并 Softmax
             final_probs_list = []

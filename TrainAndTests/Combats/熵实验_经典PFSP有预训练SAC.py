@@ -8,7 +8,7 @@ from prepare_il_datas_hierarchical import run_rules
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
 # resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"SAC0.3_flymask_v0h0-run-20260921-212357")
+#     r"SAC0.3_flymask_v0h0-run-20260923-144952")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -27,8 +27,8 @@ mission_name = f'SAC0.3_flymask_v{ver}h{hor}'
 init_actor_path = None # r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat\SLWSPFSP0.3_flymask_0-run-20260905-210412\actor_rein0.pt"
 
 # 超参数
-actor_lr = 1e-4 # 4 1e-4
-critic_lr = actor_lr * 5 # * 5
+actor_lr = 0.5e-4 # 4 1e-4
+critic_lr = actor_lr * 10 # * 5
 IL_epoches= 30 # 180，使用外部 actor 起点时跳过 IL 预训练
 max_steps = 20e6 # 1320e4
 hidden_dim = [128, 128, 128]
@@ -71,9 +71,9 @@ replay_buffer_save_interval = 20     # 每多少个 batch 持久化一次经验�
 SAC_update_step_interval = 1024      # [SAC] 每收集512个环境步触发一次更新
 SAC_max_updates_per_batch = 4       # [SAC] 每个采样块固定最多执行32次梯度更新 8
 SAC_policy_delay = 2                # [SAC] TD3式延迟更新：每N次梯度更新才更新一次actor/alpha
-SAC_actor_max_update_norm = 0.01    # [SAC] 单次actor更新参数位移L2上限，收紧防策略横跳
+SAC_actor_max_update_norm = 0.0005    # [SAC] 单次actor更新参数位移L2上限，收紧防策略横跳
 SAC_mobility_freeze_steps = 8e5     # [SAC] 前N个环境步冻结机动头（cont/cat），仅Q网络与开火头SL学习
-SAC_actor_norm_ramp_steps = 5e6     # [SAC] actor位移上限在解冻后线性爬坡，至此步数达到满值
+SAC_actor_norm_ramp_steps = 1 # 5e6     # [SAC] actor位移上限在解冻后线性爬坡，至此步数达到满值
 
 """
 tau=1.0：原始基线，利用更强，塌缩风险更高。
