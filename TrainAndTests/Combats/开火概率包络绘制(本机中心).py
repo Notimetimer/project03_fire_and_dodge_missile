@@ -19,15 +19,16 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 USE_SAC_HYBRID = 0
 
 # 优先使用 dir_name 指定日志目录；为 None 时用 experiment_name 自动找最新
-# DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
-DIR_NAME = "PPO0.3_flymask_v0h0-run-20260921-194617"
+DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
+# DIR_NAME = "PPO0.3_flymask_v0h0-run-20260921-194617"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428"
+# DIR_NAME = "SAC0.3_flymask_v1h1-run-20260923-213238"
 
 EXPERIMENT_NAME = None
 
-# 抽取进度为几%的actor参数
-select_progress_percentage = 100 # %
-ammo = 6
+# 抽取进度为几%的actor参数 / 弹药量（循环遍历所有组合）
+PROGRESS_LIST = [0, 50, 100]  # select_progress_percentage (%)
+AMMO_LIST = [6, 1]            # ammo 初始弹药量
 
 # 观测覆盖：中制导标志 / 自发射以来的等待时间
 MID_TERM = 0      # r_obs[3]  missile_in_mid_term
@@ -54,6 +55,10 @@ COLOR_LEVELS = 21     # 颜色采样等级（越大过渡越细）
 FIG_DPI = 300 # 300            # 保存分辨率 (dpi)
 FIG_WIDTH_CM = 10 # 4.0       # 图宽 (cm)
 FIG_HEIGHT_CM = None     # 图高 (cm)；None 时极坐标按正方形、直角坐标按 0.7 倍宽自动
+
+# 输出目录（相对 project_root）与是否弹窗显示
+OUT_DIR_NAME = os.path.join('结果展示', 'exp_png2')
+SHOW_PLOT = False
 # ===========================================================
 
 if USE_SAC_HYBRID:
@@ -141,7 +146,7 @@ def load_trained_actor(model_path, device='cpu'):
     
     return actor
 
-def run_single_step_firing_probability(actor, red_height, blue_height, distance, delta_psi, AA_hor=0, device='cpu'):
+def run_single_step_firing_probability(actor, red_height, blue_height, distance, delta_psi, AA_hor=0, device='cpu', ammo=6):
     """
     运行单步并获取开火概率
     
@@ -323,7 +328,7 @@ def main():
     print(f"角度范围: {ANGLE_MIN_DEG:.0f}° - {ANGLE_MAX_DEG:.0f}°, 间隔: {ANGLE_STEP_DEG:.0f}°")
     print(f"总计算点数: {len(distances) * len(delta_psis)}")
     
-    # 查找并加载训练好的模型
+    # 查找日志目录
     dir_name = DIR_NAME
     experiment_name = EXPERIMENT_NAME
     
@@ -334,90 +339,92 @@ def main():
     if not latest_log_dir:
         raise FileNotFoundError(f"No log directory found for mission '{experiment_name}'")
     
-    # 按进度百分比选取 actor_rein*.pt（select_progress_percentage 为 0~100）
-    agent_path = select_agent_by_progress(latest_log_dir, select_progress_percentage)
-    if not agent_path:
-        raise FileNotFoundError(f"No agent file found in '{latest_log_dir}'")
+    # 输出目录（相对 project_root），不存在则创建
+    out_dir = os.path.join(project_root, OUT_DIR_NAME)
+    os.makedirs(out_dir, exist_ok=True)
     
-    print(f"找到模型: {agent_path}")
-    
-    try:
-        # 加载模型
-        env_args = argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3)
-        env = ChooseStrategyEnv(env_args, tacview_show=False, vertices=None)
-        state_dim = env.obs_dim
-        action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
-        hidden_dim = [128, 128, 128]
-        
-        actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
-        actor = HybridActorWrapper(actor_net, action_dims_dict, device=device).to(device)
-        actor.load_state_dict(torch.load(agent_path, map_location=device, weights_only=True), strict=False)
-        actor.eval()
-        
-        print("模型加载成功")
-    except Exception as e:
-        print(f"模型加载失败: {e}")
-        return
-    
-    # 计算开火概率网格
-    probabilities = np.zeros((len(delta_psis), len(distances)))
+    # 网络结构参数（只需建一次环境读取维度）
+    env_args = argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3)
+    env = ChooseStrategyEnv(env_args, tacview_show=False, vertices=None)
+    state_dim = env.obs_dim
+    action_dims_dict = {'cont': 0, 'cat': env.fly_act_dim, 'bern': env.fire_dim}
+    hidden_dim = [128, 128, 128]
     
     total_points = len(distances) * len(delta_psis)
-    current_point = 0
     
-    for i, delta_psi in enumerate(delta_psis):
-        for j, distance in enumerate(distances):
-            current_point += 1
-            print(f"进度: {current_point}/{total_points} ({100*current_point/total_points:.1f}%)", end='\r')
+    # 循环遍历 progress × ammo 组合
+    for prog in PROGRESS_LIST:
+        # 按进度百分比选取 actor_rein*.pt
+        agent_path = select_agent_by_progress(latest_log_dir, prog)
+        if not agent_path:
+            print(f"跳过 prog={prog}: '{latest_log_dir}' 中没有 actor_rein 文件")
+            continue
+        print(f"找到模型: {agent_path}")
+        
+        try:
+            actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+            actor = HybridActorWrapper(actor_net, action_dims_dict, device=device).to(device)
+            actor.load_state_dict(torch.load(agent_path, map_location=device, weights_only=True), strict=False)
+            actor.eval()
+            print("模型加载成功")
+        except Exception as e:
+            print(f"模型加载失败: {e}")
+            continue
+        
+        for ammo in AMMO_LIST:
+            print(f"\n===== ammo={ammo}, progress={prog}% =====")
+            # 计算开火概率网格
+            probabilities = np.zeros((len(delta_psis), len(distances)))
+            current_point = 0
             
-            try:
-                prob = run_single_step_firing_probability(
-                    actor=actor, 
-                    red_height=red_height, 
-                    blue_height=blue_height, 
-                    distance=distance, 
-                    delta_psi=delta_psi, 
-                    AA_hor=AA_hor, 
-                    device=device
-                )
-                probabilities[i, j] = prob
-            except Exception as e:
-                print(f"\n计算错误 (距离={distance/1000:.0f}km, 角度={np.degrees(delta_psi):.0f}°): {e}")
-                probabilities[i, j] = 0.0
+            for i, delta_psi in enumerate(delta_psis):
+                for j, distance in enumerate(distances):
+                    current_point += 1
+                    print(f"进度: {current_point}/{total_points} ({100*current_point/total_points:.1f}%)", end='\r')
+                    
+                    try:
+                        prob = run_single_step_firing_probability(
+                            actor=actor, 
+                            red_height=red_height, 
+                            blue_height=blue_height, 
+                            distance=distance, 
+                            delta_psi=delta_psi, 
+                            AA_hor=AA_hor, 
+                            device=device,
+                            ammo=ammo
+                        )
+                        probabilities[i, j] = prob
+                    except Exception as e:
+                        print(f"\n计算错误 (距离={distance/1000:.0f}km, 角度={np.degrees(delta_psi):.0f}°): {e}")
+                        probabilities[i, j] = 0.0
+            
+            print(f"\n计算完成！")
+            
+            base_name = f"fire_prob_prog{prog}_ammo{ammo}"
+            
+            # 保存结果
+            results = {
+                'distances_km': distances / 1000,
+                'delta_psis_rad': delta_psis,
+                'delta_psis_deg': np.degrees(delta_psis),
+                'probabilities': probabilities
+            }
+            np.savez(os.path.join(out_dir, base_name + '.npz'), **results)
+            
+            # 绘制图形并保存 png + svg
+            fig1, ax1 = plot_firing_probability_heatmap_polar(
+                delta_psis=delta_psis, 
+                distances=distances, 
+                probabilities=1-np.power(1-probabilities, 5)
+            )
+            fig1.savefig(os.path.join(out_dir, base_name + '.png'), dpi=FIG_DPI, bbox_inches='tight')
+            fig1.savefig(os.path.join(out_dir, base_name + '.svg'), bbox_inches='tight')
+            if SHOW_PLOT:
+                plt.show()
+            plt.close(fig1)
+            print(f"已保存: {os.path.join(out_dir, base_name)}.png/.svg")
     
-    print(f"\n计算完成！")
-    
-    # 保存结果
-    results = {
-        'distances_km': distances / 1000,
-        'delta_psis_rad': delta_psis,
-        'delta_psis_deg': np.degrees(delta_psis),
-        'probabilities': probabilities
-    }
-    
-    np.savez('firing_probability_results.npz', **results)
-    print("结果已保存至: firing_probability_results.npz")
-    
-    # 绘制图形
-    print("绘制极坐标热图...")
-    fig1, ax1 = plot_firing_probability_heatmap_polar(
-        delta_psis=delta_psis, 
-        distances=distances, 
-        probabilities=1-np.power(1-probabilities, 5)
-    )
-    plt.savefig('firing_probability_polar.png', dpi=FIG_DPI, bbox_inches='tight')
-    plt.show()
-    
-    # print("绘制直角坐标热图...")
-    # fig2, ax2 = plot_firing_probability_heatmap_cartesian(
-    #     delta_psis=delta_psis, 
-    #     distances=distances, 
-    #     probabilities=probabilities
-    # )
-    # plt.savefig('firing_probability_cartesian.png', dpi=FIG_DPI, bbox_inches='tight')
-    # plt.show()
-    
-    print("图形已保存！")
+    print("\n全部组合完成！")
 
 if __name__ == '__main__':
     main()
