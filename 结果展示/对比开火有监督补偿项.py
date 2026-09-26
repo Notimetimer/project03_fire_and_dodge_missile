@@ -95,6 +95,114 @@ plt.rcParams.update({
 })
 # ================================================================
 
+# ==================== 绘图任务配置（统一在头部管理，新增/删除/禁用都在这里） ====================
+# 说明：
+#   - enabled = False 可临时禁用某张图
+#   - 直接新增一个 dict 即可添加新图
+#   - 只要保留任务名、类型和参数即可，后面统一循环执行
+SAVE_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "对比开火有监督补偿项")
+
+PLOT_TASKS = [
+    {
+        "name": "win_rates",
+        "enabled": True,
+        "type": "win_rates",
+        "exp_csv_dir": EXP_CSV_DIR,
+        "x_min": 0,
+        "x_max": None,
+        "num_points": 500,
+        "algo_list": None,
+        "algo_labels": None,
+        "opp_list": None,
+        "display_titles": None,
+        "show_title": False,
+        "smooth_window": 31,
+        "fill_alpha": 0.10,
+        "linewidth": linewidth,
+        "legend_alpha": 0.35,
+        "legend_linewidth": legend_linewidth,
+        "invert_y": False,
+        "include_mutualkill": False,
+        "mutualkill_label": "对基准对手平均双杀率",
+        "save_base_dir": SAVE_BASE_DIR,
+    },
+    {
+        "name": "run_metrics",
+        "enabled": True,
+        "type": "run_metrics",
+        "exp_csv_dir": EXP_CSV_DIR,
+        "metric_names": ('accuracy', 'return', 'pre_entropy', 'entropy', 'max_fire_prob', 'min_fire_prob'),
+        "x_min": 0,
+        "x_max": None,
+        "num_points": 500,
+        "algo_list": None,
+        "algo_labels": None,
+        "metric_labels": None,
+        "smooth_window": 31,
+        "fill_alpha": 0.10,
+        "linewidth": linewidth,
+        "legend_alpha": 0.35,
+        "legend_linewidth": legend_linewidth,
+        "show_grid": True,
+        "save_base_dir": SAVE_BASE_DIR,
+    },
+]
+
+
+def run_plot_tasks(plot_tasks=None):
+    """统一执行头部配置的绘图任务，支持 enable 开关、增删任务。"""
+    if plot_tasks is None:
+        plot_tasks = PLOT_TASKS
+
+    for task in plot_tasks:
+        if not task.get("enabled", True):
+            print(f"跳过任务: {task.get('name', 'unnamed')} (enabled=False)")
+            continue
+
+        task_type = task.get("type")
+        if task_type == "win_rates":
+            plot_interpolated_win_rates(
+                exp_csv_dir=task.get("exp_csv_dir", EXP_CSV_DIR),
+                x_min=task.get("x_min", 0),
+                x_max=task.get("x_max", None),
+                num_points=task.get("num_points", 500),
+                algo_list=task.get("algo_list", None),
+                algo_labels=task.get("algo_labels", None),
+                opp_list=task.get("opp_list", None),
+                display_titles=task.get("display_titles", None),
+                show_title=task.get("show_title", False),
+                smooth_window=task.get("smooth_window", 31),
+                fill_alpha=task.get("fill_alpha", 0.10),
+                linewidth=task.get("linewidth", linewidth),
+                legend_alpha=task.get("legend_alpha", 0.35),
+                legend_linewidth=task.get("legend_linewidth", legend_linewidth),
+                invert_y=task.get("invert_y", False),
+                include_mutualkill=task.get("include_mutualkill", False),
+                mutualkill_label=task.get("mutualkill_label", "对基准对手平均双杀率"),
+                save_base_dir=task.get("save_base_dir", SAVE_BASE_DIR),
+            )
+        elif task_type == "run_metrics":
+            plot_run_metrics(
+                exp_csv_dir=task.get("exp_csv_dir", EXP_CSV_DIR),
+                metric_names=task.get("metric_names", ('entropy', 'mutualkill', 'return')),
+                x_min=task.get("x_min", 0),
+                x_max=task.get("x_max", None),
+                num_points=task.get("num_points", 500),
+                algo_list=task.get("algo_list", None),
+                algo_labels=task.get("algo_labels", None),
+                metric_labels=task.get("metric_labels", None),
+                smooth_window=task.get("smooth_window", 31),
+                fill_alpha=task.get("fill_alpha", 0.10),
+                linewidth=task.get("linewidth", linewidth),
+                legend_alpha=task.get("legend_alpha", 0.35),
+                legend_linewidth=task.get("legend_linewidth", legend_linewidth),
+                show_grid=task.get("show_grid", True),
+                save_base_dir=task.get("save_base_dir", SAVE_BASE_DIR),
+            )
+        else:
+            print(f"未知绘图任务类型: {task_type!r}，任务名={task.get('name', 'unnamed')}")
+
+
 # --- 运行级指标的中文标签映射 ---
 METRIC_LABELS = {
     'entropy': '在线训练策略熵',
@@ -102,6 +210,8 @@ METRIC_LABELS = {
     'return': '累积奖励',
     'accuracy': '预训练分类准确率',
     'mutualkill': '对基准对手平均双杀率',
+    'max_fire_prob': '最大开火概率',
+    'min_fire_prob': '最小开火概率',
 }
 
 # --- 运行级指标的横轴名称映射（预训练用"迭代"，在线训练用"步数"） ---
@@ -111,6 +221,8 @@ METRIC_XLABELS = {
     'return': '步数',
     'accuracy': '迭代',
     'mutualkill': '步数',
+    'max_fire_prob': '步数',
+    'min_fire_prob': '步数',
 }
 
 def smooth_curve(data, window_size):
@@ -863,8 +975,8 @@ def plot_run_metrics(exp_csv_dir,
 
 
 if __name__ == "__main__":
-    
-    # ==================== 1. 横轴范围与插值点数 ====================
+    # 统一在头部的 PLOT_TASKS 中维护要画的图，想加就新增 dict，想删就删除，想停用就 enabled=False
+    # 这里保留通用参数，以便在图任务中直接复用。
     X_MIN = 0
     X_MAX = None          # None 表示自动检测所有 CSV 中的最大步数（如 20000000 即 20M）
     NUM_POINTS = 500      # 统一插值采样点数
@@ -894,51 +1006,8 @@ if __name__ == "__main__":
     # 使用独立子目录，避免与其他对比实验的出图互相覆盖
     SAVE_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "对比开火有监督补偿项")
 
-    # ==================== 4. 执行绘图 ====================
-    # 比分 + 双杀率：每个对手各一张独立 figure，双杀率一张独立 figure
-    plot_interpolated_win_rates(
-        exp_csv_dir=EXP_CSV_DIR,
-        x_min=X_MIN,
-        x_max=X_MAX,
-        num_points=NUM_POINTS,
-        algo_list=ALGO_LIST,
-        algo_labels=ALGO_LABELS,
-        opp_list=OPP_LIST,
-        display_titles=DISPLAY_TITLES,
-        show_title=SHOW_TITLE,
-        smooth_window=SMOOTH_WINDOW,
-        fill_alpha=FILL_ALPHA,
-        linewidth=LINEWIDTH,
-        legend_alpha=LEGEND_ALPHA,
-        legend_linewidth=LEGEND_LINEWIDTH,
-        invert_y=INVERT_Y,
-        include_mutualkill=False,   # exp_csv2 中无 mutualkill 数据，置 False 避免生成空图
-        mutualkill_label="对基准对手平均双杀率",
-        save_base_dir=SAVE_BASE_DIR
-    )
-
-    # ==================== 5. 运行级指标曲线 ====================
-    # 每个指标各一张独立 figure
-    # 依次为：预训练准确率 / 累积回报 / 预训练策略熵 / 在线训练策略熵
-    METRIC_NAMES = ('accuracy', 'return', 'pre_entropy', 'entropy')
-
-    plot_run_metrics(
-        exp_csv_dir=EXP_CSV_DIR,
-        metric_names=METRIC_NAMES,
-        x_min=X_MIN,
-        x_max=X_MAX,
-        num_points=NUM_POINTS,
-        algo_list=ALGO_LIST,
-        algo_labels=ALGO_LABELS,
-        metric_labels=None,        # None 则使用内置 METRIC_LABELS 中文映射
-        smooth_window=SMOOTH_WINDOW,
-        fill_alpha=FILL_ALPHA,
-        linewidth=LINEWIDTH,
-        legend_alpha=LEGEND_ALPHA,
-        legend_linewidth=LEGEND_LINEWIDTH,
-        show_grid=True,
-        save_base_dir=SAVE_BASE_DIR
-    )
+    # 任务统一执行（不要再在这里写重复的 plot_* 调用）
+    run_plot_tasks(PLOT_TASKS)
 
     # 一次性显示所有 figure（不再逐张阻塞）
     plt.show()
