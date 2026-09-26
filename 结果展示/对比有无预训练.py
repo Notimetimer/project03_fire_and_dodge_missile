@@ -59,7 +59,7 @@ dpi = 200                 # 屏幕显示与保存的统一 DPI
 # 5 条用 '-'，5 条用 '--'，5 条用 ':'，最多 15 条组合
 COLOR_CYCLE = 5
 linestyles = ['-', ':', '--']
-
+smooth_window = 9
 # ==================== 单位换算（严格写出过程） ====================
 # matplotlib 的 figsize 单位为英寸（inch），fontsize 单位为磅（pt）
 # 换算关系：
@@ -69,10 +69,12 @@ linestyles = ['-', ':', '--']
 CM_PER_INCH = 2.54
 PT_PER_INCH = 72.0
 
-FIG_WIDTH_CM = 5.0          # 图宽：5 cm
-FIG_HEIGHT_CM = 4.5         # 图高：4.5 cm
+FIG_WIDTH_CM = 7 # 5.0          # 图宽：5 cm
+FIG_HEIGHT_CM = 5 # 3.5 # 4.5         # 图高：4.5 cm
 FIG_WIDTH_IN = FIG_WIDTH_CM / CM_PER_INCH   # 5 / 2.54 ≈ 1.9685 inch
 FIG_HEIGHT_IN = FIG_HEIGHT_CM / CM_PER_INCH  # 4.5 / 2.54 ≈ 1.7717 inch
+
+action_cycle_multiplier = 10 # 动作步和决策步之比
 
 # --- 1. 环境与绘图配置 ---
 # 字体：英文用 Times New Roman，中文用宋体（SimSun）
@@ -89,6 +91,8 @@ plt.rcParams.update({
     'axes.axisbelow': True,
     'figure.dpi': dpi,                                # 屏幕显示与保存文件统一 DPI
     'grid.linewidth': 0.3,
+    'axes.linewidth': 0.6,                             # 图窗外框线宽（默认 0.8 偏粗）
+    'axes.edgecolor': '0.35',                          # 外框颜色调浅为灰色
 })
 # ================================================================
 
@@ -96,7 +100,7 @@ plt.rcParams.update({
 METRIC_LABELS = {
     'entropy': '在线训练策略熵',
     'pre_entropy': '预训练策略熵',
-    'return': '奖励',
+    'return': '累积奖励',
     'accuracy': '预训练分类准确率',
     'mutualkill': '对基准对手平均双杀率',
 }
@@ -180,7 +184,8 @@ def load_and_interpolate_experiments(exp_csv_dir,
                                      x_max=None, 
                                      num_points=500,
                                      algo_list=None,
-                                     invert_y=False):
+                                     invert_y=False,
+                                     smooth_window=smooth_window):
     """
     读取 exp_csv 下所有算法及对手的 run 数据，并插值对齐到指定的横轴网格上。
 
@@ -194,6 +199,7 @@ def load_and_interpolate_experiments(exp_csv_dir,
         num_points (int): 插值点数
         algo_list (list): 算法文件夹名称列表，为 None 时自动扫描子文件夹
         invert_y (bool): 是否使用 (1 - y) 反转胜率，默认为 False
+        smooth_window (int): 每条 run 曲线插值后的平滑窗口（先平滑再统计 mean/min/max）
         
     Returns:
         x_targets (dict): { opp_id: x_target(np.ndarray) }，每个对手各自的横轴插值点
@@ -248,7 +254,7 @@ def load_and_interpolate_experiments(exp_csv_dir,
                         df = pd.read_csv(csv_path)
                         if not df.empty:
                             step_col, _ = find_step_and_value_columns(df)
-                            detected = max(detected, df[step_col].max())
+                            detected = max(detected, df[step_col].max() / action_cycle_multiplier)
                     except Exception:
                         pass
             opp_xmax = detected if detected > 0 else 1e6
@@ -272,7 +278,7 @@ def load_and_interpolate_experiments(exp_csv_dir,
                 if df.empty:
                     continue
                 step_col, val_col = find_step_and_value_columns(df)
-                steps = df[step_col].to_numpy(dtype=float)
+                steps = df[step_col].to_numpy(dtype=float) / action_cycle_multiplier
                 vals = df[val_col].to_numpy(dtype=float)
 
                 if invert_y:
@@ -298,6 +304,7 @@ def load_and_interpolate_experiments(exp_csv_dir,
                 # 线性插值（使用该对手专属的横轴）
                 xt = x_targets[opp_id]
                 interp_y = np.interp(xt, steps, vals, left=vals[0], right=vals[-1])
+                interp_y = smooth_curve(interp_y, smooth_window)
                 opp_run_curves[opp_id].append(interp_y)
 
             except Exception as e:
@@ -335,7 +342,7 @@ def plot_interpolated_win_rates(exp_csv_dir,
                                 opp_list=None,
                                 display_titles=None,
                                 show_title=False,
-                                smooth_window=61,
+                                smooth_window=smooth_window,
                                 fill_alpha=0.10,
                                 linewidth=1.08,
                                 legend_alpha=0.35,
@@ -380,7 +387,8 @@ def plot_interpolated_win_rates(exp_csv_dir,
         x_max=x_max,
         num_points=num_points,
         algo_list=algo_list,
-        invert_y=invert_y
+        invert_y=invert_y,
+        smooth_window=smooth_window
     )
 
     if not x_targets or not stats_data:
@@ -422,6 +430,7 @@ def plot_interpolated_win_rates(exp_csv_dir,
             x_max=x_max,
             num_points=num_points,
             algo_list=active_algos,
+            smooth_window=smooth_window,
         )
         if mk_x_targets and mk_stats:
             mk_x_target = mk_x_targets['mutualkill']
@@ -525,9 +534,9 @@ def plot_interpolated_win_rates(exp_csv_dir,
             elif isinstance(display_titles, list) and i < len(display_titles):
                 ylabel_text = display_titles[i]
             else:
-                ylabel_text = f"相对基准对手比分" # f"相对基准对手{i+1}比分"
+                ylabel_text = f"相对规则对手比分" # f"相对基准对手{i+1}比分"
         else:
-            ylabel_text = f"相对基准对手比分" # f"相对基准对手{i+1}比分"
+            ylabel_text = f"相对规则对手比分" # f"相对基准对手{i+1}比分"
 
         xt = x_targets[opp_id]
 
@@ -567,7 +576,8 @@ def load_and_interpolate_run_metrics(exp_csv_dir,
                                      x_min=0,
                                      x_max=None,
                                      num_points=500,
-                                     algo_list=None):
+                                     algo_list=None,
+                                     smooth_window=smooth_window):
     """
     读取 exp_csv 下各算法的 run{run_idx}_{metric}.csv 文件并插值对齐到指定横轴网格上。
 
@@ -581,6 +591,7 @@ def load_and_interpolate_run_metrics(exp_csv_dir,
         x_max (float): 插值横轴终点，None 则按指标分别自动检测
         num_points (int): 插值点数
         algo_list (list): 算法文件夹名称列表，None 则自动扫描
+        smooth_window (int): 每条 run 曲线插值后的平滑窗口（先平滑再统计 mean/min/max）
 
     Returns:
         x_targets (dict): { metric: x_target(np.ndarray) }，每个指标各自的横轴插值点
@@ -628,7 +639,7 @@ def load_and_interpolate_run_metrics(exp_csv_dir,
                         df = pd.read_csv(csv_path)
                         if not df.empty:
                             step_col, _ = find_step_and_value_columns(df)
-                            detected = max(detected, df[step_col].max())
+                            detected = max(detected, df[step_col].max() / action_cycle_multiplier)
                     except Exception:
                         pass
             mk_xmax = detected if detected > 0 else 1e6
@@ -649,7 +660,7 @@ def load_and_interpolate_run_metrics(exp_csv_dir,
                     if df.empty:
                         continue
                     step_col, val_col = find_step_and_value_columns(df)
-                    steps = df[step_col].to_numpy(dtype=float)
+                    steps = df[step_col].to_numpy(dtype=float) / action_cycle_multiplier
                     vals = df[val_col].to_numpy(dtype=float)
 
                     valid_mask = np.isfinite(steps) & np.isfinite(vals)
@@ -667,6 +678,7 @@ def load_and_interpolate_run_metrics(exp_csv_dir,
                     vals = vals[unique_idx]
 
                     interp_y = np.interp(xt, steps, vals, left=vals[0], right=vals[-1])
+                    interp_y = smooth_curve(interp_y, smooth_window)
                     curves.append(interp_y)
                 except Exception as e:
                     print(f"读取或插值文件 {csv_path} 时出错: {e}")
@@ -692,7 +704,7 @@ def plot_run_metrics(exp_csv_dir,
                      algo_list=None,
                      algo_labels=None,
                      metric_labels=None,
-                     smooth_window=61,
+                     smooth_window=smooth_window,
                      fill_alpha=0.10,
                      linewidth=1.08,
                      legend_alpha=0.35,
@@ -734,6 +746,7 @@ def plot_run_metrics(exp_csv_dir,
         x_max=x_max,
         num_points=num_points,
         algo_list=algo_list,
+        smooth_window=smooth_window,
     )
 
     if not x_targets or not stats_data:
@@ -868,7 +881,7 @@ if __name__ == "__main__":
     SHOW_TITLE = False    # 是否显示各子图上方的标题（设为 False 则彻底不显示任何标题）
 
     # ==================== 3. 视觉样式设置（可在此调节） ====================
-    SMOOTH_WINDOW = 21    # 平均曲线的滑动平均平滑窗口大小（推荐 51 ~ 101，数值越大越平滑，<=1 不平滑）
+    SMOOTH_WINDOW = smooth_window    # 平均曲线的滑动平均平滑窗口大小（推荐 51 ~ 101，数值越大越平滑，<=1 不平滑）
     FILL_ALPHA = 0.10     # 极值阴影区透明度（0.05 ~ 0.15，使阴影块更浅）
     LINEWIDTH = linewidth # 曲线线宽（pt），由顶部 linewidth 统一控制
     LEGEND_ALPHA = 0.35   # 图例背景透明度（更通透）

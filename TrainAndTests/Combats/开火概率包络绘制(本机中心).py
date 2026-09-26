@@ -16,7 +16,8 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 
 # ======================= 可配置参数区 =======================
 # 模型来源：True 加载 Algorithms.SACHybrid；False 加载 Algorithms.PPOHybrid23_0
-USE_SAC_HYBRID = 0
+from Algorithms.SACHybrid import PolicyNetHybrid, HybridActorWrapper
+# from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 
 # 优先使用 dir_name 指定日志目录；为 None 时用 experiment_name 自动找最新
 # DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
@@ -61,10 +62,6 @@ OUT_DIR_NAME = os.path.join('结果展示', 'exp_png2')
 SHOW_PLOT = False
 # ===========================================================
 
-if USE_SAC_HYBRID:
-    from Algorithms.SACHybrid import PolicyNetHybrid, HybridActorWrapper
-else:
-    from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 
 def create_initial_states(red_height, blue_height, distance, delta_psi, AA_hor=0):
     """
