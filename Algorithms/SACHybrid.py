@@ -356,9 +356,9 @@ class PolicyNetHybrid(torch.nn.Module):
                 if ver_mask:
                     v_off = ver_logits_all[:, 0:5]   # 进攻：0,1,2,3,4
                     v_dis = ver_logits_all[:, 5:8]   # 偏置：2,3,4
-                    v_off_5 = v_off
 
                     B = ver_logits_all.size(0)
+                    v_off_5 = v_off
                     v_dis_5 = torch.full((B, 5), -1e8, dtype=ver_logits_all.dtype, device=ver_logits_all.device)
                     v_dis_5[:, 2] = v_dis[:, 0]
                     v_dis_5[:, 3] = v_dis[:, 1]
@@ -467,38 +467,70 @@ class PolicyNetHybrid(torch.nn.Module):
 
         # --- Bernoulli ---
         if 'bern' in self.action_dims and self.action_dims['bern'] > 0:
+            # # 根据是否使用Autoregressive选择bern_logits来源
+            # if self.Autoregressive == 1:
+            #     bern_logits = bern_logits_direct
+            # else:
+            #     bern_logits = self.fc_bern(shared_features)
             bern_logits = self.fc_bern(shared_features)
 
+            # Compute can_fire mask from flattened observation x (always applied)
             xb = x
             if xb.dim() == 1:
                 xb = xb.unsqueeze(0)
 
+            # Indices (0-based): cos_ata_hor -> x[:,6], ata -> x[:,10], locked -> x[:,2], ammo -> x[:,20], distance_scaled -> x[:,9]
             cos_ata_hor = torch.clamp(xb[:, 6], -0.999999, 0.999999)
             delta_theta = xb[:, 8]
             ata = xb[:, 10]
+            # alt = xb[:, 15] * 5e3
             sin_theta = xb[:, 17]
+            # locked = xb[:, 2]
             ammo = xb[:, 20]
             dist = xb[:, 9] * 10e3
+            AA_hor = xb[:, 12]
+
             t_since_launch = xb[:, 21] * 120
+            missile_in_mid_term = xb[:, 3] > 1e-6
 
             ammo_cond = (ammo > 0.0)
+            # time_const_cond = t_since_launch >= torch.max(dist/(3*340)/2, torch.as_tensor(10.0, device=dist.device, dtype=dist.dtype))
             time_const_cond = t_since_launch >= torch.clamp_min(dist/(3*340)/2, 10.0)
+            # 最小开火冷却时间10s，随开火距离增加 # 10  # 冷却时间10s，全程开启
+            
             ata_cond = ata < math.pi / 2
+            # 全程只施加弹药与冷却mask；角度/距离mask仅在部署阶段由get_action的check_obs控制
             can_fire = ammo_cond & time_const_cond & ata_cond
 
-            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(45))
+            # 禁止大离轴发射导弹
+            delta_psi_cond = cos_ata_hor >= math.cos(np.radians(45)) # 25
             can_fire = can_fire & delta_psi_cond
-
+            # 禁止俯冲发射导弹
             theta = torch.arcsin(sin_theta)
             elevation = theta + delta_theta
             theta_cond = theta >= elevation - np.radians(15)
             can_fire = can_fire & theta_cond
 
+            # # 禁止中制导下开火
+            # can_fire = can_fire & ~missile_in_mid_term
+            
+            # # 禁止尾追长距离开火
+            # far_chase = (AA_hor < math.pi/2) & (dist > 25e3)
+            # can_fire = can_fire & ~ far_chase
+            
+            # if not can_fire:
+            #     print("禁止开火")
+            # else:
+            #     print("  可以开炮  ")
+            
+
+            # build mask for bern dims and apply to first bern dimension only
             bern_dim = self.action_dims.get('bern', 0)
             batch_size = shared_features.size(0)
             mask = torch.ones((batch_size, bern_dim), dtype=torch.bool, device=shared_features.device)
             mask[:, 0] = can_fire.to(dtype=torch.bool)
 
+            # If external action_masks provided (e.g., death masks), combine them (AND)
             if action_masks is not None and 'bern' in action_masks:
                 ext_mask = action_masks['bern']
                 if isinstance(ext_mask, torch.Tensor):
@@ -516,13 +548,17 @@ class PolicyNetHybrid(torch.nn.Module):
 
                 mask = mask & ext_bool
 
+            # Apply mask: False -> set logits very small
             bern_logits = bern_logits.masked_fill(mask == 0, -1e8)
 
+            # [修改] 使用我们提取的 temp_bern
+            # temperatures = 1.0 
             scaled_bern_logits = bern_logits / (temp_bern + 1e-8)
             outputs['bern'] = scaled_bern_logits
-
-            outputs['fire_mask'] = mask.float()
-
+            
+            # [新增] 返回 fire_mask，用于在 update 中过滤 Bernoulli 熵计算
+            outputs['fire_mask'] = mask.float()  # shape: (batch, bern_dim)
+            
         return outputs
 
 # =============================================================================
@@ -1383,4 +1419,4 @@ class SACHybrid:
         self.marwil_adv_positive_frac = monitor_metrics['adv_positive_frac']
 
         return avg_actor_loss, avg_critic_loss, avg_c
-    
+
