@@ -139,7 +139,7 @@ if __name__ == "__main__":
             # 1
             {"dir_name": "对基准对手score",   "smooth_type": "MA",    "SMOOTH_WINDOW": 41, "sign": 1,  "draw_original": 1,   "ylabel": "对基准策略平均Score", "linewidth": 1.2},
             # 2
-            {"dir_name": "奖励函数",          "smooth_type": "MA",    "SMOOTH_WINDOW": 41, "sign": 1,  "draw_original": 0.5, "ylabel": "累积奖励值",     "linewidth": 1.2},
+            {"dir_name": "奖励函数",          "smooth_type": "MA",    "SMOOTH_WINDOW": 41, "sign": 1,  "draw_original": 0.5, "ylabel": "累计奖励值",     "linewidth": 1.2},
             # 3
             {"dir_name": "策略熵",            "smooth_type": "MA",    "SMOOTH_WINDOW": 41, "sign": 1,  "draw_original": 2,   "ylabel": "策略熵",           "linewidth": 1.2},
             # 4

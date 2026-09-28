@@ -207,7 +207,7 @@ def run_plot_tasks(plot_tasks=None):
 METRIC_LABELS = {
     'entropy': '在线训练策略熵',
     'pre_entropy': '预训练策略熵',
-    'return': '累积奖励',
+    'return': '累计奖励',
     'accuracy': '预训练分类准确率',
     'mutualkill': '对基准对手平均双杀率',
     'max_fire_prob': '最大开火概率',
