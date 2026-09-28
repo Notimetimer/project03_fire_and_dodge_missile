@@ -23,7 +23,7 @@ from Algorithms.SACHybrid import PolicyNetHybrid, HybridActorWrapper
 # DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
 # DIR_NAME = "PPO0.3_flymask_v0h0-run-20260921-194617"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428"
-DIR_NAME = "SAC0.3_flymask_v1h1-run-20260923-213238"
+DIR_NAME = "SAC0.3_flymask_v0h0-run-20260927-101454" # "SAC0.3_flymask_v1h1-run-20260923-213238"
 
 EXPERIMENT_NAME = None
 
