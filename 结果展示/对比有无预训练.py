@@ -107,11 +107,11 @@ METRIC_LABELS = {
 
 # --- 运行级指标的横轴名称映射（预训练用"迭代"，在线训练用"步数"） ---
 METRIC_XLABELS = {
-    'entropy': '步数',
+    'entropy': '训练步数',
     'pre_entropy': '迭代',
-    'return': '步数',
+    'return': '训练步数',
     'accuracy': '迭代',
-    'mutualkill': '步数',
+    'mutualkill': '训练步数',
 }
 
 def smooth_curve(data, window_size):
@@ -478,7 +478,7 @@ def plot_interpolated_win_rates(exp_csv_dir,
         for hval in [0, 0.5, 1.0]:
             ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth, alpha=0.8, zorder=1)
 
-        ax.set_xlabel('步数', fontweight='bold', fontsize=label_fontsize)
+        ax.set_xlabel('训练步数', fontweight='bold', fontsize=label_fontsize)
         ax.set_ylabel(ylabel_text, fontweight='bold', fontsize=label_fontsize)
         ax.tick_params(axis='both', labelsize=tick_fontsize)
         ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
@@ -534,9 +534,9 @@ def plot_interpolated_win_rates(exp_csv_dir,
             elif isinstance(display_titles, list) and i < len(display_titles):
                 ylabel_text = display_titles[i]
             else:
-                ylabel_text = f"相对规则对手比分" # f"相对基准对手{i+1}比分"
+                ylabel_text = f"与规则对手对抗得分" # f"相对基准对手{i+1}得分"
         else:
-            ylabel_text = f"相对规则对手比分" # f"相对基准对手{i+1}比分"
+            ylabel_text = f"与规则对手对抗得分" # f"相对基准对手{i+1}得分"
 
         xt = x_targets[opp_id]
 
@@ -896,7 +896,7 @@ if __name__ == "__main__":
     SAVE_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "对比有无预训练")
 
     # ==================== 4. 执行绘图 ====================
-    # 比分 + 双杀率：每个对手各一张独立 figure，双杀率一张独立 figure
+    # 得分 + 双杀率：每个对手各一张独立 figure，双杀率一张独立 figure
     plot_interpolated_win_rates(
         exp_csv_dir=EXP_CSV_DIR,
         x_min=X_MIN,

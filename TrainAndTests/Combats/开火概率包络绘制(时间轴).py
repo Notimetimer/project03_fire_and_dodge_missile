@@ -52,7 +52,7 @@ COLOR_LEVELS = 21     # 颜色采样等级（越大过渡越细）
 total_steps = 2e6
 
 # 出图规格
-FIG_DPI = 300 # 300            # 保存分辨率 (dpi)
+FIG_DPI = 600 # 300            # 保存分辨率 (dpi)
 FIG_WIDTH_CM = 10 # 4.0       # 图宽 (cm)
 FIG_HEIGHT_CM = None     # 图高 (cm)；None 时极坐标按正方形、直角坐标按 0.7 倍宽自动
 
@@ -226,7 +226,7 @@ def run_single_step_firing_probability(actor, red_height, blue_height, distance,
     
     return firing_probability
 
-def plot_firing_probability_heatmap_timeline(steps, distances, probabilities):
+def plot_firing_probability_heatmap_timeline(steps, distances, probabilities, ammo):
     """
     在直角坐标系中绘制开火概率热图（时间轴版本）
     横轴：训练步数，纵轴：距离
@@ -235,7 +235,16 @@ def plot_firing_probability_heatmap_timeline(steps, distances, probabilities):
         steps: 训练步数数组
         distances: 距离数组 (m)
         probabilities: 概率矩阵，形状为 (len(steps), len(distances))
+        ammo: 导弹数量
     """
+    import matplotlib.ticker as ticker
+    import matplotlib as mpl
+
+    # 字体配置：中文用默认字体，英文/数学用 Times New Roman
+    mpl.rcParams['font.family'] = ['sans-serif']
+    mpl.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial']  # 中文支持
+    mpl.rcParams['mathtext.fontset'] = 'stix'  # 数学公式用类似 Times New Roman 的字体
+
     # 图尺寸：cm -> inch；高度默认 0.7 倍宽
     fig_w = FIG_WIDTH_CM / 2.54
     fig_h = (FIG_HEIGHT_CM if FIG_HEIGHT_CM is not None else FIG_WIDTH_CM * 0.7) / 2.54
@@ -259,9 +268,17 @@ def plot_firing_probability_heatmap_timeline(steps, distances, probabilities):
     cbar.set_ticklabels(['0%', '20%', '40%', '60%', '80%', '100%'])
 
     # 设置标签
-    ax.set_xlabel('Training Steps')
-    ax.set_ylabel('Distance (km)')
-    ax.set_title('Firing Probability Heatmap (Timeline)')
+    ax.set_xlabel('训练步数')
+    ax.set_ylabel('距离/(km)')
+    ax.set_title(f'$n_{{msl}} = {ammo}$', fontsize=12)
+
+    # 横轴科学记数法格式
+    ax.xaxis.set_major_formatter(ticker.ScalarFormatter(useMathText=True))
+    ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+
+    # # 纵轴单位标注（放在图外左侧顶部）
+    # ax.text(-0.15, 1.02, '$\\times 1$ km', transform=ax.transAxes,
+    #         ha='right', va='bottom', fontsize=10)
 
     # 添加网格
     ax.grid(True, alpha=0.3)
@@ -371,7 +388,8 @@ def main():
         fig1, ax1 = plot_firing_probability_heatmap_timeline(
             steps=steps,
             distances=distances,
-            probabilities=1 - np.power(1 - probabilities, 5)
+            probabilities=1 - np.power(1 - probabilities, 5),
+            ammo=ammo
         )
         fig1.savefig(os.path.join(out_dir, base_name + '.png'), dpi=FIG_DPI, bbox_inches='tight')
         fig1.savefig(os.path.join(out_dir, base_name + '.svg'), bbox_inches='tight')

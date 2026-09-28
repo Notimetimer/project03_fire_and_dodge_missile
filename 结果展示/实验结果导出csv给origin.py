@@ -57,12 +57,12 @@ SMOOTH_WINDOW_BY_CATEGORY = {
 
 # 按分类指定横轴名称（写入 CSV 第一列表头）
 X_LABEL_BY_CATEGORY = {
-    'entropy':       '步数',
-    'mutualkill':    '步数',
-    'return':        '步数',
+    'entropy':       '训练步数',
+    'mutualkill':    '训练步数',
+    'return':        '训练步数',
     'accuracy':      '迭代',
     'pre_entropy':   '迭代',
-    'vs_opponent':  '步数',  # 所有 vs_opponent{N} 共用此值
+    'vs_opponent':  '训练步数',  # 所有 vs_opponent{N} 共用此值
 }
 
 # 默认值（分类未在上述字典中时使用）
