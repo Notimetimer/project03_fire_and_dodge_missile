@@ -2177,9 +2177,9 @@ def run_MLP_simulation(
                     logger.add("train/7b supervised_fire_loss", getattr(student_agent, 'last_supervised_fire_loss', 0.0), total_steps)
 
 
-                # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
-                if batch_idx % 10 == 0:
-                    student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
+                # # 开火概率保护，如果策略向满开火/不开一发坍缩，直接用有监督暴力修正开火概率
+                # if batch_idx % 10 == 0:
+                #     student_agent.fire_prob_protection(transition_dict, protect_epochs=4)
                 
                 # # 机动概率保护，未被调好，无法区分告警状态的有无，加上进攻引导就不会躲，加上防御引导又不会进攻
                 # if  \
