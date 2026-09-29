@@ -12,8 +12,8 @@ from prepare_il_datas_hierarchical import run_rules
 
 # 指定中断续训的目录。如果为 None，则正常开启新训练。
 resume_target_dir = None
-# resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
-#     r"SLWSPFSP0.45_flymask_v0h0-run-20260909-161355")
+resume_target_dir = os.path.join(r"D:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile\logs\combat",
+    r"PPO0.3_flymask_v0h0_fireSL-run-20260928-161901")
 collape_recover={ # 是否是崩盘后恢复
             "collapsed": False,
             "best_actor_name": None,
@@ -31,6 +31,8 @@ mission_name = f'PPO0.3_flymask_v{ver}h{hor}'
 # 与原实验区分日志目录，避免互相覆盖
 mission_name = mission_name + '_fireSL'
 
+# 正常情况下应该是1，这样才能开启有监督
+use_supervised_fire = 1
 
 # 超参数
 actor_lr = 1e-4 # 4 1e-4
@@ -161,10 +163,11 @@ if __name__=='__main__':
         init_il_data = original_il_transition_dict, # 传入模仿数据集
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
-        use_supervised_fire=1, # [新增] 默认0：不使用额外的开火命中监督更新（fc_bern）
+        use_supervised_fire=use_supervised_fire, # [新增] 默认0：不使用额外的开火命中监督更新（fc_bern）
         ppo_with_bern=1, # [新增] 0：PPO 不更新开火头 fc_bern，交由开火命中监督独占
         supervised_fire_buffer_size = 1000, # [新增] 开火记录滚动缓冲容量（FIFO，像off-policy一样滚动更新）
         supervised_fire_batch_size = 256, # [新增] 每次监督更新从缓冲中采样的批大小
+        sup_on_prob_ratio = 15,  # 最大最小开火概率小于这个底线的时候使用有监督辅助更新，否则单靠强化学习就足够了
     )
     end_time = datetime.now()
     print(f"Simulation end: {end_time.isoformat(sep=' ', timespec='seconds')}")

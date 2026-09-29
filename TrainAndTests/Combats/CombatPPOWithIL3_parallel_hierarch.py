@@ -1089,6 +1089,7 @@ def run_MLP_simulation(
     supervised_fire_buffer_size = 1000, # [新增] 开火记录滚动缓冲容量（FIFO，像off-policy一样滚动更新）
     supervised_fire_batch_size = 128, # [新增] 每次监督更新从缓冲中采样的批大小
     ppo_with_bern = 1, # [新增] 0 时 PPO 更新跳过开火头 fc_bern（log_prob 不计入 bern 项）
+    sup_on_prob_ratio = 10, # 有监督辅助开关
 ):
 
     actor_lr0 = actor_lr
@@ -2169,7 +2170,9 @@ def run_MLP_simulation(
                                      ppo_with_bern=ppo_with_bern)
 
                 # [新增] 开火命中监督更新：从滚动缓冲采样，仅更新 actor.net.fc_bern，不影响机动策略
-                if use_supervised_fire and len(fire_records_buffer) > 100: # 至少收集100次开火，不要过拟合
+                if use_supervised_fire and len(fire_records_buffer) > 100  and\
+                    (student_agent.max_fire_prob / student_agent.min_fire_prob <= sup_on_prob_ratio  or  ppo_with_bern==0): # PPO不更新，就全程带上，否则只作为开火分布保护器
+
                     fire_sl_batch = random.sample(list(fire_records_buffer), min(int(supervised_fire_batch_size), len(fire_records_buffer)))
                     student_agent.supervised_fire_update(fire_sl_batch, epochs=1, batch_size=int(supervised_fire_batch_size), fire_lr_ratio=1)
                     logger.add("train_plus/supervised_fire_buffer_size", len(fire_records_buffer), total_steps)
