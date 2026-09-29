@@ -1668,23 +1668,25 @@ def run_MLP_simulation(
             # --- 2. 准备训练 Batch (Synchronous) ---
             # 改变环境奖励权重，超过100轮采样再更新权重，每次权重维持5轮采样
             if adj_r_w and batch_idx > 10:
-                fire_inside_weight, fire_reward_weight = RWController.update({
-                    'ema_fire_interval': ema_fire_interval,
-                    'ema_fire_distance': ema_fire_distance,
-                    'ema_fire_altitude': ema_fire_altitude,
-                    'ema_fire_delta_psi': ema_fire_delta_psi,
-                    'ema_fire_theta': ema_fire_theta,
-                    'ema_ATA': ema_ATA,
-                    'ema_delta_psi_threat': ema_delta_psi_threat,
-                    'ema_delta_theta': ema_delta_theta
-                })
-                logger.add(f"SPECIAL/开火权重", fire_reward_weight, total_steps)
-                logger.add(f"SPECIAL/0 W_d_fire", fire_inside_weight[0], total_steps)
-                logger.add(f"SPECIAL/1 W_t_since_fire", fire_inside_weight[1], total_steps)
-                logger.add(f"SPECIAL/2 W_AA_fire", fire_inside_weight[2], total_steps)
-                logger.add(f"SPECIAL/3 W_psi_fire", fire_inside_weight[3], total_steps)
-                logger.add(f"SPECIAL/4 W_v_fire", fire_inside_weight[4], total_steps)
-                logger.add(f"SPECIAL/5 W_theta_fire", fire_inside_weight[5], total_steps)
+                fire_inside_weight = None
+                fire_reward_weight = None
+                # fire_inside_weight, fire_reward_weight = RWController.update({
+                #     'ema_fire_interval': ema_fire_interval,
+                #     'ema_fire_distance': ema_fire_distance,
+                #     'ema_fire_altitude': ema_fire_altitude,
+                #     'ema_fire_delta_psi': ema_fire_delta_psi,
+                #     'ema_fire_theta': ema_fire_theta,
+                #     'ema_ATA': ema_ATA,
+                #     'ema_delta_psi_threat': ema_delta_psi_threat,
+                #     'ema_delta_theta': ema_delta_theta
+                # })
+                # logger.add(f"SPECIAL/开火权重", fire_reward_weight, total_steps)
+                # logger.add(f"SPECIAL/0 W_d_fire", fire_inside_weight[0], total_steps)
+                # logger.add(f"SPECIAL/1 W_t_since_fire", fire_inside_weight[1], total_steps)
+                # logger.add(f"SPECIAL/2 W_AA_fire", fire_inside_weight[2], total_steps)
+                # logger.add(f"SPECIAL/3 W_psi_fire", fire_inside_weight[3], total_steps)
+                # logger.add(f"SPECIAL/4 W_v_fire", fire_inside_weight[4], total_steps)
+                # logger.add(f"SPECIAL/5 W_theta_fire", fire_inside_weight[5], total_steps)
             
             if not adj_r_w:
                 fire_inside_weight = None
