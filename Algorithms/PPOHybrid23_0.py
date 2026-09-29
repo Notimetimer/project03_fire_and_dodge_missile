@@ -2241,12 +2241,15 @@ class PPOHybrid:
         check_weights_bias_nan(self.actor, "actor", "update后")
         check_weights_bias_nan(self.critic, "critic", "update后")
     
-    def supervised_fire_update(self, fire_batch, epochs=1, batch_size=128, max_grad_norm=2.0):
+    def supervised_fire_update(self, fire_batch, epochs=1, batch_size=128, max_grad_norm=2.0, fire_lr_ratio=1.0):
         """仅用回合结束后的 fire_obs/hit_record 更新开火头 fc_bern。
 
         共享 backbone 和 BFM/其它动作头不参与梯度更新；因此该更新不会改变
         SAC 学到的机动策略。fire_batch 可是 SupervisedFireBuffer.sample() 的
         字典，也可是包含 fire_obs/hit_record 的原始 record 列表。
+
+        Args:
+            fire lr ratio: supervised fire update 学习率与 update 中学习率的比例系数
         """
         if self.fire_head_optimizer is None:
             self.last_supervised_fire_loss = 0.0
@@ -2267,6 +2270,10 @@ class PPOHybrid:
         labels = torch.as_tensor(np.asarray(labels, dtype=np.float32), device=self.device).view(-1, 1)
         if states.size(0) != labels.size(0):
             raise ValueError('fire_obs and hit_record must have the same length')
+
+        # ── 缩放学习率 ────────────────────────────────────────────────────────
+        current_fire_lr = self.fire_head_optimizer.param_groups[0]['lr']
+        self.fire_head_optimizer.param_groups[0]['lr'] = current_fire_lr * fire_lr_ratio
 
         net = self.actor.net
         params = list(self.actor.parameters())
@@ -2299,6 +2306,10 @@ class PPOHybrid:
 
         for p, requires_grad in zip(params, old_requires_grad):
             p.requires_grad_(requires_grad)
+
+        # ── 还原学习率 ────────────────────────────────────────────────────────
+        self.fire_head_optimizer.param_groups[0]['lr'] = current_fire_lr
+
         self.last_supervised_fire_loss = float(np.mean(losses)) if losses else 0.0
         return self.last_supervised_fire_loss
 

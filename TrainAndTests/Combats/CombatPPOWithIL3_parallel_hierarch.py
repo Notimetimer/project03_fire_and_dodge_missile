@@ -2171,7 +2171,7 @@ def run_MLP_simulation(
                 # [新增] 开火命中监督更新：从滚动缓冲采样，仅更新 actor.net.fc_bern，不影响机动策略
                 if use_supervised_fire and len(fire_records_buffer) > 100: # 至少收集100次开火，不要过拟合
                     fire_sl_batch = random.sample(list(fire_records_buffer), min(int(supervised_fire_batch_size), len(fire_records_buffer)))
-                    student_agent.supervised_fire_update(fire_sl_batch, epochs=1, batch_size=int(supervised_fire_batch_size))
+                    student_agent.supervised_fire_update(fire_sl_batch, epochs=1, batch_size=int(supervised_fire_batch_size), fire_lr_ratio=1)
                     logger.add("train_plus/supervised_fire_buffer_size", len(fire_records_buffer), total_steps)
                     logger.add("train_plus/supervised_fire_samples", batch_fire_supervised, total_steps)
                     logger.add("train/7b supervised_fire_loss", getattr(student_agent, 'last_supervised_fire_loss', 0.0), total_steps)
