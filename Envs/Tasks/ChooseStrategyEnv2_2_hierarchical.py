@@ -172,10 +172,19 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 m = msl_table.get(rec['msl_id'])
                 if m is None:
                     continue
+                # 命中与否
                 if m.hit:
                     rec['hit_record'] = 1
                 elif m.dead:
                     rec['hit_record'] = 0
+                
+                # 是否压制对手
+                # 第一枚导弹打进12km就算有效压制
+                if rec['ammo'] == ego.init_ammo:
+                    rec['hit_record'] = 1 if m.get_in_12km else None
+                # 留下2枚导弹用于击杀，中间的导弹打进4km就算压制了
+                elif 2 <= rec['ammo'] < ego.init_ammo:
+                    rec['hit_record'] = 1 if m.get_in_4km else None
 
         # [新增] 终局强制结算：done=1 时仍未分辨命中/脱靶的记录整行删除
         if done and fire_hit_records:
@@ -356,6 +365,7 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 if all(rec['msl_id'] != newest_msl.id for rec in ego.fire_hit_records):
                     ego_obs, ego_check_obs = self.obs_1v1(ego.side, pomdp=1)
                     ego.fire_hit_records.append({
+                        "ammo": ego.ammo+1,
                         "msl_id": newest_msl.id,
                         "fire_obs": copy.deepcopy(ego_obs),
                         "hit_record": None,
