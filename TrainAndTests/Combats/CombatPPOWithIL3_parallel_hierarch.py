@@ -2170,8 +2170,8 @@ def run_MLP_simulation(
                                      ppo_with_bern=ppo_with_bern)
 
                 # [新增] 开火命中监督更新：从滚动缓冲采样，仅更新 actor.net.fc_bern，不影响机动策略
-                if use_supervised_fire and len(fire_records_buffer) > 100  and\
-                    (student_agent.max_fire_prob / student_agent.min_fire_prob <= sup_on_prob_ratio  or  ppo_with_bern==0): # PPO不更新，就全程带上，否则只作为开火分布保护器
+                if use_supervised_fire and len(fire_records_buffer) > 100: #  and\
+                    # (student_agent.max_fire_prob / student_agent.min_fire_prob <= sup_on_prob_ratio  or  ppo_with_bern==0): # PPO不更新，就全程带上，否则只作为开火分布保护器
 
                     fire_sl_batch = random.sample(list(fire_records_buffer), min(int(supervised_fire_batch_size), len(fire_records_buffer)))
                     student_agent.supervised_fire_update(fire_sl_batch, epochs=1, batch_size=int(supervised_fire_batch_size), fire_lr_ratio=1)
