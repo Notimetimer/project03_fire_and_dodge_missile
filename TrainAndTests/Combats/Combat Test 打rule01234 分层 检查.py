@@ -47,14 +47,14 @@ if __name__ == "__main__":
 
     gamma = 0.97
 
-    # from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
-    from Algorithms.SACHybrid import PolicyNetHybrid
+    from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
+    # from Algorithms.SACHybrid import PolicyNetHybrid
     
     tacview_show=1
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SAC0.3_flymask_v1h1-run-20260923-213238"
+    dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
     
     
 
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=tacview_show, vertices=vertices)
-    env.dt_move = 0.05 # 025 # 2 # 0.05 # 0.04 # 25
+    env.dt_move = 0.02 # 025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [1] # [0,1,2,3,4] # [3]
+    rule_opponents = [0,1,2,3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -149,7 +149,7 @@ if __name__ == "__main__":
             # 重置环境
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = None, None # create_initial_state()
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r', 
-                      red_init_ammo=4, blue_init_ammo=4)
+                      red_init_ammo=6, blue_init_ammo=6)
 
             done = False
             last_r_action_label = 0
@@ -195,7 +195,7 @@ if __name__ == "__main__":
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
                             r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.4,
-                            temperature={'cat':1, 'bern':1}
+                            temperature={'cat':0.3, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]

@@ -16,14 +16,16 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 
 # ======================= 可配置参数区 =======================
 # 模型来源：True 加载 Algorithms.SACHybrid；False 加载 Algorithms.PPOHybrid23_0
-from Algorithms.SACHybrid import PolicyNetHybrid, HybridActorWrapper
-# from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
+# from Algorithms.SACHybrid import PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 
 # 优先使用 dir_name 指定日志目录；为 None 时用 experiment_name 自动找最新
 # DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
 # DIR_NAME = "PPO0.3_flymask_v0h0-run-20260921-194617"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428"
-DIR_NAME = "SAC0.3_flymask_v0h0-run-20260927-101454" # "SAC0.3_flymask_v1h1-run-20260923-213238"
+# DIR_NAME = "SAC0.3_flymask_v0h0-run-20260927-101454" # "SAC0.3_flymask_v1h1-run-20260923-213238"
+
+DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
 
 EXPERIMENT_NAME = None
 
