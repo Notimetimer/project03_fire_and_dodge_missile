@@ -178,10 +178,11 @@ class ChooseStrategyEnv(BaseChooseStrategyEnv):
                 elif m.dead:
                     rec['hit_record'] = 0
                 
-                # # 是否压制对手
-                # # 第一枚导弹打进12km就算有效压制
-                # if rec['ammo'] == ego.init_ammo:
-                #     rec['hit_record'] = 1 if m.get_in_12km else None
+
+                # 是否压制对手
+                # 第一枚导弹打进12km就算有效压制
+                if rec['ammo'] == ego.init_ammo:
+                    rec['hit_record'] = 1 if m.get_in_4km else None
                 # # 留下2枚导弹用于击杀，中间的导弹打进4km就算压制了
                 # elif 2 <= rec['ammo'] < ego.init_ammo:
                 #     rec['hit_record'] = 1 if m.get_in_4km else None
