@@ -1656,33 +1656,57 @@ def run_MLP_simulation(
                 # 记录第一种测试结果
                 outcomes = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
                 outcomes_return = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes_wins = {rule_num: wins for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes_loses = {rule_num: loses for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
+                outcomes_draws = {rule_num: draws for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
                 outcomes_perish = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results}
 
                 for r_num, score in outcomes.items():
                     logger.add(f"test/agent_vs_rule{r_num}", score, total_steps)
+                    logger.add(f"test/agent_vs_rule{r_num}_win_rate", outcomes_wins[r_num], total_steps)
+                    logger.add(f"test/agent_vs_rule{r_num}_lose_rate", outcomes_loses[r_num], total_steps)
+                    logger.add(f"test/agent_vs_rule{r_num}_draw_rate", outcomes_draws[r_num], total_steps)
                     # logger.add(f"test/agent_vs_rule{r_num}_return", outcomes_return[r_num], total_steps)
                     print(f"  [Test Result] Rule_{r_num}: {score} (return: {outcomes_return[r_num]:.2f})")
 
-                # 记录第一种测试的平均指标（所有对手的平均Score和超视距双杀率）
+                # 记录第一种测试的平均指标（所有对手的平均Score、胜负平比例和超视距双杀率）
                 avg_score = np.mean(list(outcomes.values()))
+                avg_win_rate = np.mean(list(outcomes_wins.values()))
+                avg_lose_rate = np.mean(list(outcomes_loses.values()))
+                avg_draw_rate = np.mean(list(outcomes_draws.values()))
                 avg_perish_together = np.mean(list(outcomes_perish.values()))
                 logger.add("test/avg_score", avg_score, total_steps)
+                logger.add("test/avg_win_rate", avg_win_rate, total_steps)
+                logger.add("test/avg_lose_rate", avg_lose_rate, total_steps)
+                logger.add("test/avg_draw_rate", avg_draw_rate, total_steps)
                 logger.add("test/BVR perish together", avg_perish_together, total_steps)
 
                 # 记录第二种测试结果 (test_No_random)
                 outcomes_nr = {rule_num: score for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
                 outcomes_return_nr = {rule_num: result2 for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_wins_nr = {rule_num: wins for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_loses_nr = {rule_num: loses for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
+                outcomes_draws_nr = {rule_num: draws for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
                 outcomes_perish_nr = {rule_num: p_t_ for rule_num, score, result2, wins, loses, draws, p_t_ in test_results_no_random}
 
                 for r_num, score in outcomes_nr.items():
                     logger.add(f"test_No_random/agent_vs_rule{r_num}", score, total_steps)
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}_win_rate", outcomes_wins_nr[r_num], total_steps)
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}_lose_rate", outcomes_loses_nr[r_num], total_steps)
+                    logger.add(f"test_No_random/agent_vs_rule{r_num}_draw_rate", outcomes_draws_nr[r_num], total_steps)
                     # logger.add(f"test_No_random/agent_vs_rule{r_num}_return", outcomes_return_nr[r_num], total_steps)
                     print(f"  [Test No Random] Rule_{r_num}: {score} (return: {outcomes_return_nr[r_num]:.2f})")
 
-                # 记录第二种测试的平均指标（所有对手的平均Score和超视距双杀率）
+                # 记录第二种测试的平均指标（所有对手的平均Score、胜负平比例和超视距双杀率）
                 avg_score_nr = np.mean(list(outcomes_nr.values()))
+                avg_win_rate_nr = np.mean(list(outcomes_wins_nr.values()))
+                avg_lose_rate_nr = np.mean(list(outcomes_loses_nr.values()))
+                avg_draw_rate_nr = np.mean(list(outcomes_draws_nr.values()))
                 avg_perish_together_nr = np.mean(list(outcomes_perish_nr.values()))
                 logger.add("test_No_random/avg_score", avg_score_nr, total_steps)
+                logger.add("test_No_random/avg_win_rate", avg_win_rate_nr, total_steps)
+                logger.add("test_No_random/avg_lose_rate", avg_lose_rate_nr, total_steps)
+                logger.add("test_No_random/avg_draw_rate", avg_draw_rate_nr, total_steps)
                 logger.add("test_No_random/BVR perish together", avg_perish_together_nr, total_steps)
 
                 # 名人堂判定：如果全胜则保存并加入池子
