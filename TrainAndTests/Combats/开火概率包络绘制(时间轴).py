@@ -25,7 +25,7 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428"
 # DIR_NAME = "SAC0.3_flymask_v0h0-run-20260927-101454" # "SAC0.3_flymask_v1h1-run-20260923-213238"
 
-DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
+DIR_NAME = "PPO0.3_flymask_v0h0-run-20260928-111836"
 
 EXPERIMENT_NAME = None
 

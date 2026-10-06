@@ -534,9 +534,9 @@ def plot_interpolated_win_rates(exp_csv_dir,
             elif isinstance(display_titles, list) and i < len(display_titles):
                 ylabel_text = display_titles[i]
             else:
-                ylabel_text = f"与规则对手对抗得分" # f"相对基准对手{i+1}得分"
+                ylabel_text = f"与基准对手对抗平均得分" # f"相对基准对手{i+1}得分"
         else:
-            ylabel_text = f"与规则对手对抗得分" # f"相对基准对手{i+1}得分"
+            ylabel_text = f"与基准对手对抗平均得分" # f"相对基准对手{i+1}得分"
 
         xt = x_targets[opp_id]
 

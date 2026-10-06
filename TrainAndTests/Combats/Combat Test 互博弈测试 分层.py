@@ -45,8 +45,8 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 if __name__ == "__main__":
 
     # 红方和蓝方分别使用不同的模型目录
-    red_dir_name = "Adistill_0.3_update-run-20260811-133736" # "SLWSPFSP0.3-run-20260719-082619"
-    blue_dir_name = "SLWSPFSP_0.15-run-20260810-124040" # "HLWSPFSP-run-20260616-130304"
+    red_dir_name = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137"
+    blue_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
 
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
@@ -129,7 +129,7 @@ if __name__ == "__main__":
             # 重置环境
             DEFAULT_RED_BIRTH_STATE, DEFAULT_BLUE_BIRTH_STATE = None, None # create_initial_state()
             env.reset(red_birth_state=DEFAULT_RED_BIRTH_STATE, blue_birth_state=DEFAULT_BLUE_BIRTH_STATE, ego_side='r', 
-                      red_init_ammo=4, blue_init_ammo=4)
+                      red_init_ammo=6, blue_init_ammo=6)
 
             done = False
             last_r_action_label = 0
@@ -159,8 +159,8 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.5, 'bern':0.97}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.4,
+                            temperature={'cat':0.3, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
                     r_action_label = r_action_exec['cat'] # [0]
@@ -177,8 +177,8 @@ if __name__ == "__main__":
                     # --- 蓝方 (RL 智能体) ---
                     with torch.no_grad():
                         b_action_exec, _, _, b_action_check = enm_actor_wrapper.get_action(
-                            b_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.5, 'bern':0.97}
+                            b_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=b_check_obs, bern_threshold=0.4,
+                            temperature={'cat':0.3, 'bern':1}
                         )
                     b_action_label = b_action_exec['cat']
                     b_fire = b_action_exec['bern'][0]

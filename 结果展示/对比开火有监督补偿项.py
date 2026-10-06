@@ -58,7 +58,7 @@ dpi = 200                 # 屏幕显示与保存的统一 DPI
 # 5 条用 '-'，5 条用 '--'，5 条用 ':'，最多 15 条组合
 COLOR_CYCLE = 5
 linestyles = ['-', ':', '--']
-smooth_window = 31
+smooth_window = 5 # 31
 # ==================== 单位换算（严格写出过程） ====================
 # matplotlib 的 figsize 单位为英寸（inch），fontsize 单位为磅（pt）
 # 换算关系：
@@ -645,9 +645,9 @@ def plot_interpolated_win_rates(exp_csv_dir,
             elif isinstance(display_titles, list) and i < len(display_titles):
                 ylabel_text = display_titles[i]
             else:
-                ylabel_text = f"与规则对手对抗得分" # f"相对基准对手{i+1}得分"
+                ylabel_text = f"与基准对手对抗平均得分" # f"相对基准对手{i+1}得分"
         else:
-            ylabel_text = f"与规则对手对抗得分" # f"相对基准对手{i+1}得分"
+            ylabel_text = f"与基准对手对抗平均得分" # f"相对基准对手{i+1}得分"
 
         xt = x_targets[opp_id]
 
