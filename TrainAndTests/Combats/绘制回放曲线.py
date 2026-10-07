@@ -41,7 +41,7 @@ def set_axes_equal(ax, z_min=0, z_max=20, pad=0.05):
     ax.set_xlim3d([x_middle - xy_half, x_middle + xy_half])
     ax.set_ylim3d([y_middle - xy_half, y_middle + xy_half])
     ax.set_zlim3d([z_min, z_max])
-    ax.set_zticks(np.arange(z_min, z_max + 1, 5))
+    ax.set_zticks([0, 10, 20])
 
     # box_aspect 按实际跨度比，使三轴单位长度视觉相等
     z_range = z_max - z_min
@@ -97,11 +97,48 @@ def load_replay(json_path: str) -> dict:
         return json.load(f)
 
 
+def _detach_legend_from_3d_rotation(ax3, leg):
+    """
+    让可拖动图例与 3D 轴旋转互不干扰。
+
+    Axes3D 在 button_press_event 上绑定了 self._button_press，
+    只要 event.inaxes == self 就会启动旋转。而 fig.legend 绘制在 3D 轴上方、
+    与之重叠，鼠标点击图例时 event.inaxes 仍是 3D 轴，导致拖图例时曲线跟着转。
+
+    解决：在 canvas 的回调注册表中找到 3D 轴的 _button_press 回调，
+    替换为「先判断点击是否命中图例，命中则 return，否则执行原逻辑」的包装版。
+    """
+    registry = ax3.figure.canvas.callbacks
+    cid_dict = registry.callbacks.get('button_press_event', {})
+    for cid, ref in list(cid_dict.items()):
+        # matplotlib 把回调包成 _StrongRef / WeakMethod，需 ref() 取出真实函数
+        try:
+            func = ref()
+        except Exception:
+            func = None
+        if func is None:
+            continue
+        # 匹配绑定到 ax3 的 _button_press 方法
+        if getattr(func, '__name__', '') == '_button_press' and getattr(func, '__self__', None) is ax3:
+            original = func
+
+            def wrapped(event, _orig=original, _legend=leg):
+                # 图例包含该点击点 → 只拖图例，不触发 3D 旋转
+                if _legend.contains(event)[0]:
+                    return
+                _orig(event)
+
+            registry.disconnect(cid)
+            registry.connect('button_press_event', wrapped)
+            return
+    # 没找到（理论上不会发生），静默跳过
+
+
 def plot_replay(data: dict, save_path: str = None):
     meta = data.get('meta', {})
-    title = (f"Agent: {meta.get('agent', '?')}  |  "
-             f"vs Rule_{meta.get('rule_num', '?')}  |  "
-             f"Result: {meta.get('result', '?')}")
+    red_name = meta.get('red_name', '红方')
+    blue_name = meta.get('blue_name', '蓝方')
+    title = (f"{blue_name}  vs  {red_name}  |  结果: {meta.get('result', '?')}")
 
     ruav_pos = np.array(data['RUAV']['pos_'])   # (T, 3)  [N, H, E]
     buav_pos = np.array(data['BUAV']['pos_'])   # (T, 3)
@@ -114,7 +151,8 @@ def plot_replay(data: dict, save_path: str = None):
     def split(arr):
         return arr[:, 2] / 1e3, arr[:, 0] / 1e3, arr[:, 1] / 1e3  # E(km), N(km), H(km)
 
-    fig = plt.figure(figsize=(12, 10))
+    # 绘图窗口 10cm x 10cm（1英寸=2.54cm）
+    fig = plt.figure(figsize=(10 / 2.54, 10 / 2.54))
     fig.suptitle(title, fontsize=11)
 
     rx, ry, rz = split(ruav_pos)
@@ -123,31 +161,25 @@ def plot_replay(data: dict, save_path: str = None):
     # ── 3D 轨迹图 ────────────────────────────────────────────
     ax3 = fig.add_subplot(1, 1, 1, projection='3d')
 
-    # 红蓝实线轨迹
-    ax3.plot(rx, ry, rz, color='crimson', lw=1.5, label='R_UAV')
-    ax3.plot(bx, by, bz, color='royalblue', lw=1.5, label='B_UAV')
+    # 红蓝实线轨迹（label 用 show_name + "轨迹"）
+    ax3.plot(rx, ry, rz, color='crimson', lw=1.5, label=f'{red_name}轨迹')
+    ax3.plot(bx, by, bz, color='royalblue', lw=1.5, label=f'{blue_name}轨迹')
 
-    # 任务区域限制：以 (0,0,0) 为圆心，65km 为半径的圆（E-N 平面，H=0）
-    radius_km = 62.0
-    theta = np.linspace(0, 2 * np.pi, 256)
-    circle_e = radius_km * np.cos(theta)
-    circle_n = radius_km * np.sin(theta)
-    circle_h = np.zeros_like(theta)
-    ax3.plot(circle_e, circle_n, circle_h, color='black', linestyle='-.', lw=1.2, label='Mission Zone')
+    # # 任务区域限制：以 (0,0,0) 为圆心，62km 为半径的圆（E-N 平面，H=0）
+    # radius_km = 62.0
+    # theta = np.linspace(0, 2 * np.pi, 256)
+    # circle_e = radius_km * np.cos(theta)
+    # circle_n = radius_km * np.sin(theta)
+    # circle_h = np.zeros_like(theta)
+    # ax3.plot(circle_e, circle_n, circle_h, color='black', linestyle='-.', lw=1.2, label='作战区域')
 
-    # 导弹虚线（只有第一条带 label）
-    r_mis_labeled = False
+    # 导弹虚线（不显示在图例中）
     for mid, traj in rmis.items():
         mx, my, mz = split(traj)
-        lbl = 'R_Missile' if not r_mis_labeled else ''
-        ax3.plot(mx, my, mz, color='crimson', lw=1.0, linestyle='--', alpha=0.8, label=lbl)
-        r_mis_labeled = True
-    b_mis_labeled = False
+        ax3.plot(mx, my, mz, color='crimson', lw=1.0, linestyle='--', alpha=0.8)
     for mid, traj in bmis.items():
         mx, my, mz = split(traj)
-        lbl = 'B_Missile' if not b_mis_labeled else ''
-        ax3.plot(mx, my, mz, color='royalblue', lw=1.0, linestyle='--', alpha=0.8, label=lbl)
-        b_mis_labeled = True
+        ax3.plot(mx, my, mz, color='royalblue', lw=1.0, linestyle='--', alpha=0.8)
 
     def add_direction_arrows(ax, x, y, z, t_arr, color, interval=30, arrow_len=1.2):
         """从进场开始，每隔 interval 秒在轨迹上绘制一个指向前进方向的圆锥箭头。"""
@@ -180,18 +212,48 @@ def plot_replay(data: dict, save_path: str = None):
     add_direction_arrows(ax3, rx, ry, rz, t_arr, color='crimson', interval=30, arrow_len=2.0)
     add_direction_arrows(ax3, bx, by, bz, t_arr, color='royalblue', interval=30, arrow_len=2.0)
 
-    # 起点（大点）和终点（小点）
+    # 起点（大点）
     ax3.scatter(rx[0],  ry[0],  rz[0],  color='crimson',   marker='o', s=40,  zorder=5)
-    ax3.scatter(bx[0],  by[0],  bz[0],  color='royalblue',  marker='o', s=40,  zorder=5)
-    ax3.scatter(rx[-1], ry[-1], rz[-1], color='crimson',   marker='o', s=20,  zorder=5)
-    ax3.scatter(bx[-1], by[-1], bz[-1], color='royalblue',  marker='o', s=20,  zorder=5)
+    ax3.scatter(bx[0],  by[0],  bz[0],  color='royalblue', marker='o', s=40,  zorder=5)
 
-    ax3.set_xlabel('E (km)')
-    ax3.set_ylabel('N (km)')
-    ax3.set_zlabel('H (km)')
-    ax3.set_title('3D Trajectory')
+    # 终点：死亡方画黄色大点（图例统一叫"命中"，只注册一次）；存活方画从倒数第二点指向最后一点的箭头
+    red_dead = bool(meta.get('red_dead', False))
+    blue_dead = bool(meta.get('blue_dead', False))
+    hit_label_used = False
+
+    if red_dead:
+        ax3.scatter(rx[-1], ry[-1], rz[-1], color='gold', marker='o', s=160,
+                    edgecolors='black', linewidths=1.0, zorder=6,
+                    label='' if hit_label_used else '命中')
+        hit_label_used = True
+    elif len(rx) >= 2:
+        d = (rx[-1] - rx[-2], ry[-1] - ry[-2], rz[-1] - rz[-2])
+        _draw_cone_arrow(ax3, origin=(rx[-2], ry[-2], rz[-2]), direction=d,
+                         color='crimson', radius_ratio=0.4, n_segments=12)
+
+    if blue_dead:
+        ax3.scatter(bx[-1], by[-1], bz[-1], color='gold', marker='o', s=160,
+                    edgecolors='black', linewidths=1.0, zorder=6,
+                    label='' if hit_label_used else '命中')
+        hit_label_used = True
+    elif len(bx) >= 2:
+        d = (bx[-1] - bx[-2], by[-1] - by[-2], bz[-1] - bz[-2])
+        _draw_cone_arrow(ax3, origin=(bx[-2], by[-2], bz[-2]), direction=d,
+                         color='royalblue', radius_ratio=0.4, n_segments=12)
+
+    ax3.set_xlabel('东 (km)')
+    ax3.set_ylabel('北 (km)')
+    ax3.set_zlabel('高度 (km)')
+    ax3.set_title('三维轨迹')
     leg = fig.legend(fontsize=9, loc='upper left', bbox_to_anchor=(0.01, 0.95))
     leg.set_draggable(True)
+
+    # 修复：拖动图例时 3D 曲线跟着旋转。
+    # Axes3D._button_press 会在鼠标落在本轴内时启动旋转，
+    # 而图例（fig.legend）与 3D 轴重叠，导致拖图例也触发旋转。
+    # 这里在 canvas 回调注册表中替换 3D 轴的 _button_press：
+    # 若点击命中图例则直接返回，不进入旋转逻辑。
+    _detach_legend_from_3d_rotation(ax3, leg)
 
     set_axes_equal(ax3, z_min=0, z_max=20)
 

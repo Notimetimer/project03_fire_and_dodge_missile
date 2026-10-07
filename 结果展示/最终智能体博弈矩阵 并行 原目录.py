@@ -61,7 +61,7 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
             with torch.no_grad():
                 explore_dict = {'cat': using_explore_maneuver, 'bern': 1}
                 # cat 温度调低以凸显确定性, bern 保持1.0不受干扰
-                temp_dict = {'cat': 0.2, 'bern': 1.0}
+                temp_dict = {'cat': 0.3, 'bern': 1.0}
                 # 不再向网络传入 check_obs 执行强力动作屏蔽
                 r_act, _, _, _ = red_wrapper.get_action(r_obs, explore=explore_dict, temperature=temp_dict, check_obs=r_check)
                 b_act, _, _, _ = blue_wrapper.get_action(b_obs, explore=explore_dict, temperature=temp_dict, check_obs=b_check)

@@ -21,7 +21,9 @@ from _context import *
 # from BasicRules_new_hierarchical import basic_rules  # 不再使用规则智能体
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper # 纯MLP
+from Algorithms.PPOHybrid23_0 import PolicyNetHybrid as PPOPolicyNet, HybridActorWrapper as PPOActorWrapper # 纯MLP
+from Algorithms.SACHybrid import PolicyNetHybrid as SACPolicyNet, HybridActorWrapper as SACActorWrapper
+from 绘制回放曲线 import plot_replay
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
@@ -30,6 +32,22 @@ dt_maneuver = 0.2
 
 # --- 2. 辅助函数 ---
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
+
+def _is_off_policy(mission_name):
+    """根据 mission 名称判断是否应使用 SAC 系列（SAC/TD3/DDPG）的 PolicyNet/ActorWrapper"""
+    upper = (mission_name or '').upper()
+    return any(tag in upper for tag in ('SAC', 'TD3', 'DDPG'))
+
+def build_wrapper(state_dim, hidden_dim, action_dims_dict, device, mission_name, log_dir=None):
+    """根据 mission_name 选择 PPO 或 SAC 的网络结构与 ActorWrapper"""
+    if _is_off_policy(mission_name):
+        # SAC 的 mask 配置会改变 fc_cat 输出维度(ver:5->13, hor:6/7->11)，
+        # 必须从 checkpoint 目录的 actor.meta.json 推断，否则加载时维度不匹配
+        net = SACPolicyNet(state_dim, hidden_dim, action_dims_dict, mask_search_dir=log_dir)
+        return SACActorWrapper(net, action_dims_dict, None, device).to(device)
+    else:
+        net = PPOPolicyNet(state_dim, hidden_dim, action_dims_dict)
+        return PPOActorWrapper(net, action_dims_dict, None, device).to(device)
 
 # def create_initial_state():
 #     """创建固定的初始状态"""
@@ -45,9 +63,12 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 if __name__ == "__main__":
 
     # 红方和蓝方分别使用不同的模型目录
-    red_dir_name = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137"
-    blue_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
-
+    red_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
+    blue_dir_name = "SAC0.3_flymask_v1h1-run-20260928-093645"
+    show_name = [
+        "IL-SLA-PPO",
+        "IL-SE-SAC",
+    ]
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -66,8 +87,8 @@ if __name__ == "__main__":
     vertices = None # 默认圆形边界
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
-    env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)
-    env.dt_move = 0.020 # 0.05 # 0.04 # 25
+    env = ChooseStrategyEnv(env_args, tacview_show=0, vertices=vertices)  # 0, 1
+    env.dt_move = 0.050 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -96,13 +117,13 @@ if __name__ == "__main__":
     print(f"Loading Blue Agent (ID: {blue_agent_id}) from: {blue_agent_path}")
     print()
 
-    # 实例化红方
-    actor_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict), action_dims_dict, None, device).to(device)
+    # 实例化红方（根据目录名判别 PPO / SAC）
+    actor_wrapper = build_wrapper(state_dim, hidden_dim, action_dims_dict, device, red_dir_name, red_log_dir)
     actor_wrapper.load_state_dict(torch.load(red_agent_path, map_location=device, weights_only=1), strict=False)
     actor_wrapper.eval() 
 
-    # 实例化蓝方
-    enm_actor_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict), action_dims_dict, None, device).to(device)
+    # 实例化蓝方（根据目录名判别 PPO / SAC）
+    enm_actor_wrapper = build_wrapper(state_dim, hidden_dim, action_dims_dict, device, blue_dir_name, blue_log_dir)
     enm_actor_wrapper.load_state_dict(torch.load(blue_agent_path, map_location=device, weights_only=1), strict=False)
     enm_actor_wrapper.eval()
 
@@ -121,7 +142,7 @@ if __name__ == "__main__":
     t_bias = 0
 
     try:
-        for i in range(5):
+        for i in range(1):
             print("\n" + "="*50)
             print(f"--- Starting Test: Self Play Test {i+1} ---")
             print("="*50)
@@ -137,11 +158,18 @@ if __name__ == "__main__":
             r_action_label = 0
             b_action_label = 0
 
-            # --- 初始化数据记录 ---
-            history = {
-                'time': [],
-                'r_ny': [], 'r_alpha': [], 'r_alt': [], 'r_mach': [],
-                'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
+            # --- 初始化回放数据结构（用于绘制3D轨迹） ---
+            replay_data = {
+                'meta': {
+                    'red_name': show_name[0],
+                    'blue_name': show_name[1],
+                    'result': '',
+                },
+                't': [],
+                'RUAV': {'pos_': []},
+                'BUAV': {'pos_': []},
+                'RMIS': {},
+                'BMIS': {},
             }
 
             fire_time = -120
@@ -214,16 +242,20 @@ if __name__ == "__main__":
                     # print("当前奖励函数", b_r1)
                     # print()
 
-                # --- 记录数据 ---
-                history['time'].append(count * action_cycle_multiplier * dt_maneuver)
-                history['r_ny'].append(env.RUAV.Ny)
-                history['r_alpha'].append(env.RUAV.alpha_air * 180 / np.pi)
-                history['r_alt'].append(env.RUAV.alt)
-                history['r_mach'].append(env.RUAV.mach)
-                history['b_ny'].append(env.BUAV.Ny)
-                history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
-                history['b_alt'].append(env.BUAV.alt)
-                history['b_mach'].append(env.BUAV.mach)
+                # --- 记录回放数据（3D轨迹用） ---
+                replay_data['t'].append(env.t)
+                replay_data['RUAV']['pos_'].append(env.RUAV.pos_.tolist() + [env.t])
+                replay_data['BUAV']['pos_'].append(env.BUAV.pos_.tolist() + [env.t])
+                for m in env.alive_r_missiles:
+                    key = str(m.id)
+                    if key not in replay_data['RMIS']:
+                        replay_data['RMIS'][key] = []
+                    replay_data['RMIS'][key].append(m.pos_.tolist() + [env.t])
+                for m in env.alive_b_missiles:
+                    key = str(m.id)
+                    if key not in replay_data['BMIS']:
+                        replay_data['BMIS'][key] = []
+                    replay_data['BMIS'][key].append(m.pos_.tolist() + [env.t])
 
                 env.render(t_bias=t_bias)
 
@@ -232,63 +264,16 @@ if __name__ == "__main__":
             if env.win: result = "Win"
             elif env.lose: result = "Lose"
             print(f"\n--- Test Finished. Result for Red (Loaded Agent): {result} ---")
-            
+            replay_data['meta']['result'] = result
+            # 直接用战机的 got_hit 属性判断哪一方被命中（含双杀时双方都命中）
+            replay_data['meta']['red_dead'] = bool(getattr(env.RUAV, 'got_hit', False))
+            replay_data['meta']['blue_dead'] = bool(getattr(env.BUAV, 'got_hit', False))
+
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
-            
-            
 
-            # --- 绘制曲线 ---
-            plt.figure(figsize=(10, 10))
-            plt.subplot(4, 1, 1)
-            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
-            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
-            plt.axhline(y=-3, color='black', linestyle=':', alpha=0.7, label='Ny limit (-3g)')
-            plt.axhline(y=9, color='black', linestyle=':', alpha=0.7, label='Ny limit (9g)')
-            plt.ylabel('Ny (g)')
-            plt.title(f'R vs B: Metrics')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(4, 1, 2)
-            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
-            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
-            plt.axhline(y=-8, color='black', linestyle=':', alpha=0.7, label='Alpha limit (-8°)')
-            plt.axhline(y=26, color='black', linestyle=':', alpha=0.7, label='Alpha limit (26°)')
-            plt.ylabel('Alpha (deg)')
-            plt.title('Angle of Attack (Alpha)')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(4, 1, 3)
-            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
-            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
-            plt.ylabel('Mach')
-            plt.title('Flight Mach Number')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(4, 1, 4)
-            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
-            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
-            plt.ylabel('Alt (m)')
-            plt.xlabel('Time (s)')
-            plt.title('Altitude (Height)')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            plt.show()
-            # # --- 保存作战记录到 CSV ---
-            # try:
-            #     df_history = pd.DataFrame(history)
-            #     save_name = f"CombatLog_vs_Rule{rule_num}.csv" #_{datetime.datetime.now().strftime('%H%M%S')}.csv"
-            #     save_path = os.path.join(project_root, "logs", save_name)
-            #     df_history.to_csv(save_path, index=False)
-            #     print(f"Combat data for Rule {rule_num} saved to: {save_path}")
-            # except Exception as e:
-            #     print(f"Failed to save CSV: {e}")
-            # input("Press Enter to continue to the next test...")
+            # --- 绘制本回合 3D 回放轨迹 ---
+            plot_replay(replay_data, save_path=None)
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")

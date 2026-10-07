@@ -47,14 +47,15 @@ if __name__ == "__main__":
 
     gamma = 0.97
 
-    from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
-    # from Algorithms.SACHybrid import PolicyNetHybrid
+    # from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
+    from Algorithms.SACHybrid import PolicyNetHybrid
     
     tacview_show=1
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
+    dir_name = "SAC0.3_flymask_v1h1-run-20260928-093645"
+    # "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
     
     
 
