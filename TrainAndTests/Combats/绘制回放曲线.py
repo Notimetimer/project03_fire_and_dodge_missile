@@ -64,7 +64,7 @@ def _perp_basis(d):
     return u, v
 
 
-def _draw_cone_arrow(ax, origin, direction, color, radius_ratio=0.35, n_segments=12):
+def _draw_cone_arrow(ax, origin, direction, color, radius_ratio=0.3, n_segments=12):
     """在 3D 轴上绘制一个实心圆锥箭头。origin 为尾部，direction 指向尖端。"""
     origin = np.asarray(origin, dtype=float)
     direction = np.asarray(direction, dtype=float)
@@ -205,12 +205,12 @@ def plot_replay(data: dict, save_path: str = None):
             dx, dy, dz = dx * scale, dy * scale, dz * scale
             # 箭头胖瘦比 radius_ratio
             _draw_cone_arrow(ax, origin=(x[i], y[i], z[i]), direction=(dx, dy, dz),
-                             color=color, radius_ratio=0.4, n_segments=12)
+                             color=color, radius_ratio=0.3, n_segments=12)
 
     # 方向箭头：从进场开始每隔 30s 绘制一次
     # 箭头长度 arrow_len
-    add_direction_arrows(ax3, rx, ry, rz, t_arr, color='crimson', interval=30, arrow_len=2.0)
-    add_direction_arrows(ax3, bx, by, bz, t_arr, color='royalblue', interval=30, arrow_len=2.0)
+    add_direction_arrows(ax3, rx, ry, rz, t_arr, color='crimson', interval=30, arrow_len=4)
+    add_direction_arrows(ax3, bx, by, bz, t_arr, color='royalblue', interval=30, arrow_len=4)
 
     # 起点（大点）
     ax3.scatter(rx[0],  ry[0],  rz[0],  color='crimson',   marker='o', s=40,  zorder=5)
@@ -229,7 +229,7 @@ def plot_replay(data: dict, save_path: str = None):
     elif len(rx) >= 2:
         d = (rx[-1] - rx[-2], ry[-1] - ry[-2], rz[-1] - rz[-2])
         _draw_cone_arrow(ax3, origin=(rx[-2], ry[-2], rz[-2]), direction=d,
-                         color='crimson', radius_ratio=0.4, n_segments=12)
+                         color='crimson', radius_ratio=0.3, n_segments=12)
 
     if blue_dead:
         ax3.scatter(bx[-1], by[-1], bz[-1], color='gold', marker='o', s=160,
@@ -239,7 +239,7 @@ def plot_replay(data: dict, save_path: str = None):
     elif len(bx) >= 2:
         d = (bx[-1] - bx[-2], by[-1] - by[-2], bz[-1] - bz[-2])
         _draw_cone_arrow(ax3, origin=(bx[-2], by[-2], bz[-2]), direction=d,
-                         color='royalblue', radius_ratio=0.4, n_segments=12)
+                         color='royalblue', radius_ratio=0.3, n_segments=12)
 
     ax3.set_xlabel('东 (km)')
     ax3.set_ylabel('北 (km)')

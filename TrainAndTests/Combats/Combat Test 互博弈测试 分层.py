@@ -61,14 +61,41 @@ def build_wrapper(state_dim, hidden_dim, action_dims_dict, device, mission_name,
 
 # --- 3. 主程序 ---
 if __name__ == "__main__":
-
-    # 红方和蓝方分别使用不同的模型目录
-    red_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
-    blue_dir_name = "SAC0.3_flymask_v1h1-run-20260928-093645"
+    # "IL-SLA-PPO",
+    # "IL-SE-SAC",
+    # "IL-SL-PPO",
+    # "IL-PPO",
+    # "PPO"
     show_name = [
         "IL-SLA-PPO",
-        "IL-SE-SAC",
+        "PPO",
     ]
+    
+    # 红方和蓝方分别使用不同的模型目录
+    red_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
+    blue_dir_name = "NoIL_flymask_v0h0-run-20260924-224736"
+    
+    """
+    PPO0.3_flymask_v0h0_fireSL-run-20260924-145554
+    PPO0.3_flymask_v0h0_fireSL-run-20260921-194654
+    PPO0.3_flymask_v0h0_fireSL-run-20260930-125149
+    
+    SAC0.3_flymask_v1h1-run-20260923-213238
+    SAC0.3_flymask_v1h1-run-20260928-093645
+    SAC0.3_flymask_v1h1-run-20260929-194715
+    
+    PPO0.3_flymask_v0h0-run-20260921-194617	
+    PPO0.3_flymask_v0h0-run-20260928-111836
+    PPO0.3_flymask_v0h0-run-20261001-152601
+    
+    切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428
+    切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260928-233900
+    切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137
+    
+    NoIL_flymask_v0h0-run-20260909-131801
+    NoIL_flymask_v0h0-run-20260924-224736
+    NoIL_flymask_v0h0-run-20260928-233924
+    """
 
     parser = argparse.ArgumentParser("RL/IL Combat Test")
     parser.add_argument("--agent-id", type=int, default=None, help="Specific agent ID to test. If None, loads the latest.")
@@ -87,7 +114,7 @@ if __name__ == "__main__":
     vertices = None # 默认圆形边界
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
-    env = ChooseStrategyEnv(env_args, tacview_show=0, vertices=vertices)  # 0, 1
+    env = ChooseStrategyEnv(env_args, tacview_show=1, vertices=vertices)  # 0, 1
     env.dt_move = 0.050 # 0.05 # 0.04 # 25
 
     

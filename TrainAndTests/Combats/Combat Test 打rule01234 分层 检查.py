@@ -23,6 +23,7 @@ from BasicRules_new_hierarchical import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import HybridActorWrapper, infer_mask_cfg_from_actor_meta # 纯MLP
+from 绘制回放曲线 import plot_replay
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
@@ -47,14 +48,14 @@ if __name__ == "__main__":
 
     gamma = 0.97
 
-    # from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
-    from Algorithms.SACHybrid import PolicyNetHybrid
+    from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
+    # from Algorithms.SACHybrid import PolicyNetHybrid
     
     tacview_show=1
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "SAC0.3_flymask_v1h1-run-20260928-093645"
+    dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
     # "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
     
     
@@ -84,7 +85,7 @@ if __name__ == "__main__":
     # 南北长54km，东西宽100km的长方形边界
     # vertices = [[29.9e3, 50e3], [-29.9e3, 50e3], [-29.9e3, -50e3], [29.9e3, -50e3]]
     env = ChooseStrategyEnv(env_args, tacview_show=tacview_show, vertices=vertices)
-    env.dt_move = 0.02 # 025 # 2 # 0.05 # 0.04 # 25
+    env.dt_move = 0.05 # 025 # 2 # 0.05 # 0.04 # 25
 
     
     state_dim = env.obs_dim
@@ -170,6 +171,20 @@ if __name__ == "__main__":
                 'r_r_shaping': [],
                 'r_count_12km': [], 'r_count_4km': [],
                 'b_count_12km': [], 'b_count_4km': [],
+            }
+
+            # --- 初始化回放数据结构（用于绘制3D轨迹） ---
+            replay_data = {
+                'meta': {
+                    'red_name': 'IL-SLA-PPO',
+                    'blue_name': f'基准对手{rule_num + 1}',
+                    'result': '',
+                },
+                't': [],
+                'RUAV': {'pos_': []},
+                'BUAV': {'pos_': []},
+                'RMIS': {},
+                'BMIS': {},
             }
 
             fire_time = -120
@@ -290,6 +305,21 @@ if __name__ == "__main__":
                 history['b_count_12km'].append(getattr(env.BUAV, '_count_12km', 0))
                 history['b_count_4km'].append(getattr(env.BUAV, '_count_4km', 0))
 
+                # --- 记录回放数据（3D轨迹用） ---
+                replay_data['t'].append(env.t)
+                replay_data['RUAV']['pos_'].append(env.RUAV.pos_.tolist() + [env.t])
+                replay_data['BUAV']['pos_'].append(env.BUAV.pos_.tolist() + [env.t])
+                for m in env.alive_r_missiles:
+                    key = str(m.id)
+                    if key not in replay_data['RMIS']:
+                        replay_data['RMIS'][key] = []
+                    replay_data['RMIS'][key].append(m.pos_.tolist() + [env.t])
+                for m in env.alive_b_missiles:
+                    key = str(m.id)
+                    if key not in replay_data['BMIS']:
+                        replay_data['BMIS'][key] = []
+                    replay_data['BMIS'][key].append(m.pos_.tolist() + [env.t])
+
                 env.render(t_bias=t_bias)
 
             # 报告结果
@@ -297,6 +327,10 @@ if __name__ == "__main__":
             if env.win: result = "Win"
             elif env.lose: result = "Lose"
             print(f"\n--- Test Finished. Result for Red (Loaded Agent): {result} ---")
+            replay_data['meta']['result'] = result
+            # 直接用战机的 got_hit 属性判断哪一方被命中（含双杀时双方都命中）
+            replay_data['meta']['red_dead'] = bool(getattr(env.RUAV, 'got_hit', False))
+            replay_data['meta']['blue_dead'] = bool(getattr(env.BUAV, 'got_hit', False))
             
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
@@ -410,6 +444,9 @@ if __name__ == "__main__":
             fig3.tight_layout()
 
             plt.show()
+
+            # --- 绘制本回合 3D 回放轨迹 ---
+            plot_replay(replay_data, save_path=None)
 
             # input("Press Enter to continue to the next test...")
 
