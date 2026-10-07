@@ -16,6 +16,7 @@ sys.path.append(project_root)
 
 from Algorithms.Utils import model_grad_norm, check_weights_bias_nan, compute_advantage, SquashedNormal
 from Algorithms.MLP_heads import ValueNet
+from Algorithms.PPOHybrid23_0 import load_mask_config, _infer_mask_cfg_from_cat_out_dim, infer_mask_cfg_from_actor_meta, infer_mask_cfg_from_state_dict
 
 def sigmoid(x):
     return 1/(1+np.exp(-x))
@@ -243,13 +244,34 @@ class PolicyNetHybrid(torch.nn.Module):
     支持混合动作空间的策略网络 (纯 MLP)。
     引入了可学习的温度参数来控制离散和伯努利动作的熵。
     """
-    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0, mask_cfg=None):
+    def __init__(self, state_dim, hidden_dims, action_dims_dict, init_std=0.5, head_hidden_layer_num=1, Autoregressive=0, mask_cfg=None, mask_search_dir=None):
         super(PolicyNetHybrid, self).__init__()
         self.action_dims = action_dims_dict
 
-        # [新增] 机动mask 开关：只在网络初始化时从
-        # mask_config.json 读取一次（或被外部显式传入），永久保存为实例属性，forward() 不再重复读取磁盘。
-        mask_cfg = load_mask_config(override=mask_cfg)
+        # [新增] 机动mask 开关：只在网络初始化时读取一次，永久保存为实例属性，forward() 不再重复读取磁盘。
+        # 优先级（从高到低）：
+        #   1. 外部显式传入的 mask_cfg (override)
+        #   2. mask_search_dir 目录下的 actor.meta.json（根据 net.fc_cat.2.bias 形状推断）
+        #   3. 回退到 Algorithms/mask_config.json
+        if mask_cfg is not None:
+            # 1. 外部显式 override 优先级最高
+            resolved_cfg = {'ver': int(mask_cfg.get('ver', 0)), 'hor': int(mask_cfg.get('hor', 0))}
+        else:
+            resolved_cfg = None
+            # 2. 目录内 actor.meta.json 推断（优先级高于 mask_config.json）
+            if mask_search_dir is None:
+                mask_search_dir = os.getcwd()
+            if mask_search_dir and os.path.isdir(mask_search_dir):
+                meta_path = os.path.join(mask_search_dir, 'actor.meta.json')
+                if os.path.exists(meta_path):
+                    inferred = infer_mask_cfg_from_actor_meta(meta_path)
+                    if inferred is not None:
+                        resolved_cfg = {'ver': int(inferred.get('ver', 0)),
+                                        'hor': int(inferred.get('hor', 0))}
+            # 3. 回退：mask_config.json
+            if resolved_cfg is None:
+                resolved_cfg = load_mask_config(override=None)
+        mask_cfg = resolved_cfg
         self.ver_map = mask_cfg['ver']
         self.ver_mask = mask_cfg['ver']
         self.hor_map = mask_cfg['hor']
