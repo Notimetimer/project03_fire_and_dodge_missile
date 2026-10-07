@@ -1,0 +1,235 @@
+"""
+遍历指定日志目录中的 actor_rein*.pt，从最小序号~最大序号等间隔抽取 N 个版本，
+对每个版本独立运行一轮 test_worker（No Random 方式：deterministic=True, restrict_fire=True），
+将每次运行的重复回合数 num_runs 提升到 5，
+导出每个规则的胜率、负率、平率、双杀率以及 score 到 CSV。
+"""
+import os
+import sys
+import glob
+import re
+import csv
+import numpy as np
+import torch
+import argparse
+import torch.multiprocessing as mp
+from itertools import product
+from _context import *
+
+from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import ChooseStrategyEnv
+from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_path
+# 复用训练脚本中的 test_worker
+from VsBaseline_while_training_hierarch_plus import test_worker
+
+# ======================= 可配置参数区 =======================
+DIR_NAME = "PPO0.3_flymask_v0h0-run-20260928-111836"
+# DIR_NAME = "SAC0.3_flymask_v1h1-run-20260928-093645"
+# DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554"
+# DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137"
+
+EXPERIMENT_NAME = None
+
+# 抽取的版本数：按最小序号~最大序号等间隔抽取
+NUM_PROGRESS_POINTS = 25
+
+# 测试回合重复次数（由 3 提升到 5）
+NUM_RUNS = 5
+
+# 测试对手规则编号列表
+TEST_RULE_IDS = [0, 1, 2, 3]
+
+# 测试场景参数（与训练脚本 CombatPPOWithIL3_parallel_hierarch 中测试段保持一致）
+DT_MANEUVER = 0.2
+ACTION_CYCLE_MULTIPLIER = 30
+TEST_RED_INIT_AMMO = 6
+TEST_BLUE_INIT_AMMO = 6
+VERTICES = None
+MAX_EPISODE_LEN = 15 * 60
+R_CAGE = 62.00e3
+
+# 模型网络结构（与训练启动脚本 熵实验_混合PFSP有预训练.py 一致）
+HIDDEN_DIM = [128, 128, 128]
+
+# 总步数（用于将文件名序号归一化为训练步数）
+total_steps = 2e6
+
+# 输出目录（相对 project_root）
+OUT_DIR_NAME = os.path.join('结果展示', 'exp_png2')
+# ===========================================================
+
+
+def select_agents_by_interval(log_dir, num_points=20, total_steps=2e6):
+    """
+    扫描目录中 actor_rein*.pt，按编号排序，等间隔抽取 num_points 个文件。
+    文件名数字归一化到 0~100% 后乘以 total_steps 得到实际步数。
+    返回 (steps, paths) 两个列表，steps 对应训练步数，paths 对应文件路径。
+    """
+    files = glob.glob(os.path.join(log_dir, "actor_rein*.pt"))
+    step_files = []
+    for f in files:
+        m = re.fullmatch(r'actor_rein(\d+(?:\.\d+)?)\.pt', os.path.basename(f))
+        if m:
+            step_files.append((float(m.group(1)), f))
+    if not step_files:
+        return [], []
+    step_files.sort(key=lambda x: x[0])
+    raw_numbers = [x[0] for x in step_files]
+    max_number = max(raw_numbers) if raw_numbers else 1.0
+    # 归一化到 0~100% 后乘以 total_steps
+    percentages = [n / max_number * 100.0 for n in raw_numbers]
+    steps = [p * total_steps / 100.0 for p in percentages]
+    paths = [x[1] for x in step_files]
+
+    # 等间隔抽取 num_points 个索引（最小序号~最大序号）
+    if len(steps) <= num_points:
+        selected_indices = list(range(len(steps)))
+    else:
+        selected_indices = np.linspace(0, len(steps) - 1, num_points, dtype=int)
+    selected_steps = [steps[i] for i in selected_indices]
+    selected_paths = [paths[i] for i in selected_indices]
+
+    print(f"扫描到 {len(steps)} 个 actor_rein 文件，序号范围 [{raw_numbers[0]:.0f}, {raw_numbers[-1]:.0f}]，"
+          f"等间隔抽取 {len(selected_steps)} 个")
+    for i, (s, p) in enumerate(zip(selected_steps, selected_paths)):
+        print(f"  [{i+1}/{len(selected_steps)}] 步数 {s:.0f}: {os.path.basename(p)}")
+    return selected_steps, selected_paths
+
+
+def run_test_for_checkpoint(agent_path, state_dim, hidden_dim, action_dims_dict,
+                            env_args, dt_maneuver_val, num_runs, test_rule_ids,
+                            action_cycle_multiplier, vertices,
+                            red_init_ammo, blue_init_ammo):
+    """
+    加载一个 actor 版本的 state_dict，对所有规则运行 No Random 测试仿真。
+    返回 dict: {rule_num: (score, win, lose, draw, perish_together)}
+    """
+    # .pt 文件直接就是 actor 的 state_dict
+    model_state_dict = torch.load(agent_path, map_location='cpu', weights_only=False)
+
+    # 并行对所有规则运行 test_worker
+    pool = mp.Pool(processes=len(test_rule_ids))
+    tasks = []
+    for rule_num in test_rule_ids:
+        kwds = {
+            'model_state_dict': model_state_dict,
+            'rule_num': rule_num,
+            'env_args': env_args,
+            'state_dim': state_dim,
+            'hidden_dim': hidden_dim,
+            'action_dims_dict': action_dims_dict,
+            'dt_maneuver_val': dt_maneuver_val,
+            'device_name': 'cpu',
+            'num_runs': num_runs,
+            'action_cycle_multiplier': action_cycle_multiplier,
+            'no_out': 0,
+            'deterministic': True,     # 机动动作确定化（No Random）
+            'restrict_fire': True,      # 动作次序限制打开
+            'vertices': vertices,
+            'red_init_ammo': red_init_ammo,
+            'blue_init_ammo': blue_init_ammo,
+        }
+        tasks.append(pool.apply_async(test_worker, kwds=kwds))
+    results = [t.get() for t in tasks]
+    pool.close()
+    pool.join()
+
+    # test_worker 返回: (rule_num, result(score), result2(return), wins, loses, draws, BVR_perish_togethers)
+    outcomes = {}
+    for rule_num, score, result2, wins, loses, draws, perish_together in results:
+        outcomes[rule_num] = (score, wins, loses, draws, perish_together)
+    return outcomes
+
+
+def main():
+    device = 'cpu'
+
+    # 构建 env_args 与维度（与训练脚本测试段一致）
+    parser = argparse.ArgumentParser("UAV swarm confrontation")
+    parser.add_argument("--max-episode-len", type=float, default=MAX_EPISODE_LEN)
+    parser.add_argument("--R-cage", type=float, default=R_CAGE)
+    args = parser.parse_args([])
+
+    dummy_env = ChooseStrategyEnv(args, tacview_show=False, vertices=VERTICES)
+    state_dim = dummy_env.obs_dim
+    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
+    del dummy_env
+
+    # 查找日志目录
+    logs_root_dir = os.path.join(project_root, "logs/combat")
+    latest_log_dir = os.path.join(logs_root_dir, DIR_NAME) if DIR_NAME else \
+        get_latest_log_dir(logs_root_dir, EXPERIMENT_NAME)
+
+    if not latest_log_dir or not os.path.isdir(latest_log_dir):
+        raise FileNotFoundError(f"日志目录不存在: {latest_log_dir}")
+
+    # 输出目录
+    out_dir = os.path.join(project_root, OUT_DIR_NAME)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # 等间隔抽取 NUM_PROGRESS_POINTS 个 actor_rein 文件
+    steps, agent_paths = select_agents_by_interval(latest_log_dir, NUM_PROGRESS_POINTS, total_steps)
+    if not steps:
+        print(f"错误: '{latest_log_dir}' 中没有 actor_rein 文件")
+        return
+
+    # CSV 列定义
+    rule_ids = sorted(TEST_RULE_IDS)
+    header = ['step', 'actor_file']
+    for r in rule_ids:
+        header += [f'rule{r}_score', f'rule{r}_win', f'rule{r}_lose',
+                   f'rule{r}_draw', f'rule{r}_perish']
+    header += ['avg_score', 'avg_win', 'avg_lose', 'avg_draw', 'avg_perish']
+
+    csv_path = os.path.join(out_dir, f"test_norandom_vs_rules_{DIR_NAME}.csv")
+    print(f"\n结果将写入: {csv_path}")
+    print(f"测试规则: {rule_ids}，num_runs={NUM_RUNS}，共 {len(steps)} 个版本\n")
+
+    with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+
+        for cp_idx, (step, agent_path) in enumerate(zip(steps, agent_paths)):
+            base = os.path.basename(agent_path)
+            print(f"[{cp_idx+1}/{len(steps)}] 步数 {step:.0f} | {base}")
+
+            try:
+                outcomes = run_test_for_checkpoint(
+                    agent_path=agent_path,
+                    state_dim=state_dim,
+                    hidden_dim=HIDDEN_DIM,
+                    action_dims_dict=action_dims_dict,
+                    env_args=args,
+                    dt_maneuver_val=DT_MANEUVER,
+                    num_runs=NUM_RUNS,
+                    test_rule_ids=rule_ids,
+                    action_cycle_multiplier=ACTION_CYCLE_MULTIPLIER,
+                    vertices=VERTICES,
+                    red_init_ammo=TEST_RED_INIT_AMMO,
+                    blue_init_ammo=TEST_BLUE_INIT_AMMO,
+                )
+            except Exception as e:
+                print(f"  测试失败: {e}")
+                continue
+
+            row = [f"{step:.0f}", base]
+            scores, wins, loses, draws, perishes = [], [], [], [], []
+            for r in rule_ids:
+                score, w, l, d, p = outcomes.get(r, (0.0, 0.0, 0.0, 0.0, 0.0))
+                row += [f"{score:.4f}", f"{w:.4f}", f"{l:.4f}", f"{d:.4f}", f"{p:.4f}"]
+                scores.append(score); wins.append(w); loses.append(l)
+                draws.append(d); perishes.append(p)
+
+            row += [f"{np.mean(scores):.4f}", f"{np.mean(wins):.4f}",
+                    f"{np.mean(loses):.4f}", f"{np.mean(draws):.4f}",
+                    f"{np.mean(perishes):.4f}"]
+            writer.writerow(row)
+            f.flush()
+            print(f"  avg_score={np.mean(scores):.3f}  "
+                  f"W/L/D={np.mean(wins):.2f}/{np.mean(loses):.2f}/{np.mean(draws):.2f}  "
+                  f"perish={np.mean(perishes):.2f}")
+
+    print(f"\n全部完成！CSV 已保存: {csv_path}")
+
+
+if __name__ == '__main__':
+    main()

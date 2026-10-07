@@ -11,7 +11,8 @@ from multiprocessing import Pool, cpu_count # 引入多进程库
 
 from _context import * # 包含 project_root
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import ChooseStrategyEnv
-from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
+from Algorithms.PPOHybrid23_0 import PolicyNetHybrid as PPOPolicyNet, HybridActorWrapper as PPOActorWrapper
+from Algorithms.SACHybrid import PolicyNetHybrid as SACPolicyNet, HybridActorWrapper as SACActorWrapper
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Utilities.LocateDirAndAgents2 import get_latest_log_dir
 from read_n_draw_inter_experiment_tests import draw_combat_matrix
@@ -19,8 +20,8 @@ from read_n_draw_inter_experiment_tests import draw_combat_matrix
 # --- 1. 配置参数 ---
 action_cycle_multiplier = 10
 dt_maneuver = 0.2
-TOTAL_ROUNDS = 80    # 每对任务之间对抗 100 场
-TEAM_SIZE = 80        # 每队从 Elo 排行中取前 50 名
+TOTAL_ROUNDS = 40    # 每对任务之间对抗 100 场
+TEAM_SIZE = 20        # 每队从 Elo 排行中取前 50 名
 using_explore_maneuver = 1  # 是否在实验间测试的时候允许动作有随机性
 
 # --- 2. 核心辅助函数 ---
@@ -89,11 +90,16 @@ def run_battle(env, blue_wrapper, red_wrapper, device):
     return float(0.5)               # 平局
 
 # --- 并行工作函数 ---
+def _is_off_policy(mission_name):
+    """根据 mission 名称判断是否应使用 SAC 系列（SAC/TD3/DDPG）的 PolicyNet/ActorWrapper"""
+    upper = (mission_name or '').upper()
+    return any(tag in upper for tag in ('SAC', 'TD3', 'DDPG'))
+
 def worker_process_battle(args_pack):
     """
     子进程执行函数
     """
-    blue_path, red_path = args_pack
+    blue_path, red_path, blue_mission, red_mission = args_pack
     
     # 强制在 Worker 中使用 CPU
     device = torch.device("cpu")
@@ -104,9 +110,18 @@ def worker_process_battle(args_pack):
     env = ChooseStrategyEnv(argparse.Namespace(max_episode_len=15*60, R_cage=62.00e3), tacview_show=0)
     state_dim, action_dims = env.obs_dim, {'cont':0, 'cat':env.fly_act_dim, 'bern':env.fire_dim}
     
-    # 2. 初始化模型
-    blue_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
-    red_wrapper = HybridActorWrapper(PolicyNetHybrid(state_dim, [128,128,128], action_dims), action_dims, None, device).to(device)
+    # 2. 初始化模型：根据 mission_name 选择 SAC 或 PPO 的网络结构与 ActorWrapper
+    def build_wrapper(ckpt_path, mission_name):
+        log_dir = os.path.dirname(ckpt_path)
+        if _is_off_policy(mission_name):
+            net = SACPolicyNet(state_dim, [128, 128, 128], action_dims, mask_search_dir=log_dir)
+            return SACActorWrapper(net, action_dims, None, device).to(device)
+        else:
+            net = PPOPolicyNet(state_dim, [128, 128, 128], action_dims)
+            return PPOActorWrapper(net, action_dims, None, device).to(device)
+
+    blue_wrapper = build_wrapper(blue_path, blue_mission)
+    red_wrapper = build_wrapper(red_path, red_mission)
     
     # 3. 加载权重
     try:
@@ -137,14 +152,10 @@ if __name__ == "__main__":
 
     # 2s
     mission_names = [
-        'SLWS-PFSP-run-20260618-221044',
-        'SLWSPFSP0.2-run-20260622-185856',
-        'SLWSPFSP0.1-run-20260624-220934',
-        'HLWS-PFSP-run-20260616-130304',
-        'PFSP-run-20260615-234324',
-        # 'SLWS-PFSP(A3C)-run-20260630-220403',
-        'FixedOpp-run-20260614-163906',
-        'SLWS-FixedOpp-run-20260712-113316',
+        'PPO0.3_flymask_v0h0_fireSL-run-20260924-145554',
+        'SAC0.3_flymask_v1h1-run-20260928-093645',
+        'PPO0.3_flymask_v0h0-run-20260928-111836',
+        '切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137',
     ]
     
     # team_labels = range(len(mission_names))
@@ -213,7 +224,11 @@ if __name__ == "__main__":
                     print(f"正在对抗: [Row]{team_labels[i]} (Blue) vs [Col]{team_labels[j]} (Red)...")
                     
                     # 一对一配对：第k个蓝方 vs 第k个红方，循环补足 TOTAL_ROUNDS 场
-                    battle_tasks = list(zip(lineups[i], lineups[j]))
+                    # 同时把各自的 mission_name 传入 worker，用于判断使用 SAC 还是 PPO 网络结构
+                    blue_mission = mission_names[i]
+                    red_mission = mission_names[j]
+                    battle_tasks = [(b, r, blue_mission, red_mission)
+                                    for b, r in zip(lineups[i], lineups[j])]
                     
                     # 并行执行
                     results = pool.map(worker_process_battle, battle_tasks)
