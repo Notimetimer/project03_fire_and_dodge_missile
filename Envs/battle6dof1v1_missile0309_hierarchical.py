@@ -1319,6 +1319,14 @@ class Battle(object):
                     data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
                     # # data_to_send += f"#-{UAV.id+1000}\n"
                     # data_to_send += f"#{send_t:.2f}\n-{UAV.id + 1000}\n"
+                    # 若飞机被命中(got_hit)，在爆炸位置画一团黄色烟雾
+                    if getattr(UAV, 'got_hit', False):
+                        loc_LLH = UAV.lon, UAV.lat, UAV.alt
+                        smoke_id = UAV.id + 5000
+                        data_to_send += (
+                            f"{smoke_id},T={loc_LLH[0]:.6f}|{loc_LLH[1]:.6f}|{loc_LLH[2]:.6f},"
+                            f"Name=Smoke,Type=Misc+Decoy+SmokeGrenade,Color=Yellow\n"
+                        )
 
             # 传输导弹信息
             for missile in self.missiles:
@@ -1378,6 +1386,7 @@ class Battle(object):
             for UAV in self.UAVs:
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id}\n"
                 data_to_send += f"#{send_t:.2f}\n-{UAV.id+1000}\n"
+                data_to_send += f"#{send_t:.2f}\n-{UAV.id+5000}\n"
             for missile in self.missiles:
                 data_to_send += f"#{send_t:.2f}\n-{missile.id}\n"
                 data_to_send += f"#{send_t:.2f}\n-{missile.id+1000}\n"
