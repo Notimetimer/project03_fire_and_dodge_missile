@@ -59,7 +59,7 @@ dpi = 200                 # 屏幕显示与保存的统一 DPI
 # 5 条用 '-'，5 条用 '--'，5 条用 ':'，最多 15 条组合
 COLOR_CYCLE = 5
 linestyles = ['-', ':', '--']
-smooth_window = 9
+smooth_window = 19
 # ==================== 单位换算（严格写出过程） ====================
 # matplotlib 的 figsize 单位为英寸（inch），fontsize 单位为磅（pt）
 # 换算关系：

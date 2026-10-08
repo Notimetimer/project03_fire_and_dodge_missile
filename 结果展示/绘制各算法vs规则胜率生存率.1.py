@@ -38,26 +38,18 @@ CSV_DIR = os.path.join(project_root, "结果展示", "exp_png2")
 
 # (算法显示名, [3 次重复实验的目录名])
 # 每组 3 个目录名即 DIR_NAME_LIST 中同算法的三次重复
+# 统一在后面给前缀 test_norandom_vs_rules_
+
 ALGORITHM_GROUPS = [
-    ("IL-SLA-PPO", [
-        "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
-        "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
-        "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
-    ]),
-    ("IL-SE-SAC", [
-        "SAC0.3_flymask_v1h1-run-20260923-213238",
-        "SAC0.3_flymask_v1h1-run-20260928-093645",
-        "SAC0.3_flymask_v1h1-run-20260929-194715",
-    ]),
     ("IL-PPO", [
         "PPO0.3_flymask_v0h0-run-20260921-194617",
         "PPO0.3_flymask_v0h0-run-20260928-111836",
         "PPO0.3_flymask_v0h0-run-20261001-152601",
     ]),
-    ("IL-SL-PPO", [
-        "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428",
-        "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260928-233900",
-        "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137",
+    ("PPO", [
+        "NoIL_flymask_v0h0-run-20260909-131801",
+        "NoIL_flymask_v0h0-run-20260924-224736",
+        "NoIL_flymask_v0h0-run-20260928-233924",
     ]),
 ]
 

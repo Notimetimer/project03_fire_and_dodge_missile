@@ -38,27 +38,29 @@ CSV_DIR = os.path.join(project_root, "结果展示", "exp_png2")
 
 # (算法显示名, [3 次重复实验的目录名])
 # 每组 3 个目录名即 DIR_NAME_LIST 中同算法的三次重复
+# 统一在后面给前缀 test_norandom_vs_rules_
+
 ALGORITHM_GROUPS = [
-    ("IL-SLA-PPO", [
-        "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
-        "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
-        "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
-    ]),
+    ("IL-PPO", [
+            "PPO0.3_flymask_v0h0-run-20260921-194617",
+            "PPO0.3_flymask_v0h0-run-20260928-111836",
+            "PPO0.3_flymask_v0h0-run-20261001-152601",
+        ]),
     ("IL-SE-SAC", [
         "SAC0.3_flymask_v1h1-run-20260923-213238",
         "SAC0.3_flymask_v1h1-run-20260928-093645",
         "SAC0.3_flymask_v1h1-run-20260929-194715",
-    ]),
-    ("IL-PPO", [
-        "PPO0.3_flymask_v0h0-run-20260921-194617",
-        "PPO0.3_flymask_v0h0-run-20260928-111836",
-        "PPO0.3_flymask_v0h0-run-20261001-152601",
     ]),
     ("IL-SL-PPO", [
         "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428",
         "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260928-233900",
         "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137",
     ]),
+    ("IL-SLA-PPO", [
+        "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
+        "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
+        "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
+    ]),    
 ]
 
 # 指标定义：(CSV 列名, 显示名)；survive 由 win+draw-perish 计算，列名占位
@@ -199,13 +201,14 @@ def load_group_stats(algo_label, dir_names, x_target):
 def style_axis(ax, ylabel_text, metric_key):
     """统一坐标轴样式：参考线、标签、刻度、科学计数法、坐标范围。
 
+    所有指标都画 0 / 0.5 / 1.0 参考线；
     avg_score 不限制 0~1，由数据自动决定 y 轴范围；
-    其余指标（win/lose/draw/survive）固定 [-0.05, 1.05] 并画 0/0.5/1.0 参考线。
+    其余指标（win/lose/draw/survive）固定 [-0.05, 1.05]。
     """
+    for hval in [0, 0.5, 1.0]:
+        ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth,
+                   alpha=0.8, zorder=1)
     if metric_key != 'avg_score':
-        for hval in [0, 0.5, 1.0]:
-            ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth,
-                       alpha=0.8, zorder=1)
         ax.set_ylim(-0.05, 1.05)
     ax.set_xlabel('训练步数', fontweight='bold', fontsize=label_fontsize)
     ax.set_ylabel(ylabel_text, fontweight='bold', fontsize=label_fontsize)

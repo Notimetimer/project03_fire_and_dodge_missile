@@ -16,7 +16,8 @@ import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+import seaborn as sns
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 # 本文件在 结果展示/废弃/ 下，父目录 结果展示/ 中含有 _context.py 和
 # 绘制各算法vs规则胜率生存率.py，把父目录加入 sys.path 以便复用其样式常量。
@@ -25,7 +26,13 @@ if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
 from _context import *  # 提供 project_root
-import 绘制各算法vs规则胜率生存率 as style  # 复用字号/图尺寸/rcParams 等样式常量
+import 绘制各算法vs规则胜率生存率 as style  # 复用图尺寸/保存路径/rcParams 等样式常量
+
+# --- 字体与字号（与 算法对抗基准对手结果矩阵.py 一致） ---
+global_font_size = 10.5
+plt.rcParams['font.family'] = 'SimSun'        # 宋体
+plt.rcParams['font.size'] = global_font_size
+plt.rcParams['axes.unicode_minus'] = False
 
 
 # ======================== CSV 配置 ========================
@@ -38,26 +45,12 @@ CSV_FILES = [
 ]
 
 
-# ======================== 配色（heatmap 专用，与项目整体蓝色风格一致） ========================
-# 白色 → 深蓝 的顺序色图，用于胜率 [0, 1]
-END_COLOR = (0.06, 0.1, 0.38)
-CMAP = LinearSegmentedColormap.from_list("custom_blue", [(1.0, 1.0, 1.0), END_COLOR], N=256)
-
-
-def build_norm(values):
-    """根据所有矩阵的实际取值范围构建 TwoSlopeNorm，使 0.5 居中。"""
-    if not values:
-        return TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
-    v_min = float(np.min(values))
-    v_max = float(np.max(values))
-    pad = 0.15 * max(v_max - v_min, 1e-6)
-    vmin = max(0.0, v_min - pad)
-    vmax = min(1.0, v_max + pad)
-    return TwoSlopeNorm(vmin=vmin, vcenter=(vmin + vmax) / 2, vmax=vmax)
+# ======================== 配色（heatmap 专用，与 算法对抗基准对手结果矩阵.py 一致） ========================
+# 白色 → 深蓝 的顺序色图，用于胜率 [0, 1]，由 sns.heatmap 的 cmap='Blues' 指定
 
 
 def draw_heatmap(ax, csv_name, title, show_y=True):
-    """在指定 ax 上绘制单个博弈矩阵 heatmap。"""
+    """在指定 ax 上绘制单个博弈矩阵 heatmap（绘图方式与 算法对抗基准对手结果矩阵.py 一致）。"""
     csv_path = os.path.join(CSV_DIR, csv_name)
     if not os.path.exists(csv_path):
         ax.set_title(f"[缺失] {csv_name}")
@@ -68,92 +61,71 @@ def draw_heatmap(ax, csv_name, title, show_y=True):
     results = df.values
     labels = [str(col).replace('_', '-') for col in df.columns.tolist()]
 
-    im = ax.imshow(results, cmap=CMAP, norm=NORM, aspect='auto')
+    # seaborn heatmap：白色格子分隔线，Blues 配色，[0,1] 范围，不自动画 colorbar
+    im = sns.heatmap(
+        results,
+        annot=True,
+        fmt='.2f',
+        cmap='Blues',
+        vmin=0.0,
+        vmax=1.0,
+        xticklabels=labels,
+        yticklabels=labels if show_y else False,
+        square=True,
+        linewidths=0.4,
+        linecolor='white',
+        annot_kws={'size': global_font_size},
+        cbar=False,
+        ax=ax,
+    )
 
-    # 去掉十字网格线：rcParams 默认 axes.grid=True，在 heatmap 上会画出
-    # 交叉网格线，这里显式关闭。
+    # 去掉 heatmap 上的十字网格线
     ax.grid(False)
 
-    # 修复：鼠标悬停时 matplotlib 默认的 format_cursor_data 会对 inf 值
-    # 调用 math.log10 导致 OverflowError。这里覆盖为安全格式化，跳过
-    # _g_sig_digits 的危险计算。
-    def _safe_cursor_data(data):
-        try:
-            v = float(data)
-            if np.isfinite(v):
-                return f"{v:.2f}"
-        except (TypeError, ValueError):
-            pass
-        return ""
+    # 数值在深色背景上用白色，浅色背景上用黑色，提升可读性
+    for text in im.texts:
+        val = float(text.get_text())
+        text.set_color('white' if val >= 0.7 else 'black')
 
-    im.format_cursor_data = _safe_cursor_data
-
-    # 标注数值
-    for i in range(results.shape[0]):
-        for j in range(results.shape[1]):
-            val = results[i, j]
-            # 深色背景用白字，浅色背景用黑字
-            text_color = 'white' if val > 0.5 else 'black'
-            ax.text(j, i, f"{val:.2f}", ha='center', va='center',
-                    fontsize=5, color=text_color)
-
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=30, ha='right', va='top',
-                       rotation_mode='anchor', fontsize=5)
+    # X 轴刻度与标签移到矩阵上方
+    ax.xaxis.tick_top()
+    ax.xaxis.set_label_position('top')
+    plt.setp(ax.get_xticklabels(), rotation=20, ha='left', va='bottom',
+             rotation_mode='anchor', fontsize=global_font_size)
     if show_y:
-        ax.set_yticks(range(len(labels)))
-        ax.set_yticklabels(labels, rotation=30, ha='right', va='center',
-                           rotation_mode='anchor', fontsize=5)
-    else:
-        ax.set_yticks([])
+        plt.setp(ax.get_yticklabels(), rotation=20, ha='right', va='center',
+                 rotation_mode='anchor', fontsize=global_font_size)
 
-    ax.set_title(title, fontsize=style.label_fontsize, pad=4)
-    ax.set_xlabel("对手 / 列", fontsize=6)
-    if show_y:
-        ax.set_ylabel("评估方 / 行", fontsize=6)
-
-    # 外框
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_linewidth(style.linewidth)
-        spine.set_color('0.35')
+    ax.set_title(title, fontsize=global_font_size, pad=4)
 
 
 def add_colorbar(fig, ax):
-    """给 figure 添加共享 colorbar。"""
-    sm = plt.cm.ScalarMappable(cmap=CMAP, norm=NORM)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, shrink=0.85)
-    cbar.ax.tick_params(labelsize=5)
-    cbar.set_label('平均对抗得分', fontsize=6)
+    """给单个 ax 添加 colorbar，高度与矩阵严格对齐（与 算法对抗基准对手结果矩阵.py 一致）。"""
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.15)
+    mappable = ax.collections[0]
+    cbar = fig.colorbar(mappable, cax=cax)
+    cbar.set_label('对抗得分', fontsize=global_font_size, labelpad=4)
+    cbar.ax.tick_params(labelsize=global_font_size)
 
 
 def main():
-    # 收集所有矩阵的取值，统一 colorbar 范围
-    all_values = []
-    for csv_name, _ in CSV_FILES:
-        csv_path = os.path.join(CSV_DIR, csv_name)
-        if os.path.exists(csv_path):
-            df = pd.read_csv(csv_path, index_col=0)
-            all_values.extend(df.values.flatten().tolist())
-    global NORM
-    NORM = build_norm(all_values)
-
+    # 颜色范围固定 [0, 1]，由 sns.heatmap 的 vmin/vmax 指定
     n = len(CSV_FILES)
-    # 画布缩小到原来的 1/4（边长各 /2），并留出图与窗口之间的边距
-    HEATMAP_W_IN = (12 / 2) / style.CM_PER_INCH
-    HEATMAP_H_IN = (10 / 2) / style.CM_PER_INCH
-    fig, axes = plt.subplots(1, n, figsize=(HEATMAP_W_IN * n, HEATMAP_H_IN),
+    # 画布尺寸：每个矩阵 10cm × 10cm（与 算法对抗基准对手结果矩阵.py 一致），
+    # 保证单元格足够大以容纳 10.5pt 字号的数字和刻度标签
+    cm = 1 / 2.54
+    fig_size = 10 * cm
+    fig, axes = plt.subplots(1, n, figsize=(fig_size * n, fig_size),
                              squeeze=False)
     axes = axes[0]
 
     for ax, (csv_name, title) in zip(axes, CSV_FILES):
         draw_heatmap(ax, csv_name, title=None, show_y=(ax == axes[0]))
+        # 每个子图单独 colorbar，高度与矩阵区域严格一致
+        add_colorbar(fig, ax)
 
-    # 先收紧布局，再加 colorbar（colorbar 与 tight_layout 顺序敏感）
-    # pad 控制子图与 figure 边框（即图与窗口）之间的留白
-    fig.tight_layout(pad=1.5)
-    add_colorbar(fig, axes)
+    fig.tight_layout(pad=1.0)
 
     # 保存
     out_pdf = os.path.join(style.SAVE_BASE_DIR, "draw_pdf", "combat_matrix.pdf")
