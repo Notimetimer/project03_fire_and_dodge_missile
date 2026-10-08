@@ -22,18 +22,34 @@ from Utilities.LocateDirAndAgents2 import get_latest_log_dir, find_latest_agent_
 from VsBaseline_while_training_hierarch_plus import test_worker
 
 # ======================= 可配置参数区 =======================
-DIR_NAME = "PPO0.3_flymask_v0h0-run-20260928-111836"
-# DIR_NAME = "SAC0.3_flymask_v1h1-run-20260928-093645"
+# DIR_NAME = "PPO0.3_flymask_v0h0-run-20260928-111836"
+DIR_NAME = "SAC0.3_flymask_v1h1-run-20260928-093645"
 # DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137"
-
+DIR_NAME_LIST = [
+    "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
+    "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
+    "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
+    
+    "SAC0.3_flymask_v1h1-run-20260923-213238",
+    "SAC0.3_flymask_v1h1-run-20260928-093645",
+    "SAC0.3_flymask_v1h1-run-20260929-194715",
+    
+    "PPO0.3_flymask_v0h0-run-20260921-194617",
+    "PPO0.3_flymask_v0h0-run-20260928-111836",
+    "PPO0.3_flymask_v0h0-run-20261001-152601",
+    
+    "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428",
+    "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260928-233900",
+    "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137",
+]
 EXPERIMENT_NAME = None
 
 # 抽取的版本数：按最小序号~最大序号等间隔抽取
-NUM_PROGRESS_POINTS = 25
+NUM_PROGRESS_POINTS = 50 # 25
 
 # 测试回合重复次数（由 3 提升到 5）
-NUM_RUNS = 5
+NUM_RUNS = 3
 
 # 测试对手规则编号列表
 TEST_RULE_IDS = [0, 1, 2, 3]
@@ -140,40 +156,26 @@ def run_test_for_checkpoint(agent_path, state_dim, hidden_dim, action_dims_dict,
     return outcomes
 
 
-def main():
-    device = 'cpu'
-
-    # 构建 env_args 与维度（与训练脚本测试段一致）
-    parser = argparse.ArgumentParser("UAV swarm confrontation")
-    parser.add_argument("--max-episode-len", type=float, default=MAX_EPISODE_LEN)
-    parser.add_argument("--R-cage", type=float, default=R_CAGE)
-    args = parser.parse_args([])
-
-    dummy_env = ChooseStrategyEnv(args, tacview_show=False, vertices=VERTICES)
-    state_dim = dummy_env.obs_dim
-    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
-    del dummy_env
-
+def process_one_experiment(DIR_NAME, state_dim, action_dims_dict, env_args, rule_ids, logs_root_dir, out_dir):
+    """
+    处理单个实验目录：查找日志目录 -> 等间隔抽取 actor 版本 -> 对所有规则测试 -> 写入 CSV。
+    若日志目录不存在则跳过并返回 False。
+    """
     # 查找日志目录
-    logs_root_dir = os.path.join(project_root, "logs/combat")
     latest_log_dir = os.path.join(logs_root_dir, DIR_NAME) if DIR_NAME else \
         get_latest_log_dir(logs_root_dir, EXPERIMENT_NAME)
 
     if not latest_log_dir or not os.path.isdir(latest_log_dir):
-        raise FileNotFoundError(f"日志目录不存在: {latest_log_dir}")
-
-    # 输出目录
-    out_dir = os.path.join(project_root, OUT_DIR_NAME)
-    os.makedirs(out_dir, exist_ok=True)
+        print(f"[跳过] 日志目录不存在: {latest_log_dir}")
+        return False
 
     # 等间隔抽取 NUM_PROGRESS_POINTS 个 actor_rein 文件
     steps, agent_paths = select_agents_by_interval(latest_log_dir, NUM_PROGRESS_POINTS, total_steps)
     if not steps:
-        print(f"错误: '{latest_log_dir}' 中没有 actor_rein 文件")
-        return
+        print(f"[跳过] '{latest_log_dir}' 中没有 actor_rein 文件")
+        return False
 
     # CSV 列定义
-    rule_ids = sorted(TEST_RULE_IDS)
     header = ['step', 'actor_file']
     for r in rule_ids:
         header += [f'rule{r}_score', f'rule{r}_win', f'rule{r}_lose',
@@ -198,7 +200,7 @@ def main():
                     state_dim=state_dim,
                     hidden_dim=HIDDEN_DIM,
                     action_dims_dict=action_dims_dict,
-                    env_args=args,
+                    env_args=env_args,
                     dt_maneuver_val=DT_MANEUVER,
                     num_runs=NUM_RUNS,
                     test_rule_ids=rule_ids,
@@ -228,7 +230,44 @@ def main():
                   f"W/L/D={np.mean(wins):.2f}/{np.mean(loses):.2f}/{np.mean(draws):.2f}  "
                   f"perish={np.mean(perishes):.2f}")
 
-    print(f"\n全部完成！CSV 已保存: {csv_path}")
+    print(f"\n[完成] {DIR_NAME} -> CSV 已保存: {csv_path}")
+    return True
+
+
+def main():
+    # 构建 env_args 与维度（与训练脚本测试段一致）—— 只构建一次，所有实验复用
+    parser = argparse.ArgumentParser("UAV swarm confrontation")
+    parser.add_argument("--max-episode-len", type=float, default=MAX_EPISODE_LEN)
+    parser.add_argument("--R-cage", type=float, default=R_CAGE)
+    args = parser.parse_args([])
+
+    dummy_env = ChooseStrategyEnv(args, tacview_show=False, vertices=VERTICES)
+    state_dim = dummy_env.obs_dim
+    action_dims_dict = {'cont': 0, 'cat': dummy_env.fly_act_dim, 'bern': dummy_env.fire_dim}
+    del dummy_env
+
+    # 公共路径与规则列表
+    logs_root_dir = os.path.join(project_root, "logs/combat")
+    out_dir = os.path.join(project_root, OUT_DIR_NAME)
+    os.makedirs(out_dir, exist_ok=True)
+    rule_ids = sorted(TEST_RULE_IDS)
+
+    # 遍历 DIR_NAME_LIST，逐个实验生成 CSV
+    print(f"共 {len(DIR_NAME_LIST)} 个实验待处理")
+    success, skipped = 0, 0
+    for idx, DIR_NAME in enumerate(DIR_NAME_LIST, 1):
+        print("\n" + "=" * 60)
+        print(f"[{idx}/{len(DIR_NAME_LIST)}] 处理实验: {DIR_NAME}")
+        print("=" * 60)
+        ok = process_one_experiment(DIR_NAME, state_dim, action_dims_dict, args,
+                                    rule_ids, logs_root_dir, out_dir)
+        if ok:
+            success += 1
+        else:
+            skipped += 1
+
+    print("\n" + "=" * 60)
+    print(f"全部完成！成功 {success} 个，跳过 {skipped} 个。")
 
 
 if __name__ == '__main__':
