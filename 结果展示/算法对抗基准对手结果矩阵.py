@@ -23,7 +23,7 @@ algorithms = ['IL-PPO', 'IL-SE-SAC', 'IL-SL-PPO', 'IL-SLA-PPO']
 opponents = ['对手1', '对手2', '对手3', '对手4', '平均']
 
 # 取每个 rule*_score 列的最后 N_TAIL 个数值求平均
-N_TAIL = 19
+N_TAIL = 5
 
 CSV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'exp_png2')
 
