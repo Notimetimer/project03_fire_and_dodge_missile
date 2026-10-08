@@ -27,13 +27,13 @@ from VsBaseline_while_training_hierarch_plus import test_worker
 # DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137"
 DIR_NAME_LIST = [
-    "NoIL_flymask_v0h0-run-20260924-224736",
-    "NoIL_flymask_v0h0-run-20260928-233924",
-    "NoIL_flymask_v0h0-run-20260909-131801",
+    # "NoIL_flymask_v0h0-run-20260924-224736",
+    # "NoIL_flymask_v0h0-run-20260928-233924",
+    # "NoIL_flymask_v0h0-run-20260909-131801",
 
-    # "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
-    # "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
-    # "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
+    "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
+    "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
+    "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
     
     # "SAC0.3_flymask_v1h1-run-20260923-213238",
     # "SAC0.3_flymask_v1h1-run-20260928-093645",
@@ -53,7 +53,12 @@ EXPERIMENT_NAME = None
 NUM_PROGRESS_POINTS = 50 # 25
 
 # 测试回合重复次数（由 3 提升到 5）
-NUM_RUNS = 3
+NUM_RUNS = 5
+
+# 并行测试的 checkpoint 数量上限。每个 worker 负责一个 checkpoint（加载一次模型后
+# 串行跑完所有 rule），checkpoint 之间相互独立可并行。
+# None 表示自动取 min(CPU核数, checkpoint数)
+MAX_PARALLEL_CHECKPOINTS = 5
 
 # 测试对手规则编号列表
 TEST_RULE_IDS = [0, 1, 2, 3]
@@ -160,6 +165,58 @@ def run_test_for_checkpoint(agent_path, state_dim, hidden_dim, action_dims_dict,
     return outcomes
 
 
+def test_checkpoint_worker(task):
+    """
+    多进程 worker：负责单个 checkpoint 的全部规则测试。
+
+    每个 worker 只加载一次模型 state_dict，然后串行跑完所有 rule，
+    避免 checkpoint 内再起子进程池（嵌套 mp 在 Windows spawn 下有问题）。
+    checkpoint 之间由外层进程池并行。
+
+    参数 task 是一个元组（方便 pool.map 只传一个参数）：
+        (agent_path, rule_ids, state_dim, hidden_dim, action_dims_dict,
+         env_args, dt_maneuver_val, num_runs, action_cycle_multiplier,
+         vertices, red_init_ammo, blue_init_ammo)
+    返回: (agent_path, outcomes_dict) 或 (agent_path, None) 表示失败
+    """
+    (agent_path, rule_ids, state_dim, hidden_dim, action_dims_dict,
+     env_args, dt_maneuver_val, num_runs, action_cycle_multiplier,
+     vertices, red_init_ammo, blue_init_ammo) = task
+
+    try:
+        model_state_dict = torch.load(agent_path, map_location='cpu', weights_only=False)
+    except Exception as e:
+        print(f"  [失败] 加载模型出错 {os.path.basename(agent_path)}: {e}")
+        return (agent_path, None)
+
+    outcomes = {}
+    for rule_num in rule_ids:
+        try:
+            rule_num_r, score, result2, wins, loses, draws, perish_together = test_worker(
+                model_state_dict=model_state_dict,
+                rule_num=rule_num,
+                env_args=env_args,
+                state_dim=state_dim,
+                hidden_dim=hidden_dim,
+                action_dims_dict=action_dims_dict,
+                dt_maneuver_val=dt_maneuver_val,
+                device_name='cpu',
+                num_runs=num_runs,
+                action_cycle_multiplier=action_cycle_multiplier,
+                no_out=0,
+                deterministic=True,
+                restrict_fire=True,
+                vertices=vertices,
+                red_init_ammo=red_init_ammo,
+                blue_init_ammo=blue_init_ammo,
+            )
+            outcomes[rule_num] = (score, wins, loses, draws, perish_together)
+        except Exception as e:
+            print(f"  [失败] {os.path.basename(agent_path)} rule={rule_num}: {e}")
+            outcomes[rule_num] = (0.0, 0.0, 0.0, 0.0, 0.0)
+    return (agent_path, outcomes)
+
+
 def process_one_experiment(DIR_NAME, state_dim, action_dims_dict, env_args, rule_ids, logs_root_dir, out_dir):
     """
     处理单个实验目录：查找日志目录 -> 等间隔抽取 actor 版本 -> 对所有规则测试 -> 写入 CSV。
@@ -188,33 +245,38 @@ def process_one_experiment(DIR_NAME, state_dim, action_dims_dict, env_args, rule
 
     csv_path = os.path.join(out_dir, f"test_norandom_vs_rules_{DIR_NAME}.csv")
     print(f"\n结果将写入: {csv_path}")
-    print(f"测试规则: {rule_ids}，num_runs={NUM_RUNS}，共 {len(steps)} 个版本\n")
+    print(f"测试规则: {rule_ids}，num_runs={NUM_RUNS}，共 {len(steps)} 个版本")
 
+    # 构建所有 checkpoint 的任务列表（每个任务 = 一个 checkpoint 的全部 rule 测试）
+    tasks = [
+        (agent_path, rule_ids, state_dim, HIDDEN_DIM, action_dims_dict,
+         env_args, DT_MANEUVER, NUM_RUNS, ACTION_CYCLE_MULTIPLIER,
+         VERTICES, TEST_RED_INIT_AMMO, TEST_BLUE_INIT_AMMO)
+        for agent_path in agent_paths
+    ]
+
+    # 决定并行 worker 数
+    n_checkpoints = len(tasks)
+    if MAX_PARALLEL_CHECKPOINTS is not None:
+        num_workers = min(MAX_PARALLEL_CHECKPOINTS, n_checkpoints)
+    else:
+        num_workers = min(os.cpu_count() or 1, n_checkpoints)
+    print(f"并行测试: {num_workers} 个 worker × {n_checkpoints} 个 checkpoint\n")
+
+    # checkpoint 之间并行，pool.map 保持输入顺序
+    with mp.Pool(processes=num_workers) as pool:
+        results = pool.map(test_checkpoint_worker, tasks)
+
+    # 按顺序写 CSV
     with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
         writer.writerow(header)
 
-        for cp_idx, (step, agent_path) in enumerate(zip(steps, agent_paths)):
+        for cp_idx, (step, agent_path, (returned_path, outcomes)) in enumerate(
+                zip(steps, agent_paths, results)):
             base = os.path.basename(agent_path)
-            print(f"[{cp_idx+1}/{len(steps)}] 步数 {step:.0f} | {base}")
-
-            try:
-                outcomes = run_test_for_checkpoint(
-                    agent_path=agent_path,
-                    state_dim=state_dim,
-                    hidden_dim=HIDDEN_DIM,
-                    action_dims_dict=action_dims_dict,
-                    env_args=env_args,
-                    dt_maneuver_val=DT_MANEUVER,
-                    num_runs=NUM_RUNS,
-                    test_rule_ids=rule_ids,
-                    action_cycle_multiplier=ACTION_CYCLE_MULTIPLIER,
-                    vertices=VERTICES,
-                    red_init_ammo=TEST_RED_INIT_AMMO,
-                    blue_init_ammo=TEST_BLUE_INIT_AMMO,
-                )
-            except Exception as e:
-                print(f"  测试失败: {e}")
+            if outcomes is None:
+                print(f"[{cp_idx+1}/{n_checkpoints}] 步数 {step:.0f} | {base}  -> 跳过（加载失败）")
                 continue
 
             row = [f"{step:.0f}", base]
@@ -229,8 +291,8 @@ def process_one_experiment(DIR_NAME, state_dim, action_dims_dict, env_args, rule
                     f"{np.mean(loses):.4f}", f"{np.mean(draws):.4f}",
                     f"{np.mean(perishes):.4f}"]
             writer.writerow(row)
-            f.flush()
-            print(f"  avg_score={np.mean(scores):.3f}  "
+            print(f"[{cp_idx+1}/{n_checkpoints}] 步数 {step:.0f} | {base}  "
+                  f"avg_score={np.mean(scores):.3f}  "
                   f"W/L/D={np.mean(wins):.2f}/{np.mean(loses):.2f}/{np.mean(draws):.2f}  "
                   f"perish={np.mean(perishes):.2f}")
 
