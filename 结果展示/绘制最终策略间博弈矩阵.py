@@ -20,7 +20,7 @@ from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 
 # 本文件在 结果展示/废弃/ 下，父目录 结果展示/ 中含有 _context.py 和
 # 绘制各算法vs规则胜率生存率.py，把父目录加入 sys.path 以便复用其样式常量。
-_PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PARENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 

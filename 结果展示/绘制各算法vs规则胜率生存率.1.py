@@ -196,22 +196,17 @@ def load_group_stats(algo_label, dir_names, x_target):
     return stats
 
 
-def style_axis(ax, ylabel_text, metric_key):
-    """统一坐标轴样式：参考线、标签、刻度、科学计数法、坐标范围。
-
-    avg_score 不限制 0~1，由数据自动决定 y 轴范围；
-    其余指标（win/lose/draw/survive）固定 [-0.05, 1.05] 并画 0/0.5/1.0 参考线。
-    """
-    if metric_key != 'avg_score':
-        for hval in [0, 0.5, 1.0]:
-            ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth,
-                       alpha=0.8, zorder=1)
-        ax.set_ylim(-0.05, 1.05)
+def style_axis(ax, ylabel_text):
+    """统一坐标轴样式：参考线、标签、刻度、科学计数法、坐标范围。"""
+    for hval in [0, 0.5, 1.0]:
+        ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth,
+                   alpha=0.8, zorder=1)
     ax.set_xlabel('训练步数', fontweight='bold', fontsize=label_fontsize)
     ax.set_ylabel(ylabel_text, fontweight='bold', fontsize=label_fontsize)
     ax.tick_params(axis='both', labelsize=tick_fontsize)
     ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
     ax.xaxis.offsetText.set_fontsize(tick_fontsize)
+    ax.set_ylim(-0.05, 1.05)
     ax.set_axisbelow(True)
     ax.grid(True, alpha=0.4)
 
@@ -287,7 +282,7 @@ def main():
             ax.fill_between(x_target, min_y, max_y, color=color,
                             alpha=fill_alpha, edgecolor='none', linewidth=0, zorder=2)
 
-        style_axis(ax, ylabel_text, metric_key)
+        style_axis(ax, ylabel_text)
         add_legend(ax)
         fig.tight_layout(pad=0.2)
         save_figure(fig, metric_key)
