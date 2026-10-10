@@ -483,8 +483,8 @@ class PolicyNetHybrid(torch.nn.Module):
                 #     mid_term_mask = cond_no_warn_mid.unsqueeze(-1).expand_as(in_mask) & in_mask
                 #     # 硬mask
                 #     cat_logits_list[1] = cat_logits_list[1].masked_fill(mid_term_mask, -1e8)
-                    # 软mask
-                    # cat_logits_list[1] = torch.where(mid_term_mask, cat_logits_list[1] - mask_penalty, cat_logits_list[1])  # condition, do, otherwise
+                #     # 软mask
+                #     cat_logits_list[1] = torch.where(mid_term_mask, cat_logits_list[1] - mask_penalty, cat_logits_list[1])  # condition, do, otherwise
 
             # 2. 应用温度缩放 (Logits / temperature) 并 Softmax
             final_probs_list = []
