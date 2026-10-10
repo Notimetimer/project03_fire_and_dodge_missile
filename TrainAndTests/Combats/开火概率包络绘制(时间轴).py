@@ -345,7 +345,7 @@ def main():
             print(f"\n加载模型: {os.path.basename(agent_path)} (步数 {step:.0f})")
 
             try:
-                actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict).to(device)
+                actor_net = PolicyNetHybrid(state_dim, hidden_dim, action_dims_dict, mask_search_dir=latest_log_dir).to(device)
                 actor = HybridActorWrapper(actor_net, action_dims_dict, device=device).to(device)
                 actor.load_state_dict(torch.load(agent_path, map_location=device, weights_only=True), strict=False)
                 actor.eval()
