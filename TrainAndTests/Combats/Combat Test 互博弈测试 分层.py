@@ -68,12 +68,12 @@ if __name__ == "__main__":
     # "PPO"
     show_name = [
         "IL-SLA-PPO",
-        "PPO",
+        "IL-SE-SAC",
     ]
     
     # 红方和蓝方分别使用不同的模型目录
-    red_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
-    blue_dir_name = "NoIL_flymask_v0h0-run-20260924-224736"
+    red_dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
+    blue_dir_name = "SAC0.3_flymask_v1h1-run-20260928-093645"  # "NoIL_flymask_v0h0-run-20260924-224736"
     
     """
     PPO0.3_flymask_v0h0_fireSL-run-20260924-145554

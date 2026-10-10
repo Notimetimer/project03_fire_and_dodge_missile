@@ -55,8 +55,11 @@ if __name__ == "__main__":
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
-    dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149"
-    # "PPO0.3_flymask_v0h0_fireSL-run-20260928-161901"
+    dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
+    # "PPO0.3_flymask_v0h0-run-20260921-194617"
+    # "SLWSPFSP0.3-run-20260807-212711"
+    # "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654"
+    
     
     
 
@@ -138,7 +141,7 @@ if __name__ == "__main__":
     env.no_out = 0 # 强制防止出界，训练的时候为0，测试的时候为1
     
     # --- 循环测试 ---
-    rule_opponents = [0,1,2,3] # [0,1,2,3,4] # [3]
+    rule_opponents = [3] # [0,1,2,3,4] # [3]
 
     t_bias = 0
 
@@ -164,6 +167,7 @@ if __name__ == "__main__":
                 'time': [],
                 'r_ny': [], 'r_alpha': [], 'r_alt': [], 'r_mach': [],
                 'b_ny': [], 'b_alpha': [], 'b_alt': [], 'b_mach': [],
+                'r_ata': [], 'b_ata': [],                # 天线转动角 (度)
                 'r_cat_entropy': [],
                 'r_cat_conf': [], 'r_bern_fire_prob': [],
                 'r_warning': [], 'r_missile_in_mid_term': [],
@@ -171,6 +175,11 @@ if __name__ == "__main__":
                 'r_r_shaping': [],
                 'r_count_12km': [], 'r_count_4km': [],
                 'b_count_12km': [], 'b_count_4km': [],
+                'distance': [],                 # 红蓝双方三维距离
+                'r_fire_time': [], 'r_fire_dist': [],   # 红方开火时刻及对应距离
+                'r_fire_alt': [], 'r_fire_mach': [],    # 红方开火时的高度/马赫数
+                'b_fire_time': [], 'b_fire_dist': [],   # 蓝方开火时刻及对应距离
+                'b_fire_alt': [], 'b_fire_mach': [],    # 蓝方开火时的高度/马赫数
             }
 
             # --- 初始化回放数据结构（用于绘制3D轨迹） ---
@@ -202,6 +211,7 @@ if __name__ == "__main__":
                 r_obs, r_check_obs = env.obs_1v1('r', pomdp=1)
                 b_obs, b_check_obs = env.obs_1v1('b', pomdp=1)
                 r_state_check = env.unscale_state(r_check_obs)
+                b_state_check = env.unscale_state(b_check_obs)
                 r_warning = float(r_state_check['warning'])
                 r_missile_in_mid_term = float(r_state_check['missile_in_mid_term'])
 
@@ -210,7 +220,7 @@ if __name__ == "__main__":
                     # --- 红方 (RL 智能体) ---
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.4,
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.82,
                             temperature={'cat':0.3, 'bern':1}
                             ) # check_obs=r_check_obs, check_obs=None 0.06
                     # print("中制导状态", r_obs[3])
@@ -246,7 +256,6 @@ if __name__ == "__main__":
                         print("开火瞬间动作", r_action_label)
 
                     # --- 蓝方 (规则智能体) ---
-                    b_state_check = env.unscale_state(b_check_obs)
                     b_action_label, b_fire = basic_rules(b_state_check, rule_num, last_action=last_b_action_label)
                     last_b_action_label = b_action_label
                     if b_fire:
@@ -262,8 +271,25 @@ if __name__ == "__main__":
                     print("Shoot")
                     print()
                     fire_time = env.t
+                    # 记录红方开火时刻及对应双方距离、高度、马赫数
+                    _r_pos = np.array(env.RUAV.pos_)
+                    _b_pos = np.array(env.BUAV.pos_)
+                    history['r_fire_time'].append(env.t)
+                    history['r_fire_dist'].append(np.linalg.norm(_r_pos - _b_pos))
+                    history['r_fire_alt'].append(env.RUAV.alt)
+                    history['r_fire_mach'].append(env.RUAV.mach)
                 if getattr(env.BUAV, 'about_to_fire', 0):
+                    # 蓝方弹药耗尽时，即使规则要求开火也不计入开火事件
+                    _b_has_ammo = env.BUAV.ammo > 0
                     launch_missile_immediately(env, 'b', tabu=1, action_label=None) # b_action_label)
+                    if _b_has_ammo and (not env.BUAV.dead) and not (env.RUAV.dead):
+                        # 记录蓝方开火时刻及对应双方距离、高度、马赫数
+                        _r_pos = np.array(env.RUAV.pos_)
+                        _b_pos = np.array(env.BUAV.pos_)
+                        history['b_fire_time'].append(env.t)
+                        history['b_fire_dist'].append(np.linalg.norm(_r_pos - _b_pos))
+                        history['b_fire_alt'].append(env.BUAV.alt)
+                        history['b_fire_mach'].append(env.BUAV.mach)
                 
 
                 if (action_cycle_multiplier-1) * env.dt_maneuver <= env.t-fire_time < 2 * action_cycle_multiplier * env.dt_maneuver:
@@ -293,6 +319,13 @@ if __name__ == "__main__":
                 history['b_alpha'].append(env.BUAV.alpha_air * 180 / np.pi)
                 history['b_alt'].append(env.BUAV.alt)
                 history['b_mach'].append(env.BUAV.mach)
+                # 天线转动角 ATA（弧度 -> 度），直接调用 get_state 取，避免被 POMDP 干扰
+                r_full_state = env.get_state('r')
+                b_full_state = env.get_state('b')
+                r_ti = r_full_state.get('target_information')
+                b_ti = b_full_state.get('target_information')
+                history['r_ata'].append(float(r_ti[4]) * 180 / np.pi if r_ti is not None else 0.0)
+                history['b_ata'].append(float(b_ti[4]) * 180 / np.pi if b_ti is not None else 0.0)
                 history['r_cat_entropy'].append(r_cat_entropy)
                 history['r_bern_fire_prob'].append(r_bern_fire_prob)
                 history['r_cat_conf'].append(r_cat_conf)
@@ -304,6 +337,10 @@ if __name__ == "__main__":
                 history['r_count_4km'].append(getattr(env.RUAV, '_count_4km', 0))
                 history['b_count_12km'].append(getattr(env.BUAV, '_count_12km', 0))
                 history['b_count_4km'].append(getattr(env.BUAV, '_count_4km', 0))
+                # 记录红蓝双方三维距离
+                _r_pos = np.array(env.RUAV.pos_)
+                _b_pos = np.array(env.BUAV.pos_)
+                history['distance'].append(np.linalg.norm(_r_pos - _b_pos))
 
                 # --- 记录回放数据（3D轨迹用） ---
                 replay_data['t'].append(env.t)
@@ -345,108 +382,107 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Failed to save CSV: {e}")
 
-            # --- 绘制曲线 ---
-            plt.figure(figsize=(10, 10))
-            plt.subplot(4, 1, 1)
-            plt.plot(history['time'], history['r_ny'], label='Red Ny', color='crimson')
-            plt.plot(history['time'], history['b_ny'], label='Blue Ny', color='royalblue', linestyle='--')
-            plt.axhline(y=-3, color='black', linestyle=':', alpha=0.7, label='Ny limit (-3g)')
-            plt.axhline(y=9, color='black', linestyle=':', alpha=0.7, label='Ny limit (9g)')
-            plt.ylabel('Ny (g)')
-            plt.title(f'Test vs Rule {rule_num}: Metrics')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
+            # --- 绘制曲线：三个独立 figure，一律中文 ---
+            # 中文字体设置
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'SimSun', 'Microsoft YaHei']
+            plt.rcParams['axes.unicode_minus'] = False
+            # 统一字号：轴标签、刻度、图例均用同一字号，避免图例被 matplotlib 默认放大
+            _fs = 8
+            plt.rcParams['font.size'] = _fs
+            plt.rcParams['axes.labelsize'] = _fs
+            plt.rcParams['xtick.labelsize'] = _fs
+            plt.rcParams['ytick.labelsize'] = _fs
+            plt.rcParams['legend.fontsize'] = _fs
 
-            plt.subplot(4, 1, 2)
-            plt.plot(history['time'], history['r_alpha'], label='Red Alpha', color='crimson')
-            plt.plot(history['time'], history['b_alpha'], label='Blue Alpha', color='royalblue', linestyle='--')
-            plt.axhline(y=-8, color='black', linestyle=':', alpha=0.7, label='Alpha limit (-8°)')
-            plt.axhline(y=26, color='black', linestyle=':', alpha=0.7, label='Alpha limit (26°)')
-            plt.ylabel('Alpha (deg)')
-            plt.title('Angle of Attack (Alpha)')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(4, 1, 3)
-            plt.plot(history['time'], history['r_mach'], label='Red Mach', color='crimson')
-            plt.plot(history['time'], history['b_mach'], label='Blue Mach', color='royalblue', linestyle='--')
-            plt.ylabel('Mach')
-            plt.title('Flight Mach Number')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-
-            plt.subplot(4, 1, 4)
-            plt.plot(history['time'], history['r_alt'], label='Red Alt', color='crimson')
-            plt.plot(history['time'], history['b_alt'], label='Blue Alt', color='royalblue', linestyle='--')
-            plt.ylabel('Alt (m)')
-            plt.xlabel('Time (s)')
-            plt.title('Altitude (Height)')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-
-            # --- Figure 4: r_shaping 与其余部分在累积蒙特卡洛回报中的占比 ---
-            plt.figure(2, figsize=(10, 4))
-            plt.clf()
             t = np.array(history['time'])
-            r_total = np.array(history['r_reward'])
-            r_shaping = np.array(history['r_r_shaping'])
-            r_rest = r_total - r_shaping
 
-            # 累积蒙特卡洛回报（从当前步到回合结束的折扣和）
-            G_shaping = np.zeros_like(r_shaping)
-            G_rest = np.zeros_like(r_rest)
-            running_shaping = 0.0
-            running_rest = 0.0
-            for i in range(len(r_total) - 1, -1, -1):
-                running_shaping = r_shaping[i] + gamma * running_shaping
-                running_rest = r_rest[i] + gamma * running_rest
-                G_shaping[i] = running_shaping
-                G_rest[i] = running_rest
-
-            denom = np.abs(G_shaping) + np.abs(G_rest)
-            denom = np.where(denom == 0, 1, denom)
-            shaping_ratio = np.abs(G_shaping) / denom
-            rest_ratio = np.abs(G_rest) / denom
-
-            plt.plot(t, shaping_ratio, label='r_shaping 占比', color='crimson')
-            plt.plot(t, rest_ratio, label='其余部分占比', color='royalblue', linestyle='--')
-            plt.xlabel('Time (s)')
-            plt.ylabel('占比')
-            plt.ylim([0, 1])
-            plt.title(f'Test vs Rule {rule_num}: r_shaping 与其余部分在累积蒙特卡洛回报中的占比')
-            plt.legend()
+            # --- Figure 1: 红蓝双方高度变化曲线（均为实线），各自曲线上标开火点 ---
+            plt.figure(1, figsize=(10/2, 4/2))
+            plt.clf()
+            plt.plot(t, [a / 1000 for a in history['r_alt']], label='红方高度', color='crimson', linestyle='-', linewidth=1.2)
+            plt.plot(t, [a / 1000 for a in history['b_alt']], label='蓝方高度', color='royalblue', linestyle='-', linewidth=1.2)
+            # 红方开火时刻画红色竖直虚线
+            for i, ft in enumerate(history['r_fire_time']):
+                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='红方开火' if i == 0 else '')
+            # 蓝方开火时刻画蓝色竖直虚线
+            for i, ft in enumerate(history['b_fire_time']):
+                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='蓝方开火' if i == 0 else '')
+            plt.xlabel('时间/(s)')
+            plt.ylabel('高度/(km)')
+            leg1 = plt.legend()
+            leg1.set_draggable(True)
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
 
-            # --- Figure 3: 红蓝双方 _count_12km / _count_4km 变化（分子图避免曲线重叠遮挡） ---
-            fig3 = plt.figure(3, figsize=(10, 6))
-            fig3.clf()
-            t3 = np.array(history['time'])
-            ax_r = fig3.add_subplot(211)
-            ax_b = fig3.add_subplot(212, sharex=ax_r)
+            # --- Figure 2: 红蓝双方马赫数曲线，各自曲线上标开火点 ---
+            plt.figure(2, figsize=(10/2, 4/2))
+            plt.clf()
+            plt.plot(t, history['r_mach'], label='红方马赫数', color='crimson', linestyle='-', linewidth=1.2)
+            plt.plot(t, history['b_mach'], label='蓝方马赫数', color='royalblue', linestyle='-', linewidth=1.2)
+            # 红方开火时刻画红色竖直虚线
+            for i, ft in enumerate(history['r_fire_time']):
+                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='红方开火' if i == 0 else '')
+            # 蓝方开火时刻画蓝色竖直虚线
+            for i, ft in enumerate(history['b_fire_time']):
+                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='蓝方开火' if i == 0 else '')
+            plt.xlabel('时间/(s)')
+            plt.ylabel('马赫数')
+            leg2 = plt.legend()
+            leg2.set_draggable(True)
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
 
-            ax_r.step(t3, history['r_count_12km'], where='post', label='Red _count_12km', color='crimson', linestyle='--')
-            ax_r.step(t3, history['r_count_4km'], where='post', label='Red _count_4km', color='crimson')
-            ax_r.set_ylabel('Red count')
-            ax_r.set_title(f'Test vs Rule {rule_num}: 双方导弹威胁穿越计数 (_count_12km / _count_4km)')
-            ax_r.legend(loc='upper left')
-            ax_r.grid(True, alpha=0.3)
+            # --- Figure 3: 双方距离曲线（黑色），红/蓝开火时刻打红点/蓝点 ---
+            plt.figure(3, figsize=(10/2, 4/2))
+            plt.clf()
+            plt.plot(t, [d / 10000 for d in history['distance']], label='双方距离', color='black', linestyle='-', linewidth=1.2)
+            # 红方开火时刻画红色竖直虚线
+            for i, ft in enumerate(history['r_fire_time']):
+                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='红方开火' if i == 0 else '')
+            # 蓝方开火时刻画蓝色竖直虚线
+            for i, ft in enumerate(history['b_fire_time']):
+                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='蓝方开火' if i == 0 else '')
+            plt.xlabel('时间/(s)')
+            plt.ylabel('双方距离/(10km)')
+            # plt.title(f'红蓝双方距离曲线与开火时刻（vs 基准对手{rule_num + 1}）')
+            leg3 = plt.legend()
+            leg3.set_draggable(True)
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
 
-            ax_b.step(t3, history['b_count_12km'], where='post', label='Blue _count_12km', color='royalblue', linestyle='--')
-            ax_b.step(t3, history['b_count_4km'], where='post', label='Blue _count_4km', color='royalblue')
-            ax_b.set_xlabel('Time (s)')
-            ax_b.set_ylabel('Blue count')
-            ax_b.legend(loc='upper left')
-            ax_b.grid(True, alpha=0.3)
+            # --- Figure 4: 红蓝双方天线转动角 ATA 曲线（度） ---
+            plt.figure(4, figsize=(10/2, 4/2))
+            plt.clf()
+            plt.plot(t, history['r_ata'], label='红方ATA', color='crimson', linestyle='-', linewidth=1.2)
+            plt.plot(t, history['b_ata'], label='蓝方ATA', color='royalblue', linestyle='-', linewidth=1.2)
+            # 红方开火时刻画红色竖直虚线
+            for i, ft in enumerate(history['r_fire_time']):
+                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='红方开火' if i == 0 else '')
+            # 蓝方开火时刻画蓝色竖直虚线
+            for i, ft in enumerate(history['b_fire_time']):
+                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                            label='蓝方开火' if i == 0 else '')
+            plt.xlabel('时间/(s)')
+            plt.ylabel('天线转动角/(°)')
+            leg4 = plt.legend()
+            leg4.set_draggable(True)
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
 
-            fig3.tight_layout()
-
-            plt.show()
+            
 
             # --- 绘制本回合 3D 回放轨迹 ---
             plot_replay(replay_data, save_path=None)
+            
+            
+            plt.show()
 
             # input("Press Enter to continue to the next test...")
 

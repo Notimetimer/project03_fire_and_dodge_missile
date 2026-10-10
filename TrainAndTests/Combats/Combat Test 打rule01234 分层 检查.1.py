@@ -47,8 +47,8 @@ if __name__ == "__main__":
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
 
-    dir_name = "SLWSPFSP0_flymask_v0h0-run-20260910-115254" # "SLWSPFSP0.3_flymask_1-run-20260903-173826"
-        
+    dir_name = "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654" # "SLWSPFSP0.3_flymask_1-run-20260903-173826"
+    
     # 次要
     experiment_name = None    
     'PFSP_分阶段_混规则对手_挑战_并行_训练满熵项'
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     actor_wrapper.eval() # **非常重要**：设置为评估模式
 
     # --- 4. 在内存中跑真实对抗，收集策略自己的轨迹 ---
-    rule_opponents = [1,2,3]
+    rule_opponents = [3]
     t_bias = 0
     episodes_data = []  # 记录每个 episode 的完整时间序列数据
     all_r_obs = []
@@ -128,7 +128,7 @@ if __name__ == "__main__":
             print("="*50)
 
             env.reset(red_birth_state=None, blue_birth_state=None, ego_side='r',
-                      red_init_ammo=4, blue_init_ammo=4)
+                      red_init_ammo=6, blue_init_ammo=6)
 
             done = False
             last_b_action_label = 0
@@ -158,8 +158,8 @@ if __name__ == "__main__":
                 if count % action_cycle_multiplier == 0:
                     with torch.no_grad():
                         r_action_exec, _, _, r_action_check = actor_wrapper.get_action(
-                            r_obs, explore={'cont':0, 'cat':1, 'bern':1}, check_obs=r_check_obs, bern_threshold=0.072,
-                            temperature={'cat':0.999, 'bern':0.97}
+                            r_obs, explore={'cont':0, 'cat':1, 'bern':0}, check_obs=r_check_obs, bern_threshold=0.5,
+                            temperature={'cat':0.3, 'bern':0.8}
                         )
                     r_action_label = r_action_exec['cat']
                     r_fire = r_action_exec['bern'][0]
