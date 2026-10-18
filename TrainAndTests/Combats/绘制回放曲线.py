@@ -9,7 +9,9 @@ import os
 import sys
 import json
 import glob
+import pickle
 import argparse
+import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
@@ -134,7 +136,7 @@ def _detach_legend_from_3d_rotation(ax3, leg):
     # 没找到（理论上不会发生），静默跳过
 
 
-def plot_replay(data: dict, save_path: str = None):
+def plot_replay(data: dict, save_path: str = None, show: bool = True):
     meta = data.get('meta', {})
     red_name = meta.get('red_name', '红方')
     blue_name = meta.get('blue_name', '蓝方')
@@ -263,7 +265,8 @@ def plot_replay(data: dict, save_path: str = None):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"图像已保存: {save_path}")
 
-    plt.show()
+    if show:
+        plt.show()
 
 
 def find_record_dir():
@@ -317,3 +320,288 @@ if __name__ == '__main__':
         save_path = os.path.splitext(json_path)[0] + '_trajectory.png'
 
     plot_replay(data, save_path=save_path)
+
+
+# =========================== 新增：离线图绘功能 ===========================
+
+# --- Figure 6/7 坐标轴显示比例（y轴数据单位 / x轴数据单位；1=等比，2=y轴拉伸2倍） ---
+FIG6_YX_ASPECT = 1.5      # Figure 6 俯视图 北(y)/东(x) 显示比例
+FIG7_YX_ASPECT = 1.5      # Figure 7 侧视图 高度(y)/东(x) 显示比例
+
+
+def _setup_fonts():
+    """统一设置中文及字号"""
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'SimSun', 'Microsoft YaHei']
+    plt.rcParams['axes.unicode_minus'] = False
+    _fs = 8
+    plt.rcParams['font.size'] = _fs
+    plt.rcParams['axes.labelsize'] = _fs
+    plt.rcParams['xtick.labelsize'] = _fs
+    plt.rcParams['ytick.labelsize'] = _fs
+    plt.rcParams['legend.fontsize'] = _fs
+
+
+def _fmt_min_sec(t_seconds):
+    """秒 -> 分:秒 字符串，如 65 -> '01:05'"""
+    m = int(t_seconds) // 60
+    s = int(t_seconds) % 60
+    return f"{m:02d}:{s:02d}"
+
+
+def plot_figures_1_to_4(history):
+    """根据 history 绘制 Figure 1~4（高度、马赫数、双方距离、ATA）"""
+    _setup_fonts()
+    t = np.array(history['time'])
+
+    # --- Figure 1: 红蓝双方高度 ---
+    plt.figure(1, figsize=(10/2, 4/2))
+    plt.clf()
+    plt.plot(t, [a / 1000 for a in history['r_alt']], label='红方高度', color='crimson', linestyle='-', linewidth=1.2)
+    plt.plot(t, [a / 1000 for a in history['b_alt']], label='蓝方高度', color='royalblue', linestyle='-', linewidth=1.2)
+    for i, ft in enumerate(history['r_fire_time']):
+        plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='红方开火' if i == 0 else '')
+    for i, ft in enumerate(history['b_fire_time']):
+        plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='蓝方开火' if i == 0 else '')
+    plt.xlabel('时间/(s)')
+    plt.ylabel('高度/(km)')
+    leg = plt.legend()
+    leg.set_draggable(True)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    # --- Figure 2: 马赫数 ---
+    plt.figure(2, figsize=(10/2, 4/2))
+    plt.clf()
+    plt.plot(t, history['r_mach'], label='红方马赫数', color='crimson', linestyle='-', linewidth=1.2)
+    plt.plot(t, history['b_mach'], label='蓝方马赫数', color='royalblue', linestyle='-', linewidth=1.2)
+    for i, ft in enumerate(history['r_fire_time']):
+        plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='红方开火' if i == 0 else '')
+    for i, ft in enumerate(history['b_fire_time']):
+        plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='蓝方开火' if i == 0 else '')
+    plt.xlabel('时间/(s)')
+    plt.ylabel('马赫数')
+    leg = plt.legend()
+    leg.set_draggable(True)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    # --- Figure 3: 双方距离 ---
+    plt.figure(3, figsize=(10/2, 4/2))
+    plt.clf()
+    plt.plot(t, [d / 10000 for d in history['distance']], label='双方距离', color='black', linestyle='-', linewidth=1.2)
+    for i, ft in enumerate(history['r_fire_time']):
+        plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='红方开火' if i == 0 else '')
+    for i, ft in enumerate(history['b_fire_time']):
+        plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='蓝方开火' if i == 0 else '')
+    plt.xlabel('时间/(s)')
+    plt.ylabel('双方距离/(10km)')
+    leg = plt.legend()
+    leg.set_draggable(True)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    # --- Figure 4: ATA ---
+    plt.figure(4, figsize=(10/2, 4/2))
+    plt.clf()
+    plt.plot(t, history['r_ata'], label='红方夹角', color='crimson', linestyle='-', linewidth=1.2)
+    plt.plot(t, history['b_ata'], label='蓝方夹角', color='royalblue', linestyle='-', linewidth=1.2)
+    for i, ft in enumerate(history['r_fire_time']):
+        plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='红方开火' if i == 0 else '')
+    for i, ft in enumerate(history['b_fire_time']):
+        plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='蓝方开火' if i == 0 else '')
+    plt.xlabel('时间/(s)')
+    plt.ylabel('夹角/(°)')
+    leg = plt.legend()
+    leg.set_draggable(True)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+
+def plot_figures_6_to_8(history, replay_data, hit_markers, fig6_aspect=1, fig7_aspect=1):
+    """根据 replay_data 绘制 Figure 6~8（俯视图、侧视图、threat_distance）"""
+    _setup_fonts()
+
+    ruav6 = np.array(replay_data['RUAV']['pos_'])  # [N, H, E, t]
+    buav6 = np.array(replay_data['BUAV']['pos_'])
+
+    # --- Figure 6: 俯视图（北-东） ---
+    plt.figure(6, figsize=(10/2, 4/2))
+    plt.clf()
+    ax6 = plt.gca()
+    ax6.plot(ruav6[:, 2] / 1e3, ruav6[:, 0] / 1e3, color='crimson', lw=1.2, label='红方飞行轨迹')
+    ax6.plot(buav6[:, 2] / 1e3, buav6[:, 0] / 1e3, color='royalblue', lw=1.2, label='蓝方飞行轨迹')
+    _r_mis_used = False
+    for _mid, _traj in replay_data['RMIS'].items():
+        _m = np.array(_traj)
+        ax6.plot(_m[:, 2] / 1e3, _m[:, 0] / 1e3, color='crimson', lw=0.8, linestyle='--', alpha=0.8,
+                 label='' if _r_mis_used else '红方导弹轨迹')
+        _r_mis_used = True
+    _b_mis_used = False
+    for _mid, _traj in replay_data['BMIS'].items():
+        _m = np.array(_traj)
+        ax6.plot(_m[:, 2] / 1e3, _m[:, 0] / 1e3, color='royalblue', lw=0.8, linestyle='--', alpha=0.8,
+                 label='' if _b_mis_used else '蓝方导弹轨迹')
+        _b_mis_used = True
+    _hit_used = False
+    for _side, _color in (('r', 'crimson'), ('b', 'royalblue')):
+        for _p in hit_markers[_side]:
+            ax6.scatter(_p[2] / 1e3, _p[0] / 1e3, marker='o', s=60, facecolors='gold',
+                        edgecolors='black', linewidths=0.8, zorder=6,
+                        label='' if _hit_used else '命中')
+            _hit_used = True
+    ax6.set_xlabel('东/(km)')
+    ax6.set_ylabel('北/(km)')
+    ax6.set_aspect(fig6_aspect, adjustable='box')
+    ax6.grid(True, alpha=0.3)
+    leg6 = ax6.legend()
+    leg6.set_draggable(True)
+    plt.tight_layout()
+
+    # --- Figure 7: 侧视图（东-高） ---
+    plt.figure(7, figsize=(10/2, 4/2))
+    plt.clf()
+    ax7 = plt.gca()
+    ax7.plot(ruav6[:, 2] / 1e3, ruav6[:, 1] / 1e3, color='crimson', lw=1.2, label='红方轨迹')
+    ax7.plot(buav6[:, 2] / 1e3, buav6[:, 1] / 1e3, color='royalblue', lw=1.2, label='蓝方轨迹')
+    _r_mis_used = False
+    for _mid, _traj in replay_data['RMIS'].items():
+        _m = np.array(_traj)
+        ax7.plot(_m[:, 2] / 1e3, _m[:, 1] / 1e3, color='crimson', lw=0.8, linestyle='--', alpha=0.8,
+                 label='' if _r_mis_used else '红方导弹轨迹')
+        _r_mis_used = True
+    _b_mis_used = False
+    for _mid, _traj in replay_data['BMIS'].items():
+        _m = np.array(_traj)
+        ax7.plot(_m[:, 2] / 1e3, _m[:, 1] / 1e3, color='royalblue', lw=0.8, linestyle='--', alpha=0.8,
+                 label='' if _b_mis_used else '蓝方导弹轨迹')
+        _b_mis_used = True
+    _hit_used = False
+    for _side in ('r', 'b'):
+        for _p in hit_markers[_side]:
+            ax7.scatter(_p[2] / 1e3, _p[1] / 1e3, marker='o', s=60, facecolors='gold',
+                        edgecolors='black', linewidths=0.8, zorder=6,
+                        label='' if _hit_used else '命中')
+            _hit_used = True
+    ax7.set_xlabel('东/(km)')
+    ax7.set_ylabel('高度/(km)')
+    ax7.set_aspect(fig7_aspect, adjustable='box')
+    ax7.grid(True, alpha=0.3)
+    leg7 = ax7.legend()
+    leg7.set_draggable(True)
+    plt.tight_layout()
+
+    # --- Figure 8: threat_distance ---
+    plt.figure(8, figsize=(10/2, 4/2))
+    plt.clf()
+    t = np.array(history['time'])
+    plt.plot(t, [d / 1e3 for d in history['r_threat_dist']], label='红方 threat_distance',
+             color='crimson', linestyle='-', linewidth=1.2)
+    plt.plot(t, [d / 1e3 for d in history['b_threat_dist']], label='蓝方 threat_distance',
+             color='royalblue', linestyle='-', linewidth=1.2)
+    for i, ft in enumerate(history['r_fire_time']):
+        plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='红方开火' if i == 0 else '')
+    for i, ft in enumerate(history['b_fire_time']):
+        plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+                    label='蓝方开火' if i == 0 else '')
+    plt.xlabel('时间/(s)')
+    plt.ylabel('threat_distance/(km)')
+    leg8 = plt.legend()
+    leg8.set_draggable(True)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+
+def plot_all_figures(history, replay_data, hit_markers,
+                     fig6_aspect=1, fig7_aspect=1, show=False):
+    """一站式绘制 Figure 1~8（含 3D 轨迹 Figure 5）。
+    show=False 时不弹窗，只创建 figure，由外部统一 plt.show()。
+    """
+    plot_figures_1_to_4(history)
+    plot_replay(replay_data, save_path=None, show=False)
+    plot_figures_6_to_8(history, replay_data, hit_markers, fig6_aspect, fig7_aspect)
+    if show:
+        plt.show()
+
+
+def find_acmi_dir():
+    """从本文件位置向上定位到项目根目录，返回 acmi_records 路径"""
+    cur = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(cur))
+    return os.path.join(project_root, 'acmi_records')
+
+
+def save_replay_data(save_dir, history, replay_data, hit_markers):
+    """用 pickle 保存仿真数据（history / replay_data / hit_markers）"""
+    os.makedirs(save_dir, exist_ok=True)
+    now = datetime.datetime.now()
+    filename = now.strftime("%Y%m%d_%H%M%S") + "_replay.pkl"
+    filepath = os.path.join(save_dir, filename)
+    data = {
+        'history': history,
+        'replay_data': replay_data,
+        'hit_markers': hit_markers,
+        'saved_at': now.isoformat(),
+    }
+    with open(filepath, 'wb') as f:
+        pickle.dump(data, f)
+    print(f"仿真数据已保存: {filepath}")
+    return filepath
+
+
+def load_replay_data(load_path):
+    """从 pickle 文件加载仿真数据"""
+    with open(load_path, 'rb') as f:
+        data = pickle.load(f)
+    print(f"仿真数据已加载: {load_path}")
+    return data['history'], data['replay_data'], data['hit_markers']
+
+
+def find_latest_replay_pkl(directory):
+    """返回目录下最新的 *_replay.pkl 文件路径"""
+    files = sorted(glob.glob(os.path.join(directory, '*_replay.pkl')), key=os.path.getmtime, reverse=True)
+    if not files:
+        return None
+    return files[0]
+
+
+# =========================== 新的 __main__ ===========================
+
+
+if __name__ == '__main__':
+    # 默认从 acmi_records 目录读取最新保存的仿真数据并画图
+    acmi_dir = find_acmi_dir()
+    latest = find_latest_replay_pkl(acmi_dir)
+    if latest is None:
+        print(f"未在 {acmi_dir} 中找到 *_replay.pkl 文件，尝试旧版 JSON 逻辑...")
+        parser = argparse.ArgumentParser(description='Plot combat replay JSON')
+        parser.add_argument('json_file', nargs='?', default=None, help='Path to replay JSON file')
+        parser.add_argument('--save', action='store_true', help='Save figure alongside JSON file')
+        parser.add_argument('--experiment', type=str, default=None,
+                            help='Filter replay files by experiment name substring')
+        args = parser.parse_args()
+        if args.json_file and os.path.isfile(args.json_file):
+            json_path = args.json_file
+        else:
+            record_dir = find_record_dir()
+            json_path = pick_file(record_dir, experiment=args.experiment)
+        print(f"\n正在读取: {json_path}")
+        data = load_replay(json_path)
+        save_path = None
+        if args.save:
+            save_path = os.path.splitext(json_path)[0] + '_trajectory.png'
+        plot_replay(data, save_path=save_path)
+        sys.exit(0)
+
+    print(f"\n加载最新仿真数据: {latest}")
+    history, replay_data, hit_markers = load_replay_data(latest)
+    plot_all_figures(history, replay_data, hit_markers,
+                     fig6_aspect=FIG6_YX_ASPECT, fig7_aspect=FIG7_YX_ASPECT, show=True)

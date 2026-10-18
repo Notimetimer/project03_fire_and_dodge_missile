@@ -23,11 +23,14 @@ from BasicRules_new_hierarchical import basic_rules
 from Envs.Tasks.ChooseStrategyEnv2_2_hierarchical import * # 1218-104003
 from Envs.battle6dof1v1_missile0309_hierarchical import launch_missile_immediately
 from Algorithms.PPOHybrid23_0 import HybridActorWrapper, infer_mask_cfg_from_actor_meta # 纯MLP
-from 绘制回放曲线 import plot_replay
+from 绘制回放曲线 import plot_replay, plot_all_figures, save_replay_data, find_acmi_dir, _fmt_min_sec
 
 # --- [修正] 在此处直接定义缺失的常量 ---
 action_cycle_multiplier = 10
 dt_maneuver = 0.2  # 0.2
+# --- Figure 6/7 坐标轴显示比例（y轴数据单位 / x轴数据单位；1=等比，2=y轴拉伸2倍） ---
+FIG6_YX_ASPECT = 1.5      # Figure 6 俯视图 北(y)/东(x) 显示比例
+FIG7_YX_ASPECT = 1.5      # Figure 7 侧视图 高度(y)/东(x) 显示比例
 # -----------------------------------------
 
 # --- 2. 辅助函数 ---
@@ -51,7 +54,7 @@ if __name__ == "__main__":
     from Algorithms.PPOHybrid23_0 import PolicyNetHybrid
     # from Algorithms.SACHybrid import PolicyNetHybrid
     
-    tacview_show=1
+    tacview_show = 2
     
     # 优先使用dir_name，如果没有则使用experiment_name
     dir_name = None
@@ -171,11 +174,14 @@ if __name__ == "__main__":
                 'r_cat_entropy': [],
                 'r_cat_conf': [], 'r_bern_fire_prob': [],
                 'r_warning': [], 'r_missile_in_mid_term': [],
+                'b_warning': [],                 # 蓝方 warning 值（用于下降沿检测）
+                'r_warning_events': [], 'b_warning_events': [],  # warning 下降沿事件 [(t, type), ...]
                 'r_reward': [],
                 'r_r_shaping': [],
                 'r_count_12km': [], 'r_count_4km': [],
                 'b_count_12km': [], 'b_count_4km': [],
                 'distance': [],                 # 红蓝双方三维距离
+                'r_threat_dist': [], 'b_threat_dist': [],  # 双方 get_state 中的 threat_distance (m)
                 'r_fire_time': [], 'r_fire_dist': [],   # 红方开火时刻及对应距离
                 'r_fire_alt': [], 'r_fire_mach': [],    # 红方开火时的高度/马赫数
                 'b_fire_time': [], 'b_fire_dist': [],   # 蓝方开火时刻及对应距离
@@ -300,7 +306,7 @@ if __name__ == "__main__":
                 env.step(r_maneuver, b_maneuver)
                 # 统计红方的奖励与状态
                 done, b_r1, b_r2, b_r3 = env.combat_terminate_and_reward('r', r_action_label, r_fire, action_cycle_multiplier)
-                # [诊断] 补一次蓝方调用（返回值丢弃）：更新蓝方导弹 get_in_12km/get_in_4km 锁存与 BUAV._count 计数，
+                # [诊断] 补一次蓝方调用（返回值丢弃）：更新蓝方导弹轨迹 get_in_12km/get_in_4km 锁存与 BUAV._count 计数，
                 # 与训练时双侧每步都调用保持一致；放在 'r' 调用之后，不影响已记录的红方奖励。
                 env.combat_terminate_and_reward('b', b_action_label, b_fire, action_cycle_multiplier)
 
@@ -326,11 +332,25 @@ if __name__ == "__main__":
                 b_ti = b_full_state.get('target_information')
                 history['r_ata'].append(float(r_ti[4]) * 180 / np.pi if r_ti is not None else 0.0)
                 history['b_ata'].append(float(b_ti[4]) * 180 / np.pi if b_ti is not None else 0.0)
+                # threat_distance（来自 get_state 的 threat[3]，单位 m）
+                r_threat = r_full_state.get('threat')
+                b_threat = b_full_state.get('threat')
+                history['r_threat_dist'].append(float(r_threat[3]) if r_threat is not None else 0.0)
+                history['b_threat_dist'].append(float(b_threat[3]) if b_threat is not None else 0.0)
                 history['r_cat_entropy'].append(r_cat_entropy)
                 history['r_bern_fire_prob'].append(r_bern_fire_prob)
                 history['r_cat_conf'].append(r_cat_conf)
                 history['r_warning'].append(r_warning)
                 history['r_missile_in_mid_term'].append(r_missile_in_mid_term)
+                b_warning = float(b_state_check['warning'])
+                history['b_warning'].append(b_warning)
+                # --- 检测双方 warning 下降沿（>0 -> <=0）并记录事件 ---
+                if len(history['r_warning']) > 1 and history['r_warning'][-2] > 0 and r_warning <= 0:
+                    _r_hit = getattr(env.RUAV, 'got_hit', False) or env.RUAV.dead
+                    history['r_warning_events'].append((env.t, '被命中' if _r_hit else '成功规避'))
+                if len(history['b_warning']) > 1 and history['b_warning'][-2] > 0 and b_warning <= 0:
+                    _b_hit = getattr(env.BUAV, 'got_hit', False) or env.BUAV.dead
+                    history['b_warning_events'].append((env.t, '被命中' if _b_hit else '成功规避'))
                 history['r_reward'].append(b_r1)
                 history['r_r_shaping'].append(env.RUAV.r_shaping)
                 history['r_count_12km'].append(getattr(env.RUAV, '_count_12km', 0))
@@ -368,6 +388,15 @@ if __name__ == "__main__":
             # 直接用战机的 got_hit 属性判断哪一方被命中（含双杀时双方都命中）
             replay_data['meta']['red_dead'] = bool(getattr(env.RUAV, 'got_hit', False))
             replay_data['meta']['blue_dead'] = bool(getattr(env.BUAV, 'got_hit', False))
+
+            # --- 收集每枚导弹的命中标记（最终位置 + 状态） ---
+            hit_markers = {'r': [], 'b': []}   # 命中点
+            for _side, _mlist in (('r', env.Rmissiles), ('b', env.Bmissiles)):
+                for _m in _mlist:
+                    if not getattr(_m, 'dead', False):
+                        continue  # 未结束的导弹不标记
+                    if getattr(_m, 'hit', False):
+                        hit_markers[_side].append(list(_m.pos_))
             
             env.clear_render(t_bias=t_bias)
             t_bias += env.t
@@ -382,113 +411,42 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Failed to save CSV: {e}")
 
-            # --- 绘制曲线：三个独立 figure，一律中文 ---
-            # 中文字体设置
-            plt.rcParams['font.sans-serif'] = ['SimHei', 'SimSun', 'Microsoft YaHei']
-            plt.rcParams['axes.unicode_minus'] = False
-            # 统一字号：轴标签、刻度、图例均用同一字号，避免图例被 matplotlib 默认放大
-            _fs = 8
-            plt.rcParams['font.size'] = _fs
-            plt.rcParams['axes.labelsize'] = _fs
-            plt.rcParams['xtick.labelsize'] = _fs
-            plt.rcParams['ytick.labelsize'] = _fs
-            plt.rcParams['legend.fontsize'] = _fs
+            # --- 保存仿真数据到本地 pickle（供离线绘图用） ---
+            _acmi_dir = find_acmi_dir()
+            save_replay_data(_acmi_dir, history, replay_data, hit_markers)
 
-            t = np.array(history['time'])
+            # --- 绘制 Figure 1~8（不含 plt.show，统一在 finally 中调用） ---
+            plot_all_figures(history, replay_data, hit_markers,
+                             fig6_aspect=FIG6_YX_ASPECT, fig7_aspect=FIG7_YX_ASPECT, show=False)
 
-            # --- Figure 1: 红蓝双方高度变化曲线（均为实线），各自曲线上标开火点 ---
-            plt.figure(1, figsize=(10/2, 4/2))
-            plt.clf()
-            plt.plot(t, [a / 1000 for a in history['r_alt']], label='红方高度', color='crimson', linestyle='-', linewidth=1.2)
-            plt.plot(t, [a / 1000 for a in history['b_alt']], label='蓝方高度', color='royalblue', linestyle='-', linewidth=1.2)
-            # 红方开火时刻画红色竖直虚线
-            for i, ft in enumerate(history['r_fire_time']):
-                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='红方开火' if i == 0 else '')
-            # 蓝方开火时刻画蓝色竖直虚线
-            for i, ft in enumerate(history['b_fire_time']):
-                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='蓝方开火' if i == 0 else '')
-            plt.xlabel('时间/(s)')
-            plt.ylabel('高度/(km)')
-            leg1 = plt.legend()
-            leg1.set_draggable(True)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
+            # --- 写对抗日志到 acmi_records/对抗日志记录.txt ---
+            _log_path = os.path.join(_acmi_dir, "对抗日志记录.txt")
+            _meta = replay_data['meta']
+            _lines = []
+            _lines.append(f"===== 对抗日志: 红方 {_meta['red_name']} vs 蓝方 {_meta['blue_name']} =====")
+            _lines.append(f"结果: {_meta['result']}")
+            _lines.append("")
+            _lines.append("-- 红方 --")
+            for _ft in history['r_fire_time']:
+                _lines.append(f"  开火 @ {_fmt_min_sec(_ft)}")
+            for _wt, _wtype in history['r_warning_events']:
+                _lines.append(f"  Warning解除({_wtype}) @ {_fmt_min_sec(_wt)}")
+            _lines.append("")
+            _lines.append("-- 蓝方 --")
+            for _ft in history['b_fire_time']:
+                _lines.append(f"  开火 @ {_fmt_min_sec(_ft)}")
+            for _wt, _wtype in history['b_warning_events']:
+                _lines.append(f"  Warning解除({_wtype}) @ {_fmt_min_sec(_wt)}")
+            _lines.append("")
+            with open(_log_path, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(_lines) + '\n')
+            print(f"对抗日志已追加到: {_log_path}")
 
-            # --- Figure 2: 红蓝双方马赫数曲线，各自曲线上标开火点 ---
-            plt.figure(2, figsize=(10/2, 4/2))
-            plt.clf()
-            plt.plot(t, history['r_mach'], label='红方马赫数', color='crimson', linestyle='-', linewidth=1.2)
-            plt.plot(t, history['b_mach'], label='蓝方马赫数', color='royalblue', linestyle='-', linewidth=1.2)
-            # 红方开火时刻画红色竖直虚线
-            for i, ft in enumerate(history['r_fire_time']):
-                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='红方开火' if i == 0 else '')
-            # 蓝方开火时刻画蓝色竖直虚线
-            for i, ft in enumerate(history['b_fire_time']):
-                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='蓝方开火' if i == 0 else '')
-            plt.xlabel('时间/(s)')
-            plt.ylabel('马赫数')
-            leg2 = plt.legend()
-            leg2.set_draggable(True)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-
-            # --- Figure 3: 双方距离曲线（黑色），红/蓝开火时刻打红点/蓝点 ---
-            plt.figure(3, figsize=(10/2, 4/2))
-            plt.clf()
-            plt.plot(t, [d / 10000 for d in history['distance']], label='双方距离', color='black', linestyle='-', linewidth=1.2)
-            # 红方开火时刻画红色竖直虚线
-            for i, ft in enumerate(history['r_fire_time']):
-                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='红方开火' if i == 0 else '')
-            # 蓝方开火时刻画蓝色竖直虚线
-            for i, ft in enumerate(history['b_fire_time']):
-                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='蓝方开火' if i == 0 else '')
-            plt.xlabel('时间/(s)')
-            plt.ylabel('双方距离/(10km)')
-            # plt.title(f'红蓝双方距离曲线与开火时刻（vs 基准对手{rule_num + 1}）')
-            leg3 = plt.legend()
-            leg3.set_draggable(True)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-
-            # --- Figure 4: 红蓝双方天线转动角 ATA 曲线（度） ---
-            plt.figure(4, figsize=(10/2, 4/2))
-            plt.clf()
-            plt.plot(t, history['r_ata'], label='红方ATA', color='crimson', linestyle='-', linewidth=1.2)
-            plt.plot(t, history['b_ata'], label='蓝方ATA', color='royalblue', linestyle='-', linewidth=1.2)
-            # 红方开火时刻画红色竖直虚线
-            for i, ft in enumerate(history['r_fire_time']):
-                plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='红方开火' if i == 0 else '')
-            # 蓝方开火时刻画蓝色竖直虚线
-            for i, ft in enumerate(history['b_fire_time']):
-                plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                            label='蓝方开火' if i == 0 else '')
-            plt.xlabel('时间/(s)')
-            plt.ylabel('天线转动角/(°)')
-            leg4 = plt.legend()
-            leg4.set_draggable(True)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-
-            
-
-            # --- 绘制本回合 3D 回放轨迹 ---
-            plot_replay(replay_data, save_path=None)
-            
-            
-            plt.show()
-
-            # input("Press Enter to continue to the next test...")
 
     except KeyboardInterrupt:
         print("\nTest interrupted by user.")
     finally:
         env.end_render()
         print("\nAll tests completed.")
+        plt.show()
 

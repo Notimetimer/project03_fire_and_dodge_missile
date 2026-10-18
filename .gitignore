@@ -74,3 +74,4 @@ TrainAndTests/Combats/marwil_pareto_recomputed_v0h0.json
 *.svg
 *.pdf
 /结果展示/exp_png2
+/acmi_records
