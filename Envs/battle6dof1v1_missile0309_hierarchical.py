@@ -176,10 +176,14 @@ class Battle(object):
         self.r_actions_ema = None
         self.b_actions_ema = None
         
-        if tacview_show:
+        if tacview_show == 2:
+            # 静默写入本地 ACMI 文件，不连接 Tacview 软件
+            self.tacview = Tacview_s()
+            self.tacview.handshake()
+        elif tacview_show == 1:
             self.tacview = Tacview()
             self.tacview.handshake()
-            self.visualize_cage()
+            # self.visualize_cage()
             
     def set_ego_side(self, side='b'):
         self.ego_side = side
@@ -333,7 +337,7 @@ class Battle(object):
         """
         if self.tacview_show:
             try:
-                self.tacview.socket.close()
+                self.tacview.end_render()
             except:
                 pass
         # 清理 UAV 和导弹引用
