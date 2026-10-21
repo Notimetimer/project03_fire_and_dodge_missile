@@ -83,7 +83,7 @@ linestyles = ['-', ':', '--']
 smooth_window = 5          # 居中滑动窗口平滑窗口大小；<=1 则不平滑
 
 CM_PER_INCH = 2.54
-FIG_WIDTH_CM = 7
+FIG_WIDTH_CM = 5.5
 FIG_HEIGHT_CM = 5
 FIG_WIDTH_IN = FIG_WIDTH_CM / CM_PER_INCH
 FIG_HEIGHT_IN = FIG_HEIGHT_CM / CM_PER_INCH
