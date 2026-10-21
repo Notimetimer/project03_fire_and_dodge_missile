@@ -40,22 +40,23 @@ ALGO_FILE_PREFIXES = {
 RULE_COLS = ['rule0_score', 'rule1_score', 'rule2_score', 'rule3_score']
 
 # 对每个算法：
-#   1. 匹配该算法下的所有 CSV（同算法多次实验）
-#   2. 每个文件取 rule0~rule3_score 列的最后 N_TAIL 行，在这 N_TAIL 个数值内求平均（得到该文件的 4 个均值）
-#   3. 再在同算法的多个实验文件之间求平均，得到该算法对 4 个对手的最终得分
+#   1. 匹配该算法下的所有 CSV（同一组实验的多次 run）
+#   2. 按行号对齐：所有 run 截断到最短行数，逐行求平均得到一条平均曲线
+#   3. 取平均曲线的最后 N_TAIL 行求均值，得到该算法对 4 个对手的最终得分
 # 先计算每个算法对 4 个对手的得分，再追加"平均"列（4 个对手得分的算术平均）
 score_matrix = np.zeros((len(algorithms), len(opponents)))
 for i, algo in enumerate(algorithms):
     prefix = ALGO_FILE_PREFIXES[algo]
     files = sorted(glob.glob(os.path.join(CSV_DIR, prefix + '*.csv')))
-    per_file_means = []
-    for f in files:
-        df = pd.read_csv(f, encoding='utf-8-sig')
-        tail = df[RULE_COLS].tail(N_TAIL)
-        per_file_means.append(tail.mean().values)
-    row = np.mean(per_file_means, axis=0)           # 对 4 个对手的得分
+    if not files:
+        raise FileNotFoundError(f"未找到 {algo} 对应的实验 CSV: {prefix}*.csv")
+    runs = [pd.read_csv(f, encoding='utf-8-sig')[RULE_COLS].values for f in files]
+    n_common = min(len(r) for r in runs)                        # 按行号对齐，截断到最短 run
+    mean_curve = np.mean([r[:n_common] for r in runs], axis=0)  # 逐行求平均
+    row = mean_curve[-N_TAIL:].mean(axis=0)                     # 平均曲线末尾 N_TAIL 行
     score_matrix[i, :4] = row
     score_matrix[i, 4] = np.mean(row)              # 最右列：4 个对手的算术平均
+    print(f"[{algo}] 使用 {len(files)} 个 run，按行号对齐后每 run {n_common} 行")
 
 print("各算法对基准对手的对抗得分矩阵（行=算法，列=对手1~对手4、平均）:")
 print(np.round(score_matrix, 4))

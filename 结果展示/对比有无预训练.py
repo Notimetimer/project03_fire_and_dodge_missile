@@ -69,7 +69,7 @@ smooth_window = 19
 CM_PER_INCH = 2.54
 PT_PER_INCH = 72.0
 
-FIG_WIDTH_CM = 7 # 5.0          # 图宽：5 cm
+FIG_WIDTH_CM = 5.5 # 5.0          # 图宽：5 cm
 FIG_HEIGHT_CM = 5 # 3.5 # 4.5         # 图高：4.5 cm
 FIG_WIDTH_IN = FIG_WIDTH_CM / CM_PER_INCH   # 5 / 2.54 ≈ 1.9685 inch
 FIG_HEIGHT_IN = FIG_HEIGHT_CM / CM_PER_INCH  # 4.5 / 2.54 ≈ 1.7717 inch
