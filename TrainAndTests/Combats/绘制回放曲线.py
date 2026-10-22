@@ -24,6 +24,26 @@ warnings.filterwarnings('ignore')
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
+def _setup_fonts():
+    """统一设置中文及字号"""
+    plt.rcParams['font.sans-serif'] = ['SimHei', 'SimSun', 'Microsoft YaHei']
+    plt.rcParams['axes.unicode_minus'] = False
+    _fs = 9.5  # 字体大小
+    plt.rcParams['font.size'] = _fs
+    plt.rcParams['axes.labelsize'] = _fs
+    plt.rcParams['xtick.labelsize'] = _fs
+    plt.rcParams['ytick.labelsize'] = _fs
+    plt.rcParams['legend.fontsize'] = _fs
+
+
+def _fmt_min_sec(t_seconds):
+    """秒 -> 分:秒 字符串，如 65 -> '01:05'"""
+    m = int(t_seconds) // 60
+    s = int(t_seconds) % 60
+    return f"{m:02d}:{s:02d}"
+
+
+
 # axis equal
 def set_axes_equal(ax, z_min=0, z_max=20, pad=0.05):
     """x/y 各自紧凑显示（只加 pad），z 轴固定 [z_min, z_max]。
@@ -137,6 +157,7 @@ def _detach_legend_from_3d_rotation(ax3, leg):
 
 
 def plot_replay(data: dict, save_path: str = None, show: bool = True):
+    _setup_fonts()
     meta = data.get('meta', {})
     red_name = meta.get('red_name', '红方')
     blue_name = meta.get('blue_name', '蓝方')
@@ -265,8 +286,8 @@ def plot_replay(data: dict, save_path: str = None, show: bool = True):
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"图像已保存: {save_path}")
 
-    if show:
-        plt.show()
+    # if show:
+    #     plt.show()
 
 
 def find_record_dir():
@@ -319,7 +340,7 @@ if __name__ == '__main__':
     if args.save:
         save_path = os.path.splitext(json_path)[0] + '_trajectory.png'
 
-    plot_replay(data, save_path=save_path)
+    # plot_replay(data, save_path=save_path)
 
 
 # =========================== 新增：离线图绘功能 ===========================
@@ -328,24 +349,6 @@ if __name__ == '__main__':
 FIG6_YX_ASPECT = 1.5      # Figure 6 俯视图 北(y)/东(x) 显示比例
 FIG7_YX_ASPECT = 1.5      # Figure 7 侧视图 高度(y)/东(x) 显示比例
 
-
-def _setup_fonts():
-    """统一设置中文及字号"""
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'SimSun', 'Microsoft YaHei']
-    plt.rcParams['axes.unicode_minus'] = False
-    _fs = 8
-    plt.rcParams['font.size'] = _fs
-    plt.rcParams['axes.labelsize'] = _fs
-    plt.rcParams['xtick.labelsize'] = _fs
-    plt.rcParams['ytick.labelsize'] = _fs
-    plt.rcParams['legend.fontsize'] = _fs
-
-
-def _fmt_min_sec(t_seconds):
-    """秒 -> 分:秒 字符串，如 65 -> '01:05'"""
-    m = int(t_seconds) // 60
-    s = int(t_seconds) % 60
-    return f"{m:02d}:{s:02d}"
 
 
 def plot_figures_1_to_4(history):
@@ -360,10 +363,10 @@ def plot_figures_1_to_4(history):
     plt.plot(t, [a / 1000 for a in history['b_alt']], label='蓝方高度', color='royalblue', linestyle='-', linewidth=1.2)
     for i, ft in enumerate(history['r_fire_time']):
         plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='红方开火' if i == 0 else '')
+                    label='红方开火时间' if i == 0 else '')
     for i, ft in enumerate(history['b_fire_time']):
         plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='蓝方开火' if i == 0 else '')
+                    label='蓝方开火时间' if i == 0 else '')
     plt.xlabel('时间/(s)')
     plt.ylabel('高度/(km)')
     leg = plt.legend()
@@ -378,10 +381,10 @@ def plot_figures_1_to_4(history):
     plt.plot(t, history['b_mach'], label='蓝方马赫数', color='royalblue', linestyle='-', linewidth=1.2)
     for i, ft in enumerate(history['r_fire_time']):
         plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='红方开火' if i == 0 else '')
+                    label='红方开火时间' if i == 0 else '')
     for i, ft in enumerate(history['b_fire_time']):
         plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='蓝方开火' if i == 0 else '')
+                    label='蓝方开火时间' if i == 0 else '')
     plt.xlabel('时间/(s)')
     plt.ylabel('马赫数')
     leg = plt.legend()
@@ -395,10 +398,10 @@ def plot_figures_1_to_4(history):
     plt.plot(t, [d / 10000 for d in history['distance']], label='双方距离', color='black', linestyle='-', linewidth=1.2)
     for i, ft in enumerate(history['r_fire_time']):
         plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='红方开火' if i == 0 else '')
+                    label='红方开火时间' if i == 0 else '')
     for i, ft in enumerate(history['b_fire_time']):
         plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='蓝方开火' if i == 0 else '')
+                    label='蓝方开火时间' if i == 0 else '')
     plt.xlabel('时间/(s)')
     plt.ylabel('双方距离/(10km)')
     leg = plt.legend()
@@ -413,10 +416,10 @@ def plot_figures_1_to_4(history):
     plt.plot(t, history['b_ata'], label='蓝方夹角', color='royalblue', linestyle='-', linewidth=1.2)
     for i, ft in enumerate(history['r_fire_time']):
         plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='红方开火' if i == 0 else '')
+                    label='红方开火时间' if i == 0 else '')
     for i, ft in enumerate(history['b_fire_time']):
         plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='蓝方开火' if i == 0 else '')
+                    label='蓝方开火时间' if i == 0 else '')
     plt.xlabel('时间/(s)')
     plt.ylabel('夹角/(°)')
     leg = plt.legend()
@@ -432,92 +435,93 @@ def plot_figures_6_to_8(history, replay_data, hit_markers, fig6_aspect=1, fig7_a
     ruav6 = np.array(replay_data['RUAV']['pos_'])  # [N, H, E, t]
     buav6 = np.array(replay_data['BUAV']['pos_'])
 
-    # --- Figure 6: 俯视图（北-东） ---
-    plt.figure(6, figsize=(10/2, 4/2))
-    plt.clf()
-    ax6 = plt.gca()
-    ax6.plot(ruav6[:, 2] / 1e3, ruav6[:, 0] / 1e3, color='crimson', lw=1.2, label='红方飞行轨迹')
-    ax6.plot(buav6[:, 2] / 1e3, buav6[:, 0] / 1e3, color='royalblue', lw=1.2, label='蓝方飞行轨迹')
-    _r_mis_used = False
-    for _mid, _traj in replay_data['RMIS'].items():
-        _m = np.array(_traj)
-        ax6.plot(_m[:, 2] / 1e3, _m[:, 0] / 1e3, color='crimson', lw=0.8, linestyle='--', alpha=0.8,
-                 label='' if _r_mis_used else '红方导弹轨迹')
-        _r_mis_used = True
-    _b_mis_used = False
-    for _mid, _traj in replay_data['BMIS'].items():
-        _m = np.array(_traj)
-        ax6.plot(_m[:, 2] / 1e3, _m[:, 0] / 1e3, color='royalblue', lw=0.8, linestyle='--', alpha=0.8,
-                 label='' if _b_mis_used else '蓝方导弹轨迹')
-        _b_mis_used = True
-    _hit_used = False
-    for _side, _color in (('r', 'crimson'), ('b', 'royalblue')):
-        for _p in hit_markers[_side]:
-            ax6.scatter(_p[2] / 1e3, _p[0] / 1e3, marker='o', s=60, facecolors='gold',
-                        edgecolors='black', linewidths=0.8, zorder=6,
-                        label='' if _hit_used else '命中')
-            _hit_used = True
-    ax6.set_xlabel('东/(km)')
-    ax6.set_ylabel('北/(km)')
-    ax6.set_aspect(fig6_aspect, adjustable='box')
-    ax6.grid(True, alpha=0.3)
-    leg6 = ax6.legend()
-    leg6.set_draggable(True)
-    plt.tight_layout()
+    # # --- Figure 6: 俯视图（北-东） ---
+    # plt.figure(6, figsize=(10/2, 4/2))
+    # plt.clf()
+    # ax6 = plt.gca()
+    # ax6.plot(ruav6[:, 2] / 1e3, ruav6[:, 0] / 1e3, color='crimson', lw=1.2, label='红方飞行轨迹')
+    # ax6.plot(buav6[:, 2] / 1e3, buav6[:, 0] / 1e3, color='royalblue', lw=1.2, label='蓝方飞行轨迹')
+    # _r_mis_used = False
+    # for _mid, _traj in replay_data['RMIS'].items():
+    #     _m = np.array(_traj)
+    #     ax6.plot(_m[:, 2] / 1e3, _m[:, 0] / 1e3, color='crimson', lw=0.8, linestyle='--', alpha=0.8,
+    #              label='' if _r_mis_used else '红方导弹轨迹')
+    #     _r_mis_used = True
+    # _b_mis_used = False
+    # for _mid, _traj in replay_data['BMIS'].items():
+    #     _m = np.array(_traj)
+    #     ax6.plot(_m[:, 2] / 1e3, _m[:, 0] / 1e3, color='royalblue', lw=0.8, linestyle='--', alpha=0.8,
+    #              label='' if _b_mis_used else '蓝方导弹轨迹')
+    #     _b_mis_used = True
+    # _hit_used = False
+    # for _side, _color in (('r', 'crimson'), ('b', 'royalblue')):
+    #     for _p in hit_markers[_side]:
+    #         ax6.scatter(_p[2] / 1e3, _p[0] / 1e3, marker='o', s=60, facecolors='gold',
+    #                     edgecolors='black', linewidths=0.8, zorder=6,
+    #                     label='' if _hit_used else '命中')
+    #         _hit_used = True
+    # ax6.set_xlabel('东/(km)')
+    # ax6.set_ylabel('北/(km)')
+    # ax6.set_aspect(fig6_aspect, adjustable='box')
+    # ax6.grid(True, alpha=0.3)
+    # leg6 = ax6.legend()
+    # leg6.set_draggable(True)
+    # plt.tight_layout()
 
-    # --- Figure 7: 侧视图（东-高） ---
-    plt.figure(7, figsize=(10/2, 4/2))
-    plt.clf()
-    ax7 = plt.gca()
-    ax7.plot(ruav6[:, 2] / 1e3, ruav6[:, 1] / 1e3, color='crimson', lw=1.2, label='红方轨迹')
-    ax7.plot(buav6[:, 2] / 1e3, buav6[:, 1] / 1e3, color='royalblue', lw=1.2, label='蓝方轨迹')
-    _r_mis_used = False
-    for _mid, _traj in replay_data['RMIS'].items():
-        _m = np.array(_traj)
-        ax7.plot(_m[:, 2] / 1e3, _m[:, 1] / 1e3, color='crimson', lw=0.8, linestyle='--', alpha=0.8,
-                 label='' if _r_mis_used else '红方导弹轨迹')
-        _r_mis_used = True
-    _b_mis_used = False
-    for _mid, _traj in replay_data['BMIS'].items():
-        _m = np.array(_traj)
-        ax7.plot(_m[:, 2] / 1e3, _m[:, 1] / 1e3, color='royalblue', lw=0.8, linestyle='--', alpha=0.8,
-                 label='' if _b_mis_used else '蓝方导弹轨迹')
-        _b_mis_used = True
-    _hit_used = False
-    for _side in ('r', 'b'):
-        for _p in hit_markers[_side]:
-            ax7.scatter(_p[2] / 1e3, _p[1] / 1e3, marker='o', s=60, facecolors='gold',
-                        edgecolors='black', linewidths=0.8, zorder=6,
-                        label='' if _hit_used else '命中')
-            _hit_used = True
-    ax7.set_xlabel('东/(km)')
-    ax7.set_ylabel('高度/(km)')
-    ax7.set_aspect(fig7_aspect, adjustable='box')
-    ax7.grid(True, alpha=0.3)
-    leg7 = ax7.legend()
-    leg7.set_draggable(True)
-    plt.tight_layout()
+    # # --- Figure 7: 侧视图（东-高） ---
+    # plt.figure(7, figsize=(10/2, 4/2))
+    # plt.clf()
+    # ax7 = plt.gca()
+    # ax7.plot(ruav6[:, 2] / 1e3, ruav6[:, 1] / 1e3, color='crimson', lw=1.2, label='红方轨迹')
+    # ax7.plot(buav6[:, 2] / 1e3, buav6[:, 1] / 1e3, color='royalblue', lw=1.2, label='蓝方轨迹')
+    # _r_mis_used = False
+    # for _mid, _traj in replay_data['RMIS'].items():
+    #     _m = np.array(_traj)
+    #     ax7.plot(_m[:, 2] / 1e3, _m[:, 1] / 1e3, color='crimson', lw=0.8, linestyle='--', alpha=0.8,
+    #              label='' if _r_mis_used else '红方导弹轨迹')
+    #     _r_mis_used = True
+    # _b_mis_used = False
+    # for _mid, _traj in replay_data['BMIS'].items():
+    #     _m = np.array(_traj)
+    #     ax7.plot(_m[:, 2] / 1e3, _m[:, 1] / 1e3, color='royalblue', lw=0.8, linestyle='--', alpha=0.8,
+    #              label='' if _b_mis_used else '蓝方导弹轨迹')
+    #     _b_mis_used = True
+    # _hit_used = False
+    # for _side in ('r', 'b'):
+    #     for _p in hit_markers[_side]:
+    #         ax7.scatter(_p[2] / 1e3, _p[1] / 1e3, marker='o', s=60, facecolors='gold',
+    #                     edgecolors='black', linewidths=0.8, zorder=6,
+    #                     label='' if _hit_used else '命中')
+    #         _hit_used = True
+    # ax7.set_xlabel('东/(km)')
+    # ax7.set_ylabel('高度/(km)')
+    # ax7.set_aspect(fig7_aspect, adjustable='box')
+    # ax7.grid(True, alpha=0.3)
+    # leg7 = ax7.legend()
+    # leg7.set_draggable(True)
+    # plt.tight_layout()
 
-    # --- Figure 8: threat_distance ---
-    plt.figure(8, figsize=(10/2, 4/2))
-    plt.clf()
-    t = np.array(history['time'])
-    plt.plot(t, [d / 1e3 for d in history['r_threat_dist']], label='红方 threat_distance',
-             color='crimson', linestyle='-', linewidth=1.2)
-    plt.plot(t, [d / 1e3 for d in history['b_threat_dist']], label='蓝方 threat_distance',
-             color='royalblue', linestyle='-', linewidth=1.2)
-    for i, ft in enumerate(history['r_fire_time']):
-        plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='红方开火' if i == 0 else '')
-    for i, ft in enumerate(history['b_fire_time']):
-        plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
-                    label='蓝方开火' if i == 0 else '')
-    plt.xlabel('时间/(s)')
-    plt.ylabel('threat_distance/(km)')
-    leg8 = plt.legend()
-    leg8.set_draggable(True)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
+    # # --- Figure 8: threat_distance ---
+    # plt.figure(8, figsize=(10/2, 4/2))
+    # plt.clf()
+    # t = np.array(history['time'])
+    # plt.plot(t, [d / 1e3 for d in history['r_threat_dist']], label='红方 threat_distance',
+    #          color='crimson', linestyle='-', linewidth=1.2)
+    # plt.plot(t, [d / 1e3 for d in history['b_threat_dist']], label='蓝方 threat_distance',
+    #          color='royalblue', linestyle='-', linewidth=1.2)
+    # for i, ft in enumerate(history['r_fire_time']):
+    #     plt.axvline(x=ft, color='red', linestyle='--', linewidth=0.8, alpha=0.7,
+    #                 label='红方开火时间' if i == 0 else '')
+    # for i, ft in enumerate(history['b_fire_time']):
+    #     plt.axvline(x=ft, color='blue', linestyle='--', linewidth=0.8, alpha=0.7,
+    #                 label='蓝方开火时间' if i == 0 else '')
+    # plt.xlabel('时间/(s)')
+    # plt.ylabel('threat_distance/(km)')
+    # leg8 = plt.legend()
+    # leg8.set_draggable(True)
+    # plt.grid(True, alpha=0.3)
+    # plt.tight_layout()
+
 
 
 def plot_all_figures(history, replay_data, hit_markers,
@@ -526,10 +530,10 @@ def plot_all_figures(history, replay_data, hit_markers,
     show=False 时不弹窗，只创建 figure，由外部统一 plt.show()。
     """
     plot_figures_1_to_4(history)
-    plot_replay(replay_data, save_path=None, show=False)
+    # plot_replay(replay_data, save_path=None, show=False)
     plot_figures_6_to_8(history, replay_data, hit_markers, fig6_aspect, fig7_aspect)
-    if show:
-        plt.show()
+    # if show:
+    #     plt.show()
 
 
 def find_acmi_dir():
@@ -605,3 +609,4 @@ if __name__ == '__main__':
     history, replay_data, hit_markers = load_replay_data(latest)
     plot_all_figures(history, replay_data, hit_markers,
                      fig6_aspect=FIG6_YX_ASPECT, fig7_aspect=FIG7_YX_ASPECT, show=True)
+    plt.show()
