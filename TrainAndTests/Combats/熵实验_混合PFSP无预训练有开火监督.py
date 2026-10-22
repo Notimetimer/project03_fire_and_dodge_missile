@@ -156,7 +156,7 @@ if __name__=='__main__':
         POMDP=0,
         adj_r_w=0, # 奖励函数权重可调
         use_supervised_fire=1, # [新增] 默认0：不使用额外的开火命中监督更新（fc_bern）
-        ppo_with_bern=0, # [新增] 0：PPO 不更新开火头 fc_bern，交由开火命中监督独占
+        ppo_with_bern=1, # [新增] 0：PPO 不更新开火头 fc_bern，交由开火命中监督独占
         supervised_fire_buffer_size = 1000, # [新增] 开火记录滚动缓冲容量（FIFO，像off-policy一样滚动更新）
         supervised_fire_batch_size = 256, # [新增] 每次监督更新从缓冲中采样的批大小
     )
