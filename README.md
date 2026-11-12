@@ -2,8 +2,54 @@
 
 基于 JSBSim、PyTorch 与混合动作空间 PPO 的 1v1 空战决策项目。主智能体同时输出垂直机动、水平机动和导弹发射动作，通过规则示范数据预训练、并行采样、历史策略自博弈、PFSP 对手采样和 Elo 评分进行训练。
 
-本文以 **[实验_混合PFSP有预训练.py](TrainAndTests/Combats/实验_混合PFSP有预训练.py)** 为主要入口，说明该入口直接执行、间接调用、导入时加载以及条件触发的项目内文件。仓库中的同名备份、旧版环境、独立测试和其他算法实验不属于这条调用链。
+本仓库包含两个相互独立的实验：低层端到端飞行控制，以及高层 1v1 超视距空战自博弈。二者共用同一套 JSBSim F-16 模型、导弹模型、数学计算工具与可视化组件，但训练入口、观测/动作空间和奖励设计不同。第 4～8 节以第二个实验的入口为主线，说明其调用关系。仓库中的同名备份、旧版环境、独立测试和其他算法实验不属于该调用链。
 ****
+## 实验一：基于强化学习的端到端飞行控制器
+
+以 PPO 连续动作策略直接输出 F-16 舵面指令，实现端到端飞行控制；观测与状态归一化由低层 `track_env` 提供。
+
+| 项目 | 内容 |
+| --- | --- |
+| 入口 | [parallel_FlightControl_Train_dual_a_out2目标会跑.py](TrainAndTests/Controls/parallel_FlightControl_Train_dual_a_out2目标会跑.py) |
+| 并行方式 | `torch.multiprocessing` 常驻 Worker + Pipe 同步采样 |
+| 动作空间 | 连续动作（`action_dims_dict['cont']`），低层 Actor 来自 [PPOHybrid23_0_distil2_one_step_KL.py](Algorithms/PPOHybrid23_0_distil2_one_step_KL.py) |
+| 环境 | [track_env](TrainAndTests/Controls/FlightControl_Train_dual_a_out2.py)，底层飞机为 [UAVmodel6d.py](Envs/UAVmodel6d.py) |
+| 启动方式 | `python "TrainAndTests/Controls/parallel_FlightControl_Train_dual_a_out2目标会跑.py"` |
+
+<table>
+<tr>
+<td align="center"><img src="docs/flight_control_test.gif" width="420" alt="端到端飞行控制效果 1"></td>
+<td align="center"><img src="docs/flight_control_test2.gif" width="420" alt="端到端飞行控制效果 2"></td>
+</tr>
+<tr>
+<td align="center">端到端飞行控制效果 1</td>
+<td align="center">端到端飞行控制效果 2</td>
+</tr>
+</table>
+
+## 实验二：1V1 超视距空战自博弈训练
+
+以 PFSP 对手采样、历史策略自博弈和 MARWIL 模仿预训练训练高层空战策略；策略输出垂直/水平机动与开火动作，再经低层 NN 控制器转化为舵面指令。
+
+| 项目 | 内容 |
+| --- | --- |
+| 入口 | [实验_混合PFSP有预训练.py](TrainAndTests/Combats/实验_混合PFSP有预训练.py) |
+| 对手采样 | `PFSP_balanced` + 20% 规则复习 + 历史策略池 + 名人堂 |
+| 动作空间 | 混合离散动作（垂直/水平机动 Categorical）+ Bernoulli 开火 |
+| 环境 | [ChooseStrategyEnv2_2_hierarchical.py](Envs/Tasks/ChooseStrategyEnv2_2_hierarchical.py) → [battle6dof1v1_missile0309_hierarchical.py](Envs/battle6dof1v1_missile0309_hierarchical.py) |
+| 启动方式 | `python "TrainAndTests/Combats/实验_混合PFSP有预训练.py"` |
+
+<table>
+<tr>
+<td align="center"><img src="docs/1V1Combat1.gif" width="420" alt="1V1 超视距空战效果 1"></td>
+<td align="center"><img src="docs/1V1Combat2.gif" width="420" alt="1V1 超视距空战效果 2"></td>
+</tr>
+<tr>
+<td align="center">1V1 超视距空战自博弈效果 1</td>
+<td align="center">1V1 超视距空战自博弈效果 2</td>
+</tr>
+</table>
+
 ## 1. 当前实验配置
 
 | 项目 | 当前值或行为 |
@@ -36,8 +82,8 @@
 ```text
 project03_fire_and_dodge_missile/
 ├── TrainAndTests/
-│   ├── Combats/                 # 本实验入口、训练编排、规则、评估、IL 数据
-│   └── Controls/                # 底层飞行控制环境与策略包装
+│   ├── Combats/                 # 实验二入口、训练编排、规则、评估、IL 数据
+│   └── Controls/                # 实验一入口、低层飞行控制环境与策略包装
 ├── Algorithms/                  # PPO、网络头、数学/分布工具、mask 配置
 ├── Envs/
 │   ├── Tasks/                   # 分层动作、观测、终止与奖励
@@ -51,6 +97,7 @@ project03_fire_and_dodge_missile/
 ├── Visualize/                   # TensorBoard 与 Tacview 支持
 ├── LaunchZone/                  # 条件式发射区命中概率仿真，已不再被调用
 ├── logs/combat/                 # 训练运行目录、模型、评分和 TensorBoard 事件
+├── docs/                        # README 展示用的实验效果 GIF
 └── README.md
 ```
 
