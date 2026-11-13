@@ -62,13 +62,13 @@ def build_wrapper(state_dim, hidden_dim, action_dims_dict, device, mission_name,
 # --- 3. 主程序 ---
 if __name__ == "__main__":
     # "IL-SLA-PPO",
-    # "IL-SE-SAC",
+    # "文献[34]方法",
     # "IL-SL-PPO",
     # "IL-PPO",
     # "PPO"
     show_name = [
         "IL-SLA-PPO",
-        "IL-SE-SAC",
+        "文献[34]方法",
     ]
     
     # 红方和蓝方分别使用不同的模型目录

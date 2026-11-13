@@ -27,30 +27,30 @@ from VsBaseline_while_training_hierarch_plus import test_worker
 # DIR_NAME = "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554"
 # DIR_NAME = "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137"
 DIR_NAME_LIST = [
-    # "NoIL_flymask_v0h0-run-20260924-224736",
-    # "NoIL_flymask_v0h0-run-20260928-233924",
-    # "NoIL_flymask_v0h0-run-20260909-131801",
+    "NoIL_flymask_v0h0-run-20260924-224736",
+    "NoIL_flymask_v0h0-run-20260928-233924",
+    "NoIL_flymask_v0h0-run-20260909-131801",
 
     "PPO0.3_flymask_v0h0_fireSL-run-20260924-145554",
     "PPO0.3_flymask_v0h0_fireSL-run-20260921-194654",
     "PPO0.3_flymask_v0h0_fireSL-run-20260930-125149",
     
-    # "SAC0.3_flymask_v1h1-run-20260923-213238",
-    # "SAC0.3_flymask_v1h1-run-20260928-093645",
-    # "SAC0.3_flymask_v1h1-run-20260929-194715",
+    "SAC0.3_flymask_v1h1-run-20260923-213238",
+    "SAC0.3_flymask_v1h1-run-20260928-093645",
+    "SAC0.3_flymask_v1h1-run-20260929-194715",
     
-    # "PPO0.3_flymask_v0h0-run-20260921-194617",
-    # "PPO0.3_flymask_v0h0-run-20260928-111836",
-    # "PPO0.3_flymask_v0h0-run-20261001-152601",
+    "PPO0.3_flymask_v0h0-run-20260921-194617",
+    "PPO0.3_flymask_v0h0-run-20260928-111836",
+    "PPO0.3_flymask_v0h0-run-20261001-152601",
     
-    # "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428",
-    # "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260928-233900",
-    # "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137",
+    "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260921-122428",
+    "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260928-233900",
+    "切断PPObern梯度0.3_flymask_v0h0_fireSL-run-20260930-093137",
 ]
 EXPERIMENT_NAME = None
 
 # 抽取的版本数：按最小序号~最大序号等间隔抽取
-NUM_PROGRESS_POINTS = 50 # 25
+NUM_PROGRESS_POINTS = 100 # 25
 
 # 测试回合重复次数（由 3 提升到 5）
 NUM_RUNS = 5
@@ -58,7 +58,7 @@ NUM_RUNS = 5
 # 并行测试的 checkpoint 数量上限。每个 worker 负责一个 checkpoint（加载一次模型后
 # 串行跑完所有 rule），checkpoint 之间相互独立可并行。
 # None 表示自动取 min(CPU核数, checkpoint数)
-MAX_PARALLEL_CHECKPOINTS = 5
+MAX_PARALLEL_CHECKPOINTS = 15
 
 # 测试对手规则编号列表
 TEST_RULE_IDS = [0, 1, 2, 3]

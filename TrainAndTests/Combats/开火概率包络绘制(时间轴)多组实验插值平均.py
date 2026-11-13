@@ -32,7 +32,7 @@ from Algorithms.PPOHybrid23_0 import PolicyNetHybrid, HybridActorWrapper
 # DIR_NAME = ["PPO0.3_flymask_v0h0-run-20260921-194617",
 #             "PPO0.3_flymask_v0h0-run-20260928-111836",
 #             "PPO0.3_flymask_v0h0-run-20261001-152601",]
-# IL-SE-SAC
+# 文献[34]方法
 DIR_NAME = ["SAC0.3_flymask_v1h1-run-20260923-213238",
             "SAC0.3_flymask_v1h1-run-20260928-093645",
             "SAC0.3_flymask_v1h1-run-20260929-194715",]

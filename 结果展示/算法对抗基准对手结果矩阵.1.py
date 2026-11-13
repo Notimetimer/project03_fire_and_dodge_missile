@@ -1,5 +1,5 @@
 """
-绘制各算法对基准对手的对抗得分热力图。
+绘制各算法对基准对手的得分热力图。
 颜色范围：白色(低分) -> 深蓝色(高分)，每个单元格显示数值。
 版式：宋体 6号(7.5pt)，DPI 600，宽度 5cm。
 图例栏高度与矩阵区域严格一致。
@@ -35,6 +35,7 @@ ALGO_FILE_PREFIXES = {
     'PPO': 'test_norandom_vs_rules_NoIL_flymask_v0h0-run-'
 }
 
+# RULE_COLS = ['rule0_win', 'rule1_win', 'rule2_win', 'rule3_win']
 RULE_COLS = ['rule0_score', 'rule1_score', 'rule2_score', 'rule3_score']
 
 # 对每个算法：
@@ -56,7 +57,7 @@ for i, algo in enumerate(algorithms):
     score_matrix[i, 4] = np.mean(row)              # 最右列：4 个对手的算术平均
     print(f"[{algo}] 使用 {len(files)} 个 run，按行号对齐后每 run {n_common} 行")
 
-print("各算法对基准对手的对抗得分矩阵（行=算法，列=对手1~对手4、平均）:")
+print("各算法对基准对手的得分矩阵（行=算法，列=对手1~对手4、平均）:")
 print(np.round(score_matrix, 4))
 
 # --- 绘图：宽度 5cm ---
@@ -101,7 +102,7 @@ divider = make_axes_locatable(ax)
 cax = divider.append_axes("right", size="5%", pad=0.15)
 mappable = ax.collections[0]
 cbar = fig.colorbar(mappable, cax=cax)
-cbar.set_label('对抗得分', labelpad=4)
+cbar.set_label('得分', labelpad=4)
 cbar.ax.tick_params(labelsize=global_font_size)   # colorbar 刻度同样 6号
 
 plt.tight_layout()

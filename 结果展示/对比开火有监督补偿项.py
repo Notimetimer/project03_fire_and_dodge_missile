@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.ticker import FuncFormatter
 from _context import * # 包含 project_root
 
 # 配置 exp_csv 路径（开火监督补偿项对比：开火头RL+SL / 开火头仅RL / 开火头仅SL）
@@ -46,9 +47,9 @@ EXP_CSV_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exp_csv2
 
 
 # 全局视觉参数（先定义，供 rcParams 和后续绘图使用）
-label_fontsize = 7.5      # 六号 = 7.5 pt
-tick_fontsize = 6.5
-legend_fontsize = 5.5
+label_fontsize = 7.5         # 标题字号，与刻度接近
+tick_fontsize = 7
+legend_fontsize = 6.5
 linewidth = 0.6           # 曲线线宽（pt），在 5 cm 小图中保持纤细
 refer_linewidth = 0.55    # 参考线宽
 legend_linewidth = 1.0    # 图例中展示的线条粗细（pt）
@@ -239,6 +240,25 @@ def smooth_curve(data, window_size):
     if window_size <= 1:
         return np.asarray(data)
     return pd.Series(data).rolling(window=window_size, min_periods=1, center=True).mean().to_numpy()
+
+
+# 需要按百分数展示的运行级指标（奖励、熵等非概率指标不加百分数）
+PERCENT_METRICS = {'accuracy', 'mutualkill', 'max_fire_prob', 'min_fire_prob'}
+
+
+def apply_step_axis(ax, xlabel_text, xt, fontsize):
+    """
+    横轴统一处理：刻度按 10^x_exp 缩放，并让 (×10^n) 紧贴轴标题。
+    x_exp <= 0 时不做换算，直接使用原刻度。
+    """
+    x_end = float(np.nanmax(xt)) if len(xt) else 0.0
+    x_exp = int(np.floor(np.log10(x_end))) if x_end > 0 else 0
+    if x_exp <= 0:
+        ax.set_xlabel(xlabel_text, fontsize=fontsize)
+        return
+    _sup = ''.join(chr(c) for c in [0x2070, 0xB9, 0xB2, 0xB3, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079])
+    ax.set_xlabel(xlabel_text + '(' + chr(0xd7) + '10' + ''.join(_sup[int(d)] for d in str(x_exp)) + ')', fontsize=fontsize)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v / 10 ** x_exp:g}'))
 
 
 def extract_opponent_id(filename):
@@ -571,6 +591,10 @@ def plot_interpolated_win_rates(exp_csv_dir,
             mean_y = smooth_curve(raw_mean, smooth_window)
             min_y = smooth_curve(raw_min, smooth_window)
             max_y = smooth_curve(raw_max, smooth_window)
+            # 该面板是 0~1 的对抗得分，按百分数展示
+            mean_y = mean_y * 100.0
+            min_y = min_y * 100.0
+            max_y = max_y * 100.0
 
             color = palette[j % COLOR_CYCLE]
             ls = linestyles[(j // COLOR_CYCLE) % len(linestyles)]
@@ -585,21 +609,19 @@ def plot_interpolated_win_rates(exp_csv_dir,
             y_max_total = max(y_max_total, np.nanmax(max_y))
             has_plotted = True
 
-        # 参考线 [0, 0.5, 1.0]
-        for hval in [0, 0.5, 1.0]:
+        # 参考线 [0, 50, 100]
+        for hval in [0, 50, 100]:
             ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth, alpha=0.8, zorder=1)
 
-        ax.set_xlabel('训练步数', fontweight='bold', fontsize=label_fontsize)
-        ax.set_ylabel(ylabel_text, fontweight='bold', fontsize=label_fontsize)
+        apply_step_axis(ax, '训练步数', xt, label_fontsize)
+        ax.set_ylabel(ylabel_text + ' (%)', fontsize=label_fontsize)
         ax.tick_params(axis='both', labelsize=tick_fontsize)
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.xaxis.offsetText.set_fontsize(tick_fontsize)  # 1e7 等科学计数法偏移文字与刻度同号
 
         if has_plotted and y_min_total < y_max_total:
-            pad = max((y_max_total - y_min_total) * 0.05, 0.02)
-            ax.set_ylim(max(-0.05, y_min_total - pad), min(1.05, y_max_total + pad))
+            pad = max((y_max_total - y_min_total) * 0.05, 2.0)
+            ax.set_ylim(max(-5, y_min_total - pad), min(105, y_max_total + pad))
         else:
-            ax.set_ylim(-0.05, 1.05)
+            ax.set_ylim(-5, 105)
 
         if show_grid:
             ax.set_axisbelow(True)
@@ -893,6 +915,8 @@ def plot_run_metrics(exp_csv_dir,
 
     for metric in active_metrics:
         ylabel_text = metric_labels.get(metric, metric)
+        if metric in PERCENT_METRICS:
+            ylabel_text = ylabel_text + ' (%)'
         xlabel_text = METRIC_XLABELS.get(metric, 'Step')
         xt = x_targets[metric]
 
@@ -910,6 +934,10 @@ def plot_run_metrics(exp_csv_dir,
                 mean_y = smooth_curve(raw_mean, smooth_window)
                 min_y = smooth_curve(raw_min, smooth_window)
                 max_y = smooth_curve(raw_max, smooth_window)
+                if metric in PERCENT_METRICS:
+                    mean_y = mean_y * 100.0
+                    min_y = min_y * 100.0
+                    max_y = max_y * 100.0
 
                 color = palette[j % COLOR_CYCLE]
                 ls = linestyles[(j // COLOR_CYCLE) % len(linestyles)]
@@ -925,11 +953,9 @@ def plot_run_metrics(exp_csv_dir,
                 has_plotted = True
 
         # 坐标轴设置
-        ax.set_xlabel(xlabel_text, fontweight='bold', fontsize=label_fontsize)
-        ax.set_ylabel(ylabel_text, fontweight='bold', fontsize=label_fontsize)
+        apply_step_axis(ax, xlabel_text, xt, label_fontsize)
+        ax.set_ylabel(ylabel_text, fontsize=label_fontsize)
         ax.tick_params(axis='both', labelsize=tick_fontsize)
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-        ax.xaxis.offsetText.set_fontsize(tick_fontsize)  # 1e7 等科学计数法偏移文字与刻度同号
 
         if has_plotted and y_min_total < y_max_total:
             pad = max((y_max_total - y_min_total) * 0.05, 0.02)

@@ -30,6 +30,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from _context import *  # 包含 project_root
 
 
@@ -55,11 +56,9 @@ ALGORITHM_GROUPS = [
 
 # 指标定义：(CSV 列名, 显示名)；survive 由 win+draw-perish 计算，列名占位
 METRICS = [
-    ("avg_score", "与基准对手对抗平均得分"),
-    ("avg_win",   "与基准对手对抗平均胜率"),
-    ("avg_lose",  "与基准对手对抗平均负率"),
-    ("avg_draw",  "与基准对手对抗平均平率"),
-    ("survive",   "与基准对手对抗平均生存率"),
+    ("kill",      "击落基准对手平均概率"),
+    ("avg_win",   "对基准对手平均胜率"),
+    ("avg_perish", "对基准对手平均双杀率"),
 ]
 
 # 统一横轴
@@ -69,9 +68,9 @@ NUM_POINTS = 100
 
 
 # ======================== 全局视觉参数（与参考文件一致） ========================
-label_fontsize = 7.5       # 六号 = 7.5 pt
-tick_fontsize = 6.5
-legend_fontsize = 5.5
+label_fontsize = 7.5         # 标题字号，与刻度接近
+tick_fontsize = 7
+legend_fontsize = 6.5
 linewidth = 0.6            # 曲线线宽
 refer_linewidth = 0.55     # 参考线宽
 legend_linewidth = 1.0     # 图例线条粗细
@@ -133,9 +132,12 @@ def compute_metric_series(df, metric_key):
     从 DataFrame 提取指标序列。
     survive = avg_win + avg_draw - avg_perish
     """
+    if metric_key == 'kill':
+        # 击落对手概率 = 胜率 + 双杀率
+        return (df['avg_win'].to_numpy() + df['avg_perish'].to_numpy()) * 100.0
     if metric_key == 'survive':
-        return df['avg_win'].to_numpy() + df['avg_draw'].to_numpy() - df['avg_perish'].to_numpy()
-    return df[metric_key].to_numpy()
+        return (df['avg_win'].to_numpy() + df['avg_draw'].to_numpy() - df['avg_perish'].to_numpy()) * 100.0
+    return df[metric_key].to_numpy() * 100.0
 
 
 def interpolate_to_grid(steps, values, x_target):
@@ -177,7 +179,8 @@ def load_group_stats(algo_label, dir_names, x_target):
         for df in dfs:
             vals = compute_metric_series(df, metric_key)
             interp = interpolate_to_grid(df['step'].to_numpy(), vals, x_target)
-            curves.append(interp)
+            # 每个 run 单独做噪声平滑，之后对平滑后的 run 聚合 mean/min/max
+            curves.append(smooth_curve(interp, smooth_window))
         stacked = np.vstack(curves)  # (num_runs, num_points)
         stats[metric_key] = {
             'mean': np.mean(stacked, axis=0),
@@ -190,15 +193,16 @@ def load_group_stats(algo_label, dir_names, x_target):
 
 def style_axis(ax, ylabel_text):
     """统一坐标轴样式：参考线、标签、刻度、科学计数法、坐标范围。"""
-    for hval in [0, 0.5, 1.0]:
+    x_exp = int(np.floor(np.log10(X_MAX)))
+    _sup = ''.join(chr(c) for c in [0x2070, 0xB9, 0xB2, 0xB3, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079])
+    for hval in [0, 50, 100]:
         ax.axhline(hval, color='gray', linestyle='-', linewidth=refer_linewidth,
                    alpha=0.8, zorder=1)
-    ax.set_xlabel('训练步数', fontweight='bold', fontsize=label_fontsize)
-    ax.set_ylabel(ylabel_text, fontweight='bold', fontsize=label_fontsize)
+    ax.set_xlabel('训练步数(' + chr(0xd7) + '10' + ''.join(_sup[int(d)] for d in str(x_exp)) + ')', fontsize=label_fontsize)
+    ax.set_ylabel(ylabel_text + ' (%)', fontsize=label_fontsize)
     ax.tick_params(axis='both', labelsize=tick_fontsize)
-    ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-    ax.xaxis.offsetText.set_fontsize(tick_fontsize)
-    ax.set_ylim(-0.05, 1.05)
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v / 10 ** x_exp:g}'))
+    ax.set_ylim(-5, 105)
     ax.set_axisbelow(True)
     ax.grid(True, alpha=0.4)
 
@@ -262,9 +266,11 @@ def main():
             entry = stats.get(metric_key)
             if entry is None:
                 continue
-            mean_y = smooth_curve(entry['mean'], smooth_window)
-            min_y = smooth_curve(entry['min'], smooth_window)
-            max_y = smooth_curve(entry['max'], smooth_window)
+            # mean/min/max 已在 load_group_stats 中对单 run 做过平滑，
+            # 这里直接取跨 run 聚合后的原始值，不再二次平滑
+            mean_y = entry['mean']
+            min_y = entry['min']
+            max_y = entry['max']
 
             color = palette[j % COLOR_CYCLE]
             ls = linestyles[(j // COLOR_CYCLE) % len(linestyles)]
