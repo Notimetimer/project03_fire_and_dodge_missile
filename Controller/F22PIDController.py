@@ -109,7 +109,7 @@ class F22PIDController:
 
         # 调参
         self.yaw_pid = None
-        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=5 / pi)  # 10 / pi, i=0 / pi, d=0.5 / pi
+        self.e_pid = PositionPID(max=1, min=-1, p=10 / pi, i=0 / pi, d=0.9 / pi)  # 10 / pi, i=0 / pi, d=0.5 / pi
         self.r_pid = None
         self.t_pid = PositionPID(max=1, min=0, p=2, i=0.3, d=0.2)
         # self.t_pid = PID(1, 0.3, 0.2, setpoint=0)
@@ -265,7 +265,7 @@ class F22PIDController:
 
         # 通用
         roll_error = delta_x_angle
-        aileron = 2 * (roll_error / pi * 2 - p / pi * 2) # 1
+        aileron = 1.2 * (roll_error / pi * 2 - p / pi * 2) # 1
 
         # steady filght
         # 副翼平稳飞行控制：delta_z_angle**2+delta_x_angle**2足够小时副翼由phi比例控制
@@ -276,8 +276,8 @@ class F22PIDController:
 
         if acos(np.dot(L_, v_) / (norm(L_)*norm(v_)+1e-8)) * 180 / pi < steady_switch_angle and \
                 abs(theta_req) < 60 * pi / 180:
-            k_steady_yaw = 3 / steady_switch_angle
-            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (pi / 3) #   /2 #debug
+            k_steady_yaw = 1 / 90
+            phi_req = np.clip(delta_heading_req * 180 / pi * k_steady_yaw, -1, 1) * (60 * pi / 180) #   /2 #debug
             roll_error = phi_req - phi
             # aileron = (roll_error / pi * 6 - p / pi * 3) / 2
             aileron = (roll_error / pi * 6 /2 - p / pi * 3) / 2
@@ -305,7 +305,7 @@ if __name__ == '__main__':
 
     tacview_show = 2  # 是否显示Tacview
 
-    dt = 0.02  # 0.02
+    dt = 0.01  # 0.02
 
     if tacview_show:
         # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
