@@ -1,7 +1,7 @@
 import numpy as np
 import sys
 sys.path.append(r"d:\3_Machine_Learning_in_Python\project03_fire_and_dodge_missile")
-from Controller.F16PIDController2_1 import F16PIDController
+from Controller.F16PIDController import F16PIDController
 from math import pi
 
 controller = F16PIDController()

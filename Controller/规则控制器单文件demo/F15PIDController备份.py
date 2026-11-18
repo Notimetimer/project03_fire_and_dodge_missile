@@ -90,21 +90,21 @@ def active_rotation(vector,heading,theta,gamma):
     return vector@Rgamma.T@Rtheta.T@Rpsi.T
 
 
-def sub_of_radian(input1, input2=0):
+def sub_of_radian(input1, input2):
     # 计算两个弧度的差值，范围为[-pi, pi]
     diff = input1 - input2
     diff = (diff + pi) % (2 * pi) - pi
     return diff
 
 
-def sub_of_degree(input1, input2=0):
+def sub_of_degree(input1, input2):
     # 计算两个角度的差值，范围为[-180, 180]
     diff = input1 - input2
     diff = (diff + 180) % 360 - 180
     return diff
 
 
-class F16PIDController:
+class F15PIDController:
     def __init__(self):
         # 建议dt=0.02
         self.check_switch2 = None
@@ -134,7 +134,7 @@ class F16PIDController:
         error_h = np.clip(target_height_devided - current_height_devided, -1, 1)
 
         if error_h >= 0:
-            kh = pi / 2 # 3
+            kh = pi / 3
         else:
             kh = pi / 2 # + pi/8
 
@@ -153,9 +153,9 @@ class F16PIDController:
         q = state_input[9]
         # # 迎角限制器
         if -8 < alpha < 13:
-            k_alpha_air = 0.01
+            k_alpha_air = 0.03
         else:
-            k_alpha_air = 0.2
+            k_alpha_air = 0.4
 
         if theta * 180 / pi < -70:
             k_alpha_air = 0
@@ -186,15 +186,12 @@ class F16PIDController:
         # abs_psi = state_input[15]
 
         # 油门控制
-        # t_pid.setpoint = v_req
-        # throttle = 0.5 + 0.5 * t_pid(v, dt)
-
         v_error = v_req-v
-        throttle = 0.5 + 0.5 * t_pid.calculate(v_error, dt)
+        throttle = 1.0 + 1.0 * t_pid.calculate(v_error, dt)
 
         # # 方向舵控制
         # rudder=0 # abaaba
-        rudder = -beta_air / (5 * pi / 180)
+        rudder = -beta_air / (5 * pi / 180) * 0.1
 
         # 升降舵控制
         L_ = 1 * np.array(
@@ -238,10 +235,6 @@ class F16PIDController:
             # print('push')
         # else:
         # print('pull')
-
-        # # 特例：abs(delta_x_angle *180/pi)>45 时杆量减半
-        # if abs(delta_x_angle *180/pi)>30:
-        #     elevator /= 2
 
         # 通用
         roll_error = delta_x_angle
@@ -292,10 +285,7 @@ if __name__ == '__main__':
 
     tacview_show = 1  # 是否显示Tacview
 
-    # dt = 0.02  # 0.02
-    dt_control = 0.02
-    dt_move = 0.01
-    control_move_rate = int(round(dt_control/dt_move))
+    dt = 0.02  # 0.02
 
     if tacview_show:
         print('please prepare tacview')
@@ -327,22 +317,22 @@ if __name__ == '__main__':
     # 启动 JSBSim
     sim = jsbsim.FGFDMExec(None, None)
     sim.set_debug_level(0)
-    sim.set_dt(dt_move)  # 解算步长 dt 秒
+    sim.set_dt(dt)  # 解算步长 dt 秒
 
     # 设置模型路径（一般 JSBSim pip 包自动包含）
-    sim.load_model("f16")  # f15, p51d, ball 等模型可选
+    sim.load_model("f15")  # f15, p51d, ball 等模型可选
 
     # 初始姿态与目标姿态
     # 连续输出并tacview中可视化
     start_time = time.time()
     # target_theta = 1 # 测试姿态控制
-    target_height = 4e3  # m # 测试飞行控制器 1e3
-    target_heading = 50  # 度 to rad 270
-    target_speed = 340 * 1.13  # m/s
+    target_height = 10e3  # m # 测试飞行控制器
+    target_heading = 20  # 度 to rad
+    target_speed = 340 * 2  # m/s
     t_last = 60 * 5
 
     # 设置初始状态（单位：英尺、节、角度）
-    sim["ic/h-sl-ft"] = 4e3 * 3.2808  # 高度：m -> ft
+    sim["ic/h-sl-ft"] = 12e3 * 3.2808  # 高度：m -> ft
     sim["ic/vt-kts"] = 340 * 1.13 * 1.9438  # 空速： m/s-> 节
     sim["ic/psi-true-deg"] = 90  # 航向角: °
     sim["ic/phi-deg"] = 0
@@ -366,21 +356,17 @@ if __name__ == '__main__':
     rudder_last = 0
     throttle_last = 0.5
 
-    f16PIDController = F16PIDController()
-    norm_act = np.array([0,0,0,0.5])
+    f15PIDController = F15PIDController()
 
     # hist_act=np.array([0,0,0,1])
-    for step in range(int(t_last / dt_move)):
-        current_t = step * dt_move
+    for step in range(int(t_last / dt)):
+        current_t = step * dt
 
         # 无限燃油
         sim["propulsion/tank[0]/contents-lbs"] = 5000.0  # 设置0号油箱油量
         sim["propulsion/tank[1]/contents-lbs"] = 5000.0  # 设置1号油箱油量（如果有）
 
-        # 随机
-        # if step % 10 == 0:
-        #     target_heading = np.random.rand()*160 # test
-        #     target_height = sim["position/h-sl-ft"] * 0.3048 # test
+        # target_heading = np.random.rand()*10
 
         # # ### 逗猫
         # if current_t < 15:
@@ -400,7 +386,7 @@ if __name__ == '__main__':
         #     target_heading = sub_of_degree(sim["attitude/psi-deg"], -10)
 
         sim.run()
-        current_time = step * dt_move
+        current_time = step * dt
         time_steps.append(current_time)
 
         # delta_height = (target_height - sim["position/h-sl-ft"]) / 3.2808
@@ -453,9 +439,8 @@ if __name__ == '__main__':
         # obs_jsbsim[15] = psi * pi / 180  # test
 
         # 输出姿态控制指令
-        if step % control_move_rate==0:
-            # norm_act = f16PIDController.att_output(obs_jsbsim, dt=dt) # 测试姿态控制器
-            norm_act = f16PIDController.flight_output(obs_jsbsim, dt=dt_control)  # # 测试飞行控制器
+        # norm_act = f15PIDController.att_output(obs_jsbsim, dt=dt) # 测试姿态控制器
+        norm_act = f15PIDController.flight_output(obs_jsbsim, dt=dt)  # # 测试飞行控制器
 
         # # 指数滑动平均控制量
         # last_control = np.array([aileron_last, elevator_last, rudder_last, throttle_last])
@@ -464,13 +449,17 @@ if __name__ == '__main__':
         sim["fcs/aileron-cmd-norm"], \
             sim["fcs/elevator-cmd-norm"], \
             sim["fcs/rudder-cmd-norm"], \
-            sim["fcs/throttle-cmd-norm"] = norm_act  # .tolist()  # 设置控制量
+            throttle_cmd_ = norm_act  # .tolist()  # 设置控制量
+        
+        # 明确设置两个引擎的初始油门
+        sim["fcs/throttle-cmd-norm[0]"] = throttle_cmd_  # 2
+        sim["fcs/throttle-cmd-norm[1]"] = throttle_cmd_  # 2
 
         # # 记录控制量
         aileron_cmd.append(sim["fcs/aileron-cmd-norm"])
         elevator_cmd.append(sim["fcs/elevator-cmd-norm"])
         rudder_cmd.append(sim["fcs/rudder-cmd-norm"])
-        throttle_cmd.append(sim["fcs/throttle-cmd-norm"])
+        throttle_cmd.append(throttle_cmd_)
 
         # 取当前位置
         lon = sim["position/long-gc-deg"]  # 经度
@@ -499,12 +488,12 @@ if __name__ == '__main__':
         fuels.append(sim["propulsion/total-fuel-lbs"])
 
         # 通过tacview可视化
-        if tacview_show:
+        if tacview_show:  # and step % np.round(0.4 / dt) == 0:
             send_t = f"{current_time:.2f}"
             name_R = '001'
             loc_r = [float(lon), float(lat), float(alt)]
-            # data_to_send = f"#{send_t:.2f}\n{name_R},T={loc_r[0]:.6f}|{loc_r[1]:.6f}|{loc_r[2]:.6f},Name=F16,Color=Red\n"
-            data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F16,Color=Red\n" % (
+            # data_to_send = f"#{send_t:.2f}\n{name_R},T={loc_r[0]:.6f}|{loc_r[1]:.6f}|{loc_r[2]:.6f},Name=F15,Color=Red\n"
+            data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F15,Color=Red\n" % (
                 float(send_t), name_R, loc_r[0], loc_r[1], loc_r[2], phi, theta, psi)
             tacview.send_data_to_client(data_to_send)
             # time.sleep(0.001)
