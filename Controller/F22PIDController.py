@@ -290,20 +290,36 @@ class F22PIDController:
         norm_act = np.array([aileron, elevator, rudder, throttle])
         return norm_act
 
+    def visualize(self, tacview, current_time, lon, lat, alt, phi, theta, psi):
+        """统一可视化入口：tacview_show==1 发送给 Tacview 软件，==2 由 Tacview_s 静默写入 ACMI 文件"""
+        send_t = f"{current_time:.2f}"
+        name_R = '001'
+        loc_r = [float(lon), float(lat), float(alt)]
+        # 画飞机
+        data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F22,Color=Red\n" % (
+            float(send_t), name_R, loc_r[0], loc_r[1], loc_r[2], phi, theta, psi)
+        tacview.send_data_to_client(data_to_send)
+
 
 if __name__ == '__main__':
 
-    tacview_show = 1  # 是否显示Tacview
+    tacview_show = 2  # 是否显示Tacview
 
     dt = 0.02  # 0.02
 
     if tacview_show:
-        print('please prepare tacview')
         # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from Visualize.tacview_visualize import Tacview
         sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from Visualize.tacview_visualize2 import Tacview, Tacview_s
         from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
-        tacview = Tacview()
+        if tacview_show == 2:
+            # 静默写入本地 ACMI 文件，不连接 Tacview 软件
+            tacview = Tacview_s()
+            tacview.handshake()
+        else:
+            print('please prepare tacview')
+            tacview = Tacview()
+            tacview.handshake()
 
     # 记录轨迹和状态数据
     psis = []
@@ -501,20 +517,14 @@ if __name__ == '__main__':
 
         # 通过tacview可视化
         if tacview_show:  # and step % np.round(0.4 / dt) == 0:
-            send_t = f"{current_time:.2f}"
-            name_R = '001'
-            loc_r = [float(lon), float(lat), float(alt)]
-            # 画飞机
-            data_to_send = "#%.2f\n%s,T=%.6f|%.6f|%.6f|%.6f|%.6f|%.6f,Name=F22,Color=Red\n" % (
-                float(send_t), name_R, loc_r[0], loc_r[1], loc_r[2], phi, theta, psi)
+            # 统一调用可视化方法，tacview_show==1/2 均走同一入口
+            f22PIDController.visualize(tacview, current_time, lon, lat, alt, phi, theta, psi)
             # # 画绣球
             # data_to_send += (
             #                 # f"#{send_t:.2f}\n"
             #                 f"{'002'},T={(lon_T):.6f}|{(lat_T):.6f}|{delta_H:.6f},"
             #                 f"Name=Target,Color=Orange\n"
             #             )
-
-            tacview.send_data_to_client(data_to_send)
             # time.sleep(0.001)
 
         mach = sim["velocities/mach"]
@@ -522,6 +532,10 @@ if __name__ == '__main__':
         # print(f"Time: {current_time:.1f}s, Mach: {mach:.3f}")
 
         # time.sleep(0.01)
+
+    # 结束可视化：连接 Tacview 时断开，静默写入时关闭并 flush ACMI 文件
+    if tacview_show:
+        tacview.end_render()
 
     end_time = time.time()
     print(f"程序运行时间: {end_time - start_time:.2f} 秒")

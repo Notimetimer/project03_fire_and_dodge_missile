@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from controller.Controller_function import *
 # from Envs.MissileModel1 import *  # test
 
-from Controller.F15PIDController2 import *
+from Controller.F15PIDController import *
 from Math_calculates.CartesianOnEarth import NUE2LLH, LLH2NUE
 from Math_calculates.sub_of_angles import *
 from Math_calculates.coord_rotations import *
